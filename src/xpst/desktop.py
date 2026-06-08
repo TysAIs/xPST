@@ -1,9 +1,10 @@
 """
-xPST Desktop App Launcher
+xPST Desktop App Launcher — Cross-Platform
 
-Provides a native macOS desktop experience using pywebview.
-The app appears in the Dock with its own window, traffic light buttons,
-and proper lifecycle management (start server on launch, stop on close).
+Provides a native desktop experience on macOS, Windows, and Linux.
+- macOS: Cocoa window with dock icon + traffic lights
+- Windows: native Win32 window with taskbar icon
+- Linux: GTK/Qt window with system tray support
 
 Falls back to opening the system browser if pywebview is not installed.
 """
@@ -11,21 +12,81 @@ Falls back to opening the system browser if pywebview is not installed.
 from __future__ import annotations
 
 import logging
+import os
+import platform
+import shutil
 import socket
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Default icon path for the macOS dock / window
-_ICON_PATH = Path.home() / ".xpst" / "icon.icns"
+# ── Platform detection ────────────────────────────────────────────────────
+_SYSTEM = platform.system()  # "Darwin", "Windows", "Linux"
 
-# Default window dimensions
+# ── Default window dimensions ─────────────────────────────────────────────
 _DEFAULT_WIDTH = 1280
 _DEFAULT_HEIGHT = 800
 _MIN_WIDTH = 960
 _MIN_HEIGHT = 600
+
+# ── Icon paths (OS-specific) ─────────────────────────────────────────────
+_ASSETS_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
+
+def _get_icon_path() -> str | None:
+    """Resolve the best icon for the current OS."""
+    if _SYSTEM == "Darwin":
+        # macOS: prefer .icns, fall back to .png
+        for name in ("xpst.icns", "icon.icns", "xpst-full.png"):
+            p = _ASSETS_DIR / name
+            if p.exists():
+                return str(p)
+        # Also check ~/.xpst/
+        p = Path.home() / ".xpst" / "icon.icns"
+        if p.exists():
+            return str(p)
+    elif _SYSTEM == "Windows":
+        # Windows: prefer .ico, fall back to .png
+        for name in ("xpst.ico", "icon.ico", "xpst-full.png"):
+            p = _ASSETS_DIR / name
+            if p.exists():
+                return str(p)
+    else:
+        # Linux: prefer .png
+        for name in ("xpst-full.png", "icon-256.png", "xpst-128.png"):
+            p = _ASSETS_DIR / name
+            if p.exists():
+                return str(p)
+    # Last resort: any PNG in assets
+    for p in sorted(_ASSETS_DIR.glob("*.png")):
+        return str(p)
+    return None
+
+
+def _get_gui_backend() -> str | None:
+    """Select the best pywebview backend for the current OS.
+
+    Returns None to let pywebview auto-detect.
+    """
+    if _SYSTEM == "Darwin":
+        return "cocoa"
+    elif _SYSTEM == "Windows":
+        return "edgechromium"  # WebView2 (Chromium-based, ships with Win10+)
+    elif _SYSTEM == "Linux":
+        # Try GTK first (most common), fall back to Qt
+        try:
+            import gi  # noqa: F401
+            return "gtk"
+        except ImportError:
+            try:
+                from PyQt5 import QtWidgets  # noqa: F401
+                return "qt"
+            except ImportError:
+                return None  # let pywebview figure it out
+    return None
 
 
 def _find_free_port() -> int:
@@ -48,10 +109,7 @@ def _wait_for_server(host: str, port: int, timeout: float = 30.0) -> bool:
 
 
 def _start_nicegui_server(port: int, config_dir: str) -> threading.Thread:
-    """Start the NiceGUI dashboard server in a background daemon thread.
-
-    Returns the daemon thread so the caller can reference it.
-    """
+    """Start the NiceGUI dashboard server in a background daemon thread."""
     from xpst.dashboard.server import start_dashboard
 
     def _run() -> None:
@@ -65,20 +123,147 @@ def _start_nicegui_server(port: int, config_dir: str) -> threading.Thread:
     return thread
 
 
+# ── Platform integrations ─────────────────────────────────────────────────
+
+def _install_macos_app(icon_path: str | None) -> None:
+    """Create/update a .app bundle in ~/Applications for macOS dock integration."""
+    app_dir = Path.home() / "Applications" / "xPST.app"
+    contents = app_dir / "Contents"
+    macos_dir = contents / "MacOS"
+    resources = contents / "Resources"
+
+    # Create structure
+    for d in (contents, macos_dir, resources):
+        d.mkdir(parents=True, exist_ok=True)
+
+    # Copy icon to Resources
+    if icon_path and Path(icon_path).exists():
+        dest_icon = resources / "AppIcon.icns"
+        if icon_path.endswith(".icns"):
+            shutil.copy2(icon_path, dest_icon)
+        elif icon_path.endswith(".png"):
+            # Convert PNG to ICNS if sips available
+            try:
+                subprocess.run(
+                    ["sips", "-s", "format", "icns", icon_path, "--out", str(dest_icon)],
+                    capture_output=True, timeout=10,
+                )
+            except Exception:
+                shutil.copy2(icon_path, resources / "AppIcon.png")
+
+    # Write Info.plist
+    plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>xPST</string>
+    <key>CFBundleDisplayName</key><string>xPST</string>
+    <key>CFBundleIdentifier</key><string>com.xpst.app</string>
+    <key>CFBundleVersion</key><string>1.0.0</string>
+    <key>CFBundleShortVersionString</key><string>1.0.0</string>
+    <key>CFBundleExecutable</key><string>xpst</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key><string>10.15</string>
+    <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>"""
+    (contents / "Info.plist").write_text(plist)
+
+    # Write launcher script
+    launcher = macos_dir / "xpst"
+    launcher.write_text(f"""#!/bin/bash
+exec {sys.executable} -m xpst app
+""")
+    launcher.chmod(0o755)
+
+    logger.info("macOS .app bundle installed at %s", app_dir)
+
+
+def _create_linux_desktop_entry(icon_path: str | None) -> None:
+    """Create a .desktop file for Linux application menu / taskbar."""
+    desktop_dir = Path.home() / ".local" / "share" / "applications"
+    desktop_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy icon to standard location
+    icon_dest = ""
+    if icon_path and Path(icon_path).exists():
+        icon_dir = Path.home() / ".local" / "share" / "icons" / "hicolor" / "256x256" / "apps"
+        icon_dir.mkdir(parents=True, exist_ok=True)
+        icon_dest = str(icon_dir / "xpst.png")
+        shutil.copy2(icon_path, icon_dest)
+
+    xpst_bin = shutil.which("xpst") or f"{sys.executable} -m xpst"
+
+    desktop_entry = f"""[Desktop Entry]
+Name=xPST
+Comment=Cross-Platform Studio — Cross-post short-form video
+Exec={xpst_bin} app
+Icon={icon_dest or 'xpst'}
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;
+Keywords=video;crosspost;social;shorts;
+"""
+    desktop_file = desktop_dir / "xpst.desktop"
+    desktop_file.write_text(desktop_entry)
+    desktop_file.chmod(0o755)
+
+    # Update desktop database
+    try:
+        subprocess.run(
+            ["update-desktop-database", str(desktop_dir)],
+            capture_output=True, timeout=5,
+        )
+    except Exception:
+        pass  # not critical
+
+    logger.info("Linux .desktop entry installed at %s", desktop_file)
+
+
+def _create_windows_shortcut(icon_path: str | None) -> None:
+    """Create a Start Menu shortcut on Windows."""
+    try:
+        import winshell  # noqa: F401
+        from win32com.client import Dispatch  # noqa: F401
+    except ImportError:
+        logger.debug("winshell not available, skipping shortcut creation")
+        return
+
+    start_menu = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "xPST"
+    start_menu.mkdir(parents=True, exist_ok=True)
+
+    shortcut_path = start_menu / "xPST.lnk"
+    shell = Dispatch("WScript.Shell")
+    shortcut = shell.CreateShortCut(str(shortcut_path))
+    shortcut.Targetpath = sys.executable
+    shortcut.Arguments = "-m xpst app"
+    shortcut.WorkingDirectory = str(Path.home())
+    shortcut.Description = "xPST — Cross-Platform Studio"
+    if icon_path and Path(icon_path).exists():
+        shortcut.IconLocation = icon_path
+    shortcut.save()
+
+    logger.info("Windows shortcut created at %s", shortcut_path)
+
+
+# ── Main launcher ─────────────────────────────────────────────────────────
+
 def launch_desktop_app(
     config_dir: str = "~/.xpst",
     port: int | None = None,
 ) -> None:
     """Launch the xPST dashboard as a native desktop window.
 
-    1. Starts the NiceGUI server on a background thread.
-    2. Opens a pywebview native window pointing at the local server.
-    3. When the window is closed the server thread is left to die with the
-       process (daemon thread), which is the cleanest shutdown path.
+    Works on macOS, Windows, and Linux. Installs platform-specific
+    integrations (dock icon, taskbar shortcut, desktop entry) on first run.
 
     Args:
         config_dir: Path to the xPST config directory.
         port: Explicit port. If *None* a free port is chosen automatically.
+
+    Raises:
+        RuntimeError: If pywebview is not installed or server fails to start.
     """
     try:
         import webview  # noqa: F401
@@ -106,14 +291,27 @@ def launch_desktop_app(
     logger.info("Dashboard server is ready at %s", url)
 
     # ── 3. Resolve icon ──
-    icon_path: str | None = None
-    if _ICON_PATH.exists():
-        icon_path = str(_ICON_PATH)
+    icon_path = _get_icon_path()
+    if icon_path:
         logger.info("Using app icon: %s", icon_path)
     else:
-        logger.debug("Icon not found at %s (using default)", _ICON_PATH)
+        logger.debug("No icon found in assets/")
 
-    # ── 4. Create and show the native window ──
+    # ── 4. Install platform integrations ──
+    try:
+        if _SYSTEM == "Darwin":
+            _install_macos_app(icon_path)
+        elif _SYSTEM == "Linux":
+            _create_linux_desktop_entry(icon_path)
+        elif _SYSTEM == "Windows":
+            _create_windows_shortcut(icon_path)
+    except Exception:
+        logger.warning("Failed to install platform integration", exc_info=True)
+
+    # ── 5. Create and show the native window ──
+    gui_backend = _get_gui_backend()
+    logger.info("Creating native window (backend=%s, port %d)…", gui_backend or "auto", port)
+
     window = webview.create_window(
         title="xPST — Cross-Platform Studio",
         url=url,
@@ -122,36 +320,34 @@ def launch_desktop_app(
         min_size=(_MIN_WIDTH, _MIN_HEIGHT),
         resizable=True,
         hidden=False,
-        # macOS-specific: text_select enables standard text selection
         text_select=True,
     )
 
     def on_closed() -> None:
-        """Called when the window is closed (user clicks red close button)."""
+        """Called when the window is closed."""
         logger.info("Desktop window closed — shutting down")
 
     window.events.closed += on_closed
 
-    # webview.start() **must** run on the main thread on macOS (Cocoa
-    # requirement).  It blocks until all windows are closed.
-    logger.info("Opening native window (port %d)…", port)
-    webview.start(
-        gui="cocoa",       # force the Cocoa backend on macOS
-        debug=False,
-        icon=icon_path,
-    )
+    # webview.start() must run on the main thread (OS requirement on all platforms).
+    # It blocks until all windows are closed.
+    start_kwargs: dict = {"debug": False}
+    if gui_backend:
+        start_kwargs["gui"] = gui_backend
+    if icon_path and _SYSTEM != "Darwin":
+        # macOS uses .app bundle icon; Windows/Linux pass to webview
+        start_kwargs["icon"] = icon_path
 
-    # After the window is closed the process will exit.  The server thread
-    # is a daemon and will be terminated automatically.
+    webview.start(**start_kwargs)
 
 
 def launch_browser_fallback(
     config_dir: str = "~/.xpst",
     port: int = 8080,
 ) -> None:
-    """Open the dashboard in the system browser (legacy / fallback path).
+    """Open the dashboard in the system browser (fallback when pywebview is unavailable).
 
-    This is used when pywebview is not available.
+    Works on all platforms via Python's webbrowser module.
     """
     import webbrowser
 

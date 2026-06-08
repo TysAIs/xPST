@@ -174,6 +174,15 @@ body, .q-page, .q-layout {
     letter-spacing: -0.02em;
 }
 
+/* Global link reset — no underlines anywhere */
+a, a:link, a:visited, a:hover, a:active {
+    text-decoration: none !important;
+    color: inherit;
+}
+a.q-link {
+    text-decoration: none !important;
+}
+
 .nav-item {
     display: flex;
     align-items: center;
@@ -181,12 +190,15 @@ body, .q-page, .q-layout {
     padding: 10px 14px;
     border-radius: 8px;
     color: var(--text-muted);
-    text-decoration: none;
+    text-decoration: none !important;
     font-size: 14px;
     font-weight: 500;
     transition: all 0.15s ease;
     cursor: pointer;
     margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    min-width: 0;
 }
 
 .nav-item:hover {
@@ -1518,14 +1530,15 @@ def _page_settings(collector: AnalyticsCollector) -> None:
             tk_username = accounts.get("tiktok", {}).get("username", "")
 
             with ui.column().classes("gap-4"):
-                ui.input("TikTok Username", value=tk_username, placeholder="e.g. tys.ais").props('outlined').classes("w-full").style("max-width:400px;")
-                ui.input("Download Directory", value=str(collector.config.get("video", {}).get("download_dir", "~/.xpst/downloads")), placeholder="Path to download directory").props('outlined').classes("w-full").style("max-width:500px;")
+                tk_input = ui.input("TikTok Username", value=tk_username, placeholder="e.g. tys.ais").props('outlined').classes("w-full").style("max-width:400px;")
+                dl_input = ui.input("Download Directory", value=str(collector.config.get("video", {}).get("download_dir", "~/.xpst/downloads")), placeholder="Path to download directory").props('outlined').classes("w-full").style("max-width:500px;")
 
         # Platform Toggles
         with ui.element("div").classes("glass-card w-full").style("margin-bottom:20px;"):
             ui.label("Platforms").classes("settings-section-title")
 
             platform_configs = collector.config.get("accounts", {})
+            platform_switches: dict = {}
 
             for name, label, color in [
                 ("youtube", "YouTube", PLATFORM_COLORS["youtube"]),
@@ -1544,24 +1557,27 @@ def _page_settings(collector: AnalyticsCollector) -> None:
                         ):
                             _icon(PLATFORM_ICONS[name], size="16px", color=color)
                         ui.label(label).style("font-size:14px; font-weight:500; color:var(--text);")
-                    ui.switch(value=enabled).props(f'color="{color}"')
+                    platform_switches[name] = ui.switch(value=enabled).props(f'color="{color}"')
 
         # Notifications
         with ui.element("div").classes("glass-card w-full").style("margin-bottom:20px;"):
             ui.label("Notifications").classes("settings-section-title")
 
             notif_cfg = collector.config.get("notifications", {})
-            enabled = notif_cfg.get("enabled", False)
+            notif_enabled = notif_cfg.get("enabled", False)
 
             with ui.column().classes("gap-4"):
-                ui.switch("Enable notifications", value=enabled).props(f'color="{ACCENT}"')
+                notif_switch = ui.switch("Enable notifications", value=notif_enabled).props(f'color="{ACCENT}"')
 
                 with ui.element("div").classes("settings-form-row"):
                     discord_url = notif_cfg.get("discord", {}).get("webhook_url", "")
-                    ui.input("Discord Webhook URL", value=discord_url, placeholder="https://discord.com/api/webhooks/...").props('outlined').classes("col-grow")
+                    discord_input = ui.input("Discord Webhook URL", value=discord_url, placeholder="https://discord.com/api/webhooks/...").props('outlined').classes("col-grow")
 
                     tg_token = notif_cfg.get("telegram", {}).get("bot_token", "")
-                    ui.input("Telegram Bot Token", value=tg_token, placeholder="123456:ABC-DEF...").props('outlined').classes("col-grow")
+                    tg_token_input = ui.input("Telegram Bot Token", value=tg_token, placeholder="123456:ABC-DEF...").props('outlined').classes("col-grow")
+
+                    tg_chat = notif_cfg.get("telegram", {}).get("chat_id", "")
+                    tg_chat_input = ui.input("Telegram Chat ID", value=tg_chat, placeholder="123456789").props('outlined').classes("col-grow")
 
         # Rate Limits
         with ui.element("div").classes("glass-card w-full").style("margin-bottom:20px;"):
@@ -1583,9 +1599,9 @@ def _page_settings(collector: AnalyticsCollector) -> None:
             schedule = collector.config.get("schedule", {})
 
             with ui.element("div").classes("settings-form-row"):
-                ui.number("Max Retries", value=reliability.get("max_retries", 3), min=1, max=10).props('outlined').style("min-width:120px;")
-                ui.number("Retry Backoff (s)", value=reliability.get("retry_backoff", 2), min=1, max=60).props('outlined').style("min-width:120px;")
-                ui.number("Check Interval (s)", value=schedule.get("check_interval", 900), min=60, max=3600).props('outlined').style("min-width:120px;")
+                max_retries_input = ui.number("Max Retries", value=reliability.get("max_retries", 3), min=1, max=10).props('outlined').style("min-width:120px;")
+                retry_backoff_input = ui.number("Retry Backoff (s)", value=reliability.get("retry_backoff", 2), min=1, max=60).props('outlined').style("min-width:120px;")
+                check_interval_input = ui.number("Check Interval (s)", value=schedule.get("check_interval", 900), min=60, max=3600).props('outlined').style("min-width:120px;")
 
         # System Paths
         with ui.element("div").classes("glass-card w-full").style("margin-bottom:20px;"):
@@ -1609,20 +1625,46 @@ def _page_settings(collector: AnalyticsCollector) -> None:
             async def save_settings() -> None:
                 try:
                     cfg = XPSTConfig.load(str(config_path))
+                    # General
+                    cfg.tiktok.username = tk_input.value or ""
+                    cfg.video.download_dir = dl_input.value or "~/.xpst/downloads"
+                    # Platform toggles
+                    cfg.youtube.enabled = platform_switches["youtube"].value
+                    cfg.instagram.enabled = platform_switches["instagram"].value
+                    cfg.x.enabled = platform_switches["x"].value
+                    # Notifications
+                    cfg.notifications.enabled = notif_switch.value
+                    cfg.notifications.discord_webhook_url = discord_input.value or ""
+                    cfg.notifications.telegram_bot_token = tg_token_input.value or ""
+                    cfg.notifications.telegram_chat_id = tg_chat_input.value or ""
+                    # Rate limits
                     cfg.rate_limits.youtube = int(rl_yt.value or 5)
                     cfg.rate_limits.instagram = int(rl_ig.value or 5)
                     cfg.rate_limits.x = int(rl_x.value or 5)
                     cfg.rate_limits.tiktok = int(rl_tt.value or 5)
+                    # Advanced
+                    cfg.reliability.max_retries = int(max_retries_input.value or 3)
+                    cfg.reliability.retry_backoff = int(retry_backoff_input.value or 2)
+                    cfg.schedule.check_interval = int(check_interval_input.value or 900)
                     cfg.save(str(config_path))
                     ui.notify("Settings saved successfully!", type="positive")
                 except Exception as e:
                     ui.notify(f"Error saving settings: {e}", type="negative")
 
+            async def reset_defaults() -> None:
+                try:
+                    default_cfg = XPSTConfig()
+                    default_cfg.save(str(config_path))
+                    ui.notify("Settings reset to defaults!", type="positive")
+                    ui.run_javascript("location.reload()")
+                except Exception as e:
+                    ui.notify(f"Error resetting: {e}", type="negative")
+
             ui.button("Save Settings", icon="save", on_click=save_settings).props(
                 f'color="{ACCENT}" rounded'
             ).style("padding:10px 28px;")
 
-            ui.button("Reset to Defaults", icon="refresh", on_click=lambda: ui.notify("Reset not yet implemented", type="warning")).props(
+            ui.button("Reset to Defaults", icon="refresh", on_click=reset_defaults).props(
                 'color="grey-7" rounded outline'
             ).style("padding:10px 28px;")
 
