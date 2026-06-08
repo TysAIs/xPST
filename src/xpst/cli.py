@@ -1387,8 +1387,9 @@ def config_set(ctx: click.Context, key: str, value: str, config_file: str | None
 
 @config.command("validate")
 @click.option("--file", "config_file", default=None, help="Config file path")
+@json_option
 @click.pass_context
-def config_validate(ctx: click.Context, config_file: str | None):
+def config_validate(ctx: click.Context, config_file: str | None, as_json: bool):
     """Validate configuration for errors.
 
     Checks required fields, path existence, and platform config validity.
@@ -1404,7 +1405,10 @@ def config_validate(ctx: click.Context, config_file: str | None):
         checks.append(("Config file loaded", True, "OK"))
     except SystemExit:
         checks.append(("Config file loaded", False, "Failed to load config"))
-        _print_validation_results(checks)
+        if as_json:
+            json_output({"valid": False, "checks": [{"name": n, "ok": o, "detail": d} for n, o, d in checks]}, True)
+        else:
+            _print_validation_results(checks)
         sys.exit(EXIT_CONFIG_ERROR)
 
     # Check config file exists
@@ -1464,10 +1468,18 @@ def config_validate(ctx: click.Context, config_file: str | None):
         ("Check interval >= 60s", cfg.schedule.check_interval >= 60, str(cfg.schedule.check_interval))
     )
 
-    _print_validation_results(checks)
+    if as_json:
+        all_pass = all(ok for _, ok, _ in checks)
+        json_output({
+            "valid": all_pass,
+            "checks": [{"name": n, "ok": o, "detail": d} for n, o, d in checks],
+        }, True)
+    else:
+        _print_validation_results(checks)
 
     all_pass = all(ok for _, ok, _ in checks)
-    sys.exit(EXIT_SUCCESS if all_pass else EXIT_CONFIG_ERROR)
+    if not as_json:
+        sys.exit(EXIT_SUCCESS if all_pass else EXIT_CONFIG_ERROR)
 
 
 def _print_validation_results(checks: list[tuple[str, bool, str]]) -> None:
@@ -1493,6 +1505,98 @@ def _print_validation_results(checks: list[tuple[str, bool, str]]) -> None:
         console.print(f"\n[green]All {total} checks passed ✓[/green]")
     else:
         console.print(f"\n[red]{total - passed} of {total} checks failed ✗[/red]")
+
+
+@config.command("export")
+@click.argument("output_file", type=click.Path())
+@click.option("--raw", is_flag=True, help="Export raw values (no masking)")
+@click.option("--file", "config_file", default=None, help="Source config file path")
+@json_option
+@click.pass_context
+def config_export(ctx: click.Context, output_file: str, raw: bool, config_file: str | None, as_json: bool):
+    """Export current configuration to a file.
+
+    Writes the config YAML to OUTPUT_FILE. By default masks sensitive values.
+    """
+    import os
+    import yaml
+
+    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    if not Path(config_path).exists():
+        if as_json:
+            json_output({"ok": False, "error": f"Config file not found: {config_path}"}, True)
+        else:
+            console.print(f"[red]Config file not found:[/red] {config_path}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    with open(config_path) as f:
+        raw_config = yaml.safe_load(f) or {}
+
+    if not raw:
+        raw_config = _mask_sensitive_values(raw_config)
+
+    out_path = Path(output_file)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w") as f:
+        yaml.dump(raw_config, f, default_flow_style=False, sort_keys=False)
+
+    if as_json:
+        json_output({"ok": True, "exported": str(out_path), "masked": not raw}, True)
+    else:
+        console.print(f"[green]✓[/green] Config exported to [bold]{out_path}[/bold]")
+
+
+@config.command("import")
+@click.argument("input_file", type=click.Path(exists=True))
+@click.option("--merge/--replace", default=True, help="Merge with existing config or replace entirely")
+@json_option
+@click.pass_context
+def config_import(ctx: click.Context, input_file: str, merge: bool, as_json: bool):
+    """Import configuration from a file.
+
+    By default merges with existing config. Use --replace to overwrite entirely.
+    """
+    import os
+    import yaml
+
+    config_path = os.path.expanduser("~/.xpst/config.yaml")
+
+    with open(input_file) as f:
+        imported = yaml.safe_load(f) or {}
+
+    if not isinstance(imported, dict):
+        if as_json:
+            json_output({"ok": False, "error": "Import file must contain a YAML mapping"}, True)
+        else:
+            console.print("[red]Import file must contain a YAML mapping[/red]")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    if merge and Path(config_path).exists():
+        with open(config_path) as f:
+            existing = yaml.safe_load(f) or {}
+
+        def _deep_merge(base: dict, override: dict) -> dict:
+            """Recursively merge override into base."""
+            for k, v in override.items():
+                if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                    _deep_merge(base[k], v)
+                else:
+                    base[k] = v
+            return base
+
+        merged = _deep_merge(existing, imported)
+    else:
+        merged = imported
+
+    Path(config_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w") as f:
+        yaml.dump(merged, f, default_flow_style=False, sort_keys=False)
+
+    if as_json:
+        json_output({"ok": True, "imported": str(input_file), "mode": "merge" if merge else "replace"}, True)
+    else:
+        mode_label = "merged" if merge else "replaced"
+        console.print(f"[green]✓[/green] Config {mode_label} from [bold]{input_file}[/bold]")
 
 
 # ──────────────────────────────────────────────
@@ -1611,16 +1715,23 @@ def schedule_list(ctx: click.Context, as_json: bool):
 
 @schedule.command("remove")
 @click.argument("entry_id")
+@json_option
 @click.pass_context
-def schedule_remove(ctx: click.Context, entry_id: str):
+def schedule_remove(ctx: click.Context, entry_id: str, as_json: bool):
     """Remove a scheduled post by ID"""
     from xpst.schedule_manager import ScheduleManager
 
     manager = ScheduleManager()
     if manager.remove(entry_id):
-        console.print(f"[green]✓ Removed scheduled post [bold]{entry_id}[/bold][/green]")
+        if as_json:
+            json_output({"ok": True, "removed": entry_id}, True)
+        else:
+            console.print(f"[green]✓ Removed scheduled post [bold]{entry_id}[/bold][/green]")
     else:
-        console.print(f"[red]Post not found:[/red] {entry_id}")
+        if as_json:
+            json_output({"ok": False, "error": f"Post not found: {entry_id}"}, True)
+        else:
+            console.print(f"[red]Post not found:[/red] {entry_id}")
         sys.exit(EXIT_GENERAL)
 
 
@@ -1703,6 +1814,248 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
 
     if not as_json:
         console.print(f"\n[green]Processed {len(due)} scheduled post(s)[/green]")
+
+
+@schedule.command("install")
+@click.option("--interval", "-i", default=15, type=int, help="Run interval in minutes (default: 15)")
+@click.option("--remove", "uninstall", is_flag=True, help="Remove the OS scheduler instead of installing")
+@json_option
+@click.pass_context
+def schedule_install(ctx: click.Context, interval: int, uninstall: bool, as_json: bool):
+    """Install an OS-level scheduler to run 'xpst schedule run' periodically.
+
+    Creates a LaunchAgent on macOS, a scheduled task on Windows, or a
+    crontab entry on Linux. Use --remove to uninstall.
+    """
+    import platform as _platform
+    import os
+
+    system = _platform.system()
+    xpst_bin = os.path.realpath(os.path.join(os.path.dirname(sys.executable), "xpst"))
+
+    if uninstall:
+        result = _uninstall_os_scheduler(system, xpst_bin, as_json)
+    else:
+        result = _install_os_scheduler(system, xpst_bin, interval, as_json)
+
+    if not result:
+        sys.exit(EXIT_GENERAL)
+
+
+def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bool) -> bool:
+    """Install OS-specific scheduler entry. Returns True on success."""
+    import os
+
+    if system == "Darwin":
+        plist_dir = Path(os.path.expanduser("~/Library/LaunchAgents"))
+        plist_dir.mkdir(parents=True, exist_ok=True)
+        plist_path = plist_dir / "com.xpst.schedule.plist"
+        interval_sec = interval * 60
+        plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.xpst.schedule</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{xpst_bin}</string>
+        <string>schedule</string>
+        <string>run</string>
+        <string>--quiet</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>{interval_sec}</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{os.path.expanduser("~/.xpst/logs/launchagent.log")}</string>
+    <key>StandardErrorPath</key>
+    <string>{os.path.expanduser("~/.xpst/logs/launchagent.err")}</string>
+</dict>
+</plist>"""
+        with open(plist_path, "w") as f:
+            f.write(plist_content)
+
+        # Load the agent
+        import subprocess
+        subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+        result = subprocess.run(["launchctl", "load", str(plist_path)], capture_output=True, text=True)
+
+        if result.returncode == 0:
+            if as_json:
+                json_output({"ok": True, "os": "macos", "path": str(plist_path), "interval_min": interval}, True)
+            else:
+                console.print(f"[green]✓[/green] LaunchAgent installed: [bold]{plist_path}[/bold]")
+                console.print(f"  Runs every {interval} minutes")
+                console.print(f"  Logs: ~/.xpst/logs/launchagent.log")
+                console.print(f"  Uninstall: [dim]xpst schedule install --remove[/dim]")
+            return True
+        else:
+            err = result.stderr.strip()
+            if as_json:
+                json_output({"ok": False, "error": f"launchctl load failed: {err}"}, True)
+            else:
+                console.print(f"[red]Failed to load LaunchAgent:[/red] {err}")
+            return False
+
+    elif system == "Linux":
+        import subprocess
+        cron_line = f"*/{interval} * * * * {xpst_bin} schedule run --quiet >> ~/.xpst/logs/cron.log 2>&1"
+
+        # Read existing crontab
+        existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        lines = existing.stdout.strip().split("\n") if existing.returncode == 0 and existing.stdout.strip() else []
+        marker = "# xPST schedule runner"
+
+        # Remove old xpst entry if present
+        filtered = []
+        skip_next = False
+        for line in lines:
+            if marker in line:
+                skip_next = True
+                continue
+            if skip_next and "xpst schedule run" in line:
+                skip_next = False
+                continue
+            skip_next = False
+            filtered.append(line)
+
+        filtered.append(marker)
+        filtered.append(cron_line)
+        new_crontab = "\n".join(filtered) + "\n"
+
+        proc = subprocess.run(["crontab", "-"], input=new_crontab, capture_output=True, text=True)
+        if proc.returncode == 0:
+            if as_json:
+                json_output({"ok": True, "os": "linux", "interval_min": interval}, True)
+            else:
+                console.print(f"[green]✓[/green] Crontab entry installed (every {interval} minutes)")
+                console.print(f"  Logs: ~/.xpst/logs/cron.log")
+                console.print(f"  Uninstall: [dim]xpst schedule install --remove[/dim]")
+            return True
+        else:
+            if as_json:
+                json_output({"ok": False, "error": proc.stderr.strip()}, True)
+            else:
+                console.print(f"[red]Failed to set crontab:[/red] {proc.stderr.strip()}")
+            return False
+
+    elif system == "Windows":
+        import subprocess
+        task_name = "XpstScheduleRun"
+        cmd = f'"{xpst_bin}" schedule run --quiet'
+
+        result = subprocess.run(
+            ["schtasks", "/Create", "/TN", task_name, "/TR", cmd,
+             "/SC", "MINUTE", "/MO", str(interval), "/F"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            if as_json:
+                json_output({"ok": True, "os": "windows", "task": task_name, "interval_min": interval}, True)
+            else:
+                console.print(f"[green]✓[/green] Scheduled task '{task_name}' created (every {interval} minutes)")
+                console.print(f"  Uninstall: [dim]xpst schedule install --remove[/dim]")
+            return True
+        else:
+            if as_json:
+                json_output({"ok": False, "error": result.stderr.strip()}, True)
+            else:
+                console.print(f"[red]Failed to create task:[/red] {result.stderr.strip()}")
+            return False
+
+    else:
+        if as_json:
+            json_output({"ok": False, "error": f"Unsupported OS: {system}"}, True)
+        else:
+            console.print(f"[red]Unsupported OS:[/red] {system}")
+        return False
+
+
+def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
+    """Remove OS-specific scheduler entry. Returns True on success."""
+    import os
+    import subprocess
+
+    if system == "Darwin":
+        plist_path = Path(os.path.expanduser("~/Library/LaunchAgents/com.xpst.schedule.plist"))
+        if not plist_path.exists():
+            if as_json:
+                json_output({"ok": False, "error": "LaunchAgent not found"}, True)
+            else:
+                console.print("[yellow]LaunchAgent not found — nothing to remove[/yellow]")
+            return True
+
+        subprocess.run(["launchctl", "unload", str(plist_path)], capture_output=True)
+        plist_path.unlink()
+        if as_json:
+            json_output({"ok": True, "removed": str(plist_path)}, True)
+        else:
+            console.print(f"[green]✓[/green] LaunchAgent removed: {plist_path}")
+        return True
+
+    elif system == "Linux":
+        existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+        if existing.returncode != 0 or not existing.stdout.strip():
+            if as_json:
+                json_output({"ok": True, "message": "No crontab entries found"}, True)
+            else:
+                console.print("[yellow]No crontab entries found[/yellow]")
+            return True
+
+        lines = existing.stdout.strip().split("\n")
+        filtered = []
+        skip_next = False
+        for line in lines:
+            if "# xPST schedule runner" in line:
+                skip_next = True
+                continue
+            if skip_next and "xpst schedule run" in line:
+                skip_next = False
+                continue
+            skip_next = False
+            filtered.append(line)
+
+        new_crontab = "\n".join(filtered) + "\n" if filtered else ""
+        if new_crontab.strip():
+            proc = subprocess.run(["crontab", "-"], input=new_crontab, capture_output=True, text=True)
+        else:
+            proc = subprocess.run(["crontab", "-r"], capture_output=True, text=True)
+
+        if as_json:
+            json_output({"ok": True, "removed": "crontab entry"}, True)
+        else:
+            console.print("[green]✓[/green] xPST crontab entry removed")
+        return True
+
+    elif system == "Windows":
+        import subprocess
+        task_name = "XpstScheduleRun"
+        result = subprocess.run(
+            ["schtasks", "/Delete", "/TN", task_name, "/F"],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            if as_json:
+                json_output({"ok": True, "removed": task_name}, True)
+            else:
+                console.print(f"[green]✓[/green] Scheduled task '{task_name}' removed")
+            return True
+        else:
+            if as_json:
+                json_output({"ok": False, "error": result.stderr.strip()}, True)
+            else:
+                console.print(f"[red]Failed to delete task:[/red] {result.stderr.strip()}")
+            return False
+
+    else:
+        if as_json:
+            json_output({"ok": False, "error": f"Unsupported OS: {system}"}, True)
+        else:
+            console.print(f"[red]Unsupported OS:[/red] {system}")
+        return False
 
 
 def confirm(message: str) -> bool:

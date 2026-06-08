@@ -99,6 +99,8 @@ Page {
                     font.pixelSize: 20
                     font.bold: true
                     color: theme.textPrimary
+                    Accessible.name: "Connect Platforms page title"
+                    Accessible.role: Accessible.Heading
                 }
                 Text {
                     text: "Manage your social media connections"
@@ -261,6 +263,8 @@ Page {
                                     cursorShape: Qt.PointingHandCursor
                                     enabled: !isConnecting
                                     onClicked: connectPage.connectPlatform(modelData.name)
+                                    Accessible.name: (isConnecting ? "Connecting" : (platformStatus.connected ? "Disconnect from " : "Connect to ")) + modelData.name
+                                    Accessible.role: Accessible.Button
                                 }
                             }
                         }

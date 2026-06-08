@@ -16,10 +16,10 @@ logging.basicConfig(
 logger = logging.getLogger("xpst.desktop")
 
 # ── PySide6 imports ──────────────────────────────────────────────────
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QSplashScreen
 from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtCore import QUrl, QTimer
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QUrl, QTimer, QSettings, Qt
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
 
 # Attempt Material style import (QtQuick.Controls)
 try:
@@ -47,6 +47,64 @@ def _find_qml_path() -> Path:
 
     # Last resort: return expected path (engine will report error)
     return here / "qml" / "main.qml"
+
+
+def _create_splash() -> QSplashScreen:
+    """Create a splash screen with xPST branding."""
+    # Try to load the real icon/logo first
+    icon_paths = [
+        Path(__file__).resolve().parent.parent.parent.parent / "assets" / "xpst-full.png",
+        Path(__file__).resolve().parent.parent.parent.parent / "assets" / "icon.png",
+    ]
+
+    pixmap = None
+    for ip in icon_paths:
+        if ip.exists():
+            pixmap = QPixmap(str(ip))
+            break
+
+    if pixmap is None or pixmap.isNull():
+        # Generate a branded splash programmatically
+        pixmap = QPixmap(400, 300)
+        pixmap.fill(QColor("#0a0a0f"))
+        painter = QPainter(pixmap)
+
+        # Background panel
+        painter.setBrush(QColor("#12121a"))
+        painter.setPen(Qt.NoPen)
+        painter.drawRoundedRect(10, 10, 380, 280, 12, 12)
+
+        # Lightning bolt
+        font = QFont()
+        font.setPixelSize(48)
+        painter.setFont(font)
+        painter.setPen(QColor("#6366f1"))
+        painter.drawText(pixmap.rect().adjusted(0, -40, 0, 0), Qt.AlignCenter, "⚡")
+
+        # App name
+        font.setPixelSize(28)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor("#f0f0f5"))
+        painter.drawText(pixmap.rect().adjusted(0, 30, 0, 0), Qt.AlignCenter, "xPST")
+
+        # Subtitle
+        font.setPixelSize(12)
+        font.setBold(False)
+        painter.setFont(font)
+        painter.setPen(QColor("#a0a0b0"))
+        painter.drawText(pixmap.rect().adjusted(0, 70, 0, 0), Qt.AlignCenter, "Cross-Posting Suite")
+
+        # Loading text
+        font.setPixelSize(10)
+        painter.setPen(QColor("#6b6b80"))
+        painter.drawText(pixmap.rect().adjusted(0, 110, 0, 0), Qt.AlignCenter, "Loading...")
+
+        painter.end()
+
+    splash = QSplashScreen(pixmap)
+    splash.setWindowFlags(Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+    return splash
 
 
 def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTrayIcon | None:
@@ -164,6 +222,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("xPST")
     app.setOrganizationName("xPST")
+    app.setOrganizationDomain("xpst.app")
     app.setApplicationDisplayName("xPST — Cross-Posting Tool")
 
     # Set Material style before creating the engine
@@ -172,6 +231,11 @@ def main() -> int:
     else:
         import os
         os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Material")
+
+    # ── Splash Screen ────────────────────────────────────────────────
+    splash = _create_splash()
+    splash.show()
+    app.processEvents()  # ensure splash is painted before heavy init
 
     # Create QML engine
     engine = QQmlApplicationEngine()
@@ -199,6 +263,7 @@ def main() -> int:
     logger.info("Loading QML from: %s", qml_path)
 
     if not qml_path.exists():
+        splash.close()
         logger.error("QML file not found: %s", qml_path)
         logger.error("Create %s or run the QML generation step first.", qml_path)
         # Don't crash — show a minimal window
@@ -216,8 +281,12 @@ def main() -> int:
 
     # Check if QML loaded successfully
     if not engine.rootObjects:
+        splash.close()
         logger.error("Failed to load QML — check main.qml for errors")
         return 1
+
+    # Close splash once the window is visible
+    QTimer.singleShot(800, splash.close)
 
     # System tray (after engine is ready)
     tray = _setup_tray(app, engine)

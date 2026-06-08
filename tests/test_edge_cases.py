@@ -847,24 +847,24 @@ class TestDashboardEdgeCases:
 
     def test_dashboard_relative_time_none(self):
         """Relative time with None should return dash."""
-        from xpst.dashboard.app import _relative_time
+        from xpst.dashboard.analytics import _relative_time
         assert _relative_time(None) == "—"
 
     def test_dashboard_relative_time_invalid(self):
         """Relative time with invalid string should return truncated string."""
-        from xpst.dashboard.app import _relative_time
+        from xpst.dashboard.analytics import _relative_time
         result = _relative_time("not a date")
         # Falls to except branch: ts_str[:10] if ts_str else "—"
         assert result == "not a date"
 
     def test_dashboard_fmt_num_none(self):
         """Format number with None should return '0'."""
-        from xpst.dashboard.app import _fmt_num
+        from xpst.dashboard.analytics import _fmt_num
         assert _fmt_num(None) == "0"
 
     def test_dashboard_fmt_num_large(self):
         """Format large numbers should use K/M suffix."""
-        from xpst.dashboard.app import _fmt_num
+        from xpst.dashboard.analytics import _fmt_num
         assert _fmt_num(1500000) == "1.5M"
         assert _fmt_num(1500) == "1.5K"
         assert _fmt_num(42) == "42"

@@ -1,7 +1,7 @@
-"""Post list model for xPST desktop app.
+"""Post and Notification list models for xPST desktop app.
 
-QAbstractListModel exposing posted videos from StateManager
-as a model consumable by QML ListView/Repeater.
+QAbstractListModel exposing posted videos and notification history
+from StateManager as models consumable by QML ListView/Repeater.
 """
 
 import json
@@ -151,3 +151,77 @@ class PostListModel(QAbstractListModel):
     def get_posts_json(self) -> str:
         """Return all posts as a JSON string."""
         return json.dumps(self._posts, default=str)
+
+    def get_post_captions(self, post_id: str) -> dict[str, str]:
+        """Return per-platform captions for a given postId."""
+        result: dict[str, str] = {}
+        for p in self._posts:
+            if p.get("postId") == post_id:
+                result[p.get("platform", "")] = p.get("caption", "")
+        return result
+
+    def update_caption(self, post_id: str, platform: str, new_caption: str) -> None:
+        """Update caption for a specific post/platform entry in the model."""
+        for i, p in enumerate(self._posts):
+            if p.get("postId") == post_id and p.get("platform") == platform:
+                p["caption"] = new_caption
+                idx = self.index(i)
+                self.dataChanged.emit(idx, idx, [self.CaptionRole])
+                break
+
+
+class NotificationListModel(QAbstractListModel):
+    """In-memory notification history for toast notifications.
+
+    Roles: message, isError, timestamp
+    """
+
+    MessageRole = Qt.UserRole + 1
+    IsErrorRole = Qt.UserRole + 2
+    TimestampRole = Qt.UserRole + 3
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._notifications: list[dict[str, Any]] = []
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: B008
+        return len(self._notifications)
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole) -> Any:
+        if not index.isValid() or index.row() < 0 or index.row() >= len(self._notifications):
+            return None
+        n = self._notifications[index.row()]
+        if role == self.MessageRole:
+            return n.get("message", "")
+        if role == self.IsErrorRole:
+            return n.get("isError", False)
+        if role == self.TimestampRole:
+            return n.get("timestamp", "")
+        return None
+
+    def roleNames(self) -> dict[int, QByteArray]:
+        return {
+            self.MessageRole: QByteArray(b"message"),
+            self.IsErrorRole: QByteArray(b"isError"),
+            self.TimestampRole: QByteArray(b"timestamp"),
+        }
+
+    def add_notification(self, message: str, is_error: bool = False) -> None:
+        """Add a notification to the history and notify views."""
+        self.beginInsertRows(QModelIndex(), 0, 0)
+        self._notifications.insert(0, {
+            "message": message,
+            "isError": is_error,
+            "timestamp": datetime.now().isoformat(),
+        })
+        self.endInsertRows()
+
+    def clear(self) -> None:
+        """Clear all notifications."""
+        self.beginResetModel()
+        self._notifications.clear()
+        self.endResetModel()
+
+    def unread_count(self) -> int:
+        """Return total notification count (simple proxy for unread)."""
+        return len(self._notifications)

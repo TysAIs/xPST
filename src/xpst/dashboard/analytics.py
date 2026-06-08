@@ -89,6 +89,36 @@ def _parse_ts(ts_str: str | None) -> datetime | None:
         return None
 
 
+def _fmt_num(n: int | float | None) -> str:
+    """Format number with K/M suffix."""
+    if n is None:
+        return "0"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(int(n))
+
+
+def _relative_time(ts_str: str | None) -> str:
+    """ISO timestamp → '2h ago' style."""
+    if not ts_str:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(ts_str)
+        delta = datetime.now() - dt
+        secs = delta.total_seconds()
+        if secs < 60:
+            return "just now"
+        if secs < 3600:
+            return f"{int(secs / 60)}m ago"
+        if secs < 86400:
+            return f"{int(secs / 3600)}h ago"
+        return f"{int(secs / 86400)}d ago"
+    except Exception:
+        return ts_str[:10] if ts_str else "—"
+
+
 class AnalyticsCollector:
     """Collects analytics from all xPST platforms.
 

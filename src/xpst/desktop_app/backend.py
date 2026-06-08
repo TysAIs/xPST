@@ -57,6 +57,8 @@ class AppController(QObject):
     error = Signal(str)          # error message
     connectResult = Signal(str)  # JSON connect result
     settingsSaved = Signal(bool, str)  # success, message
+    progressChanged = Signal(str, float)  # platform, percentage 0-100
+    notification = Signal(str, bool)   # message, isError
 
     # ── Init ─────────────────────────────────────────────────────────
 
@@ -87,6 +89,12 @@ class AppController(QObject):
         # Thumbnail cache dir
         self._thumb_dir = Path("~/.xpst/thumbnails").expanduser()
         self._thumb_dir.mkdir(parents=True, exist_ok=True)
+
+        # Wire error signal to notification signal
+        self.error.connect(lambda msg: self.notification.emit(msg, True))
+        self.postComplete.connect(
+            lambda json_str: self.notification.emit("Post completed successfully", False)
+        )
 
         # Initialise backends (best-effort)
         self._init_backends()
@@ -440,12 +448,22 @@ class AppController(QObject):
 
         def _run() -> None:
             try:
+                # Emit 0% progress for all platforms at start
+                for plat in ("youtube", "instagram", "x", "tiktok"):
+                    self.progressChanged.emit(plat, 0.0)
+
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 result = loop.run_until_complete(
                     self._engine.post_manual(path, caption)
                 )
                 loop.close()
+
+                # Emit per-platform progress from results
+                total_platforms = len(result.results) or 1
+                for idx, (plat, ur) in enumerate(result.results.items()):
+                    pct = ((idx + 1) / total_platforms) * 100.0
+                    self.progressChanged.emit(plat, pct)
 
                 result_dict = {
                     "video_id": result.video_id,
@@ -461,6 +479,10 @@ class AppController(QObject):
                         for plat, ur in result.results.items()
                     },
                 }
+
+                # Mark all as complete
+                for plat in result.results:
+                    self.progressChanged.emit(plat, 100.0)
 
                 result_json = json.dumps(result_dict, default=str)
                 self.postComplete.emit(result_json)
@@ -814,6 +836,43 @@ class AppController(QObject):
         }
         return json.dumps(status, default=str)
 
+    @Slot(result=str)
+    def checkForUpdates(self) -> str:
+        """Check for available package updates.
+
+        Calls xpst.updater.check_updates() and returns a JSON summary
+        of installed versions, latest versions, and which packages
+        can be updated.
+
+        Returns:
+            JSON string with update status for each tracked package.
+        """
+        try:
+            from xpst.updater import check_updates as _check_updates
+            packages = _check_updates()
+            result: list[dict[str, Any]] = []
+            for pkg in packages:
+                result.append({
+                    "name": pkg.name,
+                    "current": pkg.current_version,
+                    "latest": pkg.latest_version,
+                    "installed": pkg.installed,
+                    "updatable": pkg.updatable,
+                    "error": pkg.error,
+                })
+            updatable_count = sum(1 for p in packages if p.updatable)
+            return json.dumps({
+                "ok": True,
+                "packages": result,
+                "updatable_count": updatable_count,
+            }, default=str)
+        except Exception as exc:
+            logger.error("checkForUpdates error: %s", exc)
+            return json.dumps({
+                "ok": False,
+                "error": str(exc),
+            })
+
     @Slot(str, result=str)
     def getThumbnail(self, video_path: str) -> str:
         """Generate or retrieve a cached thumbnail for a video file/URL.
@@ -871,73 +930,128 @@ class AppController(QObject):
         t = threading.Thread(target=_run, daemon=True)
         t.start()
 
+    @Slot(str, str, str)
+    def updateCaption(self, post_id: str, platform: str, new_caption: str) -> None:
+        """Update caption for a specific post/platform in the post model.
+
+        Args:
+            post_id: The post identifier.
+            platform: The platform name.
+            new_caption: The new caption text.
+        """
+        # This is called from QML; the actual model update happens in main.py
+        # where we connect this signal.  Emit a notification on success.
+        self._pending_caption_update = (post_id, platform, new_caption)
+        self._captionUpdateReady.emit(post_id, platform, new_caption)
+
+    _captionUpdateReady = Signal(str, str, str)
+
 
 class ThemeProvider(QObject):
-    """Theme colors and design tokens exposed to QML."""
-    
+    """Theme colors and design tokens exposed to QML.
+
+    All colour properties emit darkModeChanged when toggled, so QML
+    bindings automatically update.
+    """
+
     darkModeChanged = Signal()
-    
+
+    # ── Colour maps ──────────────────────────────────────────────────
+    _DARK = {
+        "canvas": "#0a0a0f",
+        "surface": "#12121a",
+        "surfaceAlt": "#1a1a25",
+        "surfaceCard": "#1e1e2a",
+        "textPrimary": "#f0f0f5",
+        "textSecondary": "#a0a0b0",
+        "textMuted": "#6b6b80",
+        "accent": "#6366f1",
+        "accentHover": "#818cf8",
+        "accentMuted": "#312e81",
+        "success": "#22c55e",
+        "warning": "#f59e0b",
+        "error": "#ef4444",
+    }
+    _LIGHT = {
+        "canvas": "#f5f5f8",
+        "surface": "#ffffff",
+        "surfaceAlt": "#eeeef2",
+        "surfaceCard": "#ffffff",
+        "textPrimary": "#1a1a25",
+        "textSecondary": "#555565",
+        "textMuted": "#888899",
+        "accent": "#6366f1",
+        "accentHover": "#818cf8",
+        "accentMuted": "#c7d2fe",
+        "success": "#16a34a",
+        "warning": "#d97706",
+        "error": "#dc2626",
+    }
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._dark_mode = True
-    
+
+    def _col(self, key: str) -> str:
+        return self._DARK[key] if self._dark_mode else self._LIGHT[key]
+
     # Surface ladder
-    @Property(str, constant=True)
-    def canvas(self): return "#0a0a0f"
-    
-    @Property(str, constant=True)
-    def surface(self): return "#12121a"
-    
-    @Property(str, constant=True)
-    def surfaceAlt(self): return "#1a1a25"
-    
-    @Property(str, constant=True)
-    def surfaceCard(self): return "#1e1e2a"
-    
+    @Property(str, notify=darkModeChanged)
+    def canvas(self): return self._col("canvas")
+
+    @Property(str, notify=darkModeChanged)
+    def surface(self): return self._col("surface")
+
+    @Property(str, notify=darkModeChanged)
+    def surfaceAlt(self): return self._col("surfaceAlt")
+
+    @Property(str, notify=darkModeChanged)
+    def surfaceCard(self): return self._col("surfaceCard")
+
     # Text hierarchy
-    @Property(str, constant=True)
-    def textPrimary(self): return "#f0f0f5"
-    
-    @Property(str, constant=True)
-    def textSecondary(self): return "#a0a0b0"
-    
-    @Property(str, constant=True)
-    def textMuted(self): return "#6b6b80"
-    
+    @Property(str, notify=darkModeChanged)
+    def textPrimary(self): return self._col("textPrimary")
+
+    @Property(str, notify=darkModeChanged)
+    def textSecondary(self): return self._col("textSecondary")
+
+    @Property(str, notify=darkModeChanged)
+    def textMuted(self): return self._col("textMuted")
+
     # Accent
-    @Property(str, constant=True)
-    def accent(self): return "#6366f1"
-    
-    @Property(str, constant=True)
-    def accentHover(self): return "#818cf8"
-    
-    @Property(str, constant=True)
-    def accentMuted(self): return "#312e81"
-    
+    @Property(str, notify=darkModeChanged)
+    def accent(self): return self._col("accent")
+
+    @Property(str, notify=darkModeChanged)
+    def accentHover(self): return self._col("accentHover")
+
+    @Property(str, notify=darkModeChanged)
+    def accentMuted(self): return self._col("accentMuted")
+
     # Semantic
-    @Property(str, constant=True)
-    def success(self): return "#22c55e"
-    
-    @Property(str, constant=True)
-    def warning(self): return "#f59e0b"
-    
-    @Property(str, constant=True)
-    def error(self): return "#ef4444"
-    
-    # Platform colors
+    @Property(str, notify=darkModeChanged)
+    def success(self): return self._col("success")
+
+    @Property(str, notify=darkModeChanged)
+    def warning(self): return self._col("warning")
+
+    @Property(str, notify=darkModeChanged)
+    def error(self): return self._col("error")
+
+    # Platform colors (same in both modes)
     @Property(str, constant=True)
     def youtube(self): return "#ff0000"
-    
+
     @Property(str, constant=True)
     def instagram(self): return "#e1306c"
-    
+
     @Property(str, constant=True)
     def xtwitter(self): return "#1d9bf0"
-    
+
     @Property(str, constant=True)
     def tiktok(self): return "#00f2ea"
-    
-    # Spacing
+
+    # Spacing (constant in both modes)
     @Property(int, constant=True)
     def spacingXs(self): return 4
     @Property(int, constant=True)
@@ -950,8 +1064,8 @@ class ThemeProvider(QObject):
     def spacingXl(self): return 24
     @Property(int, constant=True)
     def spacingXxl(self): return 32
-    
-    # Radius
+
+    # Radius (constant in both modes)
     @Property(int, constant=True)
     def radiusSm(self): return 6
     @Property(int, constant=True)
@@ -960,12 +1074,12 @@ class ThemeProvider(QObject):
     def radiusLg(self): return 12
     @Property(int, constant=True)
     def radiusXl(self): return 16
-    
+
     # Dark mode toggle
     @Property(bool, notify=darkModeChanged)
     def darkMode(self):
         return self._dark_mode
-    
+
     @darkMode.setter
     def darkMode(self, value):
         if self._dark_mode != value:

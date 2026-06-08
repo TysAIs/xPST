@@ -3,6 +3,10 @@ xPST Dashboard Server
 
 Launches the NiceGUI web server for the analytics dashboard.
 Supports optional HTTP Basic Auth and Prometheus metrics endpoint.
+
+NOTE: The NiceGUI UI (create_dashboard) has been removed in favour of the
+desktop QML app.  This module is kept for API-only / metrics endpoints.
+Attempting to start the full dashboard will raise an informative error.
 """
 
 from __future__ import annotations
@@ -12,10 +16,6 @@ import base64
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-from nicegui import ui
-
-from xpst.dashboard.app import create_dashboard
 
 if TYPE_CHECKING:
     from fastapi import Request
@@ -68,18 +68,38 @@ def start_dashboard(
         logger.info("Dashboard auth not configured (no username/password set)")
 
     logger.info("Starting xPST Dashboard on http://%s:%d", host, port)
+
+    try:
+        from nicegui import ui
+    except ImportError:
+        raise RuntimeError(
+            "NiceGUI is not installed. The web dashboard UI has been removed. "
+            "Use the xPST desktop app instead."
+        )
+
+    try:
+        from xpst.dashboard.app import create_dashboard
+    except ImportError:
+        raise RuntimeError(
+            "NiceGUI dashboard UI (app.py) has been removed. "
+            "Use the xPST desktop app for the graphical interface."
+        )
+
     create_dashboard(config_dir)
 
     # Add /metrics endpoint for Prometheus
-    from xpst.utils.metrics import metrics_text
+    try:
+        from xpst.utils.metrics import metrics_text
 
-    @ui.page("/metrics")
-    def metrics_page():
-        from fastapi.responses import PlainTextResponse
-        return PlainTextResponse(
-            metrics_text(),
-            media_type="text/plain; version=0.0.4; charset=utf-8",
-        )
+        @ui.page("/metrics")
+        def metrics_page():
+            from fastapi.responses import PlainTextResponse
+            return PlainTextResponse(
+                metrics_text(),
+                media_type="text/plain; version=0.0.4; charset=utf-8",
+            )
+    except ImportError:
+        logger.debug("Prometheus metrics module not available")
 
     # Add basic auth middleware if credentials are configured
     if auth_enabled:
@@ -106,7 +126,7 @@ def _setup_basic_auth(username: str, password: str) -> None:
     from starlette.middleware.base import BaseHTTPMiddleware
 
     class BasicAuthMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request: Request, call_next):
+        async def dispatch(self, request: "Request", call_next):
             # Skip auth for the metrics endpoint
             if request.url.path == "/metrics":
                 return await call_next(request)
@@ -116,7 +136,7 @@ def _setup_basic_auth(username: str, password: str) -> None:
                 return JSONResponse(
                     {"detail": "Not authenticated"},
                     status_code=401,
-                    headers={"WWW-Authenticate": "Basic realm=\"xPST Dashboard\""},
+                    headers={"WWW-Authenticate": 'Basic realm="xPST Dashboard"'},
                 )
 
             try:
@@ -126,7 +146,7 @@ def _setup_basic_auth(username: str, password: str) -> None:
                 return JSONResponse(
                     {"detail": "Invalid authentication"},
                     status_code=401,
-                    headers={"WWW-Authenticate": "Basic realm=\"xPST Dashboard\""},
+                    headers={"WWW-Authenticate": 'Basic realm="xPST Dashboard"'},
                 )
 
             # Support both hashed (sha256:) and legacy plain-text passwords
@@ -139,7 +159,7 @@ def _setup_basic_auth(username: str, password: str) -> None:
                 return JSONResponse(
                     {"detail": "Invalid credentials"},
                     status_code=401,
-                    headers={"WWW-Authenticate": "Basic realm=\"xPST Dashboard\""},
+                    headers={"WWW-Authenticate": 'Basic realm="xPST Dashboard"'},
                 )
 
             return await call_next(request)

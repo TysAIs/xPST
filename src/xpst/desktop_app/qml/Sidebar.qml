@@ -14,6 +14,15 @@ Rectangle {
     property string currentPage: "dashboard"
     signal navigate(string pageName)
 
+    property int notifCount: typeof notifModel !== "undefined" ? notifModel.rowCount() : 0
+
+    // Update count when model changes
+    Connections {
+        target: typeof notifModel !== "undefined" ? notifModel : null
+        function onRowsInserted() { sidebar.notifCount = notifModel.rowCount() }
+        function onModelReset() { sidebar.notifCount = notifModel.rowCount() }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -98,6 +107,198 @@ Rectangle {
         }
 
         Item { Layout.fillHeight: true }
+
+        // Notification bell (Item 8)
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 44
+            Layout.leftMargin: theme.spacingSm
+            Layout.rightMargin: theme.spacingSm
+            Layout.bottomMargin: theme.spacingSm
+            radius: theme.radiusMd
+            color: bellMouse.containsMouse ? theme.surfaceAlt : "transparent"
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: theme.spacingMd
+                spacing: theme.spacingMd
+
+                // Bell icon with badge
+                Item {
+                    Layout.preferredWidth: 24
+                    Layout.preferredHeight: 24
+
+                    Text {
+                        text: "🔔"
+                        font.pixelSize: 14
+                        anchors.centerIn: parent
+                    }
+
+                    // Badge count
+                    Rectangle {
+                        width: Math.max(16, badgeText.implicitWidth + 6)
+                        height: 16
+                        radius: 8
+                        color: theme.error
+                        visible: sidebar.notifCount > 0
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.topMargin: -4
+                        anchors.rightMargin: -6
+
+                        Text {
+                            id: badgeText
+                            anchors.centerIn: parent
+                            text: sidebar.notifCount > 99 ? "99+" : String(sidebar.notifCount)
+                            font.pixelSize: 9
+                            font.bold: true
+                            color: "#ffffff"
+                        }
+                    }
+                }
+
+                Text {
+                    text: "Notifications"
+                    font.pixelSize: 13
+                    color: theme.textSecondary
+                    visible: sidebar.expanded
+                }
+                Item { Layout.fillWidth: true }
+            }
+
+            MouseArea {
+                id: bellMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    // Show notification popup
+                    if (notifPopup.visible) {
+                        notifPopup.close()
+                    } else {
+                        notifPopup.open()
+                    }
+                }
+            }
+
+            // Notification popup
+            Popup {
+                id: notifPopup
+                y: -notifPopupContent.implicitHeight - 8
+                x: sidebar.expanded ? 0 : 64
+                width: 280
+                height: Math.min(360, notifPopupContent.implicitHeight + theme.spacingXl)
+                background: Rectangle {
+                    color: theme.surfaceCard
+                    radius: theme.radiusLg
+                    border.color: theme.surfaceAlt
+                    border.width: 1
+                }
+
+                ColumnLayout {
+                    id: notifPopupContent
+                    anchors.fill: parent
+                    anchors.margins: theme.spacingMd
+                    spacing: theme.spacingSm
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text {
+                            text: "Notifications"
+                            font.pixelSize: 13
+                            font.bold: true
+                            color: theme.textPrimary
+                            Layout.fillWidth: true
+                        }
+                        Rectangle {
+                            width: clearLabel.implicitWidth + theme.spacingMd
+                            height: 24
+                            radius: theme.radiusSm
+                            color: theme.surfaceAlt
+                            visible: sidebar.notifCount > 0
+                            Text {
+                                id: clearLabel
+                                anchors.centerIn: parent
+                                text: "Clear"
+                                font.pixelSize: 10
+                                color: theme.textSecondary
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (typeof notifModel !== "undefined") notifModel.clear()
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.surfaceAlt }
+
+                    // Notification list
+                    ListView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
+                        model: typeof notifModel !== "undefined" ? notifModel : 0
+
+                        delegate: Rectangle {
+                            width: parent ? parent.width : 280
+                            height: notifDelegateCol.implicitHeight + theme.spacingMd
+                            color: "transparent"
+
+                            ColumnLayout {
+                                id: notifDelegateCol
+                                anchors.fill: parent
+                                spacing: 2
+
+                                RowLayout {
+                                    spacing: theme.spacingXs
+                                    Text {
+                                        text: model.isError ? "❌" : "✅"
+                                        font.pixelSize: 10
+                                    }
+                                    Text {
+                                        text: model.message || ""
+                                        font.pixelSize: 11
+                                        color: theme.textPrimary
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.Wrap
+                                        maximumLineCount: 2
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                                Text {
+                                    text: {
+                                        if (!model.timestamp) return ""
+                                        try {
+                                            var d = new Date(model.timestamp)
+                                            var now = new Date()
+                                            var diff = (now - d) / 1000
+                                            if (diff < 60) return "just now"
+                                            if (diff < 3600) return Math.floor(diff / 60) + "m ago"
+                                            if (diff < 86400) return Math.floor(diff / 3600) + "h ago"
+                                            return d.toLocaleDateString()
+                                        } catch(e) { return "" }
+                                    }
+                                    font.pixelSize: 9
+                                    color: theme.textMuted
+                                }
+                            }
+                        }
+
+                        // Empty state
+                        Text {
+                            anchors.centerIn: parent
+                            text: "No notifications yet"
+                            font.pixelSize: 11
+                            color: theme.textMuted
+                            visible: typeof notifModel !== "undefined" && notifModel.rowCount() === 0
+                        }
+                    }
+                }
+            }
+        }
 
         // Theme toggle
         Rectangle {

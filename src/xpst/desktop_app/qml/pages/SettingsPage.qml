@@ -16,6 +16,7 @@ Page {
     property bool tiktokEnabled: true
     property int rateLimitPosts: 10
     property int rateLimitMinutes: 60
+    property bool mcpRunning: false
 
     // ── Validation state ────────────────────────────────────────
     property bool hasErrors: false
@@ -217,6 +218,8 @@ Page {
                                     font.pixelSize: 13
                                     clip: true
                                     onTextChanged: settingsPage.tiktokUsername = text
+                                    Accessible.name: "TikTok Username input"
+                                    Accessible.role: Accessible.EditableText
                                 }
                             }
                         }
@@ -246,6 +249,8 @@ Page {
                                         settingsPage.downloadDir = text
                                         settingsPage.validateForm()
                                     }
+                                    Accessible.name: "Download Directory input"
+                                    Accessible.role: Accessible.EditableText
                                 }
                             }
                             Text {
@@ -305,6 +310,8 @@ Page {
                                 Switch {
                                     checked: settingsPage[modelData.prop]
                                     onCheckedChanged: settingsPage[modelData.prop] = checked
+                                    Accessible.name: "Enable " + modelData.label
+                                    Accessible.role: Accessible.CheckBox
                                 }
                             }
                         }
@@ -363,6 +370,8 @@ Page {
                                         if (!isNaN(v)) settingsPage.rateLimitPosts = v
                                         settingsPage.validateForm()
                                     }
+                                    Accessible.name: "Max Posts per Window input"
+                                    Accessible.role: Accessible.EditableText
                                 }
                             }
                             Text {
@@ -400,6 +409,8 @@ Page {
                                         if (!isNaN(v)) settingsPage.rateLimitMinutes = v
                                         settingsPage.validateForm()
                                     }
+                                    Accessible.name: "Window Duration input"
+                                    Accessible.role: Accessible.EditableText
                                 }
                             }
                             Text {
@@ -443,7 +454,11 @@ Page {
                                 color: theme.textPrimary
                                 Layout.fillWidth: true
                             }
-                            Switch { checked: true }
+                            Switch {
+                                checked: true
+                                Accessible.name: "Toggle post completion alerts"
+                                Accessible.role: Accessible.CheckBox
+                            }
                         }
                         RowLayout {
                             Text {
@@ -452,7 +467,285 @@ Page {
                                 color: theme.textPrimary
                                 Layout.fillWidth: true
                             }
-                            Switch { checked: true }
+                            Switch {
+                                checked: true
+                                Accessible.name: "Toggle error notifications"
+                                Accessible.role: Accessible.CheckBox
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Encoding Preview Section (Item 10)
+            ColumnLayout {
+                spacing: theme.spacingXl
+
+                Text {
+                    text: "Encoding Preview"
+                    font.pixelSize: 16
+                    font.bold: true
+                    color: theme.textPrimary
+                }
+
+                Text {
+                    text: "Current encoding parameters per platform"
+                    font.pixelSize: 12
+                    color: theme.textSecondary
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: encCol.implicitHeight + theme.spacingXxl
+                    radius: theme.radiusLg
+                    color: theme.surfaceCard
+
+                    ColumnLayout {
+                        id: encCol
+                        anchors.fill: parent
+                        anchors.margins: theme.spacingXl
+                        spacing: theme.spacingMd
+
+                        Repeater {
+                            model: [
+                                {
+                                    platform: "YouTube",
+                                    codec: "H.264 / AVC",
+                                    resolution: "1080p (1920×1080)",
+                                    fps: "30 fps",
+                                    bitrate: "8-12 Mbps",
+                                    audioCodec: "AAC",
+                                    audioBitrate: "256 kbps",
+                                    container: "MP4",
+                                    maxDuration: "60s (Shorts)",
+                                    color: theme.youtube
+                                },
+                                {
+                                    platform: "Instagram",
+                                    codec: "H.264 / AVC",
+                                    resolution: "1080×1920 (9:16)",
+                                    fps: "30 fps",
+                                    bitrate: "5-8 Mbps",
+                                    audioCodec: "AAC",
+                                    audioBitrate: "128 kbps",
+                                    container: "MP4",
+                                    maxDuration: "90s (Reels)",
+                                    color: theme.instagram
+                                },
+                                {
+                                    platform: "X",
+                                    codec: "H.264 / AVC",
+                                    resolution: "1280×720 (16:9)",
+                                    fps: "30 fps",
+                                    bitrate: "5-8 Mbps",
+                                    audioCodec: "AAC",
+                                    audioBitrate: "128 kbps",
+                                    container: "MP4",
+                                    maxDuration: "140s",
+                                    color: theme.xtwitter
+                                },
+                                {
+                                    platform: "TikTok",
+                                    codec: "H.264 / AVC",
+                                    resolution: "1080×1920 (9:16)",
+                                    fps: "30 fps",
+                                    bitrate: "4-6 Mbps",
+                                    audioCodec: "AAC",
+                                    audioBitrate: "128 kbps",
+                                    container: "MP4",
+                                    maxDuration: "60s",
+                                    color: theme.tiktok
+                                }
+                            ]
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: encPlatformCol.implicitHeight + theme.spacingXl
+                                radius: theme.radiusMd
+                                color: theme.surfaceAlt
+
+                                ColumnLayout {
+                                    id: encPlatformCol
+                                    anchors.fill: parent
+                                    anchors.margins: theme.spacingLg
+                                    spacing: theme.spacingSm
+
+                                    RowLayout {
+                                        spacing: theme.spacingSm
+                                        Rectangle {
+                                            width: 8; height: 8; radius: 4
+                                            color: modelData.color
+                                        }
+                                        Text {
+                                            text: modelData.platform
+                                            font.pixelSize: 13
+                                            font.bold: true
+                                            color: theme.textPrimary
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                    }
+
+                                    GridLayout {
+                                        columns: 4
+                                        columnSpacing: theme.spacingXl
+                                        rowSpacing: theme.spacingXs
+                                        Layout.fillWidth: true
+
+                                        Text { text: "Codec"; font.pixelSize: 11; color: theme.textMuted }
+                                        Text { text: modelData.codec; font.pixelSize: 11; color: theme.textSecondary }
+
+                                        Text { text: "Resolution"; font.pixelSize: 11; color: theme.textMuted }
+                                        Text { text: modelData.resolution; font.pixelSize: 11; color: theme.textSecondary }
+
+                                        Text { text: "FPS"; font.pixelSize: 11; color: theme.textMuted }
+                                        Text { text: modelData.fps; font.pixelSize: 11; color: theme.textSecondary }
+
+                                        Text { text: "Bitrate"; font.pixelSize: 11; color: theme.textMuted }
+                                        Text { text: modelData.bitrate; font.pixelSize: 11; color: theme.textSecondary }
+
+                                        Text { text: "Audio"; font.pixelSize: 11; color: theme.textMuted }
+                                        Text { text: modelData.audioCodec + " " + modelData.audioBitrate; font.pixelSize: 11; color: theme.textSecondary }
+
+                                        Text { text: "Container"; font.pixelSize: 11; color: theme.textMuted }
+                                        Text { text: modelData.container; font.pixelSize: 11; color: theme.textSecondary }
+
+                                        Text { text: "Max Duration"; font.pixelSize: 11; color: theme.textMuted }
+                                        Text { text: modelData.maxDuration; font.pixelSize: 11; color: theme.textSecondary }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+    // Developer / MCP Server Section
+            ColumnLayout {
+                spacing: theme.spacingXl
+
+                Text {
+                    text: "Developer"
+                    font.pixelSize: 16
+                    font.bold: true
+                    color: theme.textPrimary
+                    Accessible.name: "Developer settings section"
+                    Accessible.role: Accessible.Heading
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: mcpCol.implicitHeight + theme.spacingXxl
+                    radius: theme.radiusLg
+                    color: theme.surfaceCard
+
+                    ColumnLayout {
+                        id: mcpCol
+                        anchors.fill: parent
+                        anchors.margins: theme.spacingXl
+                        spacing: theme.spacingMd
+
+                        Text {
+                            text: "MCP Server"
+                            font.pixelSize: 14
+                            font.bold: true
+                            color: theme.textPrimary
+                        }
+
+                        RowLayout {
+                            spacing: theme.spacingMd
+                            Rectangle {
+                                width: 8; height: 8; radius: 4
+                                color: mcpRunning ? theme.success : theme.error
+                            }
+                            Text {
+                                text: mcpRunning ? "Running" : "Stopped"
+                                font.pixelSize: 13
+                                color: theme.textSecondary
+                            }
+                            Item { Layout.fillWidth: true }
+
+                            Rectangle {
+                                width: mcpBtnLabel.implicitWidth + theme.spacingXxl
+                                height: 32
+                                radius: theme.radiusMd
+                                color: mcpRunning ? theme.error : theme.accent
+                                opacity: mcpBtnMouse.containsMouse ? 0.85 : 1.0
+
+                                Text {
+                                    id: mcpBtnLabel
+                                    anchors.centerIn: parent
+                                    text: mcpRunning ? "Stop" : "Start"
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                    color: "#ffffff"
+                                }
+
+                                MouseArea {
+                                    id: mcpBtnMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        mcpRunning = !mcpRunning
+                                        showToast(mcpRunning ? "MCP server started" : "MCP server stopped", false)
+                                    }
+                                    Accessible.name: mcpRunning ? "Stop MCP server" : "Start MCP server"
+                                    Accessible.role: Accessible.Button
+                                }
+                            }
+                        }
+
+                        // MCP Tools list
+                        Text {
+                            text: "Available Tools"
+                            font.pixelSize: 12
+                            color: theme.textMuted
+                            visible: mcpRunning
+                        }
+
+                        ColumnLayout {
+                            spacing: theme.spacingXs
+                            visible: mcpRunning
+
+                            Repeater {
+                                model: [
+                                    { name: "post_video", desc: "Post video to platforms" },
+                                    { name: "crosspost_new", desc: "Cross-post new content" },
+                                    { name: "check_status", desc: "Check system status" },
+                                    { name: "list_platforms", desc: "List configured platforms" },
+                                    { name: "get_analytics", desc: "Get engagement analytics" },
+                                    { name: "delete_post", desc: "Delete a post" },
+                                    { name: "health_check", desc: "Run health check" },
+                                    { name: "get_logs", desc: "Retrieve log entries" }
+                                ]
+
+                                RowLayout {
+                                    spacing: theme.spacingSm
+                                    Rectangle {
+                                        width: 4; height: 4; radius: 2
+                                        color: theme.accent
+                                    }
+                                    Text {
+                                        text: modelData.name
+                                        font.pixelSize: 12
+                                        font.family: "monospace"
+                                        color: theme.textPrimary
+                                    }
+                                    Text {
+                                        text: "— " + modelData.desc
+                                        font.pixelSize: 11
+                                        color: theme.textSecondary
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: "Connect via stdio: xpst-mcp"
+                            font.pixelSize: 11
+                            font.family: "monospace"
+                            color: theme.textMuted
+                            visible: mcpRunning
                         }
                     }
                 }
@@ -484,6 +777,8 @@ Page {
                         cursorShape: hasErrors ? Qt.ForbiddenCursor : Qt.PointingHandCursor
                         enabled: !hasErrors
                         onClicked: settingsPage.saveSettings()
+                        Accessible.name: "Save Settings"
+                        Accessible.role: Accessible.Button
                     }
                 }
 
@@ -505,6 +800,8 @@ Page {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         onClicked: settingsPage.resetSettings()
+                        Accessible.name: "Reset Settings"
+                        Accessible.role: Accessible.Button
                     }
                 }
 

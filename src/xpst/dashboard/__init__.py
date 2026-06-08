@@ -1,11 +1,10 @@
 """
 xPST Dashboard
 
-Web-based analytics dashboard built with NiceGUI.
-Provides overview, posts, analytics, platform health, and settings views.
+API-only mode: exposes analytics and server modules for programmatic access.
+NiceGUI UI code has been removed; use the desktop app for the GUI.
 """
 
-from xpst.dashboard.app import create_dashboard
-from xpst.dashboard.server import start_dashboard
+from xpst.dashboard.analytics import AnalyticsCollector
 
-__all__ = ["create_dashboard", "start_dashboard"]
+__all__ = ["AnalyticsCollector"]

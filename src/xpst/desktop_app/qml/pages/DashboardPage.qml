@@ -7,9 +7,43 @@ Page {
     id: dashboardPage
     background: Rectangle { color: theme.canvas }
 
+    property var platformHealthData: {
+        try {
+            if (typeof controller !== "undefined" && controller.platformHealth)
+                return JSON.parse(controller.platformHealth)
+        } catch(e) {}
+        return ({})
+    }
+    property var recentPostsData: {
+        try {
+            if (typeof controller !== "undefined" && controller.recentPosts)
+                return JSON.parse(controller.recentPosts)
+        } catch(e) {}
+        return ([])
+    }
+
     Component.onCompleted: {
         if (typeof controller !== "undefined")
             controller.refreshData()
+    }
+
+    Connections {
+        target: typeof controller !== "undefined" ? controller : null
+        function onDataChanged() {
+            try {
+                dashboardPage.platformHealthData = JSON.parse(controller.platformHealth)
+                dashboardPage.recentPostsData = JSON.parse(controller.recentPosts)
+            } catch(e) {}
+        }
+    }
+
+    function platformColor(name) {
+        var n = (name || "").toLowerCase()
+        if (n === "youtube") return theme.youtube
+        if (n === "instagram") return theme.instagram
+        if (n === "x") return theme.xtwitter
+        if (n === "tiktok") return theme.tiktok
+        return theme.accent
     }
 
     Flickable {
@@ -34,6 +68,8 @@ Page {
                     font.pixelSize: 20
                     font.bold: true
                     color: theme.textPrimary
+                    Accessible.name: "Dashboard page title"
+                    Accessible.role: Accessible.Heading
                 }
                 Text {
                     text: "Overview of your cross-posting performance"
@@ -86,7 +122,7 @@ Page {
                 }
             }
 
-            // Platform Health
+            // Platform Health — from real controller data
             ColumnLayout {
                 spacing: theme.spacingMd
                 Text {
@@ -94,6 +130,8 @@ Page {
                     font.pixelSize: 16
                     font.bold: true
                     color: theme.textPrimary
+                    Accessible.name: "Platform Health section"
+                    Accessible.role: Accessible.Heading
                 }
 
                 RowLayout {
@@ -101,12 +139,20 @@ Page {
                     spacing: theme.spacingXl
 
                     Repeater {
-                        model: [
-                            { name: "YouTube",   color: theme.youtube,    status: "healthy" },
-                            { name: "Instagram", color: theme.instagram,  status: "healthy" },
-                            { name: "X",         color: theme.xtwitter,  status: "healthy" },
-                            { name: "TikTok",    color: theme.tiktok,     status: "warning" }
-                        ]
+                        model: {
+                            var result = []
+                            var keys = ["youtube", "instagram", "x", "tiktok"]
+                            for (var i = 0; i < keys.length; i++) {
+                                var k = keys[i]
+                                var info = dashboardPage.platformHealthData[k]
+                                if (info) {
+                                    result.push(info)
+                                } else {
+                                    result.push({ name: k, label: k.charAt(0).toUpperCase() + k.slice(1), status: "unknown" })
+                                }
+                            }
+                            return result
+                        }
 
                         Rectangle {
                             Layout.fillWidth: true
@@ -121,18 +167,30 @@ Page {
 
                                 Rectangle {
                                     width: 10; height: 10; radius: 5
-                                    color: modelData.status === "healthy" ? theme.success : theme.warning
+                                    color: {
+                                        var s = modelData.status || "unknown"
+                                        if (s === "ok" || s === "healthy" || s === "connected") return theme.success
+                                        if (s === "warning" || s === "degraded") return theme.warning
+                                        if (s === "error" || s === "failed") return theme.error
+                                        return theme.textMuted
+                                    }
                                 }
                                 ColumnLayout {
                                     spacing: theme.spacingXs
                                     Text {
-                                        text: modelData.name
+                                        text: modelData.label || modelData.name || ""
                                         font.pixelSize: 13
                                         font.bold: true
-                                        color: modelData.color
+                                        color: dashboardPage.platformColor(modelData.name)
                                     }
                                     Text {
-                                        text: modelData.status === "healthy" ? "Connected" : "Attention"
+                                        text: {
+                                            var s = modelData.status || "unknown"
+                                            if (s === "ok" || s === "healthy" || s === "connected") return "Connected"
+                                            if (s === "warning" || s === "degraded") return "Degraded"
+                                            if (s === "error" || s === "failed") return "Error"
+                                            return "Unknown"
+                                        }
                                         font.pixelSize: 12
                                         color: theme.textSecondary
                                     }
@@ -144,7 +202,7 @@ Page {
                 }
             }
 
-            // Recent Posts
+            // Recent Posts — from real controller data
             ColumnLayout {
                 spacing: theme.spacingMd
                 Text {
@@ -152,6 +210,8 @@ Page {
                     font.pixelSize: 16
                     font.bold: true
                     color: theme.textPrimary
+                    Accessible.name: "Recent Posts section"
+                    Accessible.role: Accessible.Heading
                 }
 
                 GridLayout {
@@ -161,14 +221,37 @@ Page {
                     rowSpacing: theme.spacingXl
 
                     Repeater {
-                        model: [
-                            { title: "Short #42", platform: "YouTube", time: "2 hours ago" },
-                            { title: "Reel #18",  platform: "Instagram", time: "5 hours ago" },
-                            { title: "Clip #7",   platform: "TikTok", time: "1 day ago" },
-                            { title: "Short #41", platform: "YouTube", time: "1 day ago" },
-                            { title: "Post #99",  platform: "X", time: "2 days ago" },
-                            { title: "Reel #17",  platform: "Instagram", time: "3 days ago" }
-                        ]
+                        model: {
+                            // Show up to 6 recent posts from real data
+                            var posts = dashboardPage.recentPostsData
+                            if (!posts || !Array.isArray(posts)) return []
+                            var result = []
+                            for (var i = 0; i < Math.min(posts.length, 6); i++) {
+                                var p = posts[i]
+                                var ts = p.timestamp || ""
+                                var timeLabel = ""
+                                if (ts) {
+                                    try {
+                                        var d = new Date(ts)
+                                        var now = new Date()
+                                        var diff = (now - d) / 1000
+                                        if (diff < 60) timeLabel = "just now"
+                                        else if (diff < 3600) timeLabel = Math.floor(diff / 60) + "m ago"
+                                        else if (diff < 86400) timeLabel = Math.floor(diff / 3600) + "h ago"
+                                        else if (diff < 604800) timeLabel = Math.floor(diff / 86400) + "d ago"
+                                        else timeLabel = d.toLocaleDateString()
+                                    } catch(e) { timeLabel = ts }
+                                }
+                                result.push({
+                                    title: p.title || p.postId || "Untitled",
+                                    caption: p.caption || "",
+                                    platform: p.platform || "",
+                                    time: timeLabel,
+                                    status: p.status || "posted"
+                                })
+                            }
+                            return result
+                        }
 
                         Rectangle {
                             Layout.fillWidth: true
@@ -186,6 +269,8 @@ Page {
                                     font.pixelSize: 14
                                     font.bold: true
                                     color: theme.textPrimary
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
                                 }
                                 RowLayout {
                                     spacing: theme.spacingSm
@@ -193,10 +278,7 @@ Page {
                                         width: platformLabel.implicitWidth + theme.spacingMd
                                         height: platformLabel.implicitHeight + theme.spacingXs
                                         radius: theme.radiusSm
-                                        color: modelData.platform === "YouTube" ? theme.youtube
-                                             : modelData.platform === "Instagram" ? theme.instagram
-                                             : modelData.platform === "X" ? theme.xtwitter
-                                             : theme.tiktok
+                                        color: dashboardPage.platformColor(modelData.platform)
                                         opacity: 0.2
                                         Text {
                                             id: platformLabel
@@ -215,6 +297,26 @@ Page {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // Empty state for recent posts
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 80
+                    color: "transparent"
+                    visible: !dashboardPage.recentPostsData || dashboardPage.recentPostsData.length === 0
+
+                    ColumnLayout {
+                        anchors.centerIn: parent
+                        spacing: theme.spacingSm
+                        Text {
+                            text: "📭 No recent posts"
+                            font.pixelSize: 13
+                            color: theme.textMuted
+                            horizontalAlignment: Text.AlignHCenter
+                            Layout.alignment: Qt.AlignHCenter
                         }
                     }
                 }
