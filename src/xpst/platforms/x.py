@@ -15,6 +15,7 @@ Upload specs:
 - Recommended: 1080p @ 10 Mbps, High@L4.0
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from xpst.config import XPSTConfig
@@ -25,6 +26,59 @@ logger = get_logger(__name__)
 
 
 class XUploader(PlatformUploader):
+    async def get_tweet_metrics(self, tweet_ids: list[str]) -> list[dict]:
+        """Get real X/Twitter tweet metrics via twikit.
+
+        Fetches views, likes, retweets, replies for each tweet.
+
+        Args:
+            tweet_ids: List of tweet IDs (as strings).
+
+        Returns:
+            List of dicts with keys: platform, post_id, views, likes,
+            comments (replies), shares (retweets), timestamp.
+        """
+        results = []
+        client = self._get_client()
+
+        for tweet_id in tweet_ids:
+            try:
+                tweet = await client.get_tweet_by_id(tweet_id)
+                results.append({
+                    "platform": "x",
+                    "post_id": str(tweet_id),
+                    "views": int(getattr(tweet, "view_count", 0) or 0),
+                    "likes": getattr(tweet, "favorite_count", 0) or 0,
+                    "comments": getattr(tweet, "reply_count", 0) or 0,
+                    "shares": getattr(tweet, "retweet_count", 0) or 0,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+            except Exception as e:
+                logger.warning(f"X metrics failed for tweet {tweet_id}: {e}")
+
+        return results
+
+    async def list_my_tweets(self, max_results: int = 20) -> list[dict]:
+        """List recent tweets from the authenticated user.
+
+        Args:
+            max_results: Maximum number of tweets to return.
+
+        Returns:
+            List of dicts with tweet_id, text, created_at.
+        """
+        client = self._get_client()
+        try:
+            user = await client.user()
+            tweets = await client.get_user_tweets(str(user.id), "Tweets", count=max_results)
+            return [{
+                "tweet_id": str(t.id),
+                "text": (t.text or "")[:100],
+                "created_at": t.created_at_datetime.isoformat() if t.created_at_datetime else "",
+            } for t in tweets]
+        except Exception as e:
+            logger.error(f"Failed to list X tweets: {e}")
+            return []
     """
     X/Twitter video uploader.
 

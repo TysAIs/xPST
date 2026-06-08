@@ -1,8 +1,17 @@
 """State persistence for XPST.
 
-Handles atomic writes, backup rotation, and corruption recovery for the
-cross-posting state file. This ensures we never lose track of which videos
-have been posted, even if the process crashes mid-write.
+Handles atomic writes, backup rotation, corruption recovery, and
+cross-process file locking for the cross-posting state file. This ensures
+we never lose track of which videos have been posted, even if the process
+crashes mid-write.
+
+Features:
+- Atomic writes (write to temp, then rename)
+- Backup rotation (keeps last 5 backups)
+- Corruption recovery (falls back to backup)
+- Versioned schema (migration support)
+- Cross-process file locking (fcntl on Unix, msvcrt on Windows)
+- Content hash deduplication to prevent double-posting
 
 State structure:
     {
@@ -17,8 +26,12 @@ State structure:
                     "instagram": {"id": "...", "url": "...", "timestamp": "..."}
                 },
                 "downloaded_at": "...",
-                "last_attempt": "..."
+                "last_attempt": "...",
+                "content_hash": "..."
             }
+        },
+        "content_hashes": {
+            "<hash>": "<video_id>"
         },
         "health": {
             "platforms": {
@@ -35,10 +48,15 @@ State structure:
 import json
 import os
 import shutil
+import sys
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from xpst.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class StateManager:
@@ -50,6 +68,9 @@ class StateManager:
     - Backup rotation (keeps last 5 backups)
     - Corruption recovery (falls back to backup)
     - Versioned schema (migration support)
+    - Cross-process file locking (fcntl/msvcrt)
+    - Content hash deduplication index
+    - Thread-safe (internal lock for in-memory state)
     """
 
     CURRENT_VERSION = 2
@@ -66,18 +87,70 @@ class StateManager:
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
         self.state_file = self.state_dir / "state.json"
+        self.lock_file = self.state_dir / ".state.lock"
         self.backup_dir = self.state_dir / "backups"
         try:
             self.backup_dir.mkdir(exist_ok=True)
         except PermissionError:
-            import logging
-            logging.getLogger(__name__).warning(
-                "Cannot create backups directory at %s (read-only). Backups disabled.", self.backup_dir
+            logger.warning(
+                "Cannot create backups directory at %s (read-only). Backups disabled.",
+                self.backup_dir,
             )
 
         # Load or create state
         self._state = self._load_state()
         self._save_lock = threading.Lock()
+
+        # Cross-process file lock fd (kept open while manager is alive)
+        self._lock_fd: int | None = None
+
+    def _acquire_file_lock(self) -> None:
+        """Acquire cross-process file lock for the state file.
+
+        Uses fcntl.flock() on Unix and msvcrt.locking() on Windows.
+        Non-blocking — if lock cannot be acquired, logs a warning but
+        proceeds (degrades gracefully rather than blocking indefinitely).
+        """
+        try:
+            self.lock_file.touch(exist_ok=True)
+            self._lock_fd = os.open(str(self.lock_file), os.O_CREAT | os.O_RDWR)
+
+            if sys.platform == "win32":
+                import msvcrt
+                try:
+                    msvcrt.locking(self._lock_fd, msvcrt.LK_NBLCK, 1)
+                except OSError:
+                    logger.warning("State file locked by another process (non-blocking)")
+            else:
+                import fcntl
+                try:
+                    fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    logger.warning("State file locked by another process (non-blocking)")
+        except OSError as e:
+            logger.debug("File lock setup failed (non-critical): %s", e)
+
+    def _release_file_lock(self) -> None:
+        """Release cross-process file lock."""
+        if self._lock_fd is not None:
+            try:
+                if sys.platform == "win32":
+                    import msvcrt
+                    try:
+                        msvcrt.locking(self._lock_fd, msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass
+                else:
+                    import fcntl
+                    try:
+                        fcntl.flock(self._lock_fd, fcntl.LOCK_UN)
+                    except OSError:
+                        pass
+                os.close(self._lock_fd)
+            except OSError:
+                pass
+            finally:
+                self._lock_fd = None
 
     def _load_state(self) -> dict[str, Any]:
         """
@@ -97,19 +170,43 @@ class StateManager:
                 # Migrate if needed
                 state = self._migrate_state(state)
 
+                # Ensure content_hashes index exists
+                if "content_hashes" not in state:
+                    state["content_hashes"] = {}
+
                 return state
             except (json.JSONDecodeError, KeyError) as e:
-                print(f"State file corrupted: {e}")
-                print("Attempting to restore from backup...")
+                logger.warning("State file corrupted: %s", e)
+                logger.info("Attempting to restore from backup...")
+
+                # Save corrupted file for forensics
+                self._save_corrupted_backup()
 
                 backup = self._restore_from_backup()
                 if backup:
-                    print("Restored from backup successfully")
+                    logger.info("Restored from backup successfully")
                     return backup
                 else:
-                    print("No valid backup found, starting fresh")
+                    logger.warning("No valid backup found, starting fresh")
 
         return self._create_empty_state()
+
+    def _save_corrupted_backup(self) -> None:
+        """Save a copy of the corrupted state file for debugging.
+
+        Creates a timestamped copy in the backup directory so that the
+        corrupted data is preserved for forensic analysis.
+        """
+        try:
+            if self.state_file.exists():
+                corrupted_path = (
+                    self.backup_dir
+                    / f"corrupted_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                )
+                shutil.copy2(str(self.state_file), str(corrupted_path))
+                logger.info("Corrupted state saved to %s", corrupted_path)
+        except OSError as e:
+            logger.debug("Could not save corrupted backup: %s", e)
 
     def _create_empty_state(self) -> dict[str, Any]:
         """Create a fresh, empty state dictionary.
@@ -123,11 +220,30 @@ class StateManager:
             "version": self.CURRENT_VERSION,
             "posted_videos": {},
             "cross_posted": {},
+            "content_hashes": {},
             "health": {
                 "platforms": {
-                    "youtube": {"status": "unknown", "last_success": None, "last_failure": None, "failures": 0, "circuit_breaker_open": False},
-                    "x": {"status": "unknown", "last_success": None, "last_failure": None, "failures": 0, "circuit_breaker_open": False},
-                    "instagram": {"status": "unknown", "last_success": None, "last_failure": None, "failures": 0, "circuit_breaker_open": False},
+                    "youtube": {
+                        "status": "unknown",
+                        "last_success": None,
+                        "last_failure": None,
+                        "failures": 0,
+                        "circuit_breaker_open": False,
+                    },
+                    "x": {
+                        "status": "unknown",
+                        "last_success": None,
+                        "last_failure": None,
+                        "failures": 0,
+                        "circuit_breaker_open": False,
+                    },
+                    "instagram": {
+                        "status": "unknown",
+                        "last_success": None,
+                        "last_failure": None,
+                        "failures": 0,
+                        "circuit_breaker_open": False,
+                    },
                 },
                 "total_processed": 0,
                 "last_check": None,
@@ -183,6 +299,10 @@ class StateManager:
 
             state["version"] = 2
 
+        # Ensure content_hashes exists (added in hardening update)
+        if "content_hashes" not in state:
+            state["content_hashes"] = {}
+
         return state
 
     def _restore_from_backup(self) -> dict[str, Any] | None:
@@ -218,29 +338,47 @@ class StateManager:
         Writes to a temporary file first, then renames to prevent
         corruption if the process crashes mid-write.
         Thread-safe: only one thread can save at a time.
+        Cross-process safe: acquires file lock during write.
         """
         with self._save_lock:
-            # Create backup of current state
-            if self.state_file.exists():
-                self._rotate_backups()
-                backup_path = self.backup_dir / f"state_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                shutil.copy2(self.state_file, backup_path)
-
-                # Atomic write: write to temp file first, then rename.
-            # os.replace() is atomic on most filesystems (macOS APFS, Linux ext4),
-            # preventing corruption if the process crashes mid-write.
-            temp_file = self.state_file.with_suffix(".tmp")
+            self._acquire_file_lock()
             try:
-                with open(temp_file, "w") as f:
-                    json.dump(self._state, f, indent=2, default=str)
+                self._save_inner()
+            finally:
+                self._release_file_lock()
 
-                # Rename is atomic on most filesystems
-                os.replace(str(temp_file), str(self.state_file))
-            except Exception:
-                # Clean up temp file if write failed
+    def _save_inner(self) -> None:
+        """Inner save logic (called with both thread and file lock held)."""
+        # Create backup of current state
+        if self.state_file.exists():
+            self._rotate_backups()
+            backup_path = (
+                self.backup_dir
+                / f"state_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            )
+            try:
+                shutil.copy2(str(self.state_file), str(backup_path))
+            except OSError as e:
+                logger.warning("Failed to create backup: %s", e)
+
+        # Atomic write: write to temp file first, then rename.
+        # os.replace() is atomic on most filesystems (macOS APFS, Linux ext4),
+        # preventing corruption if the process crashes mid-write.
+        temp_file = self.state_file.with_suffix(".tmp")
+        try:
+            with open(temp_file, "w") as f:
+                json.dump(self._state, f, indent=2, default=str)
+
+            # Rename is atomic on most filesystems
+            os.replace(str(temp_file), str(self.state_file))
+        except OSError:
+            # Clean up temp file if write failed
+            try:
                 if temp_file.exists():
                     temp_file.unlink()
-                raise
+            except OSError:
+                pass
+            raise
 
     def _rotate_backups(self) -> None:
         """Delete oldest backups, keeping only ``MAX_BACKUPS`` (5) most recent.
@@ -250,8 +388,11 @@ class StateManager:
 
         backups = sorted(self.backup_dir.glob("state_*.json"), reverse=True)
 
-        for backup in backups[self.MAX_BACKUPS - 1:]:
-            backup.unlink()
+        for backup in backups[self.MAX_BACKUPS - 1 :]:
+            try:
+                backup.unlink()
+            except OSError:
+                pass
 
     @property
     def state(self) -> dict[str, Any]:
@@ -275,6 +416,36 @@ class StateManager:
 
         return platform in video.get("posted_to", {})
 
+    def is_content_hash_posted(
+        self, content_hash: str, platform: str
+    ) -> bool:
+        """Check if content with this hash has already been posted to a platform.
+
+        Used for deduplication: before cross-posting, check if any video
+        with matching content hash already exists on the target platform.
+        Checks both ``posted_videos`` and ``cross_posted`` entries.
+
+        Args:
+            content_hash: Content hash string.
+            platform: Target platform name.
+
+        Returns:
+            True if a video with this hash has been posted to the platform.
+        """
+        result = self.find_duplicate_by_hash(content_hash)
+        return bool(result and platform in result.get("posted_platforms", []))
+
+    def get_video_id_by_hash(self, content_hash: str) -> str | None:
+        """Look up a video ID by its content hash.
+
+        Args:
+            content_hash: Content hash string.
+
+        Returns:
+            Video ID if found, None otherwise.
+        """
+        return self._state.get("content_hashes", {}).get(content_hash)
+
     def mark_video_posted(
         self,
         video_id: str,
@@ -283,6 +454,7 @@ class StateManager:
         post_url: str | None = None,
         caption: str | None = None,
         tiktok_url: str | None = None,
+        content_hash: str | None = None,
     ) -> None:
         """
         Record that a video has been posted to a platform.
@@ -294,6 +466,7 @@ class StateManager:
             post_url: URL to the post
             caption: Caption used
             tiktok_url: Original TikTok URL
+            content_hash: Content hash for deduplication
         """
         if video_id not in self._state["posted_videos"]:
             self._state["posted_videos"][video_id] = {
@@ -302,6 +475,7 @@ class StateManager:
                 "posted_to": {},
                 "downloaded_at": datetime.now().isoformat(),
                 "last_attempt": datetime.now().isoformat(),
+                "content_hash": content_hash,
             }
 
         video = self._state["posted_videos"][video_id]
@@ -311,6 +485,13 @@ class StateManager:
             "timestamp": datetime.now().isoformat(),
         }
         video["last_attempt"] = datetime.now().isoformat()
+
+        # Update content hash index
+        if content_hash:
+            video["content_hash"] = content_hash
+            if "content_hashes" not in self._state:
+                self._state["content_hashes"] = {}
+            self._state["content_hashes"][content_hash] = video_id
 
         # Update health
         self._state["health"]["total_processed"] += 1
@@ -362,7 +543,7 @@ class StateManager:
         else:
             platform_health["failures"] += 1
             platform_health["last_failure"] = datetime.now().isoformat()
-                # Open circuit breaker after 5 consecutive failures.
+            # Open circuit breaker after 5 consecutive failures.
             # This threshold matches the CircuitBreakerManager default.
             if platform_health["failures"] >= 5:
                 platform_health["circuit_breaker_open"] = True
@@ -377,12 +558,15 @@ class StateManager:
         Returns:
             Platform health dict
         """
-        return self._state["health"]["platforms"].get(platform, {
-            "status": "unknown",
-            "last_success": None,
-            "failures": 0,
-            "circuit_breaker_open": False,
-        })
+        return self._state["health"]["platforms"].get(
+            platform,
+            {
+                "status": "unknown",
+                "last_success": None,
+                "failures": 0,
+                "circuit_breaker_open": False,
+            },
+        )
 
     def is_circuit_breaker_open(self, platform: str) -> bool:
         """
@@ -405,7 +589,9 @@ class StateManager:
             last_failure_dt = datetime.fromisoformat(last_failure)
             if datetime.now() - last_failure_dt > timedelta(hours=1):
                 # Reset circuit breaker
-                self._state["health"]["platforms"][platform]["circuit_breaker_open"] = False
+                self._state["health"]["platforms"][platform][
+                    "circuit_breaker_open"
+                ] = False
                 self._state["health"]["platforms"][platform]["failures"] = 0
                 return False
 
@@ -433,7 +619,9 @@ class StateManager:
         """Update the last wake check time to now"""
         self._state["health"]["last_wake_check"] = datetime.now().isoformat()
 
-    def get_unposted_videos(self, video_ids: list[str], platform: str) -> list[str]:
+    def get_unposted_videos(
+        self, video_ids: list[str], platform: str
+    ) -> list[str]:
         """
         Get list of video IDs that haven't been posted to a platform.
 
@@ -456,7 +644,9 @@ class StateManager:
     def remove_post(self, video_id: str, platform: str) -> None:
         """Remove a post record from state"""
         if video_id in self._state["posted_videos"]:
-            posted_to = self._state["posted_videos"][video_id].get("posted_to", {})
+            posted_to = self._state["posted_videos"][video_id].get(
+                "posted_to", {}
+            )
             if platform in posted_to:
                 del posted_to[platform]
 
@@ -478,14 +668,16 @@ class StateManager:
                     # Include in DLQ after 3+ failures — indicates a persistent
                     # problem that won't resolve with simple retries.
                     if health.get("failures", 0) >= 3:
-                        dlq.append({
-                            "video_id": video_id,
-                            "platform": platform,
-                            "tiktok_url": video.get("tiktok_url"),
-                            "caption": video.get("caption"),
-                            "last_attempt": video.get("last_attempt"),
-                            "errors": health.get("last_error"),
-                        })
+                        dlq.append(
+                            {
+                                "video_id": video_id,
+                                "platform": platform,
+                                "tiktok_url": video.get("tiktok_url"),
+                                "caption": video.get("caption"),
+                                "last_attempt": video.get("last_attempt"),
+                                "errors": health.get("last_error"),
+                            }
+                        )
 
         return dlq
 
@@ -580,6 +772,7 @@ class StateManager:
         post_id: str | None = None,
         post_url: str | None = None,
         caption: str | None = None,
+        content_hash: str | None = None,
     ) -> None:
         """Record that a post has been cross-posted to a platform.
 
@@ -589,6 +782,7 @@ class StateManager:
             post_id: Platform-specific post ID.
             post_url: URL to the post.
             caption: Caption used for the post.
+            content_hash: Content hash for deduplication.
         """
         if "cross_posted" not in self._state:
             self._state["cross_posted"] = {}
@@ -598,6 +792,7 @@ class StateManager:
                 "caption": caption,
                 "posted_to": {},
                 "first_seen": datetime.now().isoformat(),
+                "content_hash": content_hash,
             }
 
         entry = self._state["cross_posted"][composite_key]
@@ -606,6 +801,13 @@ class StateManager:
             "url": post_url,
             "timestamp": datetime.now().isoformat(),
         }
+
+        # Update content hash index
+        if content_hash:
+            entry["content_hash"] = content_hash
+            if "content_hashes" not in self._state:
+                self._state["content_hashes"] = {}
+            self._state["content_hashes"][content_hash] = composite_key
 
         # Update health
         self._state["health"]["total_processed"] += 1
@@ -659,3 +861,63 @@ class StateManager:
         cross_posted = self._state.get("cross_posted", {})
         entry = cross_posted.get(composite_key, {})
         return entry.get("posted_to", {}).get(platform)
+
+    def find_duplicate_by_hash(
+        self, content_hash: str, exclude_platform: str | None = None
+    ) -> dict[str, Any] | None:
+        """Find a posted video by content hash across all platforms.
+
+        Used for cross-platform deduplication: when detecting a new post,
+        check if the same content has already been posted elsewhere.
+
+        Args:
+            content_hash: Content hash to search for.
+            exclude_platform: Platform to exclude from the search (source platform).
+
+        Returns:
+            Dict with 'video_id' and 'posted_platforms' if found, None otherwise.
+        """
+        # Check content_hashes index first
+        identifier = self._state.get("content_hashes", {}).get(content_hash)
+
+        if identifier:
+            # Check in posted_videos
+            video = self._state["posted_videos"].get(identifier)
+            if video:
+                platforms = list(video.get("posted_to", {}).keys())
+                if exclude_platform:
+                    platforms = [p for p in platforms if p != exclude_platform]
+                if platforms:
+                    return {"video_id": identifier, "posted_platforms": platforms}
+
+            # Check in cross_posted
+            entry = self._state.get("cross_posted", {}).get(identifier)
+            if entry:
+                platforms = list(entry.get("posted_to", {}).keys())
+                if exclude_platform:
+                    platforms = [p for p in platforms if p != exclude_platform]
+                if platforms:
+                    return {"video_id": identifier, "posted_platforms": platforms}
+
+        # Fallback: scan all videos for matching content_hash field
+        for vid_id, video in self._state["posted_videos"].items():
+            if video.get("content_hash") == content_hash:
+                platforms = list(video.get("posted_to", {}).keys())
+                if exclude_platform:
+                    platforms = [p for p in platforms if p != exclude_platform]
+                if platforms:
+                    return {"video_id": vid_id, "posted_platforms": platforms}
+
+        for ck, entry in self._state.get("cross_posted", {}).items():
+            if entry.get("content_hash") == content_hash:
+                platforms = list(entry.get("posted_to", {}).keys())
+                if exclude_platform:
+                    platforms = [p for p in platforms if p != exclude_platform]
+                if platforms:
+                    return {"video_id": ck, "posted_platforms": platforms}
+
+        return None
+
+    def close(self) -> None:
+        """Release resources (file lock)."""
+        self._release_file_lock()

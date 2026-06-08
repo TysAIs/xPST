@@ -13,6 +13,8 @@ Key design decisions:
 - A post is considered "new" if it hasn't been cross-posted to ALL other
   enabled platforms.
 - Cross-posting respects anti-bot protections (delays, limits, etc.)
+- Content hash deduplication prevents double-posting the same video
+  that appears on multiple platforms with different IDs.
 
 Usage:
     monitor = PostMonitor(config, state)
@@ -22,13 +24,17 @@ Usage:
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from xpst.config import XPSTConfig
 from xpst.sources.base import VideoMetadata, VideoSource
 from xpst.state import StateManager
+from xpst.utils.content_hash import compute_caption_hash
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+MAX_CROSS_POST_AGE_HOURS = 24
 
 
 @dataclass
@@ -43,7 +49,9 @@ class NewPost:
         url: Original post URL.
         metadata: Full VideoMetadata from the source.
         target_platforms: Platforms to cross-post to (excludes source).
+        content_hash: Content hash for deduplication (from caption or file).
     """
+
     video_id: str
     composite_key: str
     source_platform: str
@@ -51,6 +59,7 @@ class NewPost:
     url: str
     metadata: VideoMetadata
     target_platforms: list[str] = field(default_factory=list)
+    content_hash: str = ""
 
 
 class PostMonitor:
@@ -59,6 +68,10 @@ class PostMonitor:
     Polls each enabled source for recent posts, identifies which ones
     haven't been cross-posted yet, and provides them for the engine
     to process.
+
+    Includes deduplication: when a post is detected on platform A, checks
+    ALL other platforms before cross-posting. If any platform already has a
+    post with matching content hash, the post is skipped for that platform.
 
     Attributes:
         config: XPST configuration.
@@ -114,6 +127,7 @@ class PostMonitor:
 
         Iterates through all sources, fetches recent posts, and filters
         to those that haven't been cross-posted to all target platforms.
+        Includes content-hash-based deduplication to prevent double-posting.
 
         Args:
             max_per_source: Max posts to check per source.
@@ -135,10 +149,31 @@ class PostMonitor:
                     source_name, post.video_id
                 )
 
+                # Time window: skip videos older than 24 hours
+                if post.timestamp and self._is_too_old(post.timestamp):
+                    logger.debug(
+                        "Skipping old post %s:%s (created %s)",
+                        source_name, post.video_id, post.timestamp,
+                    )
+                    continue
+
+                # Compute content hash for deduplication
+                content_hash = compute_caption_hash(post.caption)
+
+                # Check deduplication: has this content been posted to other platforms?
+                skip_targets = self._get_dedup_skip_targets(
+                    content_hash, source_name
+                )
+
                 # Determine which target platforms still need this post
                 missing_targets = self._get_missing_targets(
                     composite_key, source_name
                 )
+
+                # Remove targets that were already deduplicated
+                missing_targets = [
+                    t for t in missing_targets if t not in skip_targets
+                ]
 
                 if missing_targets:
                     new_post = NewPost(
@@ -149,6 +184,7 @@ class PostMonitor:
                         url=post.url,
                         metadata=post,
                         target_platforms=missing_targets,
+                        content_hash=content_hash,
                     )
                     new_posts.append(new_post)
                     logger.info(
@@ -157,6 +193,57 @@ class PostMonitor:
                     )
 
         return new_posts
+
+    def _get_dedup_skip_targets(
+        self, content_hash: str, source_platform: str
+    ) -> set[str]:
+        """Check if content hash already exists on other platforms.
+
+        When a new post is detected, this checks ALL other platforms for
+        matching content. If any platform already has a post with the same
+        content hash, it's added to the skip set to prevent double-posting.
+
+        Args:
+            content_hash: Caption-based content hash.
+            source_platform: Platform where the post was detected.
+
+        Returns:
+            Set of platform names to skip (already have this content).
+        """
+        skip: set[str] = set()
+
+        duplicate = self.state.find_duplicate_by_hash(
+            content_hash, exclude_platform=source_platform
+        )
+        if duplicate:
+            for platform in duplicate.get("posted_platforms", []):
+                if platform != source_platform and platform in self.platforms:
+                    skip.add(platform)
+                    logger.info(
+                        "Dedup: content hash %s already on %s, skipping",
+                        content_hash,
+                        platform,
+                    )
+
+        return skip
+
+    def _is_too_old(self, created_at) -> bool:
+        """Check if a post's creation time is older than the time window.
+
+        Args:
+            created_at: Creation timestamp (datetime or ISO string).
+
+        Returns:
+            True if the post is older than MAX_CROSS_POST_AGE_HOURS.
+        """
+        if isinstance(created_at, str):
+            try:
+                created_at = datetime.fromisoformat(created_at)
+            except (ValueError, TypeError):
+                return False
+        if isinstance(created_at, datetime):
+            return datetime.now() - created_at > timedelta(hours=MAX_CROSS_POST_AGE_HOURS)
+        return False
 
     def _get_missing_targets(
         self, composite_key: str, source_platform: str

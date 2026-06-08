@@ -10,6 +10,13 @@ Integrates AntiBotProtection for human-like upload behavior:
 - Conservative rate limits (well below platform maximums)
 - Random delays between uploads (2-5 minutes)
 - Caption variation per platform
+
+Edge case handling:
+- Disk space check before encoding
+- Graceful auth expiry handling (skip + log)
+- Rate limit pause/resume (exponential backoff)
+- Partial upload cleanup on crash
+- Temp file cleanup on encoding failure
 """
 
 import asyncio
@@ -18,6 +25,7 @@ from typing import Any
 
 from xpst.platforms.base import PlatformUploader, UploadResult
 from xpst.utils.circuit_breaker import CircuitBreakerManager, CircuitBreakerOpenError
+from xpst.utils.disk import DiskSpaceError, check_disk_space
 from xpst.utils.logger import get_logger
 from xpst.utils.notifications import WebhookNotifier
 from xpst.utils.progress import create_upload_tracker
@@ -32,6 +40,14 @@ logger = get_logger(__name__)
 _TOS_UNOFFICIAL_PLATFORMS = {"instagram", "x"}
 
 
+class AuthExpiredError(Exception):
+    """Raised when platform authentication has expired.
+
+    This is a signal to skip the platform gracefully and prompt for re-auth,
+    rather than retrying which would just waste time.
+    """
+
+
 class UploadService:
     """Handles the full upload pipeline for a single video to a single platform.
 
@@ -43,6 +59,13 @@ class UploadService:
     - Enforces conservative daily rate limits
     - Adds randomized delays between platform uploads
     - Varies captions per platform to avoid detection
+
+    Edge case handling:
+    - Pre-encode disk space check (prevents disk-full mid-encode)
+    - Auth expiry detection with graceful skip
+    - Rate limit pause with exponential backoff
+    - Partial upload cleanup via crash recovery
+    - Temp file cleanup on encoding failure
     """
 
     def __init__(
@@ -64,6 +87,8 @@ class UploadService:
         self.shutdown_handler = shutdown_handler
         self.config = config
         self.anti_bot = anti_bot
+        self._crash_recovery: Any = None  # Injected by engine
+        self._rate_limit_paused: dict[str, float] = {}
 
     async def upload_to_platform(
         self,
@@ -76,7 +101,8 @@ class UploadService:
         """Single method that handles the full upload pipeline.
 
         Steps: anti-bot checks → circuit breaker check → quota check →
-        encode → upload with retry → record result → send notification.
+        disk space check → encode → upload with retry → record result →
+        send notification.
 
         Returns:
             UploadResult with success/failure and metadata.
@@ -116,6 +142,21 @@ class UploadService:
                 )
                 await asyncio.sleep(wait_time)
 
+        # ── Rate limit pause/resume ──
+        if platform_name in self._rate_limit_paused:
+            import time
+            paused_until = self._rate_limit_paused[platform_name]
+            now = time.time()
+            if now < paused_until:
+                wait_secs = paused_until - now
+                logger.info(
+                    "Rate limit: waiting %.0fs for %s",
+                    wait_secs,
+                    platform_name,
+                )
+                await asyncio.sleep(wait_secs)
+            del self._rate_limit_paused[platform_name]
+
         # ── Anti-bot: Vary caption ──
         if self.anti_bot:
             caption = self.anti_bot.vary_caption(caption, platform_name)
@@ -150,7 +191,19 @@ class UploadService:
                 platform=platform_name,
             )
 
+        # ── Disk space check before encoding ──
+        try:
+            check_disk_space(video_path.parent)
+        except DiskSpaceError as e:
+            logger.error("Disk space check failed: %s", e)
+            return UploadResult(
+                success=False,
+                error=f"Insufficient disk space: {e}",
+                platform=platform_name,
+            )
+
         # Encode for platform
+        encoded_path = video_path
         try:
             self.shutdown_handler.update_phase("encoding")
             logger.info("Encoding for %s...", platform_name)
@@ -161,6 +214,12 @@ class UploadService:
                 self.shutdown_handler.add_temp_file(encoded_path)
         except Exception as e:
             logger.error("Encoding failed for %s: %s", platform_name, e)
+            # Clean up partial encoded file
+            if encoded_path != video_path and encoded_path.exists():
+                try:
+                    encoded_path.unlink()
+                except OSError:
+                    pass
             return UploadResult(
                 success=False,
                 error=f"Encoding failed: {str(e)[:200]}",
@@ -202,6 +261,32 @@ class UploadService:
                 if self.anti_bot:
                     self.anti_bot.record_upload(platform_name)
             else:
+                # Check for auth expiry in error
+                if self._is_auth_expired(upload_result.error):
+                    logger.error(
+                        "Auth expired for %s: %s — needs re-authentication",
+                        platform_name,
+                        upload_result.error,
+                    )
+                    self.notifier.notify_upload_failure(
+                        platform=platform_name,
+                        video_id=video_id,
+                        error=f"AUTH EXPIRED: {upload_result.error}",
+                    )
+
+                # Check for rate limit and schedule pause
+                if self._is_rate_limit(upload_result.error):
+                    import time
+                    pause_duration = self._calculate_rate_limit_pause(platform_name)
+                    self._rate_limit_paused[platform_name] = (
+                        time.time() + pause_duration
+                    )
+                    logger.warning(
+                        "Rate limit hit for %s, pausing for %.0fs",
+                        platform_name,
+                        pause_duration,
+                    )
+
                 self.state.mark_video_failed(
                     video_id,
                     platform_name,
@@ -240,6 +325,72 @@ class UploadService:
                 error=f"Upload failed: {str(e)[:200]}",
                 platform=platform_name,
             )
+
+    def _is_auth_expired(self, error: str | None) -> bool:
+        """Check if an error indicates authentication expiry.
+
+        Args:
+            error: Error message string.
+
+        Returns:
+            True if error indicates expired auth.
+        """
+        if not error:
+            return False
+        error_lower = error.lower()
+        auth_indicators = [
+            "401",
+            "unauthorized",
+            "login required",
+            "session expired",
+            "token expired",
+            "auth expired",
+            "authentication failed",
+            "invalid credentials",
+        ]
+        return any(ind in error_lower for ind in auth_indicators)
+
+    def _is_rate_limit(self, error: str | None) -> bool:
+        """Check if an error indicates a rate limit.
+
+        Args:
+            error: Error message string.
+
+        Returns:
+            True if error indicates rate limiting.
+        """
+        if not error:
+            return False
+        error_lower = error.lower()
+        rate_limit_indicators = [
+            "429",
+            "rate limit",
+            "too many requests",
+            "throttl",
+        ]
+        return any(ind in error_lower for ind in rate_limit_indicators)
+
+    def _calculate_rate_limit_pause(self, platform_name: str) -> float:
+        """Calculate pause duration for rate limit with exponential backoff.
+
+        Starts at 60s, doubles each time, max 3600s (1 hour).
+
+        Args:
+            platform_name: Platform that hit the limit.
+
+        Returns:
+            Pause duration in seconds.
+        """
+        # Track consecutive rate limits per platform
+        if not hasattr(self, "_rate_limit_count"):
+            self._rate_limit_count: dict[str, int] = {}
+
+        count = self._rate_limit_count.get(platform_name, 0)
+        self._rate_limit_count[platform_name] = count + 1
+
+        # Exponential backoff: 60, 120, 240, ... max 3600
+        pause = min(60 * (2 ** count), 3600)
+        return pause
 
     async def upload_carousel_to_platform(
         self,
@@ -341,7 +492,10 @@ class UploadService:
         video_path: Path,
         platform: str,
     ) -> Path:
-        """Encode a video file for a specific platform's requirements."""
+        """Encode a video file for a specific platform's requirements.
+
+        Handles ffmpeg temp file cleanup on failure.
+        """
         if platform == "youtube":
             config = self.config.video.encoding_youtube
         elif platform == "instagram":
@@ -360,9 +514,19 @@ class UploadService:
             logger.info("Using cached encoding for %s", platform)
             return output_path
 
-        return self.video_processor.encode_for_platform(
-            video_path, output_path, platform, config
-        )
+        try:
+            return self.video_processor.encode_for_platform(
+                video_path, output_path, platform, config
+            )
+        except Exception:
+            # Clean up partial output on ffmpeg failure
+            if output_path.exists():
+                try:
+                    output_path.unlink()
+                    logger.debug("Cleaned up partial encode: %s", output_path)
+                except OSError:
+                    pass
+            raise
 
     def crash_recovery_clear(self, video_id: str, platform_name: str) -> None:
         """Clear crash recovery checkpoint on success (no-op if no crash_recovery)."""

@@ -15,6 +15,7 @@ Upload specs:
 """
 
 import contextlib
+from datetime import datetime
 from pathlib import Path
 
 from xpst.config import XPSTConfig
@@ -25,6 +26,78 @@ logger = get_logger(__name__)
 
 
 class InstagramUploader(PlatformUploader):
+    async def get_media_insights(self, media_ids: list[str]) -> list[dict]:
+        """Get real Instagram media insights via instagrapi.
+
+        Fetches views, likes, comments, shares, saves for each media.
+        Falls back to basic media_info if insights API fails.
+
+        Args:
+            media_ids: List of Instagram media PKs (as strings).
+
+        Returns:
+            List of dicts with keys: platform, post_id, views, likes,
+            comments, shares, saves, timestamp.
+        """
+        results = []
+        client = self._get_client()
+
+        for media_id in media_ids:
+            try:
+                media_pk = int(media_id) if str(media_id).isdigit() else media_id
+
+                # Try insights first (available for business/creator accounts)
+                metric_map: dict = {}
+                try:
+                    insights = client.insights.get_media_insights(media_pk)
+                    for metric in insights.get("data", []):
+                        name = metric.get("name", "")
+                        values = metric.get("values", [])
+                        if values:
+                            metric_map[name] = values[0].get("value", 0)
+                except Exception:
+                    pass  # Insights not available, fall back to basic info
+
+                # Get basic media info
+                info = client.media_info(str(media_pk))
+                results.append({
+                    "platform": "instagram",
+                    "post_id": str(media_id),
+                    "views": metric_map.get("impressions", 0),
+                    "likes": getattr(info, "like_count", 0) or 0,
+                    "comments": getattr(info, "comment_count", 0) or 0,
+                    "shares": metric_map.get("shares", 0),
+                    "saves": metric_map.get("saved", 0),
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+            except Exception as e:
+                logger.warning(f"Instagram insights failed for {media_id}: {e}")
+
+        return results
+
+    async def list_my_media(self, max_results: int = 20) -> list[dict]:
+        """List recent media from the authenticated account.
+
+        Args:
+            max_results: Maximum number of media items to return.
+
+        Returns:
+            List of dicts with media_id, media_type, caption, taken_at.
+        """
+        client = self._get_client()
+        try:
+            user_id = str(client.user_id)
+            medias = client.user_medias(user_id, amount=max_results)
+            return [{
+                "media_id": str(m.pk),
+                "media_type": m.media_type,
+                "caption": (m.caption_text or "")[:100],
+                "taken_at": m.taken_at.isoformat() if m.taken_at else "",
+                "code": m.code,
+            } for m in medias]
+        except Exception as e:
+            logger.error(f"Failed to list Instagram media: {e}")
+            return []
     """
     Instagram Reels uploader.
 

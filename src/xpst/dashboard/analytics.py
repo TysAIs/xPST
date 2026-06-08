@@ -562,9 +562,14 @@ class AnalyticsCollector:
     def get_engagement_data(self) -> dict[str, dict]:
         """Get engagement metrics aggregated by platform.
 
-        Returns dict keyed by platform name with aggregated metrics.
-        Since we don't have live API data, returns counts from state.
+        Attempts to collect real metrics from platform APIs. Falls back to
+        state.json counts if API calls fail or credentials are unavailable.
+
+        Returns dict keyed by platform name with aggregated metrics:
+            {platform: {posts, views, likes, comments, shares}}
         """
+        import asyncio
+
         state = load_state(self.config_dir)
         posted = state.get("posted_videos", {})
 
@@ -578,10 +583,39 @@ class AnalyticsCollector:
                 "shares": 0,
             }
 
+        # Count posts per platform from state
+        post_ids: dict[str, list[str]] = {
+            "youtube": [],
+            "instagram": [],
+            "x": [],
+            "tiktok": [],
+        }
+
         for video_data in posted.values():
-            for platform in video_data.get("posted_to", {}):
+            for platform, info in video_data.get("posted_to", {}).items():
                 if platform in engagement:
                     engagement[platform]["posts"] += 1
+                    if info.get("post_id"):
+                        post_ids[platform].append(info["post_id"])
+
+        # Try to collect real metrics from APIs
+        try:
+            from xpst.analytics import AnalyticsCollector
+
+            collector = AnalyticsCollector(self.config_dir)
+            # Only attempt if we have IDs to query
+            has_ids = any(ids for ids in post_ids.values())
+            if has_ids:
+                data = asyncio.run(collector.collect_all(post_ids))
+                for platform, posts_data in data.items():
+                    if platform in engagement:
+                        for metrics in posts_data.values():
+                            engagement[platform]["views"] += metrics.get("views", 0)
+                            engagement[platform]["likes"] += metrics.get("likes", 0)
+                            engagement[platform]["comments"] += metrics.get("comments", 0)
+                            engagement[platform]["shares"] += metrics.get("shares", 0)
+        except Exception as exc:
+            logger.debug("Live analytics collection failed, using state data: %s", exc)
 
         return engagement
 

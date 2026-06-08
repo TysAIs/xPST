@@ -37,8 +37,10 @@ from xpst.sources.base import VideoMetadata
 from xpst.state import StateManager
 from xpst.utils.circuit_breaker import CircuitBreakerManager
 from xpst.utils.credentials import CredentialStore
+from xpst.utils.disk import DiskSpaceError, check_disk_space
 from xpst.utils.logger import get_logger
 from xpst.utils.notifications import NotificationConfig, WebhookNotifier
+from xpst.utils.pidfile import PidfileLock
 from xpst.utils.progress import get_video_duration
 from xpst.utils.quota import QuotaManager
 from xpst.utils.sessions import SessionManager
@@ -130,6 +132,11 @@ class CrossPostEngine:
         credential storage, session management, quota tracking, webhook
         notifications, graceful shutdown handling, and crash recovery.
 
+        On startup, performs crash recovery:
+        1. Checks for stale shutdown state (from previous crash/SIGTERM)
+        2. Finds half-uploaded videos and cleans up temp files
+        3. Logs recovery actions taken
+
         Args:
             config: Fully loaded XPST configuration.
 
@@ -137,6 +144,7 @@ class CrossPostEngine:
             RuntimeError: If FFmpeg is not installed (raised by VideoProcessor).
         """
 
+        self._pidfile: PidfileLock | None = None
         self.config = config
 
         # Initialize components
@@ -188,6 +196,9 @@ class CrossPostEngine:
         )
         # Wire crash recovery into upload service
         self.upload_service._crash_recovery = self.crash_recovery
+        # Perform startup crash recovery
+        self._startup_crash_recovery()
+
         # Back-compat: expose sources and platforms on engine
         self._sources = self.source_service.sources
         # Initialize platforms
@@ -198,6 +209,73 @@ class CrossPostEngine:
             platform._session_manager = self.session_manager
         # Initialize post monitor for bidirectional cross-posting
         self._monitor: PostMonitor | None = None
+
+    def acquire_pidfile(self) -> None:
+        """Acquire pidfile lock to prevent concurrent instances.
+
+        Raises:
+            PidfileLockError: If another instance is already running.
+        """
+        self._pidfile = PidfileLock(self.config.config_dir)
+        self._pidfile.acquire()
+
+    def release_pidfile(self) -> None:
+        """Release pidfile lock."""
+        if self._pidfile:
+            self._pidfile.release()
+            self._pidfile = None
+
+    def _startup_crash_recovery(self) -> None:
+        """Perform crash recovery on startup.
+
+        Checks for stale shutdown state and pending checkpoints,
+        then cleans up any half-uploaded temp files.
+        """
+        # Check for stale shutdown state
+        shutdown_state = self.shutdown_handler.load_shutdown_state()
+        if shutdown_state:
+            video_id = shutdown_state.get("video_id", "unknown")
+            platform = shutdown_state.get("platform", "unknown")
+            phase = shutdown_state.get("phase", "unknown")
+            logger.warning(
+                "Found incomplete upload from previous run: %s -> %s (phase: %s)",
+                video_id, platform, phase,
+            )
+            # Clean up temp files from the shutdown state
+            temp_files = shutdown_state.get("temp_files", [])
+            for tf in temp_files:
+                try:
+                    path = Path(tf)
+                    if path.exists():
+                        path.unlink()
+                        logger.info("Cleaned up temp file from crash: %s", tf)
+                except OSError as e:
+                    logger.warning("Failed to clean up %s: %s", tf, e)
+            self.shutdown_handler.clear_shutdown_state()
+
+        # Check for pending checkpoints
+        pending = self.crash_recovery.get_pending_checkpoints()
+        if pending:
+            logger.warning(
+                "Found %d pending upload checkpoints from previous run",
+                len(pending),
+            )
+            for _key, checkpoint in pending.items():
+                video_path = checkpoint.get("metadata", {}).get("video_path")
+                if video_path:
+                    path = Path(video_path)
+                    # Clean up platform-specific encoded files
+                    for suffix in ["_youtube", "_instagram", "_x"]:
+                        encoded = path.with_stem(f"{path.stem}{suffix}")
+                        if encoded.exists():
+                            try:
+                                encoded.unlink()
+                                logger.info("Cleaned up partial encode: %s", encoded)
+                            except OSError:
+                                pass
+            # Clear all stale checkpoints
+            self.crash_recovery.clear_all_checkpoints()
+            logger.info("Crash recovery complete")
 
     def _init_platforms(self) -> None:
         """Initialize enabled platform uploaders.
@@ -354,8 +432,16 @@ class CrossPostEngine:
 
         self.shutdown_handler.start_tracking(video.video_id, "", "downloading")
 
-        # Download video
+        # Check disk space before downloading
         download_dir = Path(self.config.video.download_dir)
+        try:
+            check_disk_space(download_dir)
+        except DiskSpaceError as e:
+            logger.error("Insufficient disk space for download: %s", e)
+            self.shutdown_handler.stop_tracking()
+            return result
+
+        # Download video
         download_result = await source.download(video.video_id, download_dir)
 
         if not download_result.success or not download_result.video_path:
@@ -773,6 +859,14 @@ class CrossPostEngine:
             logger.error("No source for %s", post.source_platform)
             return result
 
+        # Check disk space before downloading
+        download_dir = Path(self.config.video.download_dir)
+        try:
+            check_disk_space(download_dir)
+        except DiskSpaceError as e:
+            logger.error("Insufficient disk space for bidirectional download: %s", e)
+            return result
+
         # Download video from source
         download_dir = Path(self.config.video.download_dir)
         download_result = await source.download(post.video_id, download_dir)
@@ -827,6 +921,7 @@ class CrossPostEngine:
                     post_id=upload_result.post_id,
                     post_url=upload_result.post_url,
                     caption=post.caption,
+                    content_hash=post.content_hash,
                 )
                 self.notifier.notify_upload_success(
                     platform=platform_name,

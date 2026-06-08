@@ -578,6 +578,121 @@ def auth_status(ctx: click.Context):
 # ──────────────────────────────────────────────
 
 @main.command()
+@click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
+@click.option("--refresh", "-r", is_flag=True, help="Force refresh (ignore cache)")
+@click.pass_context
+def analytics(ctx: click.Context, platforms: str | None, refresh: bool):
+    """Show cross-platform analytics summary"""
+    import asyncio
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    platform_list = platforms.split(",") if platforms else None
+
+    console.print("[bold blue]XPST - Cross-Platform Analytics[/bold blue]\n")
+
+    # Load state to get post IDs
+    from xpst.analytics import AnalyticsCollector
+    from xpst.state import StateManager
+
+    StateManager(config.config_dir)
+    collector = AnalyticsCollector(config.config_dir)
+
+    if refresh:
+        collector._cache_ttl = 0  # Force cache miss
+
+    # Discover post IDs from state
+    post_ids = collector._discover_post_ids()
+
+    if platform_list:
+        post_ids = {k: v for k, v in post_ids.items() if k in platform_list}
+
+    total_ids = sum(len(v) for v in post_ids.values())
+    if total_ids == 0:
+        console.print("[yellow]No posts found in state. Run `xpst run` first.[/yellow]")
+        return
+
+    console.print(f"[dim]Fetching analytics for {total_ids} posts across {len(post_ids)} platforms...[/dim]\n")
+
+    # Collect analytics
+    data = asyncio.run(collector.collect_all(post_ids))
+
+    # Display summary table
+    table = Table(title="Platform Analytics")
+    table.add_column("Platform", style="cyan")
+    table.add_column("Posts", style="white")
+    table.add_column("Views", style="green")
+    table.add_column("Likes", style="red")
+    table.add_column("Comments", style="magenta")
+    table.add_column("Shares", style="blue")
+
+    totals = {"posts": 0, "views": 0, "likes": 0, "comments": 0, "shares": 0}
+    for platform, posts_data in data.items():
+        posts = len(posts_data)
+        views = sum(m.get("views", 0) for m in posts_data.values())
+        likes = sum(m.get("likes", 0) for m in posts_data.values())
+        comments = sum(m.get("comments", 0) for m in posts_data.values())
+        shares = sum(m.get("shares", 0) for m in posts_data.values())
+
+        totals["posts"] += posts
+        totals["views"] += views
+        totals["likes"] += likes
+        totals["comments"] += comments
+        totals["shares"] += shares
+
+        table.add_row(
+            platform.title(),
+            str(posts),
+            f"{views:,}",
+            f"{likes:,}",
+            f"{comments:,}",
+            f"{shares:,}",
+        )
+
+    table.add_section()
+    table.add_row(
+        "[bold]TOTAL[/bold]",
+        f"[bold]{totals['posts']}[/bold]",
+        f"[bold]{totals['views']:,}[/bold]",
+        f"[bold]{totals['likes']:,}[/bold]",
+        f"[bold]{totals['comments']:,}[/bold]",
+        f"[bold]{totals['shares']:,}[/bold]",
+    )
+
+    console.print(table)
+
+    # Top posts detail
+    all_posts = []
+    for platform, posts_data in data.items():
+        for _post_id, metrics in posts_data.items():
+            metrics["platform"] = platform
+            all_posts.append(metrics)
+
+    if all_posts:
+        all_posts.sort(key=lambda p: p.get("views", 0), reverse=True)
+        console.print("\n[bold]Top Posts by Views:[/bold]")
+        detail_table = Table(show_header=True, header_style="bold")
+        detail_table.add_column("#", style="dim")
+        detail_table.add_column("Platform", style="cyan")
+        detail_table.add_column("Post ID")
+        detail_table.add_column("Views", style="green")
+        detail_table.add_column("Likes", style="red")
+        detail_table.add_column("Comments", style="magenta")
+
+        for i, p in enumerate(all_posts[:10], 1):
+            detail_table.add_row(
+                str(i),
+                p["platform"].title(),
+                str(p.get("post_id", ""))[:20],
+                f"{p.get('views', 0):,}",
+                f"{p.get('likes', 0):,}",
+                f"{p.get('comments', 0):,}",
+            )
+
+        console.print(detail_table)
+
+
+@main.command()
 @click.pass_context
 def logs(ctx: click.Context):
     """View recent logs"""

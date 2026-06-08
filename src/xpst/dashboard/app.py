@@ -874,6 +874,38 @@ def _render_analytics_content(container, collector: AnalyticsCollector, platform
             _metric_card("comment", _fmt_num(total_comments), "Comments", ACCENT, "#a855f7")
             _metric_card("share", _fmt_num(total_shares), "Shares", ACCENT, "#22c55e")
 
+        # ── Per-Platform Metrics Cards ──────────────────────────────────
+        if platform == "all":
+            with ui.element("div").classes("glass-card card-hover w-full").style("margin-bottom:28px;"):
+                ui.label("Per-Platform Breakdown").classes("section-header")
+                with ui.row().classes("gap-3 w-full").style("flex-wrap:wrap;"):
+                    for plat_name in ["youtube", "instagram", "x", "tiktok"]:
+                        plat_eng = engagement.get(plat_name, {"posts": 0, "views": 0, "likes": 0, "comments": 0, "shares": 0})
+                        plat_color = PLATFORM_COLORS.get(plat_name, ACCENT)
+                        plat_label = PLATFORM_LABELS.get(plat_name, plat_name.title())
+
+                        with ui.element("div").classes("content-card").style("flex:1; min-width:200px; padding:20px;"):
+                            with ui.row().classes("items-center gap-3").style("margin-bottom:12px;"):
+                                with ui.element("div").style(
+                                    f"width:36px; height:36px; border-radius:10px; background:{plat_color}15; display:flex; align-items:center; justify-content:center;"
+                                ):
+                                    ui.icon(PLATFORM_ICONS.get(plat_name, "circle"), size="20px", color=plat_color)
+                                ui.label(plat_label).style(f"font-size:0.95rem; font-weight:600; color:{TEXT_PRIMARY};")
+
+                            with ui.column().classes("gap-2"):
+                                with ui.row().classes("justify-between w-full"):
+                                    ui.label("Views").style(f"font-size:0.75rem; color:{TEXT_MUTED};")
+                                    ui.label(_fmt_num(plat_eng["views"])).style(f"font-size:0.85rem; font-weight:600; color:{TEXT_PRIMARY};")
+                                with ui.row().classes("justify-between w-full"):
+                                    ui.label("Likes").style(f"font-size:0.75rem; color:{TEXT_MUTED};")
+                                    ui.label(_fmt_num(plat_eng["likes"])).style(f"font-size:0.85rem; font-weight:600; color:{TEXT_PRIMARY};")
+                                with ui.row().classes("justify-between w-full"):
+                                    ui.label("Comments").style(f"font-size:0.75rem; color:{TEXT_MUTED};")
+                                    ui.label(_fmt_num(plat_eng["comments"])).style(f"font-size:0.85rem; font-weight:600; color:{TEXT_PRIMARY};")
+                                with ui.row().classes("justify-between w-full"):
+                                    ui.label("Posts").style(f"font-size:0.75rem; color:{TEXT_MUTED};")
+                                    ui.label(str(plat_eng["posts"])).style(f"font-size:0.85rem; font-weight:600; color:{TEXT_PRIMARY};")
+
         with ui.row().classes("gap-4 w-full").style("margin-bottom:28px;"):
             # ── Engagement Over Time ─────────────────────────────────────
             with ui.element("div").classes("glass-card card-hover col-grow"):

@@ -14,16 +14,106 @@ Upload specs:
 - Category: 28 (Science & Technology) - configurable
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from xpst.config import XPSTConfig
 from xpst.platforms.base import PlatformHealth, PlatformUploader, UploadResult
 from xpst.utils.logger import get_logger
 
+try:
+    from xpst.auth.auth_manager import AuthManager
+except ImportError:
+    AuthManager = None  # type: ignore[assignment,misc]
+
 logger = get_logger(__name__)
 
 
 class YouTubeUploader(PlatformUploader):
+    async def get_video_analytics(self, video_ids: list[str]) -> list[dict]:
+        """Get real YouTube video statistics via Data API v3.
+
+        Uses videos().list with statistics part to fetch views, likes,
+        comments for each video ID.
+
+        Args:
+            video_ids: List of YouTube video IDs to query.
+
+        Returns:
+            List of dicts with keys: platform, post_id, views, likes,
+            comments, shares, timestamp.
+        """
+        results = []
+        service = self._get_service()
+
+        try:
+            # YouTube API allows up to 50 IDs per request
+            for i in range(0, len(video_ids), 50):
+                batch = video_ids[i : i + 50]
+                resp = (
+                    service.videos()
+                    .list(part="statistics,contentDetails", id=",".join(batch))
+                    .execute()
+                )
+                for item in resp.get("items", []):
+                    stats = item.get("statistics", {})
+                    results.append({
+                        "platform": "youtube",
+                        "post_id": item["id"],
+                        "views": int(stats.get("viewCount", 0)),
+                        "likes": int(stats.get("likeCount", 0)),
+                        "comments": int(stats.get("commentCount", 0)),
+                        "shares": 0,  # YouTube doesn't expose shares via Data API
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+        except Exception as e:
+            logger.error(f"YouTube analytics fetch failed: {e}")
+            raise
+
+        return results
+
+    async def list_my_videos(self, max_results: int = 50) -> list[dict]:
+        """List recent videos uploaded by the authenticated channel.
+
+        Args:
+            max_results: Maximum number of videos to return.
+
+        Returns:
+            List of dicts with video_id, title, published_at.
+        """
+        service = self._get_service()
+        try:
+            # Get channel's uploads playlist
+            channels_resp = (
+                service.channels()
+                .list(part="contentDetails", mine=True)
+                .execute()
+            )
+            items = channels_resp.get("items", [])
+            if not items:
+                return []
+
+            uploads_playlist = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+
+            # List videos from uploads playlist
+            playlist_resp = (
+                service.playlistItems()
+                .list(part="snippet", playlistId=uploads_playlist, maxResults=max_results)
+                .execute()
+            )
+
+            videos = []
+            for item in playlist_resp.get("items", []):
+                snippet = item["snippet"]
+                videos.append({
+                    "video_id": snippet["resourceId"]["videoId"],
+                    "title": snippet.get("title", ""),
+                    "published_at": snippet.get("publishedAt", ""),
+                })
+            return videos
+        except Exception as e:
+            logger.error(f"Failed to list YouTube videos: {e}")
+            return []
     """
     YouTube Shorts uploader.
 
@@ -52,21 +142,103 @@ class YouTubeUploader(PlatformUploader):
         self._creds = None  # Cached OAuth2 credentials
 
     def _get_credentials(self):
-        """Get YouTube OAuth2 credentials with automatic refresh.
+        """Get YouTube OAuth2 credentials via Authlib with automatic refresh.
 
-        Loads from token file, refreshes if expired, and saves the refreshed
-        token back to disk and optionally to the OS keychain via SessionManager.
+        Uses Authlib-based AuthManager for token management. Falls back to
+        google-auth if Authlib is not available.
 
         Returns:
-            Valid Google OAuth2 Credentials object.
+            Valid google.oauth2.credentials.Credentials object for use
+            with googleapiclient.
 
         Raises:
             FileNotFoundError: If client_secrets.json is missing.
             ValueError: If credentials are expired and cannot be refreshed.
         """
+        # Try Authlib path first
+        if AuthManager is not None:
+            return self._get_credentials_authlib()
+        return self._get_credentials_google_auth()
 
+    def _get_credentials_authlib(self):
+        """Authlib-based credential loading with token refresh."""
+        from google.oauth2.credentials import Credentials
+
+        token_file = Path(self.config.youtube.token_file)
+        client_secrets = Path(self.config.youtube.client_secrets)
+
+        if not client_secrets.exists():
+            raise FileNotFoundError(
+                f"YouTube client_secrets.json not found at {client_secrets}. "
+                "Download from Google Cloud Console: https://console.cloud.google.com/apis/credentials"
+            )
+
+        # Load client secrets for client_id/client_secret
+        import json
+        secrets_data = json.loads(client_secrets.read_text())
+        installed = secrets_data.get("installed", secrets_data.get("web", {}))
+        client_id = installed.get("client_id", "")
+        client_secret = installed.get("client_secret", "")
+
+        auth = AuthManager(config_dir=str(self.config.config_dir).replace("~", str(Path.home())))
+
+        # Try to load existing token
+        token = auth.load_token("youtube")
+
+        # Import from google-auth token file if no Authlib token
+        if token is None and token_file.exists():
+            try:
+                auth.load_from_google_credentials("youtube", token_file.read_text())
+                token = auth.load_token("youtube")
+            except Exception as e:
+                logger.warning("Failed to import google-auth token: %s", e)
+
+        if token is None:
+            raise ValueError(
+                "YouTube credentials expired or missing. "
+                "Run: xpst auth youtube"
+            )
+
+        # Refresh if expired
+        if token.is_expired:
+            if token.is_refreshable:
+                try:
+                    token = auth.refresh("youtube")
+                except Exception as e:
+                    logger.warning("Authlib refresh failed: %s, trying google-auth fallback", e)
+                    return self._get_credentials_google_auth()
+            else:
+                raise ValueError(
+                    "YouTube credentials expired and no refresh token available. "
+                    "Run: xpst auth youtube"
+                )
+
+        # Build google-auth Credentials object from Authlib token
+        creds = Credentials(
+            token=token.access_token,
+            refresh_token=token.refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=self.SCOPES,
+        )
+
+        # Save back to token file for compatibility
+        token_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(token_file, "w") as f:
+            f.write(creds.to_json())
+
+        if self._session_manager:
+            self._session_manager.credentials.store("youtube_token", creds.to_json())
+
+        self._creds = creds
+        return creds
+
+    def _get_credentials_google_auth(self):
+        """Fallback: google-auth-oauthlib credential loading."""
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
+
 
         # Direct file-based credential loading (primary path)
         token_file = Path(self.config.youtube.token_file)
@@ -122,7 +294,6 @@ class YouTubeUploader(PlatformUploader):
         Returns:
             Authenticated YouTube API service (cached after first call).
         """
-
         if self._service is None:
             from googleapiclient.discovery import build
             creds = self._get_credentials()
