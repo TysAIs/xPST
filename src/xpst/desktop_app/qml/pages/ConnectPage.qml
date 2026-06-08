@@ -7,6 +7,76 @@ Page {
     id: connectPage
     background: Rectangle { color: theme.canvas }
 
+    property var healthData: {
+        try {
+            if (typeof controller !== "undefined" && controller.platformHealth)
+                return JSON.parse(controller.platformHealth)
+        } catch(e) {}
+        return ({})
+    }
+    property var connectingPlatforms: ({})
+
+    // Refresh health when data changes
+    Connections {
+        target: typeof controller !== "undefined" ? controller : null
+        function onDataChanged() {
+            try {
+                connectPage.healthData = JSON.parse(controller.platformHealth)
+            } catch(e) {}
+        }
+    }
+
+    function getPlatformStatus(platformName) {
+        var key = platformName.toLowerCase()
+        if (key === "x") key = "x"
+        var info = healthData[key]
+        if (!info) return { status: "unknown", connected: false, enabled: true }
+        return {
+            status: info.status || "unknown",
+            connected: info.status === "ok" || info.status === "healthy" || info.status === "connected",
+            enabled: info.enabled !== false,
+            failures: info.failures || 0,
+            canUpload: info.can_upload !== false,
+            circuitBreakerOpen: info.circuit_breaker_open || false,
+            lastSuccess: info.last_success || null
+        }
+    }
+
+    function getHealthColor(status) {
+        if (status === "ok" || status === "healthy" || status === "connected") return theme.success
+        if (status === "warning" || status === "degraded") return theme.warning
+        if (status === "error" || status === "failed") return theme.error
+        return theme.textMuted
+    }
+
+    function getHealthLabel(status) {
+        if (status === "ok" || status === "healthy" || status === "connected") return "Healthy"
+        if (status === "warning" || status === "degraded") return "Degraded"
+        if (status === "error" || status === "failed") return "Error"
+        return "Unknown"
+    }
+
+    function connectPlatform(platformName) {
+        if (typeof controller === "undefined") return
+        connectPage.connectingPlatforms[platformName.toLowerCase()] = true
+        connectPage.connectingPlatformsChanged()
+        controller.connectPlatformAsync(platformName.toLowerCase())
+    }
+
+    Connections {
+        target: typeof controller !== "undefined" ? controller : null
+        function onConnectResult(jsonStr) {
+            try {
+                var result = JSON.parse(jsonStr)
+                var key = result.platform || ""
+                connectPage.connectingPlatforms[key] = false
+                connectPage.connectingPlatformsChanged()
+            } catch(e) {
+                connectPage.connectingPlatforms = ({})
+            }
+        }
+    }
+
     Flickable {
         anchors.fill: parent
         contentHeight: contentCol.implicitHeight + theme.spacingXxl
@@ -46,17 +116,20 @@ Page {
 
                 Repeater {
                     model: [
-                        { name: "YouTube",   icon: "▶️", color: theme.youtube,    connected: true,  health: "healthy" },
-                        { name: "Instagram", icon: "📷", color: theme.instagram,  connected: true,  health: "healthy" },
-                        { name: "X",         icon: "𝕏",  color: theme.xtwitter,  connected: false, health: "unknown" },
-                        { name: "TikTok",    icon: "🎵", color: theme.tiktok,     connected: true,  health: "warning" }
+                        { name: "YouTube",   key: "youtube",   icon: "▶️", color: theme.youtube },
+                        { name: "Instagram", key: "instagram", icon: "📷", color: theme.instagram },
+                        { name: "X",         key: "x",         icon: "𝕏",  color: theme.xtwitter },
+                        { name: "TikTok",    key: "tiktok",    icon: "🎵", color: theme.tiktok }
                     ]
 
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 180
+                        Layout.preferredHeight: 200
                         radius: theme.radiusXl
                         color: theme.surfaceCard
+
+                        property var platformStatus: connectPage.getPlatformStatus(modelData.key)
+                        property bool isConnecting: connectPage.connectingPlatforms[modelData.key] === true
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -88,10 +161,10 @@ Page {
                                         spacing: theme.spacingXs
                                         Rectangle {
                                             width: 8; height: 8; radius: 4
-                                            color: modelData.connected ? theme.success : theme.textMuted
+                                            color: platformStatus.connected ? theme.success : theme.textMuted
                                         }
                                         Text {
-                                            text: modelData.connected ? "Connected" : "Not connected"
+                                            text: platformStatus.enabled ? (platformStatus.connected ? "Connected" : "Not connected") : "Disabled"
                                             font.pixelSize: 12
                                             color: theme.textSecondary
                                         }
@@ -100,6 +173,7 @@ Page {
                                 Item { Layout.fillWidth: true }
                             }
 
+                            // Health status
                             RowLayout {
                                 spacing: theme.spacingSm
                                 Text {
@@ -109,41 +183,84 @@ Page {
                                 }
                                 Rectangle {
                                     width: 8; height: 8; radius: 4
-                                    color: modelData.health === "healthy" ? theme.success
-                                         : modelData.health === "warning" ? theme.warning
-                                         : theme.textMuted
+                                    color: connectPage.getHealthColor(platformStatus.status)
                                 }
                                 Text {
-                                    text: modelData.health === "healthy" ? "Good"
-                                         : modelData.health === "warning" ? "Rate limited"
-                                         : "Unknown"
+                                    text: connectPage.getHealthLabel(platformStatus.status)
                                     font.pixelSize: 12
                                     color: theme.textSecondary
+                                }
+
+                                // Show failure count if any
+                                Text {
+                                    text: platformStatus.failures > 0 ? "(" + platformStatus.failures + " failures)" : ""
+                                    font.pixelSize: 11
+                                    color: theme.error
+                                    visible: platformStatus.failures > 0
+                                }
+
+                                // Circuit breaker warning
+                                Text {
+                                    text: "⚠ Circuit breaker open"
+                                    font.pixelSize: 11
+                                    color: theme.warning
+                                    visible: platformStatus.circuitBreakerOpen
+                                }
+
+                                Item { Layout.fillWidth: true }
+                            }
+
+                            // Quota info
+                            RowLayout {
+                                spacing: theme.spacingSm
+                                Text {
+                                    text: "Can upload:"
+                                    font.pixelSize: 12
+                                    color: theme.textMuted
+                                }
+                                Text {
+                                    text: platformStatus.canUpload ? "Yes" : "No (quota reached)"
+                                    font.pixelSize: 12
+                                    color: platformStatus.canUpload ? theme.success : theme.warning
                                 }
                                 Item { Layout.fillWidth: true }
                             }
 
+                            Item { Layout.fillHeight: true }
+
+                            // Connect/Disconnect button
                             Rectangle {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 36
+                                Layout.preferredHeight: 40
                                 radius: theme.radiusMd
-                                color: modelData.connected ? theme.surfaceAlt : theme.accent
+                                color: isConnecting ? theme.surfaceAlt
+                                       : platformStatus.connected ? theme.surfaceAlt : theme.accent
 
-                                Text {
+                                RowLayout {
                                     anchors.centerIn: parent
-                                    text: modelData.connected ? "Disconnect" : "Connect"
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    color: modelData.connected ? theme.textSecondary : "#ffffff"
+                                    spacing: theme.spacingSm
+
+                                    // Loading spinner
+                                    BusyIndicator {
+                                        width: 16; height: 16
+                                        running: isConnecting
+                                        visible: isConnecting
+                                    }
+
+                                    Text {
+                                        text: isConnecting ? "Connecting..."
+                                             : platformStatus.connected ? "Disconnect" : "Connect"
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        color: platformStatus.connected ? theme.textSecondary : "#ffffff"
+                                    }
                                 }
 
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (typeof controller !== "undefined")
-                                            controller.connectPlatform(modelData.name)
-                                    }
+                                    enabled: !isConnecting
+                                    onClicked: connectPage.connectPlatform(modelData.name)
                                 }
                             }
                         }

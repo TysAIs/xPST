@@ -251,6 +251,9 @@ class TestPostManual:
 
         engine = CrossPostEngine(config)
 
+        # Disable anti-bot for tests
+        engine.upload_service.anti_bot = None
+
         # Inject a mock platform
         mock_uploader = _make_mock_uploader("youtube", success=True)
         engine._platforms["youtube"] = mock_uploader

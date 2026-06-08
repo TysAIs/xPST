@@ -80,9 +80,10 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
     menu = QMenu()
 
     show_action = menu.addAction("Show Window")
+    post_now_action = menu.addAction("Post Now...")
+    check_health_action = menu.addAction("Check Health")
     refresh_action = menu.addAction("Refresh Data")
     menu.addSeparator()
-    quit_action = menu.addAction("Quit")
     quit_action = menu.addAction("Quit")
 
     def _show_window() -> None:
@@ -94,18 +95,64 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
                 obj.raise_()
                 obj.requestActivate()
 
+    def _toggle_window() -> None:
+        root_objects = engine.rootObjects
+        for obj in root_objects:
+            if hasattr(obj, "isVisible") and hasattr(obj, "show"):
+                if obj.isVisible():
+                    obj.hide()
+                else:
+                    obj.show()
+                    obj.raise_()
+                    obj.requestActivate()
+
     def _refresh() -> None:
         root_objects = engine.rootObjects
         for obj in root_objects():
             if hasattr(obj, "refreshData"):
                 obj.refreshData()
 
+    def _post_now() -> None:
+        from PySide6.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            None, "Select video to post", "",
+            "Video Files (*.mp4 *.mov *.avi *.mkv *.webm);;All Files (*)"
+        )
+        if file_path:
+            controller_obj = engine.rootContext().contextProperty("controller")
+            if controller_obj:
+                caption = Path(file_path).stem
+                controller_obj.postVideo(file_path, caption)
+                tray.showMessage("xPST", f"Posting: {Path(file_path).name}", QSystemTrayIcon.Information, 3000)
+
+    def _check_health() -> None:
+        controller_obj = engine.rootContext().contextProperty("controller")
+        if controller_obj:
+            health_json = controller_obj.getHealth()
+            try:
+                import json
+                health = json.loads(health_json)
+                healthy_count = sum(
+                    1 for p in health.values()
+                    if p.get("status") in ("ok", "healthy", "connected")
+                )
+                total = len(health)
+                tray.showMessage(
+                    "xPST Health",
+                    f"{healthy_count}/{total} platforms healthy",
+                    QSystemTrayIcon.Information, 5000
+                )
+            except Exception:
+                tray.showMessage("xPST Health", "Health check complete", QSystemTrayIcon.Information, 3000)
+
     show_action.triggered.connect(_show_window)
+    post_now_action.triggered.connect(_post_now)
+    check_health_action.triggered.connect(_check_health)
     refresh_action.triggered.connect(_refresh)
     quit_action.triggered.connect(app.quit)
 
     tray.setContextMenu(menu)
-    tray.activated.connect(lambda reason: _show_window() if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
+    tray.activated.connect(lambda reason: _toggle_window() if reason == QSystemTrayIcon.ActivationReason.Trigger else None)
 
     tray.show()
     return tray

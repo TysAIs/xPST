@@ -8,7 +8,11 @@ data is serialised as JSON strings so QML can parse with JSON.parse().
 import asyncio
 import json
 import logging
+import subprocess
+import sys
+import threading
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, QTimer, Signal, Slot, Property
@@ -51,6 +55,8 @@ class AppController(QObject):
     dataChanged = Signal()
     postComplete = Signal(str)   # JSON result string
     error = Signal(str)          # error message
+    connectResult = Signal(str)  # JSON connect result
+    settingsSaved = Signal(bool, str)  # success, message
 
     # ── Init ─────────────────────────────────────────────────────────
 
@@ -77,6 +83,10 @@ class AppController(QObject):
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refreshData)
         self._refresh_timer.start(30_000)
+
+        # Thumbnail cache dir
+        self._thumb_dir = Path("~/.xpst/thumbnails").expanduser()
+        self._thumb_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialise backends (best-effort)
         self._init_backends()
@@ -112,6 +122,21 @@ class AppController(QObject):
 
         # Engine is heavy and async; defer creation
         self._engine = None
+
+    def _ensure_engine(self) -> bool:
+        """Lazily initialize the CrossPostEngine. Returns True if ready."""
+        if self._engine is not None:
+            return True
+        if CrossPostEngine is None:
+            return False
+        if self._config is None:
+            return False
+        try:
+            self._engine = CrossPostEngine(self._config)
+            return True
+        except Exception as exc:
+            logger.error("Failed to create CrossPostEngine: %s", exc)
+            return False
 
     # ── Q_PROPERTY definitions ───────────────────────────────────────
 
@@ -171,8 +196,8 @@ class AppController(QObject):
 
     # ── Data refresh ─────────────────────────────────────────────────
 
-    @Slot()
-    def refreshData(self) -> None:
+    @Slot(result=str)
+    def refreshData(self) -> str:
         """Reload all cached data from backends and emit dataChanged."""
         try:
             self._refresh_state()
@@ -182,9 +207,11 @@ class AppController(QObject):
             self._refresh_analytics()
             self._refresh_quota()
             self.dataChanged.emit()
+            return json.dumps({"ok": True})
         except Exception as exc:
             logger.error("refreshData failed: %s", exc)
             self.error.emit(str(exc))
+            return json.dumps({"ok": False, "error": str(exc)})
 
     def _refresh_state(self) -> None:
         """Update summary counters from StateManager."""
@@ -293,6 +320,7 @@ class AppController(QObject):
             for video_id, vdata in posted.items():
                 caption = (vdata.get("caption") or "")[:120]
                 downloaded_at = vdata.get("downloaded_at") or ""
+                thumbnail_path = vdata.get("thumbnail") or ""
 
                 for platform, pinfo in vdata.get("posted_to", {}).items():
                     posts.append({
@@ -303,6 +331,7 @@ class AppController(QObject):
                         "timestamp": pinfo.get("timestamp") or downloaded_at,
                         "postId": pinfo.get("id") or video_id,
                         "url": pinfo.get("url", ""),
+                        "thumbnail": thumbnail_path,
                     })
 
             # Sort newest first, limit to 50
@@ -388,63 +417,143 @@ class AppController(QObject):
 
     # ── Q_INVOKABLE slots ────────────────────────────────────────────
 
-    @Slot()
-    def runPost(self) -> None:
-        """Trigger a cross-post cycle via CrossPostEngine."""
-        if CrossPostEngine is None:
+    @Slot(str, str)
+    def postVideo(self, video_path: str, caption: str) -> None:
+        """Post a video file to all enabled platforms.
+
+        Runs the upload pipeline in a background thread to avoid
+        blocking the UI. Emits postComplete with JSON results or
+        error signal on failure.
+
+        Args:
+            video_path: Absolute path to the video file.
+            caption: Caption/title text for the post.
+        """
+        if not self._ensure_engine():
             self.error.emit("CrossPostEngine not available")
             return
 
-        try:
-            # Lazy-init engine
-            if self._engine is None:
-                if self._config is None or self._state is None:
-                    self.error.emit("Config or State not initialised")
-                    return
-                self._engine = CrossPostEngine(self._config, self._state)
+        path = Path(video_path).expanduser()
+        if not path.exists():
+            self.error.emit(f"Video file not found: {video_path}")
+            return
 
-            # Run in a background thread to avoid blocking the UI
-            import threading
+        def _run() -> None:
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                result = loop.run_until_complete(
+                    self._engine.post_manual(path, caption)
+                )
+                loop.close()
 
-            def _run() -> None:
-                try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    results = loop.run_until_complete(
-                        self._engine.check_and_post()
-                    )
-                    loop.close()
+                result_dict = {
+                    "video_id": result.video_id,
+                    "caption": result.caption,
+                    "all_success": result.all_success,
+                    "partial_success": result.partial_success,
+                    "platforms": {
+                        plat: {
+                            "success": ur.success,
+                            "error": ur.error,
+                            "post_url": ur.post_url,
+                        }
+                        for plat, ur in result.results.items()
+                    },
+                }
 
-                    result_dicts = []
-                    for r in results:
-                        result_dicts.append({
-                            "video_id": r.video_id,
-                            "all_success": r.all_success,
-                            "partial_success": r.partial_success,
-                            "platforms": {
-                                plat: {"success": ur.success, "error": ur.error}
-                                for plat, ur in r.results.items()
-                            },
-                        })
+                result_json = json.dumps(result_dict, default=str)
+                self.postComplete.emit(result_json)
+                self.refreshData()
+            except Exception as exc:
+                logger.error("postVideo error: %s", exc)
+                self.error.emit(str(exc))
 
-                    result_json = json.dumps(result_dicts, default=str)
-                    # Signal must be emitted on the main thread
-                    self.postComplete.emit(result_json)
-                    self.refreshData()
-                except Exception as exc:
-                    logger.error("runPost error: %s", exc)
-                    self.error.emit(str(exc))
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
 
-            t = threading.Thread(target=_run, daemon=True)
-            t.start()
+    @Slot(str, str)
+    def deletePost(self, post_id: str, platform: str) -> None:
+        """Delete a post from a platform and update state.
 
-        except Exception as exc:
-            logger.error("runPost setup error: %s", exc)
-            self.error.emit(str(exc))
+        Attempts to delete the post on the actual platform via the
+        engine's delete_post() method. If the engine is not available,
+        falls back to removing the state entry only. Runs async platform
+        deletion in a background thread.
+
+        Args:
+            post_id: Video/post identifier.
+            platform: Platform name (youtube, instagram, x, tiktok).
+        """
+        if self._state is None:
+            self.error.emit("StateManager not available")
+            return
+
+        def _run() -> None:
+            try:
+                deleted_from_platform = False
+
+                # Try to delete from the actual platform via engine
+                if self._ensure_engine():
+                    try:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        deleted_from_platform = loop.run_until_complete(
+                            self._engine.delete_post(post_id, platform)
+                        )
+                        loop.close()
+                    except Exception as exc:
+                        logger.warning(
+                            "Platform delete failed for %s/%s: %s",
+                            post_id, platform, exc,
+                        )
+
+                # Remove from local state regardless
+                posted = self._state._state.get("posted_videos", {})
+                if post_id in posted:
+                    posted_to = posted[post_id].get("posted_to", {})
+                    if platform in posted_to:
+                        del posted_to[platform]
+                        logger.info(
+                            "Removed %s/%s from state (platform_delete=%s)",
+                            post_id, platform, deleted_from_platform,
+                        )
+
+                    # If no platforms left, remove the entire video entry
+                    if not posted_to:
+                        del posted[post_id]
+                        logger.info("Removed video entry %s (no platforms left)", post_id)
+
+                    self._state.save()
+
+                self.refreshData()
+
+                result = json.dumps({
+                    "ok": True,
+                    "removed": f"{post_id}/{platform}",
+                    "platform_deleted": deleted_from_platform,
+                }, default=str)
+                self.postComplete.emit(result)
+            except Exception as exc:
+                logger.error("deletePost error: %s", exc)
+                self.error.emit(str(exc))
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
 
     @Slot(str, result=str)
     def saveSettings(self, settings_json: str) -> str:
-        """Persist settings from QML. Accepts JSON string, returns status JSON."""
+        """Persist settings from QML. Accepts JSON string, returns status JSON.
+
+        Parses the JSON, merges into the existing YAML config file,
+        reloads XPSTConfig, and refreshes all cached data.
+
+        Args:
+            settings_json: JSON string with settings to merge.
+
+        Returns:
+            JSON string with {"ok": true} or {"ok": false, "error": "..."}.
+        """
         try:
             settings = json.loads(settings_json)
         except json.JSONDecodeError as exc:
@@ -485,80 +594,208 @@ class AppController(QObject):
             if "monitoring" in settings:
                 existing.setdefault("monitoring", {}).update(settings["monitoring"])
 
+            if "video" in settings:
+                existing.setdefault("video", {}).update(settings["video"])
+
+            if "reliability" in settings:
+                existing.setdefault("reliability", {}).update(settings["reliability"])
+
+            if "notifications" in settings:
+                existing.setdefault("notifications", {}).update(settings["notifications"])
+
+            if "schedule" in settings:
+                existing.setdefault("schedule", {}).update(settings["schedule"])
+
             # Write back
             with open(config_path, "w") as f:
                 yaml.dump(existing, f, default_flow_style=False, sort_keys=False)
 
             # Reload config
             self._config = XPSTConfig.load()
+            # Reset engine so it picks up new config on next use
+            self._engine = None
             self.refreshData()
 
+            self.settingsSaved.emit(True, "Settings saved successfully")
             return json.dumps({"ok": True})
         except Exception as exc:
             logger.error("saveSettings error: %s", exc)
+            self.settingsSaved.emit(False, str(exc))
             return json.dumps({"ok": False, "error": str(exc)})
+
+    @Slot(str)
+    def connectPlatform(self, platform: str) -> None:
+        """Test connectivity / authenticate a platform.
+
+        Runs in a background thread to avoid blocking the UI.
+        Emits postComplete with JSON result containing ok/details.
+
+        Args:
+            platform: Platform name to connect/test.
+        """
+        def _run() -> None:
+            try:
+                # First try running 'xpst auth <platform>' via subprocess
+                # This handles OAuth flows etc.
+                try:
+                    result = subprocess.run(
+                        [sys.executable, "-m", "xpst", "auth", platform],
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+                    if result.returncode == 0:
+                        self.connectResult.emit(json.dumps({
+                            "ok": True,
+                            "platform": platform,
+                            "message": f"Authenticated with {platform}",
+                            "output": result.stdout.strip(),
+                        }))
+                        return
+                except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+                    logger.debug("Auth subprocess failed: %s, trying engine", exc)
+
+                # Fallback: use engine check_health for connectivity test
+                if self._ensure_engine():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    health = loop.run_until_complete(self._engine.check_health())
+                    loop.close()
+
+                    plat_health = health.get("platforms", {}).get(platform, {})
+                    ok = plat_health.get("authenticated", False)
+
+                    self.connectResult.emit(json.dumps({
+                        "ok": ok,
+                        "platform": platform,
+                        "details": plat_health,
+                    }, default=str))
+                else:
+                    self.connectResult.emit(json.dumps({
+                        "ok": False,
+                        "platform": platform,
+                        "error": "Engine not available and auth subprocess failed",
+                    }))
+
+            except Exception as exc:
+                logger.error("connectPlatform(%s) error: %s", platform, exc)
+                self.error.emit(str(exc))
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
 
     @Slot(str, result=str)
-    def connectPlatform(self, platform: str) -> str:
-        """Test connectivity to a platform. Returns JSON status."""
-        if self._engine is None:
-            # Try lazy engine init
-            if CrossPostEngine is not None and self._config and self._state:
-                try:
-                    self._engine = CrossPostEngine(self._config, self._state)
-                except Exception as exc:
-                    return json.dumps({"ok": False, "error": str(exc)})
-            else:
-                return json.dumps({"ok": False, "error": "Engine not available"})
+    def getAnalytics(self, platform: str = "") -> str:
+        """Get analytics data for a specific platform or all platforms.
 
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            health = loop.run_until_complete(self._engine.check_health())
-            loop.close()
+        Uses AnalyticsCollector to gather real engagement metrics from
+        platform APIs, falling back to state-based counts.
 
-            plat_health = health.get("platforms", {}).get(platform, {})
-            ok = plat_health.get("status") in ("ok", "healthy", "connected")
+        Args:
+            platform: Platform name (empty string = all platforms).
 
+        Returns:
+            JSON string with views/likes/comments/shares per platform.
+        """
+        if self._analytics is None:
             return json.dumps({
-                "ok": ok,
-                "platform": platform,
-                "details": plat_health,
-            }, default=str)
-        except Exception as exc:
-            logger.error("connectPlatform(%s) error: %s", platform, exc)
-            return json.dumps({"ok": False, "error": str(exc)})
-
-    @Slot(str, str, result=str)
-    def deletePost(self, post_id: str, platform: str) -> str:
-        """Remove a post entry from state (does not delete from platform)."""
-        if self._state is None:
-            return json.dumps({"ok": False, "error": "StateManager not available"})
+                "available": False,
+                "error": "AnalyticsCollector not initialized",
+            })
 
         try:
-            posted = self._state._state.get("posted_videos", {})
-            if post_id in posted:
-                # Remove specific platform entry
-                posted_to = posted[post_id].get("posted_to", {})
-                if platform in posted_to:
-                    del posted_to[platform]
-                    self._state.save()
-                    self.refreshData()
-                    return json.dumps({"ok": True, "removed": f"{post_id}/{platform}"})
+            data: dict[str, Any] = {"available": True}
 
-                # If no platforms left, remove the entire video entry
-                if not posted_to:
-                    del posted[post_id]
-                    self._state.save()
-                    self.refreshData()
-                    return json.dumps({"ok": True, "removed": post_id})
+            # Get engagement data (uses real APIs where possible)
+            engagement = self._analytics.get_engagement_data()
 
-                return json.dumps({"ok": False, "error": f"Not posted to {platform}"})
+            if platform and platform in engagement:
+                data["platform"] = platform
+                data["metrics"] = engagement[platform]
+            elif platform:
+                data["error"] = f"Unknown platform: {platform}"
+                data["metrics"] = {}
+            else:
+                data["platforms"] = engagement
 
-            return json.dumps({"ok": False, "error": "Post not found"})
+            # Add summary stats
+            data["summary"] = self._analytics.get_summary_stats()
+
+            return json.dumps(data, default=str)
         except Exception as exc:
-            logger.error("deletePost error: %s", exc)
-            return json.dumps({"ok": False, "error": str(exc)})
+            logger.error("getAnalytics error: %s", exc)
+            return json.dumps({
+                "available": False,
+                "error": str(exc),
+            })
+
+    @Slot()
+    def runPost(self) -> None:
+        """Trigger a cross-post cycle via CrossPostEngine.
+
+        Runs check_and_post() in a background thread. Emits
+        postComplete with JSON results when done, or error on failure.
+        """
+        if not self._ensure_engine():
+            self.error.emit("CrossPostEngine not available")
+            return
+
+        def _run() -> None:
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                results = loop.run_until_complete(
+                    self._engine.check_and_post()
+                )
+                loop.close()
+
+                result_dicts = []
+                for r in results:
+                    result_dicts.append({
+                        "video_id": r.video_id,
+                        "all_success": r.all_success,
+                        "partial_success": r.partial_success,
+                        "platforms": {
+                            plat: {"success": ur.success, "error": ur.error}
+                            for plat, ur in r.results.items()
+                        },
+                    })
+
+                result_json = json.dumps(result_dicts, default=str)
+                # Signal must be emitted on the main thread
+                self.postComplete.emit(result_json)
+                self.refreshData()
+            except Exception as exc:
+                logger.error("runPost error: %s", exc)
+                self.error.emit(str(exc))
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+
+    @Slot(result=str)
+    def getHealth(self) -> str:
+        """Return platform health as JSON.
+
+        If the engine is available, performs a live health check
+        (connectivity test per platform) via check_health(). Otherwise
+        returns cached state-based health data.
+
+        Returns:
+            JSON string with per-platform health status.
+        """
+        if self._ensure_engine():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                health = loop.run_until_complete(self._engine.check_health())
+                loop.close()
+                return json.dumps(health, default=str)
+            except Exception as exc:
+                logger.warning("Live health check failed, using cached: %s", exc)
+
+        # Fallback: return cached platform health
+        self._refresh_platform_health()
+        return self._platform_health
 
     @Slot(result=str)
     def getStatus(self) -> str:
@@ -577,12 +814,62 @@ class AppController(QObject):
         }
         return json.dumps(status, default=str)
 
-    @Slot(result=str)
-    def getHealth(self) -> str:
-        """Return platform health as JSON (same as platformHealth property)."""
-        # Force a refresh then return
-        self._refresh_platform_health()
-        return self._platform_health
+    @Slot(str, result=str)
+    def getThumbnail(self, video_path: str) -> str:
+        """Generate or retrieve a cached thumbnail for a video file/URL.
+
+        Returns a file:// URL to the thumbnail image, or empty string on failure.
+        """
+        import hashlib
+        import shutil
+
+        if not video_path:
+            return ""
+
+        # Create a deterministic cache key from the path
+        cache_key = hashlib.md5(video_path.encode()).hexdigest()
+        thumb_path = self._thumb_dir / f"{cache_key}.jpg"
+
+        # Return cached thumbnail if it exists
+        if thumb_path.exists() and thumb_path.stat().st_size > 0:
+            return thumb_path.as_uri()
+
+        # Check if ffmpeg is available
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return ""
+
+        # If it's a local file, try to extract a frame
+        source = video_path
+        if video_path.startswith("file://"):
+            source = video_path[7:]
+
+        try:
+            if Path(source).is_file():
+                subprocess.run(
+                    [ffmpeg, "-i", source, "-ss", "00:00:01", "-vframes", "1",
+                     "-vf", "scale=320:-1", "-y", str(thumb_path)],
+                    capture_output=True, timeout=10
+                )
+                if thumb_path.exists() and thumb_path.stat().st_size > 0:
+                    return thumb_path.as_uri()
+        except Exception as exc:
+            logger.debug("Thumbnail extraction failed for %s: %s", video_path, exc)
+
+        return ""
+
+    @Slot(str)
+    def connectPlatformAsync(self, platform: str) -> None:
+        """Async wrapper that emits connectResult signal."""
+        import threading
+
+        def _run():
+            result = self.connectPlatform(platform)
+            # connectPlatform already emits connectResult internally
+            # This method exists for QML to call explicitly
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
 
 
 class ThemeProvider(QObject):

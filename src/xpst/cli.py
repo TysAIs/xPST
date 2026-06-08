@@ -21,6 +21,7 @@ import asyncio
 import json as _json
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import Console
@@ -1243,6 +1244,465 @@ Option 2: Export cookies manually
 2. Save cookies to a file
 3. Set cookies_file in config.yaml
 """)
+
+
+# ──────────────────────────────────────────────
+# Config Commands
+# ──────────────────────────────────────────────
+
+def _mask_sensitive_values(data: dict | list | Any, _path: str = "") -> Any:
+    """Recursively mask sensitive values (passwords, tokens, secrets, keys).
+
+    Args:
+        data: The data structure to mask.
+        _path: Current key path (for determining sensitivity).
+
+    Returns:
+        Data with sensitive values replaced by '***'.
+    """
+    sensitive_keywords = {
+        "password", "token", "secret", "key", "webhook_url",
+        "cookies", "session", "credentials", "auth",
+    }
+    if isinstance(data, dict):
+        result = {}
+        for k, v in data.items():
+            child_path = f"{_path}.{k}" if _path else k
+            is_sensitive = any(kw in k.lower() for kw in sensitive_keywords)
+            if is_sensitive and isinstance(v, str) and v:
+                result[k] = "***"
+            else:
+                result[k] = _mask_sensitive_values(v, child_path)
+        return result
+    elif isinstance(data, list):
+        return [_mask_sensitive_values(item, _path) for item in data]
+    return data
+
+
+@main.group()
+@click.pass_context
+def config(ctx: click.Context):
+    """View and manage xPST configuration"""
+    pass
+
+
+@config.command("show")
+@click.option("--raw", is_flag=True, help="Show raw values (no masking)")
+@click.option("--file", "config_file", default=None, help="Config file path")
+@json_option
+@click.pass_context
+def config_show(ctx: click.Context, raw: bool, config_file: str | None, as_json: bool):
+    """Display current configuration as YAML"""
+    import os
+    import yaml
+    from rich.syntax import Syntax
+
+    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    if not Path(config_path).exists():
+        console.print(f"[red]Config file not found:[/red] {config_path}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    with open(config_path) as f:
+        raw_config = yaml.safe_load(f) or {}
+
+    if not raw:
+        raw_config = _mask_sensitive_values(raw_config)
+
+    if as_json:
+        json_output(raw_config, True)
+    else:
+        yaml_str = yaml.dump(raw_config, default_flow_style=False, sort_keys=False)
+        syntax = Syntax(yaml_str, "yaml", theme="monokai", line_numbers=False)
+        console.print(syntax)
+
+
+@config.command("set")
+@click.argument("key")
+@click.argument("value")
+@click.option("--file", "config_file", default=None, help="Config file path")
+@json_option
+@click.pass_context
+def config_set(ctx: click.Context, key: str, value: str, config_file: str | None, as_json: bool):
+    """Set a configuration value using dotted keys.
+
+    Examples:
+        xpst config set accounts.youtube.enabled true
+        xpst config set rate_limits.youtube 10
+        xpst config set monitoring.log_level DEBUG
+    """
+    import os
+    import yaml
+
+    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    config_path = Path(config_path)
+
+    # Load existing config
+    if config_path.exists():
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f) or {}
+    else:
+        cfg = {}
+
+    # Parse value: try int, then float, then bool, else string
+    def _parse_value(v: str):
+        # Bool
+        if v.lower() in ("true", "yes", "1"):
+            return True
+        if v.lower() in ("false", "no", "0"):
+            return False
+        # Int
+        try:
+            return int(v)
+        except ValueError:
+            pass
+        # Float
+        try:
+            return float(v)
+        except ValueError:
+            pass
+        # String
+        return v
+
+    parsed_value = _parse_value(value)
+
+    # Navigate dotted key and set value
+    parts = key.split(".")
+    current = cfg
+    for part in parts[:-1]:
+        if part not in current or not isinstance(current[part], dict):
+            current[part] = {}
+        current = current[part]
+    current[parts[-1]] = parsed_value
+
+    # Save
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w") as f:
+        yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+
+    if as_json:
+        json_output({"key": key, "value": parsed_value, "saved": True}, True)
+    else:
+        console.print(f"[green]✓[/green] Set [bold]{key}[/bold] = [cyan]{parsed_value}[/cyan]")
+
+
+@config.command("validate")
+@click.option("--file", "config_file", default=None, help="Config file path")
+@click.pass_context
+def config_validate(ctx: click.Context, config_file: str | None):
+    """Validate configuration for errors.
+
+    Checks required fields, path existence, and platform config validity.
+    Exit code 0 if valid, 4 if invalid.
+    """
+    import os
+
+    checks: list[tuple[str, bool, str]] = []
+
+    # Load config
+    try:
+        cfg = load_config(config_file)
+        checks.append(("Config file loaded", True, "OK"))
+    except SystemExit:
+        checks.append(("Config file loaded", False, "Failed to load config"))
+        _print_validation_results(checks)
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    # Check config file exists
+    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    exists = Path(config_path).exists()
+    checks.append(("Config file exists", exists, config_path))
+
+    # Check download directory
+    dl_dir = Path(cfg.video.download_dir).expanduser()
+    dl_ok = dl_dir.exists() or dl_dir.parent.exists()
+    checks.append(
+        ("Download directory accessible", dl_ok, str(dl_dir))
+    )
+
+    # Check log directory
+    log_dir = Path(cfg.monitoring.log_file).expanduser().parent
+    log_ok = log_dir.exists() or log_dir.parent.exists()
+    checks.append(
+        ("Log directory accessible", log_ok, str(log_dir))
+    )
+
+    # Check platform configs
+    platforms_to_check = [
+        ("YouTube", cfg.youtube.enabled, cfg.youtube.client_secrets, "client_secrets"),
+        ("X/Twitter", cfg.x.enabled, cfg.x.cookies_file, "cookies_file"),
+        ("Instagram", cfg.instagram.enabled, cfg.instagram.session_file, "session_file"),
+    ]
+    for name, enabled, cred_path, field_name in platforms_to_check:
+        if enabled:
+            if cred_path:
+                expanded = Path(cred_path).expanduser()
+                cred_exists = expanded.exists()
+                checks.append(
+                    (f"{name} credentials", cred_exists, str(expanded))
+                )
+            else:
+                checks.append(
+                    (f"{name} credentials", False, f"{field_name} not configured")
+                )
+        else:
+            checks.append((f"{name} enabled", False, "Platform disabled (OK)"))
+
+    # Check rate limits are positive
+    for platform, limit in [
+        ("YouTube", cfg.rate_limits.youtube),
+        ("Instagram", cfg.rate_limits.instagram),
+        ("X", cfg.rate_limits.x),
+        ("TikTok", cfg.rate_limits.tiktok),
+    ]:
+        ok = isinstance(limit, (int, float)) and limit > 0
+        checks.append(
+            (f"{platform} rate limit", ok, str(limit))
+        )
+
+    # Check schedule config
+    checks.append(
+        ("Check interval >= 60s", cfg.schedule.check_interval >= 60, str(cfg.schedule.check_interval))
+    )
+
+    _print_validation_results(checks)
+
+    all_pass = all(ok for _, ok, _ in checks)
+    sys.exit(EXIT_SUCCESS if all_pass else EXIT_CONFIG_ERROR)
+
+
+def _print_validation_results(checks: list[tuple[str, bool, str]]) -> None:
+    """Print validation check results as a table.
+
+    Args:
+        checks: List of (name, passed, detail) tuples.
+    """
+    table = Table(title="Configuration Validation", show_lines=True)
+    table.add_column("Check", style="bold")
+    table.add_column("Status", justify="center")
+    table.add_column("Details")
+
+    for name, passed, detail in checks:
+        status = "[green]PASS[/green]" if passed else "[red]FAIL[/red]"
+        table.add_row(name, status, detail)
+
+    console.print(table)
+
+    passed = sum(1 for _, ok, _ in checks if ok)
+    total = len(checks)
+    if passed == total:
+        console.print(f"\n[green]All {total} checks passed ✓[/green]")
+    else:
+        console.print(f"\n[red]{total - passed} of {total} checks failed ✗[/red]")
+
+
+# ──────────────────────────────────────────────
+# Schedule Commands
+# ──────────────────────────────────────────────
+
+@main.group()
+@click.pass_context
+def schedule(ctx: click.Context):
+    """Manage scheduled posts"""
+    pass
+
+
+@schedule.command("add")
+@click.argument("file", type=click.Path())
+@click.option("--caption", "-c", required=True, help="Post caption text")
+@click.option("--at", "scheduled_time", required=True, help="Scheduled time (ISO or 'YYYY-MM-DD HH:MM')")
+@click.option("--platforms", "-p", default=None, help="Comma-separated target platforms")
+@json_option
+@click.pass_context
+def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: str, platforms: str | None, as_json: bool):
+    """Schedule a post for later publishing.
+
+    Examples:
+        xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00'
+        xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08T10:00:00' -p youtube,instagram
+    """
+    from datetime import datetime
+    from xpst.schedule_manager import ScheduleManager
+
+    video_path = Path(file)
+    if not video_path.exists():
+        console.print(f"[red]File not found:[/red] {file}")
+        sys.exit(EXIT_GENERAL)
+
+    # Parse scheduled time
+    dt = None
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            dt = datetime.strptime(scheduled_time, fmt)
+            break
+        except ValueError:
+            continue
+    if dt is None:
+        console.print(f"[red]Invalid date format:[/red] {scheduled_time}")
+        console.print("[dim]Use: 'YYYY-MM-DD HH:MM' or ISO format[/dim]")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    platform_list = [p.strip() for p in platforms.split(",")] if platforms else None
+
+    manager = ScheduleManager()
+    entry = manager.add(
+        video_path=str(video_path.resolve()),
+        caption=caption,
+        scheduled_time=dt,
+        platforms=platform_list,
+    )
+
+    if as_json:
+        json_output(entry, True)
+    else:
+        console.print(f"[green]✓ Scheduled post[/green]")
+        console.print(f"  ID:       [bold]{entry['id']}[/bold]")
+        console.print(f"  File:     {video_path}")
+        console.print(f"  Caption:  {caption[:60]}{'...' if len(caption) > 60 else ''}")
+        console.print(f"  Time:     {dt.strftime('%Y-%m-%d %H:%M')}")
+        console.print(f"  Platforms: {', '.join(platform_list) if platform_list else 'all enabled'}")
+
+
+@schedule.command("list")
+@json_option
+@click.pass_context
+def schedule_list(ctx: click.Context, as_json: bool):
+    """List all scheduled posts"""
+    from xpst.schedule_manager import ScheduleManager
+
+    manager = ScheduleManager()
+    entries = manager.list()
+
+    if as_json:
+        json_output(entries, True)
+        return
+
+    if not entries:
+        console.print("[dim]No scheduled posts.[/dim]")
+        return
+
+    table = Table(title="Scheduled Posts", show_lines=True)
+    table.add_column("ID", style="bold")
+    table.add_column("File")
+    table.add_column("Caption", max_width=40)
+    table.add_column("Scheduled")
+    table.add_column("Platforms")
+    table.add_column("Status")
+
+    status_styles = {
+        "pending": "[yellow]pending[/yellow]",
+        "completed": "[green]completed[/green]",
+        "failed": "[red]failed[/red]",
+    }
+
+    for entry in entries:
+        file_name = Path(entry.get("video_path", "")).name
+        caption = entry.get("caption", "")[:37]
+        if len(entry.get("caption", "")) > 37:
+            caption += "..."
+        scheduled = entry.get("scheduled_time", "")
+        if "T" in scheduled:
+            scheduled = scheduled.replace("T", " ").split(".")[0]
+        platforms = ", ".join(entry.get("platforms", [])) or "all"
+        status = status_styles.get(entry.get("status", "pending"), entry.get("status", ""))
+        table.add_row(entry.get("id", "?"), file_name, caption, scheduled, platforms, status)
+
+    console.print(table)
+
+
+@schedule.command("remove")
+@click.argument("entry_id")
+@click.pass_context
+def schedule_remove(ctx: click.Context, entry_id: str):
+    """Remove a scheduled post by ID"""
+    from xpst.schedule_manager import ScheduleManager
+
+    manager = ScheduleManager()
+    if manager.remove(entry_id):
+        console.print(f"[green]✓ Removed scheduled post [bold]{entry_id}[/bold][/green]")
+    else:
+        console.print(f"[red]Post not found:[/red] {entry_id}")
+        sys.exit(EXIT_GENERAL)
+
+
+@schedule.command("run")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show what would be posted without uploading")
+@json_option
+@click.pass_context
+def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
+    """Process all due scheduled posts.
+
+    Fetches posts where scheduled_time <= now and status is pending,
+    then posts each one. Typically called by cron or manually.
+    """
+    from datetime import datetime
+    from xpst.schedule_manager import ScheduleManager
+
+    config_obj = load_config(ctx.obj.get("config_path"))
+    setup_logging(
+        log_level=config_obj.monitoring.log_level,
+        log_file=config_obj.monitoring.log_file,
+    )
+
+    manager = ScheduleManager()
+    due = manager.get_due()
+
+    if not due:
+        if as_json:
+            json_output({"status": "nothing_due", "processed": 0}, True)
+        else:
+            console.print("[dim]No scheduled posts are due.[/dim]")
+        return
+
+    if as_json:
+        results = []
+        for entry in due:
+            results.append({"id": entry["id"], "status": "would_post" if dry_run else "pending"})
+        json_output({"status": "dry_run" if dry_run else "processing", "count": len(due), "posts": results}, True)
+        if dry_run:
+            return
+    else:
+        console.print(f"[bold blue]Found {len(due)} due post(s)[/bold blue]")
+        if dry_run:
+            for entry in due:
+                console.print(f"  Would post: {entry['id']} — {Path(entry['video_path']).name} → {', '.join(entry.get('platforms', ['all']))}")
+            return
+
+    engine = CrossPostEngine(config_obj)
+
+    for entry in due:
+        entry_id = entry["id"]
+        video_path = Path(entry["video_path"])
+        caption = entry["caption"]
+        platforms = entry.get("platforms") or None
+
+        if not video_path.exists():
+            if not as_json:
+                console.print(f"  [red]✗[/red] {entry_id}: file not found — {video_path}")
+            manager.mark_complete(entry_id, success=False, error=f"File not found: {video_path}")
+            continue
+
+        try:
+            result = asyncio.run(engine.post_manual(video_path, caption, platforms))
+            success = result.all_success
+            error_msg = None
+            if not success:
+                failed = [f"{p}: {ur.error}" for p, ur in result.results.items() if not ur.success]
+                error_msg = "; ".join(failed)
+
+            manager.mark_complete(entry_id, success=success, error=error_msg)
+
+            if not as_json:
+                if success:
+                    console.print(f"  [green]✓[/green] {entry_id}: posted successfully")
+                else:
+                    console.print(f"  [yellow]⚠[/yellow] {entry_id}: partial — {error_msg}")
+        except Exception as e:
+            manager.mark_complete(entry_id, success=False, error=str(e))
+            if not as_json:
+                console.print(f"  [red]✗[/red] {entry_id}: {e}")
+
+    if not as_json:
+        console.print(f"\n[green]Processed {len(due)} scheduled post(s)[/green]")
 
 
 def confirm(message: str) -> bool:
