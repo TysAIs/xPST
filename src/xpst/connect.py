@@ -163,7 +163,8 @@ def connect_youtube(config: XPSTConfig) -> bool:
         cred_store = CredentialStore(config.config_dir)
         try:
             cred_store.store("youtube_token", creds.to_json())
-        except Exception:
+        except Exception as e:
+            logger.debug("Unexpected error: %s", e)
             pass  # Keyring optional
 
         console.print("[green]✅ YouTube connected and token saved![/green]")
@@ -226,7 +227,8 @@ def connect_instagram(config: XPSTConfig) -> bool:
                     existing = json.load(f)
                 if "settings" in existing:
                     client.set_settings(existing["settings"])
-            except Exception:
+            except Exception as e:
+                logger.debug("Unexpected error: %s", e)
                 pass
 
         # Attempt login
@@ -286,14 +288,16 @@ def connect_instagram(config: XPSTConfig) -> bool:
         cred_store = CredentialStore(config.config_dir)
         try:
             cred_store.store_json("instagram_session", session_data)
-        except Exception:
+        except Exception as e:
+            logger.debug("Unexpected error: %s", e)
             pass
 
         # Verify connection
         try:
             account = client.account_info()
             console.print(f"[green]✅ Connected as @{account.username} ({account.full_name})[/green]")
-        except Exception:
+        except Exception as e:
+            logger.debug("Unexpected error: %s", e)
             console.print("[green]✅ Instagram connected and session saved![/green]")
 
         return True
@@ -366,7 +370,8 @@ def connect_x(config: XPSTConfig) -> bool:
             try:
                 user = await client.user()
                 screen_name = user.screen_name
-            except Exception:
+            except Exception as e:
+                logger.debug("Unexpected error: %s", e)
                 pass
 
             return screen_name
@@ -379,7 +384,8 @@ def connect_x(config: XPSTConfig) -> bool:
             if cookies_path.exists():
                 cookies_data = json.loads(cookies_path.read_text())
                 cred_store.store_json("x_cookies", cookies_data)
-        except Exception:
+        except Exception as e:
+            logger.debug("Unexpected error: %s", e)
             pass
 
         if screen_name:
@@ -567,7 +573,8 @@ async def test_connections(config: XPSTConfig) -> dict[str, bool]:
         else:
             console.print("  ⚠️  TikTok: yt-dlp not installed")
             results["tiktok"] = False
-    except Exception:
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
         results["tiktok"] = False
 
     return results

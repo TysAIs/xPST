@@ -240,7 +240,8 @@ class ShutdownHandler:
             try:
                 state_tmp.unlink()
                 logger.debug("Cleaned up state.json.tmp")
-            except Exception:
+            except Exception as e:
+                logger.debug("Unexpected error: %s", e)
                 pass
 
     def _cleanup_on_exit(self) -> None:

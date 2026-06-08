@@ -163,7 +163,6 @@ class TikTokSource(VideoSource):
 
         # Check format note for slideshow indicators
         format_note = (data.get("format_note") or "").lower()
-        (data.get("description") or "").lower()
         if "slideshow" in format_note or "photo" in format_note:
             return ContentType.CAROUSEL_IMAGE
 
@@ -497,7 +496,8 @@ class TikTokSource(VideoSource):
                 )
                 if result.returncode == 0:
                     version = result.stdout.strip()
-            except Exception:
+            except Exception as e:
+                logger.debug("Unexpected error: %s", e)
                 pass
 
         # Check username

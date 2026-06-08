@@ -240,9 +240,11 @@ def get_video_duration(video_path: Path) -> float:
     import json
     import subprocess
 
+    from xpst.utils.platform import get_ffprobe_name
+
     try:
         cmd = [
-            "ffprobe",
+            get_ffprobe_name(),
             "-v", "quiet",
             "-print_format", "json",
             "-show_format",

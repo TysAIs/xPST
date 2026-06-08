@@ -264,7 +264,7 @@ class SessionManager:
                 cookies_path.write_text(json.dumps(cookies, default=str))
 
                 return client
-            except Exception:
+            except Exception as e:
                 logger.info("X cookies invalid, need to re-login")
 
         except Exception as e:

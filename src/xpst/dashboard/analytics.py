@@ -331,8 +331,8 @@ class AnalyticsCollector:
                             "shares": 0,
                         }
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to collect platform analytics: %s", e)
 
         return results
 

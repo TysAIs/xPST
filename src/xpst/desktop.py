@@ -76,16 +76,18 @@ def _get_gui_backend() -> str | None:
     elif _SYSTEM == "Windows":
         return "edgechromium"  # WebView2 (Chromium-based, ships with Win10+)
     elif _SYSTEM == "Linux":
-        # Try GTK first (most common), fall back to Qt
+        # Try GTK first (most common), then Qt variants
         try:
             import gi  # noqa: F401
             return "gtk"
         except ImportError:
-            try:
-                from PyQt5 import QtWidgets  # noqa: F401
-                return "qt"
-            except ImportError:
-                return None  # let pywebview figure it out
+            for qt_module in ("PySide6", "PyQt6", "PyQt5"):
+                try:
+                    __import__(qt_module)
+                    return "qt"
+                except ImportError:
+                    continue
+            return None  # let pywebview figure it out
     return None
 
 
@@ -115,7 +117,8 @@ def _start_nicegui_server(port: int, config_dir: str) -> threading.Thread:
     def _run() -> None:
         try:
             start_dashboard(port=port, host="127.0.0.1", config_dir=config_dir)
-        except Exception:
+        except Exception as e:
+            logger.debug("NiceGUI server thread error: %s", e)
             logger.exception("NiceGUI server thread exited with error")
 
     thread = threading.Thread(target=_run, daemon=True, name="nicegui-server")
@@ -148,7 +151,8 @@ def _install_macos_app(icon_path: str | None) -> None:
                     ["sips", "-s", "format", "icns", icon_path, "--out", str(dest_icon)],
                     capture_output=True, timeout=10,
                 )
-            except Exception:
+            except Exception as e:
+                logger.debug("Icon conversion failed, copying as-is: %s", e)
                 shutil.copy2(icon_path, resources / "AppIcon.png")
 
     # Write Info.plist
@@ -215,36 +219,54 @@ Keywords=video;crosspost;social;shorts;
             ["update-desktop-database", str(desktop_dir)],
             capture_output=True, timeout=5,
         )
-    except Exception:
-        pass  # not critical
+    except Exception as e:
+        logger.debug("Desktop database update failed (not critical): %s", e)
 
     logger.info("Linux .desktop entry installed at %s", desktop_file)
 
 
 def _create_windows_shortcut(icon_path: str | None) -> None:
-    """Create a Start Menu shortcut on Windows."""
-    try:
-        import winshell  # noqa: F401
-        from win32com.client import Dispatch  # noqa: F401
-    except ImportError:
-        logger.debug("winshell not available, skipping shortcut creation")
-        return
+    """Create a Start Menu shortcut on Windows.
 
+    Gracefully handles missing winshell or win32com — falls back to
+    creating a simple .bat launcher if COM automation is unavailable.
+    """
     start_menu = Path(os.environ.get("APPDATA", "")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "xPST"
     start_menu.mkdir(parents=True, exist_ok=True)
 
     shortcut_path = start_menu / "xPST.lnk"
-    shell = Dispatch("WScript.Shell")
-    shortcut = shell.CreateShortCut(str(shortcut_path))
-    shortcut.Targetpath = sys.executable
-    shortcut.Arguments = "-m xpst app"
-    shortcut.WorkingDirectory = str(Path.home())
-    shortcut.Description = "xPST — Cross-Platform Studio"
-    if icon_path and Path(icon_path).exists():
-        shortcut.IconLocation = icon_path
-    shortcut.save()
 
-    logger.info("Windows shortcut created at %s", shortcut_path)
+    # Try COM-based shortcut first (requires pywin32)
+    try:
+        from win32com.client import Dispatch  # noqa: F401
+
+        shell = Dispatch("WScript.Shell")
+        shortcut = shell.CreateShortCut(str(shortcut_path))
+        shortcut.Targetpath = sys.executable
+        shortcut.Arguments = "-m xpst app"
+        shortcut.WorkingDirectory = str(Path.home())
+        shortcut.Description = "xPST — Cross-Platform Studio"
+        if icon_path and Path(icon_path).exists():
+            shortcut.IconLocation = icon_path
+        shortcut.save()
+        logger.info("Windows shortcut created at %s", shortcut_path)
+        return
+    except ImportError:
+        logger.debug("win32com not available, trying bat fallback")
+    except Exception as e:
+        logger.warning("COM shortcut creation failed: %s", e)
+
+    # Fallback: create a .bat launcher
+    try:
+        xpst_cmd = shutil.which("xpst") or f'"{sys.executable}" -m xpst'
+        bat_path = start_menu / "xPST.bat"
+        bat_path.write_text(
+            f'@echo off\r\n{xpst_cmd} app %*\r\n',
+            encoding="utf-8",
+        )
+        logger.info("Windows .bat launcher created at %s", bat_path)
+    except Exception as e:
+        logger.debug("Failed to create .bat fallback: %s", e)
 
 
 # ── Main launcher ─────────────────────────────────────────────────────────
@@ -305,7 +327,8 @@ def launch_desktop_app(
             _create_linux_desktop_entry(icon_path)
         elif _SYSTEM == "Windows":
             _create_windows_shortcut(icon_path)
-    except Exception:
+    except Exception as e:
+        logger.debug("Platform integration error: %s", e)
         logger.warning("Failed to install platform integration", exc_info=True)
 
     # ── 5. Create and show the native window ──

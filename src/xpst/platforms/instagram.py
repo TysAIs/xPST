@@ -143,12 +143,14 @@ class InstagramUploader(PlatformUploader):
             thumb_path = video_path.with_suffix(".jpg")
             try:
                 import subprocess
+                from xpst.utils.platform import get_ffmpeg_name
                 subprocess.run(
-                    ["ffmpeg", "-y", "-i", str(video_path), "-ss", "1",
+                    [get_ffmpeg_name(), "-y", "-i", str(video_path), "-ss", "1",
                      "-vframes", "1", "-q:v", "2", str(thumb_path)],
                     capture_output=True, timeout=30,
                 )
-            except Exception:
+            except Exception as e:
+                logger.debug("Unexpected error: %s", e)
                 thumb_path = None
 
             # Upload as Reel (clip)
@@ -232,7 +234,7 @@ class InstagramUploader(PlatformUploader):
                         "full_name": account.full_name,
                     },
                 )
-            except Exception:
+            except Exception as e:
                 return PlatformHealth(
                     platform="instagram",
                     authenticated=False,
@@ -262,7 +264,7 @@ class InstagramUploader(PlatformUploader):
                 error=f"Health check failed: {str(e)[:200]}",
             )
 
-    def delete(self, post_id: str) -> bool:
+    async def delete(self, post_id: str) -> bool:
         """Delete a post from Instagram"""
         try:
             client = self._get_client()

@@ -450,7 +450,8 @@ class XSource(VideoSource):
                 )
                 if result.returncode == 0:
                     version = result.stdout.strip()
-            except Exception:
+            except Exception as e:
+                logger.debug("Unexpected error: %s", e)
                 pass
 
         # Check twikit

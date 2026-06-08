@@ -108,7 +108,7 @@ class PlatformUploader(ABC):
         """
         return True
 
-    def delete(self, post_id: str) -> bool:
+    async def delete(self, post_id: str) -> bool:
         """Delete a post from this platform. Override in subclasses."""
         raise NotImplementedError(f"Delete not implemented for {self.__class__.__name__}")
 

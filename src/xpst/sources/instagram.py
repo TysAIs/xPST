@@ -461,7 +461,8 @@ class InstagramSource(VideoSource):
             try:
                 # Try a simple API call to verify session
                 authenticated = self._client.user_id is not None
-            except Exception:
+            except Exception as e:
+                logger.debug("Unexpected error: %s", e)
                 pass
 
         # Check username config

@@ -252,7 +252,8 @@ class AnalyticsCollector:
                             values = metric.get("values", [])
                             if values:
                                 metric_map[name] = values[0].get("value", 0)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("Unexpected error: %s", e)
                         pass
 
                     info = client.media_info(str(media_pk))

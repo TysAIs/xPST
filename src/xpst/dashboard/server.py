@@ -7,6 +7,7 @@ Supports optional HTTP Basic Auth and Prometheus metrics endpoint.
 
 from __future__ import annotations
 
+import hashlib
 import base64
 import logging
 from pathlib import Path
@@ -33,7 +34,7 @@ def _load_dashboard_auth(config_dir: str) -> tuple[str, str]:
         config_path = str(Path(config_dir).expanduser() / "config.yaml")
         config = XPSTConfig.load(config_path)
         return config.monitoring.dashboard_username, config.monitoring.dashboard_password
-    except Exception:
+    except Exception as e:
         return "", ""
 
 
@@ -121,14 +122,20 @@ def _setup_basic_auth(username: str, password: str) -> None:
             try:
                 decoded = base64.b64decode(auth_header.split(" ", 1)[1]).decode("utf-8")
                 user, pwd = decoded.split(":", 1)
-            except Exception:
+            except Exception as e:
                 return JSONResponse(
                     {"detail": "Invalid authentication"},
                     status_code=401,
                     headers={"WWW-Authenticate": "Basic realm=\"xPST Dashboard\""},
                 )
 
-            if user != username or pwd != password:
+            # Support both hashed (sha256:) and legacy plain-text passwords
+            if password.startswith("sha256:"):
+                pwd_hash = "sha256:" + hashlib.sha256(pwd.encode("utf-8")).hexdigest()
+                password_ok = (pwd_hash == password)
+            else:
+                password_ok = (pwd == password)
+            if user != username or not password_ok:
                 return JSONResponse(
                     {"detail": "Invalid credentials"},
                     status_code=401,

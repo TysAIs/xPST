@@ -21,6 +21,7 @@ from pathlib import Path
 
 from xpst.config import EncodingConfig
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import get_ffmpeg_name, get_ffprobe_name
 
 logger = get_logger(__name__)
 
@@ -32,14 +33,14 @@ class VideoProcessor:
     Handles platform-specific encoding for optimal quality preservation.
     """
 
-    def __init__(self, ffmpeg_path: str = "ffmpeg"):
+    def __init__(self, ffmpeg_path: str | None = None):
         """
         Initialize video processor.
 
         Args:
-            ffmpeg_path: Path to ffmpeg binary
+            ffmpeg_path: Path to ffmpeg binary. Defaults to platform-specific name.
         """
-        self.ffmpeg_path = ffmpeg_path
+        self.ffmpeg_path = ffmpeg_path or get_ffmpeg_name()
         self._verify_ffmpeg()
 
     def _verify_ffmpeg(self) -> None:
@@ -75,7 +76,7 @@ class VideoProcessor:
             Dictionary with video info (width, height, duration, etc.)
         """
         cmd = [
-            "ffprobe",
+            get_ffprobe_name(),
             "-v", "quiet",
             "-print_format", "json",
             "-show_format",
@@ -415,7 +416,8 @@ class VideoProcessor:
                 try:
                     info = self.get_video_info(path)
                     vid_duration = float(info.get("format", {}).get("duration", str(duration_per_image)))
-                except Exception:
+                except Exception as e:
+                    logger.debug("Unexpected error: %s", e)
                     vid_duration = duration_per_image
                 filter_parts.append(
                     f"[{_i}:v]scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"

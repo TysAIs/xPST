@@ -16,12 +16,16 @@ Example config file:
         client_secrets: "~/.xpst/credentials/youtube_client_secrets.json"
 """
 
+import hashlib
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # Default configuration values
 DEFAULT_CONFIG = {
@@ -602,6 +606,15 @@ class XPSTConfig:
         if errors:
             raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))
 
+    def _hashed_password(self) -> str:
+        """Return the dashboard password, hashing it on first save if needed."""
+        pwd = self.monitoring.dashboard_password
+        if not pwd:
+            return ""
+        if pwd.startswith("sha256:"):
+            return pwd
+        return "sha256:" + hashlib.sha256(pwd.encode("utf-8")).hexdigest()
+
     def save(self, config_path: str | None = None) -> None:
         """Save current configuration to a YAML file.
 
@@ -693,7 +706,7 @@ class XPSTConfig:
                 "healthcheck_port": self.monitoring.healthcheck_port,
                 "enable_metrics": self.monitoring.enable_metrics,
                 "dashboard_username": self.monitoring.dashboard_username,
-                "dashboard_password": self.monitoring.dashboard_password,
+                "dashboard_password": self._hashed_password(),
             },
             "schedule": {
                 "check_interval": self.schedule.check_interval,
@@ -720,5 +733,8 @@ class XPSTConfig:
             },
         }
 
-        with open(config_path, "w") as f:
-            yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+        try:
+            with open(config_path, "w") as f:
+                yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+        except OSError as e:
+            logger.warning("Failed to save config: %s", e)

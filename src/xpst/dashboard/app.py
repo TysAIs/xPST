@@ -7,11 +7,14 @@ Pages: Overview · Content Library · Analytics · Connect · Settings
 
 from __future__ import annotations
 
+import logging
 import contextlib
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from nicegui import ui
+
+logger = logging.getLogger(__name__)
 
 from xpst.config import XPSTConfig
 from xpst.dashboard.analytics import (
@@ -787,7 +790,8 @@ def _relative_time(ts_str: str | None) -> str:
         if secs < 86400:
             return f"{int(secs / 3600)}h ago"
         return f"{int(secs / 86400)}d ago"
-    except Exception:
+    except Exception as e:
+        logger.debug("Failed to parse timestamp: %s", e)
         return ts_str[:10] if ts_str else "—"
 
 
@@ -1393,8 +1397,8 @@ def _render_analytics_content(container, collector: AnalyticsCollector, platform
                             hour = dt.hour
                             key = f"{hour:02d}:00"
                             hour_day.setdefault(key, Counter())[day] += 1
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            logger.debug("Failed to parse datetime: %s", e)
 
                 if hour_day:
                     hours = sorted(hour_day.keys())

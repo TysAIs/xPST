@@ -58,16 +58,18 @@ def setup_logging(
     # Remove existing handlers
     root_logger.handlers.clear()
 
-    # Console handler (with rich if available)
+    # Console handler (with rich if available) — always use stderr so stdout stays clean for --json
     if HAS_RICH:
+        stderr_console = Console(stderr=True)
         console_handler = RichHandler(
+            console=stderr_console,
             rich_tracebacks=True,
             show_time=True,
             show_path=False,
         )
         console_handler.setLevel(logging.DEBUG)
     else:
-        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(
             logging.Formatter(

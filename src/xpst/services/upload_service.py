@@ -518,7 +518,8 @@ class UploadService:
             return self.video_processor.encode_for_platform(
                 video_path, output_path, platform, config
             )
-        except Exception:
+        except Exception as e:
+            logger.debug("Encode failed, cleaning up: %s", e)
             # Clean up partial output on ffmpeg failure
             if output_path.exists():
                 try:

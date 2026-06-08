@@ -190,7 +190,7 @@ class AuthManager:
         if token.is_expired and token.is_refreshable:
             try:
                 token = self.refresh(platform)
-            except Exception:
+            except Exception as e:
                 return None
         elif token.is_expired:
             return None
@@ -485,7 +485,8 @@ class AuthManager:
                     data = json.loads(secrets_path.read_text())
                     installed = data.get("installed", data.get("web", {}))
                     return installed.get("client_id", ""), installed.get("client_secret", "")
-            except Exception:
+            except Exception as e:
+                logger.debug("Unexpected error: %s", e)
                 pass
 
         raise ValueError(f"No client credentials found for {platform}")

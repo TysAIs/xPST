@@ -52,7 +52,8 @@ def get_ytdlp_fallback_path() -> Path:
     if sys.platform == "win32":
         return Path.home() / "AppData" / "Local" / "Programs" / "Python" / "Scripts" / "yt-dlp.exe"
     elif sys.platform == "darwin":
-        return Path.home() / "Library" / "Python" / "3.12" / "bin" / "yt-dlp"
+        ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+        return Path.home() / "Library" / "Python" / ver / "bin" / "yt-dlp"
     else:
         return Path.home() / ".local" / "bin" / "yt-dlp"
 

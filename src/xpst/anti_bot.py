@@ -85,37 +85,8 @@ CAPTION_SUFFIXES: dict[str, list[str]] = {
     ],
 }
 
-# Platform-specific caption prefixes (subtle variations)
-CAPTION_PREFIXES: dict[str, list[str]] = {
-    "youtube": [
-        "",  # Most common: no prefix
-        "",
-        "",
-        "",
-        "",
-    ],
-    "instagram": [
-        "",
-        "",
-        "",
-        "",
-        "",
-    ],
-    "x": [
-        "",
-        "",
-        "",
-        "",
-        "",
-    ],
-    "tiktok": [
-        "",
-        "",
-        "",
-        "",
-        "",
-    ],
-}
+# Caption prefixes removed — all entries were empty strings (no-op).
+# Only suffixes are used for caption variation.
 
 
 class AntiBotProtection:
@@ -306,11 +277,7 @@ class AntiBotProtection:
         suffixes = CAPTION_SUFFIXES.get(platform, [""])
         suffix = suffixes[hash_val % len(suffixes)]
 
-        # Select prefix (rare)
-        prefixes = CAPTION_PREFIXES.get(platform, [""])
-        prefix = prefixes[(hash_val >> 4) % len(prefixes)]
-
-        varied = f"{prefix}{caption}{suffix}".strip()
+        varied = f"{caption}{suffix}".strip()
 
         # Log if caption was changed
         if varied != caption:

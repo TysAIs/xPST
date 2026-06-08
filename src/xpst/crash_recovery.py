@@ -221,7 +221,8 @@ class CrashRecoveryManager:
             with open(temp_file, "w") as f:
                 json.dump(checkpoints, f, indent=2)
             os.replace(str(temp_file), str(self.checkpoint_file))
-        except Exception:
+        except Exception as e:
+            logger.warning("Failed to save checkpoint: %s", e)
             if temp_file.exists():
                 temp_file.unlink()
             raise

@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from xpst.utils.platform import get_ffmpeg_name
+
 from rich.console import Console
 from rich.panel import Panel
 
@@ -39,7 +41,7 @@ def check_ffmpeg() -> bool:
         True if ffmpeg binary is found, False otherwise.
     """
 
-    return shutil.which("ffmpeg") is not None
+    return shutil.which(get_ffmpeg_name()) is not None
 
 
 def check_python_version() -> tuple[bool, str]:
@@ -116,12 +118,13 @@ def check_system_requirements() -> bool:
     if check_ffmpeg():
         try:
             result = subprocess.run(
-                ["ffmpeg", "-version"],
+                [get_ffmpeg_name(), "-version"],
                 capture_output=True, text=True, timeout=10,
             )
             first_line = result.stdout.split("\n")[0] if result.stdout else "unknown"
             console.print(f"  ✅ FFmpeg: {first_line}")
-        except Exception:
+        except Exception as e:
+            logger.debug("FFmpeg version check failed: %s", e)
             console.print("  ✅ FFmpeg: installed")
     else:
         console.print("  ❌ FFmpeg not found")
@@ -346,7 +349,7 @@ def run_setup() -> XPSTConfig:
         console.print("[yellow]⚠️  Some requirements are missing. You can still continue.[/yellow]\n")
         if not _confirm("Continue anyway?", default=True):
             console.print("[red]Setup aborted. Please install missing requirements and try again.[/red]")
-            sys.exit(1)
+            sys.exit(4)  # config error
 
     # Step 2: Create directories
     config_dir = create_directory_structure()

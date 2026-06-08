@@ -18,6 +18,7 @@ Uses Click for CLI framework with rich for beautiful output.
 """
 
 import asyncio
+import json as _json
 import sys
 from pathlib import Path
 
@@ -35,6 +36,33 @@ from xpst.utils.sessions import SessionManager
 
 console = Console()
 logger = get_logger(__name__)
+
+
+# ── Meaningful exit codes ───────────────────────
+EXIT_SUCCESS = 0
+EXIT_GENERAL = 1
+EXIT_AUTH_FAILURE = 2
+EXIT_RATE_LIMIT = 3
+EXIT_CONFIG_ERROR = 4
+EXIT_PLATFORM_UNAVAILABLE = 10
+
+
+def json_output(data: object, as_json: bool) -> None:
+    """Print *data* as JSON when ``--json`` is passed, otherwise Rich console.
+
+    Args:
+        data: Any JSON-serialisable object.
+        as_json: If ``True``, print compact JSON; otherwise print nothing
+            (caller is responsible for Rich output in the ``else`` branch).
+    """
+    if as_json:
+        click.echo(_json.dumps(data, default=str, ensure_ascii=False))
+
+
+# Shared Click decorator that adds ``--json`` to every command
+json_option = click.option(
+    "--json", "as_json", is_flag=True, help="Machine-readable JSON output"
+)
 
 
 def load_config(config_path: str | None = None) -> XPSTConfig:
@@ -55,18 +83,20 @@ def load_config(config_path: str | None = None) -> XPSTConfig:
         return XPSTConfig.load(config_path)
     except ValueError as e:
         console.print(f"[red]Configuration error:[/red] {e}")
-        sys.exit(1)
+        sys.exit(EXIT_CONFIG_ERROR)
     except Exception as e:
         console.print(f"[red]Failed to load config:[/red] {e}")
-        sys.exit(1)
+        sys.exit(EXIT_CONFIG_ERROR)
 
 
 @click.group()
 @click.option("--config", "-c", help="Path to config file")
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
+@click.option("--quiet", "-q", is_flag=True, help="Suppress decorative output")
+@click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
 @click.version_option(version="0.1.0", prog_name="xPST")
 @click.pass_context
-def main(ctx: click.Context, config: str | None, verbose: bool):
+def main(ctx: click.Context, config: str | None, verbose: bool, quiet: bool, json_output: bool):
     """
     xPST - Enterprise-grade cross-posting for short-form video
 
@@ -76,9 +106,13 @@ def main(ctx: click.Context, config: str | None, verbose: bool):
     ctx.ensure_object(dict)
     ctx.obj["config_path"] = config
     ctx.obj["verbose"] = verbose
+    ctx.obj["quiet"] = quiet
+
+    # Auto-enable JSON mode when stdout is not a TTY (piped)
+    ctx.obj["json"] = json_output or not sys.stdout.isatty()
 
     # Setup logging
-    log_level = "DEBUG" if verbose else "INFO"
+    log_level = "DEBUG" if verbose else "WARNING" if quiet else "INFO"
     setup_logging(log_level=log_level)
 
 
@@ -124,10 +158,21 @@ def update(check_only: bool):
 
 
 @main.command()
-def version():
+@json_option
+def version(as_json: bool):
     """Show xPST version and all dependency versions"""
-    from xpst.updater import display_version_info
-    display_version_info()
+    if as_json:
+        from xpst.updater import PACKAGE_IMPORTS, get_installed_version, get_xpst_version
+        info = {
+            "xpst": get_xpst_version(),
+            "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        }
+        for name in PACKAGE_IMPORTS:
+            info[name] = get_installed_version(name)
+        json_output(info, True)
+    else:
+        from xpst.updater import display_version_info
+        display_version_info()
 
 
 # ──────────────────────────────────────────────
@@ -136,31 +181,71 @@ def version():
 
 @main.command()
 @click.option("--bidirectional", "-b", is_flag=True, help="Check ALL sources (not just TikTok) for bidirectional cross-posting")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
+@json_option
 @click.pass_context
-def run(ctx: click.Context, bidirectional: bool):
+def run(ctx: click.Context, bidirectional: bool, dry_run: bool, as_json: bool):
     """Check for new videos and post them"""
     config = load_config(ctx.obj.get("config_path"))
+    quiet = ctx.obj.get("quiet", False)
     setup_logging(
         log_level=config.monitoring.log_level,
         log_file=config.monitoring.log_file,
     )
 
+    engine = CrossPostEngine(config)
+
+    if dry_run:
+        if bidirectional:
+            monitor = engine._get_monitor()
+            new_posts = asyncio.run(monitor.check_all_sources(5))
+            if as_json:
+                json_output({"dry_run": True, "posts": [{"source": p.source_platform, "video_id": p.video_id, "caption": p.caption[:50], "targets": list(p.target_platforms)} for p in new_posts]}, True)
+            elif new_posts:
+                if not quiet:
+                    console.print("[bold blue]Dry run — would cross-post:[/bold blue]")
+                for p in new_posts:
+                    console.print(f"  {p.source_platform}:{p.video_id} → {', '.join(p.target_platforms)}")
+            else:
+                if not quiet:
+                    console.print("[green]No new videos to post[/green]")
+        else:
+            videos = asyncio.run(engine.source_service.fetch_new_videos("tiktok", 5))
+            new_videos = engine.source_service.filter_new(videos, engine.state, engine._platforms) if videos else []
+            if as_json:
+                json_output({"dry_run": True, "videos": [{"video_id": v.video_id, "caption": v.caption[:50], "targets": list(engine._platforms.keys())} for v in new_videos]}, True)
+            elif new_videos:
+                if not quiet:
+                    console.print("[bold blue]Dry run — would post:[/bold blue]")
+                for v in new_videos:
+                    console.print(f"  {v.video_id}: {v.caption[:50]} → {', '.join(engine._platforms.keys())}")
+            else:
+                if not quiet:
+                    console.print("[green]No new videos to post[/green]")
+        return
+
     if bidirectional:
-        console.print("[bold blue]xPST - Bidirectional cross-posting check...[/bold blue]")
-        engine = CrossPostEngine(config)
+        if not as_json and not quiet:
+            console.print("[bold blue]xPST - Bidirectional cross-posting check...[/bold blue]")
         results = asyncio.run(engine.check_and_post_bidirectional())
     else:
-        console.print("[bold blue]xPST - Checking for new videos...[/bold blue]")
-        engine = CrossPostEngine(config)
+        if not as_json and not quiet:
+            console.print("[bold blue]xPST - Checking for new videos...[/bold blue]")
         results = asyncio.run(engine.check_and_post())
 
     if not results:
-        console.print("[green]No new videos to post[/green]")
+        if as_json:
+            json_output({"status": "no_new_videos", "results": []}, True)
+        elif not quiet:
+            console.print("[green]No new videos to post[/green]")
         return
 
-    # Display results
-    for result in results:
-        _display_result(result)
+    if as_json:
+        out = [_result_to_dict(r) for r in results]
+        json_output({"status": "ok", "results": out}, True)
+    else:
+        for result in results:
+            _display_result(result)
 
 
 @main.command()
@@ -227,10 +312,13 @@ def watch(ctx: click.Context, interval: int | None, bidirectional: bool):
 @click.option("--video", "-v", required=True, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
 @click.option("--caption", "-c", required=True, help="Video caption")
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
+@json_option
 @click.pass_context
-def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: str | None):
+def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: str | None, dry_run: bool, as_json: bool):
     """Manually post a video or carousel (multiple --video flags)"""
     config = load_config(ctx.obj.get("config_path"))
+    quiet = ctx.obj.get("quiet", False)
     setup_logging(
         log_level=config.monitoring.log_level,
         log_file=config.monitoring.log_file,
@@ -239,10 +327,34 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
     media_paths = [Path(v) for v in video]
     platform_list = platforms.split(",") if platforms else None
 
-    if len(media_paths) > 1:
-        console.print(f"[bold blue]Posting carousel ({len(media_paths)} items) to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
-    else:
-        console.print(f"[bold blue]Posting to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
+    if dry_run:
+        engine = CrossPostEngine(config)
+        targets = platform_list or list(engine._platforms.keys())
+        info = {
+            "dry_run": True,
+            "video": str(media_paths[0]),
+            "caption": caption[:80],
+            "carousel": len(media_paths) > 1,
+            "items": len(media_paths),
+            "targets": targets,
+        }
+        if as_json:
+            json_output(info, True)
+        else:
+            if not quiet:
+                console.print("[bold blue]Dry run — would post:[/bold blue]")
+            console.print(f"  File: {media_paths[0]}")
+            if len(media_paths) > 1:
+                console.print(f"  Carousel: {len(media_paths)} items")
+            console.print(f"  Caption: {caption[:80]}")
+            console.print(f"  Targets: {', '.join(targets)}")
+        return
+
+    if not as_json and not quiet:
+        if len(media_paths) > 1:
+            console.print(f"[bold blue]Posting carousel ({len(media_paths)} items) to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
+        else:
+            console.print(f"[bold blue]Posting to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
 
     engine = CrossPostEngine(config)
 
@@ -251,16 +363,22 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
     else:
         result = asyncio.run(engine.post_manual(media_paths[0], caption, platform_list))
 
-    _display_result(result)
+    if as_json:
+        json_output(_result_to_dict(result), True)
+    else:
+        _display_result(result)
 
 
 @main.command()
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms")
 @click.option("--limit", "-l", default=10, help="Maximum videos to backfill")
+@click.option("--dry-run", "dry_run", is_flag=True, help="Show what would be backfilled without uploading")
+@json_option
 @click.pass_context
-def backfill(ctx: click.Context, platforms: str | None, limit: int):
+def backfill(ctx: click.Context, platforms: str | None, limit: int, dry_run: bool, as_json: bool):
     """Retry failed or incomplete posts"""
     config = load_config(ctx.obj.get("config_path"))
+    quiet = ctx.obj.get("quiet", False)
     setup_logging(
         log_level=config.monitoring.log_level,
         log_file=config.monitoring.log_file,
@@ -268,26 +386,54 @@ def backfill(ctx: click.Context, platforms: str | None, limit: int):
 
     platform_list = platforms.split(",") if platforms else None
 
-    console.print(f"[bold blue]Backfilling (limit: {limit})...[/bold blue]")
-
     engine = CrossPostEngine(config)
+
+    if dry_run:
+        target_platforms = platform_list or list(engine._platforms.keys())
+        # Find videos that need backfilling
+        candidates = []
+        for video_id, video_data in list(engine.state.state["posted_videos"].items())[:limit]:
+            missing = [p for p in target_platforms if p not in video_data.get("posted_to", {})]
+            if missing:
+                candidates.append({"video_id": video_id, "missing_platforms": missing})
+        if as_json:
+            json_output({"dry_run": True, "candidates": candidates}, True)
+        else:
+            if not quiet:
+                console.print(f"[bold blue]Dry run — {len(candidates)} videos need backfilling:[/bold blue]")
+            for c in candidates:
+                console.print(f"  {c['video_id']} → {', '.join(c['missing_platforms'])}")
+        return
+
+    if not as_json and not quiet:
+        console.print(f"[bold blue]Backfilling (limit: {limit})...[/bold blue]")
+
     results = asyncio.run(engine.backfill(platform_list, limit))
 
-    for result in results:
-        _display_result(result)
+    if as_json:
+        out = [_result_to_dict(r) for r in results]
+        json_output({"status": "ok", "results": out}, True)
+    else:
+        for result in results:
+            _display_result(result)
 
 
 @main.command()
+@json_option
 @click.pass_context
-def status(ctx: click.Context):
+def status(ctx: click.Context, as_json: bool):
     """Show health status"""
     config = load_config(ctx.obj.get("config_path"))
-
-    console.print("[bold blue]xPST Health Status[/bold blue]\n")
 
     # Load state
     state = StateManager(config.config_dir)
     stats = state.get_statistics()
+
+    if as_json:
+        json_output(stats, True)
+        return
+
+    console.print("[bold blue]xPST Health Status[/bold blue]\n")
 
     # Create status table
     table = Table(title="Statistics")
@@ -343,8 +489,9 @@ def status(ctx: click.Context):
 
 
 @main.command()
+@json_option
 @click.pass_context
-def health(ctx: click.Context):
+def health(ctx: click.Context, as_json: bool):
     """Test connectivity to all platforms (no uploads)"""
     config = load_config(ctx.obj.get("config_path"))
     setup_logging(
@@ -352,11 +499,16 @@ def health(ctx: click.Context):
         log_file=config.monitoring.log_file,
     )
 
-    console.print("[bold blue]xPST - Platform Health Check[/bold blue]\n")
-    console.print("[dim]Testing connectivity to all platforms (no uploads)...[/dim]\n")
+    if not as_json:
+        console.print("[bold blue]xPST - Platform Health Check[/bold blue]\n")
+        console.print("[dim]Testing connectivity to all platforms (no uploads)...[/dim]\n")
 
     engine = CrossPostEngine(config)
     health_data = asyncio.run(engine.check_health())
+
+    if as_json:
+        json_output(health_data, True)
+        return
 
     # ── TikTok Source ──
     console.print("[bold]TikTok Source:[/bold]")
@@ -468,7 +620,7 @@ def connect(ctx: click.Context, platform: str | None, test_only: bool):
     platforms = [platform] if platform else None
     success = run_connect(platforms=platforms, test_only=test_only)
     if not success:
-        sys.exit(1)
+        sys.exit(EXIT_AUTH_FAILURE)
 
 
 # ──────────────────────────────────────────────
@@ -491,7 +643,7 @@ def auth(ctx: click.Context, platform: str | None):
     if platform not in valid_platforms:
         click.echo(f"Unknown platform: {platform}")
         click.echo(f"Valid platforms: {', '.join(sorted(valid_platforms))}")
-        ctx.exit(1)
+        ctx.exit(EXIT_CONFIG_ERROR)
         return
 
     config = load_config(ctx.obj.get("config_path"))
@@ -509,20 +661,40 @@ def auth(ctx: click.Context, platform: str | None):
 
 
 @auth.command("status")
+@json_option
 @click.pass_context
-def auth_status(ctx: click.Context):
+def auth_status(ctx: click.Context, as_json: bool):
     """Show authentication and quota status for all platforms"""
     config = load_config(ctx.obj.get("config_path"))
-
-    console.print("[bold blue]xPST Authentication Status[/bold blue]\n")
 
     # Credential store status
     cred_store = CredentialStore(config.config_dir)
     quota_mgr = QuotaManager(config.config_dir)
 
-    # Credential store info
     stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (fallback)"
+
+    if as_json:
+        data: dict = {
+            "credential_storage": storage_type,
+            "stored_credentials": stored_keys,
+            "platforms": {},
+        }
+        yt_creds = cred_store.retrieve("youtube_token")
+        x_creds = cred_store.retrieve_json("x_cookies")
+        ig_creds = cred_store.retrieve_json("instagram_session")
+        for plat, creds in [("youtube", yt_creds), ("x", x_creds), ("instagram", ig_creds)]:
+            remaining = quota_mgr.get_remaining(plat)
+            data["platforms"][plat] = {
+                "authenticated": bool(creds),
+                "quota_remaining": remaining.get("daily", "N/A"),
+            }
+        json_output(data, True)
+        return
+
+    console.print("[bold blue]xPST Authentication Status[/bold blue]\n")
+
+    # Credential store info
     console.print(f"[bold]Credential Storage:[/bold] {storage_type}")
     console.print(f"[bold]Stored Credentials:[/bold] {len(stored_keys)}")
     for key in stored_keys:
@@ -699,19 +871,27 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool):
 
 
 @main.command()
+@json_option
 @click.pass_context
-def logs(ctx: click.Context):
+def logs(ctx: click.Context, as_json: bool):
     """View recent logs"""
     config = load_config(ctx.obj.get("config_path"))
     log_file = Path(config.monitoring.log_file).expanduser()
 
     if not log_file.exists():
-        console.print("[yellow]No log file found[/yellow]")
+        if as_json:
+            json_output({"logs": [], "error": "No log file found"}, True)
+        else:
+            console.print("[yellow]No log file found[/yellow]")
         return
 
     # Show last 50 lines
     with open(log_file) as f:
         lines = f.readlines()
+
+    if as_json:
+        json_output({"logs": [l.rstrip() for l in lines[-50:]]}, True)
+    else:
         for line in lines[-50:]:
             console.print(line.rstrip())
 
@@ -720,12 +900,13 @@ def logs(ctx: click.Context):
 @click.argument('video_id')
 @click.option('--platform', '-p', help='Platform to delete from (default: all)')
 @click.option('--yes', '-y', is_flag=True, help='Skip confirmation')
+@json_option
 @click.pass_context
-def delete(ctx: click.Context, video_id: str, platform: str, yes: bool):
+def delete(ctx: click.Context, video_id: str, platform: str, yes: bool, as_json: bool):
     """Delete a posted video from platforms"""
     import asyncio
 
-    if not yes:
+    if not yes and not as_json:
         click.confirm(f'Delete {video_id} from {platform or "all platforms"}?', abort=True)
 
     config = load_config(ctx.obj.get("config_path"))
@@ -733,16 +914,22 @@ def delete(ctx: click.Context, video_id: str, platform: str, yes: bool):
 
     platforms = [platform] if platform else list(engine._platforms.keys())
 
-    async def do_delete() -> None:
+    async def do_delete() -> list[dict]:
         """Execute deletion across all target platforms."""
+        results = []
         for p in platforms:
             result = await engine.delete_post(video_id, p)
-            if result:
-                click.echo(f'  ✓ Deleted from {p}')
-            else:
-                click.echo(f'  ✗ Failed to delete from {p}')
+            results.append({"platform": p, "deleted": result})
+            if not as_json:
+                if result:
+                    click.echo(f'  ✓ Deleted from {p}')
+                else:
+                    click.echo(f'  ✗ Failed to delete from {p}')
+        return results
 
-    asyncio.run(do_delete())
+    results = asyncio.run(do_delete())
+    if as_json:
+        json_output({"video_id": video_id, "results": results}, True)
 
 
 @main.command()
@@ -758,8 +945,8 @@ def dashboard(ctx: click.Context, port: int):
         try:
             cfg = load_config(config_path)
             config_dir = cfg.config_dir
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not load config for dashboard: %s", e)
 
     console.print(f"[bold blue]Starting xPST Dashboard on http://localhost:{port}[/bold blue]")
     console.print("[dim]Press Ctrl+C to stop[/dim]\n")
@@ -786,8 +973,8 @@ def app(ctx: click.Context, port: int | None):
         try:
             cfg = load_config(config_path)
             config_dir = cfg.config_dir
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not load config for desktop app: %s", e)
 
     # Try native desktop window first, fall back to browser
     try:
@@ -801,12 +988,43 @@ def app(ctx: click.Context, port: int | None):
         launch_browser_fallback(config_dir=config_dir, port=port or 8080)
     except RuntimeError as e:
         console.print(f"[red]{e}[/red]")
-        sys.exit(1)
+        sys.exit(EXIT_PLATFORM_UNAVAILABLE)
+
+
+# ──────────────────────────────────────────────
+# MCP Server Command
+# ──────────────────────────────────────────────
+
+@main.command()
+def mcp():
+    """Start MCP (Model Context Protocol) server over stdio"""
+    from xpst.mcp_server import main as mcp_main
+    mcp_main()
 
 
 # ──────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────
+
+def _result_to_dict(result: CrossPostResult) -> dict:
+    """Convert a CrossPostResult to a JSON-serialisable dict."""
+    return {
+        "video_id": result.video_id,
+        "caption": result.caption,
+        "all_success": result.all_success,
+        "partial_success": result.partial_success,
+        "results": {
+            platform: {
+                "success": ur.success,
+                "post_url": ur.post_url,
+                "post_id": ur.post_id,
+                "error": ur.error,
+                "platform": ur.platform,
+            }
+            for platform, ur in result.results.items()
+        },
+    }
+
 
 def _display_result(result: CrossPostResult) -> None:
     """Display a cross-posting result as a rich table.
@@ -842,6 +1060,26 @@ def _display_result(result: CrossPostResult) -> None:
             )
 
     console.print(table)
+
+
+def _result_to_dict(result: CrossPostResult) -> dict:
+    """Convert a CrossPostResult to a plain dict for JSON output."""
+    platforms = {}
+    for platform, ur in result.results.items():
+        platforms[platform] = {
+            "success": ur.success,
+            "post_url": ur.post_url,
+            "post_id": ur.post_id,
+            "error": ur.error,
+            "platform": ur.platform,
+        }
+    return {
+        "video_id": result.video_id,
+        "caption": result.caption[:80],
+        "all_success": result.all_success,
+        "partial_success": result.partial_success,
+        "platforms": platforms,
+    }
 
 
 def _check_crash_recovery(engine: CrossPostEngine) -> None:

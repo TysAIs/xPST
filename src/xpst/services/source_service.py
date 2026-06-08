@@ -10,6 +10,7 @@ from xpst.config import XPSTConfig
 from xpst.sources.base import VideoMetadata, VideoSource
 from xpst.state import StateManager
 from xpst.utils.logger import get_logger
+from typing import Any
 
 logger = get_logger(__name__)
 
@@ -114,7 +115,7 @@ class SourceService:
         self,
         videos: list[VideoMetadata],
         state: StateManager,
-        platforms: dict[str, any],
+        platforms: dict[str, Any],
     ) -> list[VideoMetadata]:
         """Filter videos to only those not yet fully posted.
 

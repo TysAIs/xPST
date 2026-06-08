@@ -101,3 +101,4 @@ Thumbs.db
 # XPST runtime data (user-specific, never commit)
 .xpst/
 .crosspstr/
+graphify-out/

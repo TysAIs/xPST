@@ -721,7 +721,7 @@ class CrossPostEngine:
             return False
 
         try:
-            result = uploader.delete(post_id)
+            result = await uploader.delete(post_id)
             if result:
                 self.state.remove_post(video_id, platform)
                 self.state.save()

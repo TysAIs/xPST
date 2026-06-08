@@ -165,12 +165,15 @@ class QuotaManager:
 
     def save(self) -> None:
         """Save quotas to file"""
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        data = {
-            name: quota.to_dict()
-            for name, quota in self.quotas.items()
-        }
-        self.state_file.write_text(json.dumps(data, indent=2))
+        try:
+            self.state_dir.mkdir(parents=True, exist_ok=True)
+            data = {
+                name: quota.to_dict()
+                for name, quota in self.quotas.items()
+            }
+            self.state_file.write_text(json.dumps(data, indent=2))
+        except OSError as e:
+            logger.warning("Failed to save quota state: %s", e)
 
     def can_upload(self, platform: str) -> bool:
         """

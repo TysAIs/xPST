@@ -63,8 +63,8 @@ def get_installed_version(package_name: str) -> str | None:
         ver = get_version(package_name)
         if ver:
             return ver
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Could not get version for %s: %s", package_name, e)
 
     # Fallback: try module attributes
     import_name = PACKAGE_IMPORTS.get(package_name, package_name)
@@ -119,8 +119,8 @@ def get_latest_version(package_name: str) -> str | None:
         with urllib.request.urlopen(url, timeout=10) as resp:
             data = json.loads(resp.read())
             return data.get("info", {}).get("version")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Failed to check PyPI for %s: %s", package_name, e)
 
     return None
 
@@ -258,11 +258,12 @@ def display_version_info() -> None:
     table.add_row("Python", f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}", "[green]✓[/green]")
 
     # FFmpeg
+    from xpst.utils.platform import get_ffmpeg_name
     import shutil
-    if shutil.which("ffmpeg"):
+    if shutil.which(get_ffmpeg_name()):
         try:
             result = subprocess.run(
-                ["ffmpeg", "-version"],
+                [get_ffmpeg_name(), "-version"],
                 capture_output=True, text=True, timeout=5,
             )
             first_line = result.stdout.split("\n")[0] if result.stdout else "installed"
@@ -273,7 +274,8 @@ def display_version_info() -> None:
                 if len(parts) > 1:
                     ver_str = parts[1].strip().split(" ")[0]
             table.add_row("FFmpeg", ver_str, "[green]✓[/green]")
-        except Exception:
+        except Exception as e:
+            logger.debug("FFmpeg version display failed: %s", e)
             table.add_row("FFmpeg", "installed", "[green]✓[/green]")
     else:
         table.add_row("FFmpeg", "[dim]not found[/dim]", "[red]✗[/red]")

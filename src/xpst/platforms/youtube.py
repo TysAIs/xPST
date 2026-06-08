@@ -31,15 +31,6 @@ logger = get_logger(__name__)
 
 class YouTubeUploader(PlatformUploader):
     """YouTube Shorts uploader with OAuth2 authentication and quality encoding."""
-    """
-    YouTube Shorts uploader.
-
-    Features:
-    - OAuth2 authentication with automatic token refresh
-    - Resumable uploads for large files
-    - Automatic #Shorts tag addition
-    - Quota tracking (YouTube API has daily limits)
-    """
 
     # YouTube API scopes needed for video upload
     SCOPES = [
@@ -387,7 +378,7 @@ class YouTubeUploader(PlatformUploader):
                 error=f"Health check failed: {str(e)[:200]}",
             )
 
-    def delete(self, post_id: str) -> bool:
+    async def delete(self, post_id: str) -> bool:
         """Delete a video from YouTube"""
         try:
             service = self._get_service()

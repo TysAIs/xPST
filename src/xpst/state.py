@@ -468,33 +468,34 @@ class StateManager:
             tiktok_url: Original TikTok URL
             content_hash: Content hash for deduplication
         """
-        if video_id not in self._state["posted_videos"]:
-            self._state["posted_videos"][video_id] = {
-                "tiktok_url": tiktok_url,
-                "caption": caption,
-                "posted_to": {},
-                "downloaded_at": datetime.now().isoformat(),
-                "last_attempt": datetime.now().isoformat(),
-                "content_hash": content_hash,
+        with self._save_lock:
+            if video_id not in self._state["posted_videos"]:
+                self._state["posted_videos"][video_id] = {
+                    "tiktok_url": tiktok_url,
+                    "caption": caption,
+                    "posted_to": {},
+                    "downloaded_at": datetime.now().isoformat(),
+                    "last_attempt": datetime.now().isoformat(),
+                    "content_hash": content_hash,
+                }
+
+            video = self._state["posted_videos"][video_id]
+            video["posted_to"][platform] = {
+                "id": post_id,
+                "url": post_url,
+                "timestamp": datetime.now().isoformat(),
             }
+            video["last_attempt"] = datetime.now().isoformat()
 
-        video = self._state["posted_videos"][video_id]
-        video["posted_to"][platform] = {
-            "id": post_id,
-            "url": post_url,
-            "timestamp": datetime.now().isoformat(),
-        }
-        video["last_attempt"] = datetime.now().isoformat()
+            # Update content hash index
+            if content_hash:
+                video["content_hash"] = content_hash
+                if "content_hashes" not in self._state:
+                    self._state["content_hashes"] = {}
+                self._state["content_hashes"][content_hash] = video_id
 
-        # Update content hash index
-        if content_hash:
-            video["content_hash"] = content_hash
-            if "content_hashes" not in self._state:
-                self._state["content_hashes"] = {}
-            self._state["content_hashes"][content_hash] = video_id
-
-        # Update health
-        self._state["health"]["total_processed"] += 1
+            # Update health
+            self._state["health"]["total_processed"] += 1
 
     def mark_video_failed(self, video_id: str, platform: str, error: str) -> None:
         """
@@ -505,23 +506,24 @@ class StateManager:
             platform: Platform name
             error: Error message
         """
-        if video_id not in self._state["posted_videos"]:
-            self._state["posted_videos"][video_id] = {
-                "tiktok_url": None,
-                "caption": None,
-                "posted_to": {},
-                "downloaded_at": None,
-                "last_attempt": datetime.now().isoformat(),
-            }
+        with self._save_lock:
+            if video_id not in self._state["posted_videos"]:
+                self._state["posted_videos"][video_id] = {
+                    "tiktok_url": None,
+                    "caption": None,
+                    "posted_to": {},
+                    "downloaded_at": None,
+                    "last_attempt": datetime.now().isoformat(),
+                }
 
-        video = self._state["posted_videos"][video_id]
-        video["last_attempt"] = datetime.now().isoformat()
+            video = self._state["posted_videos"][video_id]
+            video["last_attempt"] = datetime.now().isoformat()
 
-        # Update platform health
-        platform_health = self._state["health"]["platforms"].get(platform)
-        if platform_health:
-            platform_health["failures"] += 1
-            platform_health["last_error"] = error
+            # Update platform health
+            platform_health = self._state["health"]["platforms"].get(platform)
+            if platform_health:
+                platform_health["failures"] += 1
+                platform_health["last_error"] = error
 
     def update_platform_health(self, platform: str, success: bool) -> None:
         """
@@ -531,22 +533,23 @@ class StateManager:
             platform: Platform name
             success: Whether the last operation was successful
         """
-        platform_health = self._state["health"]["platforms"].get(platform)
-        if not platform_health:
-            return
+        with self._save_lock:
+            platform_health = self._state["health"]["platforms"].get(platform)
+            if not platform_health:
+                return
 
-        if success:
-            platform_health["status"] = "ok"
-            platform_health["last_success"] = datetime.now().isoformat()
-            platform_health["failures"] = 0
-            platform_health["circuit_breaker_open"] = False
-        else:
-            platform_health["failures"] += 1
-            platform_health["last_failure"] = datetime.now().isoformat()
-            # Open circuit breaker after 5 consecutive failures.
-            # This threshold matches the CircuitBreakerManager default.
-            if platform_health["failures"] >= 5:
-                platform_health["circuit_breaker_open"] = True
+            if success:
+                platform_health["status"] = "ok"
+                platform_health["last_success"] = datetime.now().isoformat()
+                platform_health["failures"] = 0
+                platform_health["circuit_breaker_open"] = False
+            else:
+                platform_health["failures"] += 1
+                platform_health["last_failure"] = datetime.now().isoformat()
+                # Open circuit breaker after 5 consecutive failures.
+                # This threshold matches the CircuitBreakerManager default.
+                if platform_health["failures"] >= 5:
+                    platform_health["circuit_breaker_open"] = True
 
     def get_platform_health(self, platform: str) -> dict[str, Any]:
         """

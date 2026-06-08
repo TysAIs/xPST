@@ -331,15 +331,10 @@ class TestMissingFiles:
         with pytest.raises(RuntimeError, match="FFmpeg not found"):
             VideoProcessor(ffmpeg_path="/nonexistent/ffmpeg")
 
-    def test_ffmpeg_empty_string_path(self):
-        """VideoProcessor with empty string ffmpeg path.
-
-        BUG: Raises PermissionError instead of RuntimeError because
-        _verify_ffmpeg only catches FileNotFoundError, not PermissionError.
-        An empty string path causes subprocess to try to execute ''.
-        """
-        with pytest.raises((RuntimeError, PermissionError)):
-            VideoProcessor(ffmpeg_path="")
+    def test_ffmpeg_empty_string_falls_back(self):
+        """VideoProcessor with empty string falls back to platform default."""
+        vp = VideoProcessor(ffmpeg_path="")
+        assert vp.ffmpeg_path  # resolved to platform default, not empty
 
     def test_quota_load_from_nonexistent(self, tmp_path):
         """QuotaManager with no existing quota file."""

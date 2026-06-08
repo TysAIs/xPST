@@ -185,7 +185,7 @@ class XUploader(PlatformUploader):
                         "user_id": user.id,
                     },
                 )
-            except Exception:
+            except Exception as e:
                 # Cookies might be expired
                 return PlatformHealth(
                     platform="x",
@@ -209,16 +209,11 @@ class XUploader(PlatformUploader):
                 error=f"Health check failed: {str(e)[:200]}",
             )
 
-    def delete(self, post_id: str) -> bool:
+    async def delete(self, post_id: str) -> bool:
         """Delete a tweet from X"""
         try:
             client = self._get_client()
-            import asyncio
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(client.delete_tweet(post_id))
-            finally:
-                loop.close()
+            await client.delete_tweet(post_id)
             logger.info(f"Deleted X tweet: {post_id}")
             return True
         except Exception as e:
