@@ -1,8 +1,8 @@
-﻿name: CI
+name: Full CI
 
 on:
   push:
-    branches: ["main", "codex/**"]
+    branches: ["main"]
   pull_request:
   workflow_dispatch:
 
