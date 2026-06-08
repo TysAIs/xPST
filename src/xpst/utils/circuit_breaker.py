@@ -285,8 +285,9 @@ class CircuitBreakerManager:
             error: Error message for diagnostics.
         """
 
-        if name in self._breakers:
-            self._breakers[name].record_failure(error)
+        if name not in self._breakers:
+            self._breakers[name] = CircuitBreaker(name=name)
+        self._breakers[name].record_failure(error)
 
     def reset(self, name: str) -> None:
         """Reset a circuit breaker"""
