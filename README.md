@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="docs/assets/xpst-horizontal.png" alt="xPST — Cross-Platform Studio" width="400">
 </p>
 
@@ -10,9 +10,9 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green)
-![Tests](https://img.shields.io/badge/tests-760%20passing-brightgreen)
-![Coverage](https://img.shields.io/codecov/c/github/xPSTOwner/xPST?label=coverage)
-![Stars](https://img.shields.io/github/stars/xPSTOwner/xPST?style=social)
+![Tests](https://img.shields.io/badge/tests-787%20passing-brightgreen)
+![Coverage](https://img.shields.io/codecov/c/github/TysAIs/xPST?label=coverage)
+![Stars](https://img.shields.io/github/stars/TysAIs/xPST?style=social)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
 ![Python Versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)
 ![MCP Server](https://img.shields.io/badge/MCP-server-orange)
@@ -66,7 +66,7 @@ xpst setup
 xpst run
 
 # Or from source (development)
-git clone https://github.com/xPSTOwner/xPST.git
+git clone https://github.com/TysAIs/xPST.git
 cd ~/XPST
 pip install -e .
 xpst setup
@@ -95,7 +95,7 @@ xpst watch
 
 ## CLI Commands
 
-xPST provides 16 commands for complete control over your cross-posting workflow.
+xPST provides 21 commands for complete control over your cross-posting workflow.
 
 ### Setup and Maintenance
 
@@ -450,12 +450,14 @@ export XPST_RATE_LIMITS_YOUTUBE="10"
 
 xPST takes a **local-first, zero-trust** approach to security:
 
-- **OS keychain storage** — credentials are stored in your operating system's secure keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager). Falls back to encrypted file storage if keychain is unavailable.
+- **OS keychain storage** — credentials are stored in your operating system's secure keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager). If the keychain is unavailable, xPST falls back to local JSON files protected by OS filesystem permissions.
 - **No passwords in config** — the config file references credential paths, never stores secrets directly.
 - **No cloud servers** — your content, credentials, and state never leave your machine. There is no xPST cloud service.
 - **No third-party OAuth sharing** — Instagram and X use your own browser cookies. Only YouTube uses a standard OAuth 2.0 flow (your own Google Cloud project).
 - **Atomic state writes** — state files are written atomically (write-then-rename) to prevent corruption.
 - **Pidfile locking** — prevents concurrent instances from corrupting shared state.
+
+See [Security Policy](SECURITY.md), [Privacy](docs/PRIVACY.md), and [Enterprise Readiness](docs/ENTERPRISE_READINESS.md) for the release/security posture.
 
 ### Authentication Methods
 
@@ -533,7 +535,7 @@ Contributions are welcome. Here's how to get started:
 
 ```bash
 # Clone the repository
-git clone https://github.com/xPSTOwner/xPST.git
+git clone https://github.com/TysAIs/xPST.git
 cd ~/XPST
 
 # Create a virtual environment
@@ -585,8 +587,8 @@ xPST/
 
 Licensed under either of:
 
-- **MIT License** ([LICENSE-MIT](LICENSE-MIT))
-- **Apache License 2.0** ([LICENSE-APACHE](LICENSE-APACHE))
+- **MIT License** ([LICENSE](LICENSE))
+- **Apache License 2.0** ([LICENSE](LICENSE))
 
 at your option. You may use this software under the terms of either license.
 

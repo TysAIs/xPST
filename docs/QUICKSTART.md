@@ -1,4 +1,4 @@
-# xPST Quick Start Guide
+﻿# xPST Quick Start Guide
 
 Get xPST up and running in 5 minutes.
 
@@ -16,7 +16,7 @@ Get xPST up and running in 5 minutes.
 
 ```bash
 # Clone the repository
-git clone https://github.com/xPSTOwner/xPST.git
+git clone https://github.com/TysAIs/xPST.git
 cd ~/XPST
 
 # Create virtual environment (recommended)
@@ -30,7 +30,7 @@ pip install -e .
 ### Option 2: uv (Fastest)
 
 ```bash
-git clone https://github.com/xPSTOwner/xPST.git
+git clone https://github.com/TysAIs/xPST.git
 cd ~/XPST
 
 # Install with uv
@@ -40,7 +40,7 @@ uv pip install -e .
 ### Option 3: Docker
 
 ```bash
-git clone https://github.com/xPSTOwner/xPST.git
+git clone https://github.com/TysAIs/xPST.git
 cd ~/XPST
 
 # Build and run
@@ -305,7 +305,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=xPSTOwner
+User=TysAIs
 WorkingDirectory=/path/to/xPST
 ExecStart=/path/to/.venv/bin/xpst watch
 Restart=always
@@ -321,9 +321,9 @@ sudo systemctl start xpst
 
 ## Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/xPSTOwner/xPST/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/xPSTOwner/xPST/discussions)
-- **Wiki**: [Documentation Wiki](https://github.com/xPSTOwner/xPST/wiki)
+- **Issues**: [GitHub Issues](https://github.com/TysAIs/xPST/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/TysAIs/xPST/discussions)
+- **Wiki**: [Documentation Wiki](https://github.com/TysAIs/xPST/wiki)
 
 ## Next Steps
 

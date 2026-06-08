@@ -420,7 +420,7 @@ Rectangle {
             Layout.preferredHeight: 32
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            text: "v1.0.0"
+            text: "v0.1.0"
             font.pixelSize: 11
             color: theme.textMuted
             visible: sidebar.expanded

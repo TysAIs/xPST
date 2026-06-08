@@ -49,6 +49,7 @@ class PidfileLock:
         self.config_dir = Path(config_dir).expanduser()
         self.lock_path = self.config_dir / "xpst.pid"
         self._fd: int | None = None
+        self._lock_offset = 1024
 
     def acquire(self) -> None:
         """Acquire the pidfile lock.
@@ -64,6 +65,7 @@ class PidfileLock:
             if sys.platform == "win32":
                 import msvcrt
                 try:
+                    os.lseek(self._fd, self._lock_offset, os.SEEK_SET)
                     msvcrt.locking(self._fd, msvcrt.LK_NBLCK, 1)
                 except OSError:
                     self._check_stale()
@@ -84,6 +86,7 @@ class PidfileLock:
 
             # Write our PID and metadata
             os.ftruncate(self._fd, 0)
+            os.lseek(self._fd, 0, os.SEEK_SET)
             metadata = {
                 "pid": os.getpid(),
                 "started_at": datetime.now().isoformat(),
@@ -104,6 +107,7 @@ class PidfileLock:
                 if sys.platform == "win32":
                     import msvcrt
                     try:
+                        os.lseek(self._fd, self._lock_offset, os.SEEK_SET)
                         msvcrt.locking(self._fd, msvcrt.LK_UNLCK, 1)
                     except OSError:
                         pass

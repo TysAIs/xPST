@@ -4,8 +4,8 @@ Creates QApplication, sets Material style, registers backend
 controllers with QML engine, sets up system tray, and runs the event loop.
 """
 
-import sys
 import logging
+import sys
 from pathlib import Path
 
 # ── Logging ──────────────────────────────────────────────────────────
@@ -16,10 +16,10 @@ logging.basicConfig(
 logger = logging.getLogger("xpst.desktop")
 
 # ── PySide6 imports ──────────────────────────────────────────────────
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QSplashScreen
+from PySide6.QtCore import Qt, QTimer, QUrl
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtCore import QUrl, QTimer, QSettings, Qt
-from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QFont
+from PySide6.QtWidgets import QApplication, QMenu, QSplashScreen, QSystemTrayIcon
 
 # Attempt Material style import (QtQuick.Controls)
 try:
@@ -146,7 +146,7 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
 
     def _show_window() -> None:
         # Bring all QML windows to front
-        root_objects = engine.rootObjects
+        root_objects = engine.rootObjects()
         for obj in root_objects:
             if hasattr(obj, "show"):
                 obj.show()
@@ -154,7 +154,7 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
                 obj.requestActivate()
 
     def _toggle_window() -> None:
-        root_objects = engine.rootObjects
+        root_objects = engine.rootObjects()
         for obj in root_objects:
             if hasattr(obj, "isVisible") and hasattr(obj, "show"):
                 if obj.isVisible():
@@ -165,8 +165,8 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
                     obj.requestActivate()
 
     def _refresh() -> None:
-        root_objects = engine.rootObjects
-        for obj in root_objects():
+        root_objects = engine.rootObjects()
+        for obj in root_objects:
             if hasattr(obj, "refreshData"):
                 obj.refreshData()
 
@@ -299,7 +299,7 @@ def main(no_splash: bool = False) -> int:
     engine.load(QUrl.fromLocalFile(str(qml_path)))
 
     # Check if QML loaded successfully
-    if not engine.rootObjects:
+    if not engine.rootObjects():
         if splash:
             splash.close()
         logger.error("Failed to load QML — check main.qml for errors")

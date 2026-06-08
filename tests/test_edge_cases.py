@@ -448,7 +448,7 @@ accounts:
   instagram:
     <<: *defaults
     session_file: "~/.xpst/credentials/instagram_session.json"
-""")
+""", encoding="utf-8")
         config = XPSTConfig.load(str(config_file))
         assert config.youtube.enabled is True
         assert config.x.enabled is True
@@ -464,13 +464,15 @@ accounts:
     enabled: true
     session_file: "~/.xpst/credentials/instagram_session.json"
     username: "пользователь"
-""")
+""", encoding="utf-8")
         config = XPSTConfig.load(str(config_file))
         assert config.tiktok.username == "café_résumé_日本語"
         assert config.instagram.username == "пользователь"
 
     def test_broken_symlink_config(self, tmp_path):
         """Config file that is a broken symlink should use defaults."""
+        if os.name == "nt":
+            pytest.skip("Creating symlinks on Windows requires elevated privileges or Developer Mode")
         symlink = tmp_path / "config.yaml"
         symlink.symlink_to(tmp_path / "nonexistent.yaml")
         assert not symlink.exists()  # Broken symlink

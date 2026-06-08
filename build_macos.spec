@@ -1,4 +1,4 @@
-# -*- mode: python ; coding: utf-8 -*-
+﻿# -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for building xPST macOS .app bundle."""
 
 import sys
@@ -90,9 +90,9 @@ app = BUNDLE(
     bundle_identifier="com.xpst.app",
     info_plist={
         "CFBundleName": "xPST",
-        "CFBundleDisplayName": "xPST — Cross-Posting Suite",
-        "CFBundleVersion": "1.0.0",
-        "CFBundleShortVersionString": "1.0.0",
+        "CFBundleDisplayName": "xPST - Cross-Posting Suite",
+        "CFBundleVersion": "0.1.0",
+        "CFBundleShortVersionString": "0.1.0",
         "NSHighResolutionCapable": True,
         "NSRequiresAquaSystemAppearance": False,
     },

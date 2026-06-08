@@ -141,7 +141,6 @@ class TestConfigExportImport:
         import shutil
         shutil.copy(config_file, str(real_config))
 
-        import builtins
         orig_expanduser = os.path.expanduser
         def fake_expanduser(path):
             if path == "~/.xpst/config.yaml":

@@ -1,9 +1,6 @@
 """Comprehensive tests for ScheduleManager (item 29)."""
 
-import json
-import tempfile
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pytest
 
@@ -53,9 +50,9 @@ class TestListSorted:
         t1 = datetime(2026, 12, 1, 10, 0)
         t2 = datetime(2026, 12, 2, 10, 0)
 
-        e3 = manager.add("/tmp/v3.mp4", "third", t3)
-        e1 = manager.add("/tmp/v1.mp4", "first", t1)
-        e2 = manager.add("/tmp/v2.mp4", "second", t2)
+        manager.add("/tmp/v3.mp4", "third", t3)
+        manager.add("/tmp/v1.mp4", "first", t1)
+        manager.add("/tmp/v2.mp4", "second", t2)
 
         entries = manager.list()
         assert len(entries) == 3

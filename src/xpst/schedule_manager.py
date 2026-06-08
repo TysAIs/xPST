@@ -20,14 +20,12 @@ Each entry:
     }
 """
 
+import calendar
 import json
-import os
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-
-import calendar
 
 from xpst.utils.logger import get_logger
 

@@ -121,10 +121,7 @@ except Exception:
 
 # Also check for bundled translations (relative to this file)
 _bundled_dir = Path(__file__).resolve().parent / "i18n"
-if (_bundled_dir / "en.json").exists():
-    _translations_dir_bundled = _bundled_dir
-else:
-    _translations_dir_bundled = None
+_translations_dir_bundled = _bundled_dir if (_bundled_dir / "en.json").exists() else None
 
 # Override load to also check bundled dir
 def _load_translations(lang: str) -> None:

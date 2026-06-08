@@ -12,7 +12,6 @@ Covers:
 - Aggregated health check across all platforms
 """
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -21,7 +20,6 @@ import pytest
 from xpst.engine import CrossPostEngine
 from xpst.platforms.base import PlatformHealth, PlatformUploader, UploadResult
 from xpst.sources.base import DownloadResult, VideoMetadata
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -1,4 +1,4 @@
-# Security Policy
+﻿# Security Policy
 
 ## Credential Storage
 
@@ -18,7 +18,7 @@ This provides:
 - No plain-text secrets on disk
 - Integration with system security policies
 
-### Fallback: Encrypted File Storage
+### Fallback: Local File Storage
 
 If the OS keychain is unavailable (e.g., headless server, Docker container), xPST falls back to file-based storage in `~/.xpst/credentials/`. These files are JSON-encoded but **not encrypted** — the OS filesystem permissions provide the security layer.
 

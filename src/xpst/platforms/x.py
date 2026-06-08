@@ -15,8 +15,6 @@ Upload specs:
 - Recommended: 1080p @ 10 Mbps, High@L4.0
 """
 
-import asyncio
-from datetime import datetime, timezone
 from pathlib import Path
 
 from xpst.config import XPSTConfig
@@ -185,7 +183,7 @@ class XUploader(PlatformUploader):
                         "user_id": user.id,
                     },
                 )
-            except Exception as e:
+            except Exception:
                 # Cookies might be expired
                 return PlatformHealth(
                     platform="x",

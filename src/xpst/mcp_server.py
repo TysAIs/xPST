@@ -180,7 +180,7 @@ def get_analytics(
     # Top posts
     all_posts = []
     for platform, posts_data in data.items():
-        for post_id, metrics in posts_data.items():
+        for _post_id, metrics in posts_data.items():
             metrics["platform"] = platform
             all_posts.append(metrics)
     all_posts.sort(key=lambda p: p.get("views", 0), reverse=True)
@@ -301,7 +301,6 @@ def get_health_resource() -> str:
     """Return current system health status."""
     from xpst.config import XPSTConfig
     from xpst.state import StateManager
-    from xpst.utils.circuit_breaker import CircuitBreakerManager
     from xpst.utils.quota import QuotaManager
 
     config = XPSTConfig.load()

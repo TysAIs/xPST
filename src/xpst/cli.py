@@ -33,7 +33,6 @@ from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger, setup_logging
 from xpst.utils.quota import QuotaManager
-from xpst.utils.sessions import SessionManager
 
 console = Console()
 logger = get_logger(__name__)
@@ -776,7 +775,6 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, as_json:
 
     # Load state to get post IDs
     from xpst.analytics import AnalyticsCollector
-    from xpst.state import StateManager
 
     collector = AnalyticsCollector(config.config_dir)
 
@@ -894,7 +892,7 @@ def logs(ctx: click.Context, as_json: bool):
         lines = f.readlines()
 
     if as_json:
-        json_output({"logs": [l.rstrip() for l in lines[-50:]]}, True)
+        json_output({"logs": [log_line.rstrip() for log_line in lines[-50:]]}, True)
     else:
         for line in lines[-50:]:
             console.print(line.rstrip())
@@ -1300,6 +1298,7 @@ def config(ctx: click.Context):
 def config_show(ctx: click.Context, raw: bool, config_file: str | None, as_json: bool):
     """Display current configuration as YAML"""
     import os
+
     import yaml
     from rich.syntax import Syntax
 
@@ -1337,6 +1336,7 @@ def config_set(ctx: click.Context, key: str, value: str, config_file: str | None
         xpst config set monitoring.log_level DEBUG
     """
     import os
+
     import yaml
 
     config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
@@ -1608,6 +1608,7 @@ def config_export(ctx: click.Context, output_file: str, raw: bool, config_file: 
     Writes the config YAML to OUTPUT_FILE. By default masks sensitive values.
     """
     import os
+
     import yaml
 
     config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
@@ -1650,6 +1651,7 @@ def config_import(ctx: click.Context, input_file: str, merge: bool, yes: bool, s
     Validates the imported config structure. Use --strict to fail on warnings.
     """
     import os
+
     import yaml
 
     config_path = os.path.expanduser("~/.xpst/config.yaml")
@@ -1691,10 +1693,7 @@ def config_import(ctx: click.Context, input_file: str, merge: bool, yes: bool, s
             existing = yaml.safe_load(f) or {}
 
     # ── Compute and display diff ──
-    if merge:
-        merged = _deep_merge_import(existing, imported)
-    else:
-        merged = imported
+    merged = _deep_merge_import(existing, imported) if merge else imported
 
     changes = _compute_config_diff(existing, merged)
 
@@ -1763,6 +1762,7 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
         xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00' --repeat daily
     """
     from datetime import datetime
+
     from xpst.schedule_manager import ScheduleManager
 
     video_path = Path(file)
@@ -1798,7 +1798,7 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
     if as_json:
         json_output(entry, True)
     else:
-        console.print(f"[green]✓ Scheduled post[/green]")
+        console.print("[green]✓ Scheduled post[/green]")
         console.print(f"  ID:       [bold]{entry['id']}[/bold]")
         console.print(f"  File:     {video_path}")
         console.print(f"  Caption:  {caption[:60]}{'...' if len(caption) > 60 else ''}")
@@ -1887,7 +1887,6 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
     Fetches posts where scheduled_time <= now and status is pending,
     then posts each one. Typically called by cron or manually.
     """
-    from datetime import datetime
     from xpst.schedule_manager import ScheduleManager
 
     config_obj = load_config(ctx.obj.get("config_path"))
@@ -1969,11 +1968,12 @@ def schedule_install(ctx: click.Context, interval: int, uninstall: bool, as_json
     Creates a LaunchAgent on macOS, a scheduled task on Windows, or a
     crontab entry on Linux. Use --remove to uninstall.
     """
-    import platform as _platform
     import os
+    import platform as _platform
 
     system = _platform.system()
-    xpst_bin = os.path.realpath(os.path.join(os.path.dirname(sys.executable), "xpst"))
+    exe_name = "xpst.exe" if _platform.system() == "Windows" else "xpst"
+    xpst_bin = os.path.realpath(os.path.join(os.path.dirname(sys.executable), exe_name))
 
     if uninstall:
         result = _uninstall_os_scheduler(system, xpst_bin, as_json)
@@ -2031,8 +2031,8 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
             else:
                 console.print(f"[green]✓[/green] LaunchAgent installed: [bold]{plist_path}[/bold]")
                 console.print(f"  Runs every {interval} minutes")
-                console.print(f"  Logs: ~/.xpst/logs/launchagent.log")
-                console.print(f"  Uninstall: [dim]xpst schedule install --remove[/dim]")
+                console.print("  Logs: ~/.xpst/logs/launchagent.log")
+                console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
         else:
             err = result.stderr.strip()
@@ -2074,8 +2074,8 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
                 json_output({"ok": True, "os": "linux", "interval_min": interval}, True)
             else:
                 console.print(f"[green]✓[/green] Crontab entry installed (every {interval} minutes)")
-                console.print(f"  Logs: ~/.xpst/logs/cron.log")
-                console.print(f"  Uninstall: [dim]xpst schedule install --remove[/dim]")
+                console.print("  Logs: ~/.xpst/logs/cron.log")
+                console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
         else:
             if as_json:
@@ -2099,7 +2099,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
                 json_output({"ok": True, "os": "windows", "task": task_name, "interval_min": interval}, True)
             else:
                 console.print(f"[green]✓[/green] Scheduled task '{task_name}' created (every {interval} minutes)")
-                console.print(f"  Uninstall: [dim]xpst schedule install --remove[/dim]")
+                console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
         else:
             if as_json:
@@ -2162,9 +2162,9 @@ def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
 
         new_crontab = "\n".join(filtered) + "\n" if filtered else ""
         if new_crontab.strip():
-            proc = subprocess.run(["crontab", "-"], input=new_crontab, capture_output=True, text=True)
+            subprocess.run(["crontab", "-"], input=new_crontab, capture_output=True, text=True)
         else:
-            proc = subprocess.run(["crontab", "-r"], capture_output=True, text=True)
+            subprocess.run(["crontab", "-r"], capture_output=True, text=True)
 
         if as_json:
             json_output({"ok": True, "removed": "crontab entry"}, True)
@@ -2467,7 +2467,7 @@ def plugins_docs(ctx: click.Context, output: str | None, as_json: bool):
         if plugin_data:
             config_opts = plugin_data.get("config_options", [])
             if config_opts:
-                lines.append(f"- **Config Options:**")
+                lines.append("- **Config Options:**")
                 for opt in config_opts:
                     if isinstance(opt, dict):
                         opt_name = opt.get("name", "?")
@@ -2552,8 +2552,8 @@ def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json
     Streams PyInstaller output in real-time.
     """
     import platform as _platform
-    import subprocess
     import shutil
+    import subprocess
 
     # Determine current OS
     system = _platform.system()
@@ -2655,7 +2655,7 @@ def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json
                 if as_json:
                     json_output({"ok": False, "error": stderr_text}, True)
                 else:
-                    console.print(f"\n[red]Cross-compilation failed:[/red]")
+                    console.print("\n[red]Cross-compilation failed:[/red]")
                     console.print(stderr_text)
                 sys.exit(EXIT_GENERAL)
         except FileNotFoundError:
@@ -2667,9 +2667,15 @@ def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json
     # Check for PyInstaller
     pyinstaller_bin = shutil.which("pyinstaller")
     if not pyinstaller_bin:
+        exe_name = "pyinstaller.exe" if current_os == "windows" else "pyinstaller"
+        candidate = Path(sys.executable).resolve().parent / exe_name
+        if candidate.exists():
+            pyinstaller_bin = str(candidate)
+    if not pyinstaller_bin:
         # Check if it's in the current venv
         if as_json:
             json_output({"ok": False, "error": "PyInstaller not found. Install with: pip install pyinstaller"}, True)
+            sys.exit(EXIT_GENERAL)
         else:
             console.print("[yellow]PyInstaller not found.[/yellow]")
             if confirm("Install PyInstaller now?"):
@@ -2683,8 +2689,20 @@ def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json
                     sys.exit(EXIT_GENERAL)
                 console.print("[green]✓[/green] PyInstaller installed")
                 pyinstaller_bin = shutil.which("pyinstaller")
+                if not pyinstaller_bin:
+                    exe_name = "pyinstaller.exe" if current_os == "windows" else "pyinstaller"
+                    candidate = Path(sys.executable).resolve().parent / exe_name
+                    if candidate.exists():
+                        pyinstaller_bin = str(candidate)
             else:
                 sys.exit(EXIT_GENERAL)
+
+    if not pyinstaller_bin:
+        if as_json:
+            json_output({"ok": False, "error": "PyInstaller installed but executable was not found"}, True)
+        else:
+            console.print("[red]PyInstaller installed but executable was not found.[/red]")
+        sys.exit(EXIT_GENERAL)
 
     if not as_json:
         console.print(f"[bold blue]Building xPST for {target_os}...[/bold blue]")
@@ -2724,7 +2742,7 @@ def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json
         if as_json:
             json_output({"ok": False, "error": stderr_text}, True)
         else:
-            console.print(f"[red]Build failed:[/red]")
+            console.print("[red]Build failed:[/red]")
             console.print(stderr_text)
         sys.exit(EXIT_GENERAL)
 

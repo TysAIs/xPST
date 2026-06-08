@@ -6,11 +6,12 @@ those not yet fully posted. Supports bidirectional cross-posting
 by initializing ALL enabled platform sources (not just TikTok).
 """
 
+from typing import Any
+
 from xpst.config import XPSTConfig
 from xpst.sources.base import VideoMetadata, VideoSource
 from xpst.state import StateManager
 from xpst.utils.logger import get_logger
-from typing import Any
 
 logger = get_logger(__name__)
 

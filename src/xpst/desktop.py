@@ -156,15 +156,15 @@ def _install_macos_app(icon_path: str | None) -> None:
                 shutil.copy2(icon_path, resources / "AppIcon.png")
 
     # Write Info.plist
-    plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+    plist = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key><string>xPST</string>
     <key>CFBundleDisplayName</key><string>xPST</string>
     <key>CFBundleIdentifier</key><string>com.xpst.app</string>
-    <key>CFBundleVersion</key><string>1.0.0</string>
-    <key>CFBundleShortVersionString</key><string>1.0.0</string>
+    <key>CFBundleVersion</key><string>0.1.0</string>
+    <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleExecutable</key><string>xpst</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>

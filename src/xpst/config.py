@@ -329,7 +329,7 @@ class XPSTConfig:
         Returns:
             Loaded and validated configuration
         """
-        config = cls()
+        config = cls._merge_config(cls(), DEFAULT_CONFIG)
 
         # Load from file - backward compatibility: use old ~/.crosspstr/ if it exists
         if config_path is None:
@@ -343,7 +343,7 @@ class XPSTConfig:
 
         config_path = Path(config_path)
         if config_path.exists():
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8-sig") as f:
                 file_config = yaml.safe_load(f) or {}
             config = cls._merge_config(config, file_config)
 
@@ -591,14 +591,18 @@ class XPSTConfig:
             Config object with all paths expanded to absolute form.
         """
 
-        config.config_dir = os.path.expanduser(config.config_dir)
-        config.video.download_dir = os.path.expanduser(config.video.download_dir)
-        config.monitoring.log_file = os.path.expanduser(config.monitoring.log_file)
-        config.tiktok.cookies_file = os.path.expanduser(config.tiktok.cookies_file) if config.tiktok.cookies_file else None
-        config.youtube.client_secrets = os.path.expanduser(config.youtube.client_secrets)
-        config.youtube.token_file = os.path.expanduser(config.youtube.token_file)
-        config.x.cookies_file = os.path.expanduser(config.x.cookies_file)
-        config.instagram.session_file = os.path.expanduser(config.instagram.session_file)
+        config.config_dir = os.path.expandvars(os.path.expanduser(config.config_dir))
+        config.video.download_dir = os.path.expandvars(os.path.expanduser(config.video.download_dir))
+        config.monitoring.log_file = os.path.expandvars(os.path.expanduser(config.monitoring.log_file))
+        config.tiktok.cookies_file = (
+            os.path.expandvars(os.path.expanduser(config.tiktok.cookies_file))
+            if config.tiktok.cookies_file
+            else None
+        )
+        config.youtube.client_secrets = os.path.expandvars(os.path.expanduser(config.youtube.client_secrets))
+        config.youtube.token_file = os.path.expandvars(os.path.expanduser(config.youtube.token_file))
+        config.x.cookies_file = os.path.expandvars(os.path.expanduser(config.x.cookies_file))
+        config.instagram.session_file = os.path.expandvars(os.path.expanduser(config.instagram.session_file))
         return config
 
     def _validate(self) -> None:
@@ -762,7 +766,7 @@ class XPSTConfig:
         }
 
         try:
-            with open(config_path, "w") as f:
+            with open(config_path, "w", encoding="utf-8") as f:
                 yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
         except OSError as e:
             logger.warning("Failed to save config: %s", e)

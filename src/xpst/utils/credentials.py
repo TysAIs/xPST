@@ -1,8 +1,8 @@
-"""
+﻿"""
 Secure credential storage for xPST
 
 Uses the OS keychain (macOS Keychain, Windows Credential Locker, Linux Secret Service)
-for secure credential storage. Falls back to encrypted file storage if keyring is unavailable.
+for secure credential storage. Falls back to local JSON files protected by OS filesystem permissions if keyring is unavailable.
 
 Security model:
 - Credentials stored in OS keychain (encrypted, requires auth to access)

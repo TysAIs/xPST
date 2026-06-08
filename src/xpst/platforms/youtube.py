@@ -14,7 +14,6 @@ Upload specs:
 - Category: 28 (Science & Technology) - configurable
 """
 
-from datetime import datetime, timezone
 from pathlib import Path
 
 from xpst.config import XPSTConfig
