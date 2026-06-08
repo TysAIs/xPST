@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/xpst-horizontal.png" alt="XPST — Cross-Platform Studio" width="400">
+</p>
+
 # XPST
 
 **Cross-Platform Studio — Enterprise-grade, free, local cross-posting for short-form video**
@@ -144,7 +148,10 @@ xpst analytics
 # Refresh analytics (ignore cache)
 xpst analytics --refresh --platforms youtube,instagram
 
-# Launch the web dashboard
+# Launch the native desktop app (recommended)
+xpst app
+
+# Or launch in browser
 xpst dashboard
 xpst dashboard --port 9090
 ```
@@ -189,7 +196,13 @@ xpst --verbose run
 
 ## Dashboard
 
-Launch the web analytics dashboard for a real-time view of your cross-posting activity:
+Launch the native desktop app (appears in your dock):
+
+```bash
+xpst app
+```
+
+Or launch in your browser:
 
 ```bash
 xpst dashboard

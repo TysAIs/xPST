@@ -764,6 +764,41 @@ def dashboard(ctx: click.Context, port: int):
 
 
 # ──────────────────────────────────────────────
+# Desktop App Command
+# ──────────────────────────────────────────────
+
+@main.command()
+@click.option("--port", "-p", default=None, type=int, help="Dashboard HTTP port (default: auto-select free port)")
+@click.pass_context
+def app(ctx: click.Context, port: int | None):
+    """Launch XPST as a native desktop app (pywebview)"""
+    config_path = ctx.obj.get("config_path")
+    config_dir = "~/.xpst"
+    if config_path:
+        config_dir = str(Path(config_path).parent)
+    else:
+        try:
+            cfg = load_config(config_path)
+            config_dir = cfg.config_dir
+        except Exception:
+            pass
+
+    # Try native desktop window first, fall back to browser
+    try:
+        from xpst.desktop import launch_desktop_app
+        console.print("[bold blue]Launching XPST desktop app…[/bold blue]")
+        launch_desktop_app(config_dir=config_dir, port=port)
+    except ImportError:
+        console.print("[yellow]pywebview not installed — falling back to browser.[/yellow]")
+        console.print("[dim]Install with: pip install 'xpst[desktop]'[/dim]\n")
+        from xpst.desktop import launch_browser_fallback
+        launch_browser_fallback(config_dir=config_dir, port=port or 8080)
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        sys.exit(1)
+
+
+# ──────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────
 

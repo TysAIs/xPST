@@ -50,10 +50,20 @@ FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
 CUSTOM_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/icon?family=Material+Icons');
 
 * {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     box-sizing: border-box;
+}
+
+html {
+    font-size: 16px;
+}
+
+:root {
+    --sidebar-width: 240px;
+    --sidebar-collapsed: 0px;
 }
 
 :root {
@@ -84,6 +94,7 @@ body, .q-page, .q-layout {
     background: var(--bg) !important;
     color: var(--text) !important;
     transition: background 0.3s ease, color 0.3s ease;
+    overflow-x: hidden;
 }
 
 .q-drawer {
@@ -92,7 +103,55 @@ body, .q-page, .q-layout {
     transition: background 0.3s ease;
 }
 
+/* ── Hamburger Toggle ─────────────────────────────────── */
+.xpst-hamburger {
+    display: none;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 1000;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+.xpst-hamburger:hover {
+    background: var(--sidebar-bg);
+}
+
+.xpst-hamburger .material-icons {
+    font-size: 22px;
+    color: var(--text);
+}
+
 /* ── Sidebar ─────────────────────────────────────────── */
+.xpst-sidebar {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+    min-height: 100vh;
+    border-right: 1px solid var(--border);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+}
+
+.xpst-main-content {
+    flex: 1;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.xpst-content-inner {
+    width: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
 .sidebar-container {
     padding: 20px 16px;
     height: 100%;
@@ -144,6 +203,39 @@ body.light-mode .nav-item:hover {
     color: #0a84ff;
 }
 
+/* ── Cards Grid ──────────────────────────────────────── */
+.metric-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    width: 100%;
+}
+
+.content-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+    width: 100%;
+}
+
+.charts-row {
+    display: flex;
+    gap: 16px;
+    width: 100%;
+    flex-wrap: wrap;
+}
+
+.chart-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.chart-side {
+    width: 320px;
+    min-width: 260px;
+    flex-shrink: 1;
+}
+
 /* ── Cards ───────────────────────────────────────────── */
 .metric-card {
     background: var(--surface);
@@ -151,8 +243,7 @@ body.light-mode .nav-item:hover {
     padding: 20px;
     border: 1px solid var(--border);
     transition: all 0.2s ease;
-    flex: 1;
-    min-width: 180px;
+    min-width: 0;
 }
 
 .metric-card:hover {
@@ -171,15 +262,16 @@ body.light-mode .nav-item:hover {
 }
 
 .metric-value {
-    font-size: 28px;
+    font-size: clamp(1.4rem, 2.5vw, 1.75rem);
     font-weight: 700;
     color: var(--text);
     line-height: 1.1;
     letter-spacing: -0.02em;
+    word-break: break-word;
 }
 
 .metric-label {
-    font-size: 12px;
+    font-size: clamp(0.7rem, 1vw, 0.75rem);
     color: var(--text-muted);
     margin-top: 4px;
     text-transform: uppercase;
@@ -260,7 +352,7 @@ body.light-mode .nav-item:hover {
 
 /* ── Typography ──────────────────────────────────────── */
 .page-title {
-    font-size: 28px;
+    font-size: clamp(1.4rem, 2.5vw, 1.75rem);
     font-weight: 700;
     color: var(--text);
     margin-bottom: 6px;
@@ -268,13 +360,13 @@ body.light-mode .nav-item:hover {
 }
 
 .page-subtitle {
-    font-size: 14px;
+    font-size: clamp(0.8rem, 1.2vw, 0.875rem);
     color: var(--text-muted);
     margin-bottom: 28px;
 }
 
 .section-header {
-    font-size: 18px;
+    font-size: clamp(1rem, 1.5vw, 1.125rem);
     font-weight: 600;
     color: var(--text);
     margin-bottom: 16px;
@@ -296,7 +388,7 @@ body.light-mode .nav-item:hover {
 .platform-tab {
     padding: 8px 18px;
     border-radius: 8px;
-    font-size: 13px;
+    font-size: clamp(0.75rem, 1vw, 0.8125rem);
     font-weight: 500;
     color: var(--text-muted);
     cursor: pointer;
@@ -323,7 +415,7 @@ body.light-mode .platform-tab:hover {
 .filter-pill {
     padding: 6px 14px;
     border-radius: 20px;
-    font-size: 13px;
+    font-size: clamp(0.75rem, 1vw, 0.8125rem);
     font-weight: 500;
     color: var(--text-muted);
     cursor: pointer;
@@ -399,11 +491,22 @@ body.light-mode .theme-toggle:hover {
 
 /* ── Plotly ──────────────────────────────────────────── */
 .js-plotly-plot .plotly { background: transparent !important; }
+.js-plotly-plot {
+    width: 100% !important;
+    max-width: 100%;
+    overflow: hidden;
+}
 
 /* ── NiceGUI overrides ───────────────────────────────── */
+.q-field {
+    width: 100%;
+}
+.q-field__control {
+    max-width: 100%;
+}
 .q-field__label {
     color: var(--text-sec) !important;
-    font-size: 13px !important;
+    font-size: clamp(0.75rem, 1vw, 0.8125rem) !important;
 }
 
 .q-field__control {
@@ -417,7 +520,218 @@ body.light-mode .q-field__control {
 
 .q-toggle__label {
     color: var(--text-sec) !important;
-    font-size: 14px !important;
+    font-size: clamp(0.8rem, 1.1vw, 0.875rem) !important;
+}
+
+/* ── Settings Form Responsive ────────────────────────── */
+.settings-form-row {
+    display: flex;
+    gap: 16px;
+    width: 100%;
+    flex-wrap: wrap;
+}
+
+.settings-form-row > .q-field,
+.settings-form-row > .q-input,
+.settings-form-row > .q-number {
+    flex: 1;
+    min-width: 140px;
+}
+
+/* ── Path rows responsive ────────────────────────────── */
+.path-row {
+    flex-wrap: wrap;
+}
+.path-row .path-value {
+    word-break: break-all;
+    min-width: 0;
+}
+
+/* ── Overlay for mobile sidebar ──────────────────────── */
+.xpst-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 998;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+.xpst-overlay.visible {
+    display: block;
+    opacity: 1;
+}
+
+/* ══════════════════════════════════════════════════════ */
+/* ── RESPONSIVE BREAKPOINTS ──────────────────────────── */
+/* ══════════════════════════════════════════════════════ */
+
+/* ── Tablet (≤ 1200px) ──────────────────────────────── */
+@media (max-width: 1200px) {
+    .xpst-sidebar {
+        width: 220px;
+        min-width: 220px;
+    }
+
+    .xpst-content-inner {
+        padding: 20px 24px !important;
+    }
+
+    .metric-cards-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .content-cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    }
+
+    .chart-side {
+        width: 280px;
+        min-width: 240px;
+    }
+
+    .connect-card {
+        width: calc(50% - 12px) !important;
+    }
+}
+
+/* ── Mobile (≤ 768px) ───────────────────────────────── */
+@media (max-width: 768px) {
+    .xpst-hamburger {
+        display: flex;
+    }
+
+    .xpst-sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        height: 100vh;
+        z-index: 999;
+        transform: translateX(-100%);
+        box-shadow: 4px 0 24px rgba(0,0,0,0.3);
+    }
+
+    .xpst-sidebar.open {
+        transform: translateX(0);
+    }
+
+    .xpst-content-inner {
+        padding: 56px 16px 20px 16px !important;
+    }
+
+    .metric-cards-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+
+    .metric-card {
+        padding: 14px;
+    }
+
+    .charts-row {
+        flex-direction: column;
+    }
+
+    .chart-side {
+        width: 100%;
+        min-width: 0;
+    }
+
+    .content-cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+        gap: 10px;
+    }
+
+    .page-title {
+        font-size: 1.3rem;
+    }
+
+    .page-subtitle {
+        margin-bottom: 16px;
+    }
+
+    .platform-tab {
+        padding: 6px 12px;
+    }
+
+    .connect-card {
+        width: calc(50% - 8px) !important;
+    }
+
+    .settings-form-row {
+        flex-direction: column;
+    }
+
+    .settings-form-row > .q-field,
+    .settings-form-row > .q-input,
+    .settings-form-row > .q-number {
+        min-width: 100%;
+    }
+
+    /* Hide sidebar footer on mobile for cleaner look */
+    .sidebar-container {
+        padding: 16px 12px;
+    }
+
+    .sidebar-logo {
+        margin-bottom: 24px;
+    }
+
+    .sidebar-logo-text {
+        font-size: 18px;
+    }
+}
+
+/* ── Small Mobile (≤ 480px) ─────────────────────────── */
+@media (max-width: 480px) {
+    .xpst-content-inner {
+        padding: 52px 10px 16px 10px !important;
+    }
+
+    .metric-cards-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .content-cards-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .connect-card {
+        width: 100% !important;
+    }
+
+    .metric-card {
+        padding: 12px;
+    }
+
+    .metric-value {
+        font-size: 1.3rem;
+    }
+
+    .glass-card {
+        padding: 14px;
+    }
+
+    .section-header {
+        font-size: 0.95rem;
+    }
+
+    /* Tabs should scroll horizontally */
+    .analytics-tabs,
+    .filter-pills {
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+    .analytics-tabs::-webkit-scrollbar,
+    .filter-pills::-webkit-scrollbar {
+        display: none;
+    }
 }
 </style>
 """
@@ -521,7 +835,11 @@ def _toggle_theme():
 def _page_shell(current: str = "/"):
     """Build sidebar + main content layout."""
     ui.add_head_html(CUSTOM_CSS)
-    # Restore theme from localStorage
+    # Viewport meta tag for responsive design
+    ui.add_head_html(
+        '<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">'
+    )
+    # Restore theme from localStorage + sidebar toggle logic
     ui.add_head_html("""
     <script>
     (function() {
@@ -530,14 +848,45 @@ def _page_shell(current: str = "/"):
             document.body.classList.add('light-mode');
         }
     })();
+
+    function xpstToggleSidebar() {
+        const sidebar = document.querySelector('.xpst-sidebar');
+        const overlay = document.querySelector('.xpst-overlay');
+        if (sidebar) {
+            sidebar.classList.toggle('open');
+            if (overlay) {
+                overlay.classList.toggle('visible');
+            }
+        }
+    }
+
+    function xpstCloseSidebar() {
+        const sidebar = document.querySelector('.xpst-sidebar');
+        const overlay = document.querySelector('.xpst-overlay');
+        if (sidebar) {
+            sidebar.classList.remove('open');
+            if (overlay) {
+                overlay.classList.remove('visible');
+            }
+        }
+    }
     </script>
     """)
 
+    # Hamburger button (visible on mobile via CSS)
+    ui.html(
+        '<div class="xpst-hamburger" onclick="xpstToggleSidebar()">'
+        '<span class="material-icons">menu</span></div>'
+    )
+
+    # Overlay for closing sidebar on mobile
+    ui.html('<div class="xpst-overlay" onclick="xpstCloseSidebar()"></div>')
+
     with ui.row().classes("w-full no-wrap").style("min-height:100vh;"):
-        with ui.column().style("width:220px; min-width:220px; min-height:100vh; border-right:1px solid var(--border);"):
+        with ui.column().classes("xpst-sidebar"):
             _sidebar(current)
-        with ui.column().classes("col-grow fade-in").style("min-height:100vh;") as main:
-            with ui.column().classes("w-full").style("padding:28px 36px; max-width:1200px;"):
+        with ui.column().classes("xpst-main-content fade-in").style("min-height:100vh;") as main:
+            with ui.column().classes("xpst-content-inner").style("padding:28px 36px;"):
                 pass  # caller appends inside this
     return main
 
@@ -572,8 +921,11 @@ def _plotly_layout(fig, height: int = 280):
         yaxis=dict(gridcolor="rgba(128,128,128,0.1)", zeroline=False, showgrid=True),
         margin=dict(t=10, b=30, l=40, r=10),
         height=height,
+        autosize=True,
         hovermode="x unified",
     )
+    fig.update_xaxes(automargin=True)
+    fig.update_yaxes(automargin=True)
 
 
 # ── Page: Overview (/) ──────────────────────────────────────────────────
@@ -590,7 +942,7 @@ def _page_overview(collector: AnalyticsCollector) -> None:
         _section_header("Dashboard", "Your cross-platform content at a glance")
 
         # ── Metric Cards ────────────────────────────────────────────────
-        with ui.row().classes("gap-4 w-full").style("margin-bottom:24px;"):
+        with ui.element("div").classes("metric-cards-grid").style("margin-bottom:24px;"):
             _metric_card("video_library", str(stats["total_posts"]), "Total Posts", ACCENT)
             _metric_card("visibility", _fmt_num(stats["total_platform_posts"]), "Total Reach", "#a855f7")
             best = stats.get("best_platform")
@@ -600,9 +952,9 @@ def _page_overview(collector: AnalyticsCollector) -> None:
             _metric_card("schedule", str(stats.get("posts_this_week", 0)), "This Week", GREEN)
 
         # ── Charts Row ──────────────────────────────────────────────────
-        with ui.row().classes("gap-4 w-full").style("margin-bottom:24px;"):
+        with ui.element("div").classes("charts-row").style("margin-bottom:24px;"):
             # Line chart — Posts over time
-            with ui.element("div").classes("glass-card col-grow"):
+            with ui.element("div").classes("glass-card chart-main"):
                 ui.label("Posts Over Time").classes("section-header")
 
                 posts_by_date = collector.get_posts_over_time(30)
@@ -624,10 +976,10 @@ def _page_overview(collector: AnalyticsCollector) -> None:
                     hovertemplate="%{x}<br>%{y} posts<extra></extra>",
                 ))
                 _plotly_layout(fig, 260)
-                ui.plotly(fig).classes("w-full").style("pointer-events:none;")
+                ui.plotly(fig).classes("w-full").style("pointer-events:none; width:100%; min-width:0;")
 
             # Pie chart — Platform breakdown
-            with ui.element("div").classes("glass-card").style("width:320px; min-width:260px;"):
+            with ui.element("div").classes("glass-card chart-side"):
                 ui.label("By Platform").classes("section-header")
 
                 pc = stats["platform_counts"]
@@ -659,20 +1011,20 @@ def _page_overview(collector: AnalyticsCollector) -> None:
                     ),
                     margin=dict(t=10, b=40, l=10, r=10),
                 )
-                ui.plotly(fig2).classes("w-full").style("pointer-events:none;")
+                ui.plotly(fig2).classes("w-full").style("pointer-events:none; width:100%; min-width:0;")
 
         # ── Recent Posts ────────────────────────────────────────────────
         with ui.element("div").classes("glass-card w-full").style("margin-bottom:24px;"):
             ui.label("Recent Posts").classes("section-header")
 
             if posts:
-                with ui.row().classes("gap-4 w-full").style("flex-wrap:wrap;"):
+                with ui.element("div").classes("content-cards-grid"):
                     for p in posts[:6]:
                         plats = list(p.get("platforms", {}).keys())
                         main_plat = plats[0] if plats else "youtube"
                         plat_color = PLATFORM_COLORS.get(main_plat, ACCENT)
 
-                        with ui.element("div").classes("content-card").style("width:calc(33.333% - 11px); min-width:220px;"):
+                        with ui.element("div").classes("content-card"):
                             with ui.element("div").classes("thumb-placeholder").style(
                                 f"background: linear-gradient(135deg, {plat_color}30 0%, {plat_color}10 100%);"
                             ):
@@ -705,7 +1057,7 @@ def _page_overview(collector: AnalyticsCollector) -> None:
         with ui.element("div").classes("glass-card w-full"):
             ui.label("Platform Health").classes("section-header")
 
-            with ui.row().classes("gap-4 w-full").style("flex-wrap:wrap;"):
+            with ui.element("div").classes("content-cards-grid"):
                 for p in health:
                     color = p["color"]
                     status = p["status"]
@@ -758,7 +1110,7 @@ def _page_content(collector: AnalyticsCollector) -> None:
                     'outlined dense'
                 ).classes("col-grow").style("max-width:380px;")
 
-                with ui.row().classes("gap-2"):
+                with ui.row().classes("gap-2 filter-pills").style("overflow-x:auto; flex-wrap:nowrap;"):
                     for label, plat in [("All", "all"), ("YouTube", "youtube"), ("Instagram", "instagram"), ("X", "x"), ("TikTok", "tiktok")]:
                         ui.button(label, on_click=lambda p=plat: _filter_posts(p)).classes("filter-pill")
 
@@ -784,14 +1136,14 @@ def _render_posts_grid(container, posts: list):
                 ui.label("Your cross-posted content will appear here").style("font-size:13px; color:var(--text-muted);")
             return
 
-        with ui.row().classes("gap-4 w-full").style("flex-wrap:wrap;"):
+        with ui.element("div").classes("content-cards-grid"):
             for p in posts:
                 plats = list(p.get("platforms", {}).keys())
                 main_plat = plats[0] if plats else "youtube"
                 plat_color = PLATFORM_COLORS.get(main_plat, ACCENT)
                 status = p.get("status", "posted")
 
-                with ui.element("div").classes("content-card").style("width:calc(25% - 12px); min-width:220px;"):
+                with ui.element("div").classes("content-card"):
                     with ui.element("div").classes("thumb-placeholder").style(
                         f"background: linear-gradient(135deg, {plat_color}25 0%, {plat_color}08 100%);"
                     ):
@@ -835,7 +1187,7 @@ def _page_analytics(collector: AnalyticsCollector) -> None:
     with _page_shell("/analytics"):
         _section_header("Analytics", "Deep dive into your content performance")
 
-        with ui.row().classes("gap-2 w-full").style("margin-bottom:24px;"):
+        with ui.row().classes("gap-2 w-full analytics-tabs").style("margin-bottom:24px; overflow-x:auto; flex-wrap:nowrap;"):
             for label, plat in [("All", "all"), ("YouTube", "youtube"), ("Instagram", "instagram"), ("X / Twitter", "x"), ("TikTok", "tiktok")]:
                 ui.button(label, on_click=lambda p=plat: _show_analytics(p)).classes("platform-tab")
 
@@ -871,7 +1223,7 @@ def _render_analytics_content(container, collector: AnalyticsCollector, platform
             total_comments = e["comments"]
             total_shares = e["shares"]
 
-        with ui.row().classes("gap-4 w-full").style("margin-bottom:24px;"):
+        with ui.element("div").classes("metric-cards-grid").style("margin-bottom:24px;"):
             _metric_card("visibility", _fmt_num(total_views), "Total Views", ACCENT)
             _metric_card("favorite", _fmt_num(total_likes), "Total Likes", RED)
             _metric_card("chat_bubble", _fmt_num(total_comments), "Comments", "#a855f7")
@@ -881,13 +1233,13 @@ def _render_analytics_content(container, collector: AnalyticsCollector, platform
         if platform == "all":
             with ui.element("div").classes("glass-card w-full").style("margin-bottom:24px;"):
                 ui.label("Per-Platform Breakdown").classes("section-header")
-                with ui.row().classes("gap-4 w-full").style("flex-wrap:wrap;"):
+                with ui.element("div").classes("content-cards-grid"):
                     for plat_name in ["youtube", "instagram", "x", "tiktok"]:
                         plat_eng = engagement.get(plat_name, {"posts": 0, "views": 0, "likes": 0, "comments": 0, "shares": 0})
                         plat_color = PLATFORM_COLORS.get(plat_name, ACCENT)
                         plat_label = PLATFORM_LABELS.get(plat_name, plat_name.title())
 
-                        with ui.element("div").classes("content-card").style("flex:1; min-width:180px; padding:16px;"):
+                        with ui.element("div").classes("content-card").style("padding:16px;"):
                             with ui.row().classes("items-center gap-3").style("margin-bottom:12px;"):
                                 with ui.element("div").style(
                                     f"width:32px; height:32px; border-radius:8px; background:{plat_color}15; display:flex; align-items:center; justify-content:center;"
@@ -901,9 +1253,9 @@ def _render_analytics_content(container, collector: AnalyticsCollector, platform
                                         ui.label(metric_name).style("font-size:12px; color:var(--text-muted);")
                                         ui.label(_fmt_num(plat_eng[metric_key])).style("font-size:13px; font-weight:600; color:var(--text);")
 
-        with ui.row().classes("gap-4 w-full").style("margin-bottom:24px;"):
+        with ui.element("div").classes("charts-row").style("margin-bottom:24px;"):
             # Engagement Over Time
-            with ui.element("div").classes("glass-card col-grow"):
+            with ui.element("div").classes("glass-card chart-main"):
                 ui.label("Engagement Over Time").classes("section-header")
 
                 posts_by_date = collector.get_posts_over_time(30)
@@ -941,10 +1293,10 @@ def _render_analytics_content(container, collector: AnalyticsCollector, platform
                     hovertemplate="%{x}<br>%{y} posts<extra></extra>",
                 ))
                 _plotly_layout(fig, 280)
-                ui.plotly(fig).classes("w-full").style("pointer-events:none;")
+                ui.plotly(fig).classes("w-full").style("pointer-events:none; width:100%; min-width:0;")
 
             # Platform Comparison
-            with ui.element("div").classes("glass-card").style("width:320px; min-width:260px;"):
+            with ui.element("div").classes("glass-card chart-side"):
                 ui.label("Platform Comparison").classes("section-header")
 
                 pc = stats["platform_counts"]
@@ -963,11 +1315,11 @@ def _render_analytics_content(container, collector: AnalyticsCollector, platform
                     hovertemplate="%{x}: %{y} posts<extra></extra>",
                 )])
                 _plotly_layout(fig2, 280)
-                ui.plotly(fig2).classes("w-full").style("pointer-events:none;")
+                ui.plotly(fig2).classes("w-full").style("pointer-events:none; width:100%; min-width:0;")
 
-        with ui.row().classes("gap-4 w-full"):
+        with ui.element("div").classes("charts-row"):
             # Heatmap
-            with ui.element("div").classes("glass-card col-grow"):
+            with ui.element("div").classes("glass-card chart-main"):
                 ui.label("Posting Activity Heatmap").classes("section-header")
 
                 from collections import Counter
@@ -996,13 +1348,13 @@ def _render_analytics_content(container, collector: AnalyticsCollector, platform
                         showscale=False,
                     ))
                     _plotly_layout(fig_heat, 280)
-                    ui.plotly(fig_heat).classes("w-full").style("pointer-events:none;")
+                    ui.plotly(fig_heat).classes("w-full").style("pointer-events:none; width:100%; min-width:0;")
                 else:
                     with ui.column().classes("items-center w-full").style("padding:40px 0;"):
                         ui.label("Not enough data for heatmap").style("color:var(--text-muted);")
 
             # Top Posts
-            with ui.element("div").classes("glass-card").style("width:380px; min-width:280px;"):
+            with ui.element("div").classes("glass-card chart-side"):
                 ui.label("Top Posts by Reach").classes("section-header")
 
                 for i, p in enumerate(top_posts):
@@ -1051,14 +1403,14 @@ def _page_connect(collector: AnalyticsCollector) -> None:
                     pct = (connected_count / total_platforms * 100) if total_platforms > 0 else 0
                     ui.element("div").style(f"width:{pct}%; height:100%; background:{ACCENT}; border-radius:3px; transition:width 0.5s ease;")
 
-        with ui.row().classes("gap-4 w-full").style("flex-wrap:wrap;"):
+        with ui.element("div").classes("content-cards-grid"):
             for p in health:
                 color = p["color"]
                 configured = p["configured"]
                 status = p["status"]
                 icon = p["icon"]
 
-                with ui.element("div").classes("connect-card").style("width:calc(25% - 12px); min-width:220px;"):
+                with ui.element("div").classes("connect-card"):
                     with ui.element("div").style(
                         f"width:48px; height:48px; border-radius:12px; background:{color}15; display:flex; align-items:center; justify-content:center; margin:0 auto 16px;"
                     ):
@@ -1183,7 +1535,7 @@ def _page_settings(collector: AnalyticsCollector) -> None:
             with ui.column().classes("gap-4"):
                 ui.switch("Enable notifications", value=enabled).props(f'color="{ACCENT}"')
 
-                with ui.row().classes("gap-4 w-full"):
+                with ui.element("div").classes("settings-form-row"):
                     discord_url = notif_cfg.get("discord", {}).get("webhook_url", "")
                     ui.input("Discord Webhook URL", value=discord_url, placeholder="https://discord.com/api/webhooks/...").props('outlined').classes("col-grow")
 
@@ -1196,11 +1548,11 @@ def _page_settings(collector: AnalyticsCollector) -> None:
 
             rate_limits_cfg = collector.config.get("rate_limits", {})
 
-            with ui.row().classes("gap-4 w-full").style("flex-wrap:wrap;"):
-                rl_yt = ui.number("YouTube", value=rate_limits_cfg.get("youtube", 5), min=1, max=50, format="%d").props('outlined').style("width:140px;")
-                rl_ig = ui.number("Instagram", value=rate_limits_cfg.get("instagram", 5), min=1, max=50, format="%d").props('outlined').style("width:140px;")
-                rl_x = ui.number("X / Twitter", value=rate_limits_cfg.get("x", 5), min=1, max=50, format="%d").props('outlined').style("width:140px;")
-                rl_tt = ui.number("TikTok", value=rate_limits_cfg.get("tiktok", 5), min=1, max=50, format="%d").props('outlined').style("width:140px;")
+            with ui.element("div").classes("settings-form-row"):
+                rl_yt = ui.number("YouTube", value=rate_limits_cfg.get("youtube", 5), min=1, max=50, format="%d").props('outlined').style("min-width:120px;")
+                rl_ig = ui.number("Instagram", value=rate_limits_cfg.get("instagram", 5), min=1, max=50, format="%d").props('outlined').style("min-width:120px;")
+                rl_x = ui.number("X / Twitter", value=rate_limits_cfg.get("x", 5), min=1, max=50, format="%d").props('outlined').style("min-width:120px;")
+                rl_tt = ui.number("TikTok", value=rate_limits_cfg.get("tiktok", 5), min=1, max=50, format="%d").props('outlined').style("min-width:120px;")
 
         # Advanced
         with ui.element("div").classes("glass-card w-full").style("margin-bottom:20px;"):
@@ -1209,10 +1561,10 @@ def _page_settings(collector: AnalyticsCollector) -> None:
             reliability = collector.config.get("reliability", {})
             schedule = collector.config.get("schedule", {})
 
-            with ui.row().classes("gap-4 w-full").style("flex-wrap:wrap;"):
-                ui.number("Max Retries", value=reliability.get("max_retries", 3), min=1, max=10).props('outlined').style("width:140px;")
-                ui.number("Retry Backoff (s)", value=reliability.get("retry_backoff", 2), min=1, max=60).props('outlined').style("width:140px;")
-                ui.number("Check Interval (s)", value=schedule.get("check_interval", 900), min=60, max=3600).props('outlined').style("width:140px;")
+            with ui.element("div").classes("settings-form-row"):
+                ui.number("Max Retries", value=reliability.get("max_retries", 3), min=1, max=10).props('outlined').style("min-width:120px;")
+                ui.number("Retry Backoff (s)", value=reliability.get("retry_backoff", 2), min=1, max=60).props('outlined').style("min-width:120px;")
+                ui.number("Check Interval (s)", value=schedule.get("check_interval", 900), min=60, max=3600).props('outlined').style("min-width:120px;")
 
         # System Paths
         with ui.element("div").classes("glass-card w-full").style("margin-bottom:20px;"):
@@ -1226,13 +1578,13 @@ def _page_settings(collector: AnalyticsCollector) -> None:
                 ("Logs", str(config_dir / "logs")),
             ]
             for label, path in paths_info:
-                with ui.row().classes("items-center gap-3").style("padding:6px 0;"):
+                with ui.row().classes("items-center gap-3 path-row").style("padding:6px 0;"):
                     ui.icon("folder", size="16px", color=DARK_TEXT_MUTED)
-                    ui.label(f"{label}:").style("color:var(--text-sec); min-width:120px; font-size:13px;")
-                    ui.label(path).style("color:var(--text); font-family:monospace; font-size:12px;")
+                    ui.label(f"{label}:").style("color:var(--text-sec); min-width:120px; font-size:clamp(0.75rem, 1vw, 0.8125rem);")
+                    ui.label(path).classes("path-value").style("color:var(--text); font-family:monospace; font-size:clamp(0.7rem, 0.9vw, 0.75rem);")
 
         # Save Buttons
-        with ui.row().classes("gap-3"):
+        with ui.row().classes("gap-3").style("flex-wrap:wrap;"):
             async def save_settings() -> None:
                 try:
                     cfg = XPSTConfig.load(str(config_path))
