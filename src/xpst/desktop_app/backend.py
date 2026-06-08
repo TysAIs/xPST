@@ -588,8 +588,11 @@ class AppController(QObject):
 class ThemeProvider(QObject):
     """Theme colors and design tokens exposed to QML."""
     
+    darkModeChanged = Signal()
+    
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._dark_mode = True
     
     # Surface ladder
     @Property(str, constant=True)
@@ -672,12 +675,12 @@ class ThemeProvider(QObject):
     def radiusXl(self): return 16
     
     # Dark mode toggle
-    _dark_mode = True
-    
-    @Property(bool)
+    @Property(bool, notify=darkModeChanged)
     def darkMode(self):
         return self._dark_mode
     
     @darkMode.setter
     def darkMode(self, value):
-        self._dark_mode = value
+        if self._dark_mode != value:
+            self._dark_mode = value
+            self.darkModeChanged.emit()
