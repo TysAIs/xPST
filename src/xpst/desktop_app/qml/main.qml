@@ -1,4 +1,4 @@
-import QtQuick 2.15
+﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
@@ -10,14 +10,14 @@ ApplicationWindow {
     height: 800
     minimumWidth: 960
     minimumHeight: 600
-    title: "xPST — Cross-Posting Suite"
+    title: "xPST - Cross-Posting Suite"
     color: theme.canvas
 
     property string currentPage: "dashboard"
     property var dialogStack: []
     property bool noSplashMode: typeof noSplashMode !== "undefined" ? noSplashMode : false
 
-    // ── Window State Persistence ───────────────────────────────────
+    // Window State Persistence
     Component.onCompleted: {
         var settings = Qt.application.settings || null
         // Restore geometry from QSettings via controller or direct settings
@@ -81,7 +81,7 @@ ApplicationWindow {
         } catch(e) {}
     }
 
-    // ── Toast notification ───────────────────────────────────────
+    // Toast notification
     Rectangle {
         id: toast
         anchors.horizontalCenter: parent.horizontalCenter
@@ -122,7 +122,7 @@ ApplicationWindow {
         Behavior on opacity { NumberAnimation { duration: 200 } }
     }
 
-    // ── Crash Recovery Dialog ─────────────────────────────────────
+    // Crash Recovery Dialog
     Dialog {
         id: crashRecoveryDialog
         anchors.centerIn: parent
@@ -138,7 +138,7 @@ ApplicationWindow {
             spacing: 16
 
             Text {
-                text: "⚠️"
+                text: "!"
                 font.pixelSize: 32
                 Layout.alignment: Qt.AlignHCenter
             }
@@ -213,7 +213,7 @@ ApplicationWindow {
         }
     }
 
-    // ── Upload Progress Overlay ───────────────────────────────────
+    // Upload Progress Overlay
     property var uploadProgresses: ({})
 
     Rectangle {
@@ -286,7 +286,7 @@ ApplicationWindow {
         }
     }
 
-    // ── Navigation ──────────────────────────────────────────────
+    // Navigation
     function navigateTo(pageName) {
         currentPage = pageName
         var component
@@ -326,7 +326,7 @@ ApplicationWindow {
         toast.show(msg, isError)
     }
 
-    // ── Keyboard Shortcuts ──────────────────────────────────────
+    // Keyboard Shortcuts
     Shortcut { sequence: "Meta+1"; onActivated: navigateTo("dashboard") }
     Shortcut { sequence: "Meta+2"; onActivated: navigateTo("content") }
     Shortcut { sequence: "Meta+3"; onActivated: navigateTo("analytics") }
@@ -353,7 +353,7 @@ ApplicationWindow {
         }
     }
 
-    // ── Controller signal connections ───────────────────────────
+    // Controller signal connections
     Connections {
         target: typeof controller !== "undefined" ? controller : null
 
@@ -400,7 +400,7 @@ ApplicationWindow {
         }
     }
 
-    // ── Drop Area for video files (Item 7) ────────────────────────
+    // Drop Area for video files
     DropArea {
         id: dropArea
         anchors.fill: parent
@@ -462,7 +462,7 @@ ApplicationWindow {
             spacing: 16
 
             Text {
-                text: "📹"
+                text: "Video"
                 font.pixelSize: 48
                 horizontalAlignment: Text.AlignHCenter
                 Layout.alignment: Qt.AlignHCenter
@@ -517,7 +517,7 @@ ApplicationWindow {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "🎬"
+                    text: "Video"
                     font.pixelSize: 36
                     color: theme.textMuted
                     visible: dropThumbnail.status !== Image.Ready
@@ -529,7 +529,7 @@ ApplicationWindow {
                 spacing: 4
                 Layout.fillWidth: true
                 Text {
-                    text: "🎬 " + (dropCaptionDialog.droppedPath ? dropCaptionDialog.droppedPath.split("/").pop() : "")
+                    text: dropCaptionDialog.droppedPath ? dropCaptionDialog.droppedPath.split("/").pop() : ""
                     font.pixelSize: 14
                     font.bold: true
                     color: theme.textPrimary

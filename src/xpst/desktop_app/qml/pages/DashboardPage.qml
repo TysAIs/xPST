@@ -2,7 +2,6 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
-
 Page {
     id: dashboardPage
     background: Rectangle { color: theme.canvas }
@@ -14,12 +13,13 @@ Page {
         } catch(e) {}
         return ({})
     }
+
     property var recentPostsData: {
         try {
             if (typeof controller !== "undefined" && controller.recentPosts)
                 return JSON.parse(controller.recentPosts)
         } catch(e) {}
-        return ([])
+        return []
     }
 
     Component.onCompleted: {
@@ -41,14 +41,20 @@ Page {
         var n = (name || "").toLowerCase()
         if (n === "youtube") return theme.youtube
         if (n === "instagram") return theme.instagram
-        if (n === "x") return theme.xtwitter
+        if (n === "x") return theme.xPlatform
         if (n === "tiktok") return theme.tiktok
         return theme.accent
     }
 
+    function titleCase(value) {
+        var text = String(value || "")
+        if (text.length === 0) return "Unknown"
+        return text.charAt(0).toUpperCase() + text.slice(1)
+    }
+
     Flickable {
         anchors.fill: parent
-        contentHeight: contentCol.implicitHeight + theme.spacingXxl
+        contentHeight: contentCol.implicitHeight + theme.pageMargin
         clip: true
         boundsBehavior: Flickable.StopAtBounds
 
@@ -57,266 +63,379 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacingXl
-            spacing: theme.spacingXl
+            anchors.margins: theme.pageMargin
+            spacing: 24
 
-            // Header
-            ColumnLayout {
-                spacing: theme.spacingXs
-                Text {
-                    text: "Dashboard"
-                    font.pixelSize: 20
-                    font.bold: true
-                    color: theme.textPrimary
-                    Accessible.name: "Dashboard page title"
-                    Accessible.role: Accessible.Heading
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 18
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 5
+
+                    Text {
+                        text: "Dashboard"
+                        font.family: theme.fontFamily
+                        font.pixelSize: 30
+                        font.weight: Font.DemiBold
+                        color: theme.textPrimary
+                        Accessible.name: "Dashboard page title"
+                        Accessible.role: Accessible.Heading
+                    }
+
+                    Text {
+                        text: "Monitor content, platform health, and recent publishing activity."
+                        font.family: theme.fontFamily
+                        font.pixelSize: 14
+                        color: theme.textSecondary
+                    }
                 }
-                Text {
-                    text: "Overview of your cross-posting performance"
-                    font.pixelSize: 13
-                    color: theme.textSecondary
+
+                Rectangle {
+                    Layout.preferredWidth: refreshText.implicitWidth + 28
+                    Layout.preferredHeight: 34
+                    radius: theme.radiusMd
+                    color: refreshMouse.containsMouse ? theme.accentHover : theme.accent
+
+                    Text {
+                        id: refreshText
+                        anchors.centerIn: parent
+                        text: "Refresh"
+                        font.family: theme.fontFamily
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                        color: "white"
+                    }
+
+                    MouseArea {
+                        id: refreshMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (typeof controller !== "undefined")
+                                controller.refreshData()
+                        }
+                    }
                 }
             }
 
-            // Metric cards row
-            RowLayout {
+            GridLayout {
                 Layout.fillWidth: true
-                spacing: theme.spacingXl
+                columns: dashboardPage.width < 960 ? 2 : 4
+                columnSpacing: 14
+                rowSpacing: 14
 
                 Repeater {
                     model: [
-                        { label: "Total Posts",     value: typeof controller !== "undefined" ? controller.totalPosts : "0",   icon: "📝" },
-                        { label: "Total Reach",     value: typeof controller !== "undefined" ? controller.totalReach : "0",   icon: "👥" },
-                        { label: "Best Platform",   value: typeof controller !== "undefined" ? controller.bestPlatform : "—", icon: "🏆" },
-                        { label: "Posts This Week",  value: typeof controller !== "undefined" ? controller.postsThisWeek : "0", icon: "📅" }
+                        { label: "Total posts", value: typeof controller !== "undefined" ? controller.totalPosts : "0", tone: theme.accent },
+                        { label: "Total reach", value: typeof controller !== "undefined" ? controller.totalReach : "0", tone: theme.success },
+                        { label: "Best platform", value: typeof controller !== "undefined" ? controller.bestPlatform : "-", tone: theme.instagram },
+                        { label: "This week", value: typeof controller !== "undefined" ? controller.postsThisWeek : "0", tone: theme.warning }
                     ]
 
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 120
-                        radius: theme.radiusLg
+                        Layout.preferredHeight: 112
+                        radius: theme.radiusXl
                         color: theme.surfaceCard
+                        border.color: theme.separator
+                        border.width: 1
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: theme.spacingXl
-                            spacing: theme.spacingSm
+                            anchors.margins: 18
+                            spacing: 8
 
                             RowLayout {
-                                spacing: theme.spacingSm
-                                Text { text: modelData.icon; font.pixelSize: 14 }
-                                Text {
-                                    text: modelData.label
-                                    font.pixelSize: 12
-                                    color: theme.textMuted
-                                }
-                            }
-                            Text {
-                                text: String(modelData.value)
-                                font.pixelSize: 20
-                                font.bold: true
-                                color: theme.textPrimary
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Platform Health — from real controller data
-            ColumnLayout {
-                spacing: theme.spacingMd
-                Text {
-                    text: "Platform Health"
-                    font.pixelSize: 16
-                    font.bold: true
-                    color: theme.textPrimary
-                    Accessible.name: "Platform Health section"
-                    Accessible.role: Accessible.Heading
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: theme.spacingXl
-
-                    Repeater {
-                        model: {
-                            var result = []
-                            var keys = ["youtube", "instagram", "x", "tiktok"]
-                            for (var i = 0; i < keys.length; i++) {
-                                var k = keys[i]
-                                var info = dashboardPage.platformHealthData[k]
-                                if (info) {
-                                    result.push(info)
-                                } else {
-                                    result.push({ name: k, label: k.charAt(0).toUpperCase() + k.slice(1), status: "unknown" })
-                                }
-                            }
-                            return result
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 80
-                            radius: theme.radiusLg
-                            color: theme.surfaceCard
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.margins: theme.spacingXl
-                                spacing: theme.spacingMd
+                                Layout.fillWidth: true
+                                spacing: 8
 
                                 Rectangle {
-                                    width: 10; height: 10; radius: 5
-                                    color: {
-                                        var s = modelData.status || "unknown"
-                                        if (s === "ok" || s === "healthy" || s === "connected") return theme.success
-                                        if (s === "warning" || s === "degraded") return theme.warning
-                                        if (s === "error" || s === "failed") return theme.error
-                                        return theme.textMuted
-                                    }
+                                    Layout.preferredWidth: 8
+                                    Layout.preferredHeight: 8
+                                    radius: 4
+                                    color: modelData.tone
                                 }
-                                ColumnLayout {
-                                    spacing: theme.spacingXs
-                                    Text {
-                                        text: modelData.label || modelData.name || ""
-                                        font.pixelSize: 13
-                                        font.bold: true
-                                        color: dashboardPage.platformColor(modelData.name)
-                                    }
-                                    Text {
-                                        text: {
-                                            var s = modelData.status || "unknown"
-                                            if (s === "ok" || s === "healthy" || s === "connected") return "Connected"
-                                            if (s === "warning" || s === "degraded") return "Degraded"
-                                            if (s === "error" || s === "failed") return "Error"
-                                            return "Unknown"
-                                        }
-                                        font.pixelSize: 12
-                                        color: theme.textSecondary
-                                    }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: modelData.label
+                                    font.family: theme.fontFamily
+                                    font.pixelSize: 12
+                                    color: theme.textMuted
+                                    elide: Text.ElideRight
                                 }
-                                Item { Layout.fillWidth: true }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: String(modelData.value)
+                                font.family: theme.fontFamily
+                                font.pixelSize: 27
+                                font.weight: Font.DemiBold
+                                color: theme.textPrimary
+                                elide: Text.ElideRight
                             }
                         }
                     }
                 }
             }
 
-            // Recent Posts — from real controller data
-            ColumnLayout {
-                spacing: theme.spacingMd
-                Text {
-                    text: "Recent Posts"
-                    font.pixelSize: 16
-                    font.bold: true
-                    color: theme.textPrimary
-                    Accessible.name: "Recent Posts section"
-                    Accessible.role: Accessible.Heading
-                }
+            GridLayout {
+                Layout.fillWidth: true
+                columns: dashboardPage.width < 1040 ? 1 : 2
+                columnSpacing: 18
+                rowSpacing: 18
 
-                GridLayout {
+                Rectangle {
                     Layout.fillWidth: true
-                    columns: 3
-                    columnSpacing: theme.spacingXl
-                    rowSpacing: theme.spacingXl
+                    Layout.preferredHeight: 292
+                    radius: theme.radiusXl
+                    color: theme.surfaceCard
+                    border.color: theme.separator
 
-                    Repeater {
-                        model: {
-                            // Show up to 6 recent posts from real data
-                            var posts = dashboardPage.recentPostsData
-                            if (!posts || !Array.isArray(posts)) return []
-                            var result = []
-                            for (var i = 0; i < Math.min(posts.length, 6); i++) {
-                                var p = posts[i]
-                                var ts = p.timestamp || ""
-                                var timeLabel = ""
-                                if (ts) {
-                                    try {
-                                        var d = new Date(ts)
-                                        var now = new Date()
-                                        var diff = (now - d) / 1000
-                                        if (diff < 60) timeLabel = "just now"
-                                        else if (diff < 3600) timeLabel = Math.floor(diff / 60) + "m ago"
-                                        else if (diff < 86400) timeLabel = Math.floor(diff / 3600) + "h ago"
-                                        else if (diff < 604800) timeLabel = Math.floor(diff / 86400) + "d ago"
-                                        else timeLabel = d.toLocaleDateString()
-                                    } catch(e) { timeLabel = ts }
-                                }
-                                result.push({
-                                    title: p.title || p.postId || "Untitled",
-                                    caption: p.caption || "",
-                                    platform: p.platform || "",
-                                    time: timeLabel,
-                                    status: p.status || "posted"
-                                })
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 20
+                        spacing: 14
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                Layout.fillWidth: true
+                                text: "Platform health"
+                                font.family: theme.fontFamily
+                                font.pixelSize: 17
+                                font.weight: Font.DemiBold
+                                color: theme.textPrimary
+                                Accessible.name: "Platform Health section"
+                                Accessible.role: Accessible.Heading
                             }
-                            return result
+                            Text {
+                                text: "Live status"
+                                font.family: theme.fontFamily
+                                font.pixelSize: 12
+                                color: theme.textMuted
+                            }
                         }
 
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 100
-                            radius: theme.radiusLg
-                            color: theme.surfaceCard
-
-                            ColumnLayout {
-                                anchors.fill: parent
-                                anchors.margins: theme.spacingXl
-                                spacing: theme.spacingSm
-
-                                Text {
-                                    text: modelData.title
-                                    font.pixelSize: 14
-                                    font.bold: true
-                                    color: theme.textPrimary
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
+                        Repeater {
+                            model: {
+                                var result = []
+                                var keys = ["youtube", "instagram", "x", "tiktok"]
+                                for (var i = 0; i < keys.length; i++) {
+                                    var k = keys[i]
+                                    var info = dashboardPage.platformHealthData[k]
+                                    if (info) {
+                                        info.name = info.name || k
+                                        info.label = info.label || dashboardPage.titleCase(k)
+                                        result.push(info)
+                                    } else {
+                                        result.push({ name: k, label: dashboardPage.titleCase(k), status: "unknown" })
+                                    }
                                 }
+                                return result
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 44
+                                radius: theme.radiusMd
+                                color: healthMouse.containsMouse ? theme.surfaceAlt : "transparent"
+
                                 RowLayout {
-                                    spacing: theme.spacingSm
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 2
+                                    anchors.rightMargin: 2
+                                    spacing: 12
+
                                     Rectangle {
-                                        width: platformLabel.implicitWidth + theme.spacingMd
-                                        height: platformLabel.implicitHeight + theme.spacingXs
-                                        radius: theme.radiusSm
-                                        color: dashboardPage.platformColor(modelData.platform)
-                                        opacity: 0.2
+                                        Layout.preferredWidth: 30
+                                        Layout.preferredHeight: 30
+                                        radius: 8
+                                        color: dashboardPage.platformColor(modelData.name)
+                                        opacity: 0.18
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.label || modelData.name || ""
+                                        font.family: theme.fontFamily
+                                        font.pixelSize: 13
+                                        font.weight: Font.DemiBold
+                                        color: theme.textPrimary
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Rectangle {
+                                        Layout.preferredWidth: statusText.implicitWidth + 20
+                                        Layout.preferredHeight: 26
+                                        radius: 13
+                                        color: {
+                                            var s = modelData.status || "unknown"
+                                            if (s === "ok" || s === "healthy" || s === "connected") return theme.success
+                                            if (s === "warning" || s === "degraded") return theme.warning
+                                            if (s === "error" || s === "failed") return theme.error
+                                            return theme.surfaceAlt
+                                        }
+                                        opacity: modelData.status === "unknown" ? 1 : 0.22
+
                                         Text {
-                                            id: platformLabel
+                                            id: statusText
                                             anchors.centerIn: parent
-                                            text: modelData.platform
+                                            text: {
+                                                var s = modelData.status || "unknown"
+                                                if (s === "ok" || s === "healthy" || s === "connected") return "Connected"
+                                                if (s === "warning" || s === "degraded") return "Degraded"
+                                                if (s === "error" || s === "failed") return "Error"
+                                                return "Unknown"
+                                            }
+                                            font.family: theme.fontFamily
                                             font.pixelSize: 11
-                                            font.bold: true
-                                            color: parent.color
-                                            opacity: 5.0
+                                            font.weight: Font.DemiBold
+                                            color: modelData.status === "unknown" ? theme.textMuted : theme.textPrimary
                                         }
                                     }
-                                    Text {
-                                        text: modelData.time
-                                        font.pixelSize: 11
-                                        color: theme.textMuted
-                                    }
+                                }
+
+                                MouseArea {
+                                    id: healthMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
                                 }
                             }
                         }
                     }
                 }
 
-                // Empty state for recent posts
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 80
-                    color: "transparent"
-                    visible: !dashboardPage.recentPostsData || dashboardPage.recentPostsData.length === 0
+                    Layout.preferredHeight: 292
+                    radius: theme.radiusXl
+                    color: theme.surfaceCard
+                    border.color: theme.separator
 
                     ColumnLayout {
-                        anchors.centerIn: parent
-                        spacing: theme.spacingSm
-                        Text {
-                            text: "📭 No recent posts"
-                            font.pixelSize: 13
-                            color: theme.textMuted
-                            horizontalAlignment: Text.AlignHCenter
-                            Layout.alignment: Qt.AlignHCenter
+                        anchors.fill: parent
+                        anchors.margins: 20
+                        spacing: 14
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                Layout.fillWidth: true
+                                text: "Recent posts"
+                                font.family: theme.fontFamily
+                                font.pixelSize: 17
+                                font.weight: Font.DemiBold
+                                color: theme.textPrimary
+                                Accessible.name: "Recent Posts section"
+                                Accessible.role: Accessible.Heading
+                            }
+                            Text {
+                                text: "Latest 5"
+                                font.family: theme.fontFamily
+                                font.pixelSize: 12
+                                color: theme.textMuted
+                            }
+                        }
+
+                        ListView {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            spacing: 8
+                            model: {
+                                var posts = dashboardPage.recentPostsData
+                                if (!posts || !Array.isArray(posts)) return []
+                                var result = []
+                                for (var i = 0; i < Math.min(posts.length, 5); i++) {
+                                    var p = posts[i]
+                                    var ts = p.timestamp || ""
+                                    var timeLabel = ""
+                                    if (ts) {
+                                        try {
+                                            var d = new Date(ts)
+                                            var now = new Date()
+                                            var diff = (now - d) / 1000
+                                            if (diff < 60) timeLabel = "just now"
+                                            else if (diff < 3600) timeLabel = Math.floor(diff / 60) + "m ago"
+                                            else if (diff < 86400) timeLabel = Math.floor(diff / 3600) + "h ago"
+                                            else if (diff < 604800) timeLabel = Math.floor(diff / 86400) + "d ago"
+                                            else timeLabel = d.toLocaleDateString()
+                                        } catch(e) { timeLabel = ts }
+                                    }
+                                    result.push({
+                                        title: p.title || p.postId || "Untitled",
+                                        platform: p.platform || "local",
+                                        time: timeLabel || "queued",
+                                        status: p.status || "posted"
+                                    })
+                                }
+                                return result
+                            }
+
+                            delegate: Rectangle {
+                                width: ListView.view ? ListView.view.width : 320
+                                height: 46
+                                radius: theme.radiusMd
+                                color: postMouse.containsMouse ? theme.surfaceAlt : "transparent"
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 2
+                                    anchors.rightMargin: 2
+                                    spacing: 12
+
+                                    Rectangle {
+                                        Layout.preferredWidth: 30
+                                        Layout.preferredHeight: 30
+                                        radius: 8
+                                        color: dashboardPage.platformColor(modelData.platform)
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 1
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: modelData.title
+                                            font.family: theme.fontFamily
+                                            font.pixelSize: 13
+                                            font.weight: Font.DemiBold
+                                            color: theme.textPrimary
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: dashboardPage.titleCase(modelData.platform) + " - " + modelData.time
+                                            font.family: theme.fontFamily
+                                            font.pixelSize: 11
+                                            color: theme.textMuted
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: postMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "No recent posts yet"
+                                font.family: theme.fontFamily
+                                font.pixelSize: 13
+                                color: theme.textMuted
+                                visible: !dashboardPage.recentPostsData || dashboardPage.recentPostsData.length === 0
+                            }
                         }
                     }
                 }

@@ -18,7 +18,7 @@ logger = logging.getLogger("xpst.desktop")
 # ── PySide6 imports ──────────────────────────────────────────────────
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
-from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQml import QQmlApplicationEngine, QQmlEngine
 from PySide6.QtWidgets import QApplication, QMenu, QSplashScreen, QSystemTrayIcon
 
 # Attempt Material style import (QtQuick.Controls)
@@ -266,6 +266,7 @@ def main(no_splash: bool = False) -> int:
     # Expose to QML
     engine.rootContext().setContextProperty("controller", controller)
     theme_provider = ThemeProvider()
+    QQmlEngine.setObjectOwnership(theme_provider, QQmlEngine.ObjectOwnership.CppOwnership)
     engine.rootContext().setContextProperty("theme", theme_provider)
     engine.rootContext().setContextProperty("postModel", post_model)
     engine.rootContext().setContextProperty("noSplashMode", no_splash)

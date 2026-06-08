@@ -2,21 +2,21 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
-
 Rectangle {
     id: sidebar
-    width: expanded ? 240 : 64
+    width: expanded ? 232 : 72
     Layout.fillHeight: true
     color: theme.surface
-    Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.InOutCubic } }
+    border.color: theme.separator
+    border.width: 1
+
+    Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
 
     property bool expanded: true
     property string currentPage: "dashboard"
+    property int notifCount: typeof notifModel !== "undefined" ? notifModel.rowCount() : 0
     signal navigate(string pageName)
 
-    property int notifCount: typeof notifModel !== "undefined" ? notifModel.rowCount() : 0
-
-    // Update count when model changes
     Connections {
         target: typeof notifModel !== "undefined" ? notifModel : null
         function onRowsInserted() { sidebar.notifCount = notifModel.rowCount() }
@@ -25,77 +25,123 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 0
+        anchors.topMargin: 18
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
+        anchors.bottomMargin: 14
+        spacing: 6
 
-        // Logo
-        Rectangle {
+        RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 64
-            color: "transparent"
+            Layout.preferredHeight: 48
+            spacing: 10
 
-            RowLayout {
-                anchors.centerIn: parent
-                spacing: theme.spacingSm
+            Rectangle {
+                Layout.preferredWidth: 34
+                Layout.preferredHeight: 34
+                radius: 9
+                color: theme.accent
 
                 Text {
-                    text: "⚡"
-                    font.pixelSize: 18
-                }
-                Text {
-                    text: "xPST"
+                    anchors.centerIn: parent
+                    text: "x"
+                    font.family: theme.fontFamily
                     font.pixelSize: 18
                     font.bold: true
+                    color: "white"
+                }
+            }
+
+            ColumnLayout {
+                visible: sidebar.expanded
+                Layout.fillWidth: true
+                spacing: 0
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "xPST"
+                    font.family: theme.fontFamily
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
-                    visible: sidebar.expanded
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: "Cross-posting studio"
+                    font.family: theme.fontFamily
+                    font.pixelSize: 11
+                    color: theme.textMuted
+                    elide: Text.ElideRight
                 }
             }
         }
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.surfaceAlt }
-
-        // Nav items
-        Item { Layout.preferredHeight: theme.spacingXl }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.separator; opacity: 0.8 }
+        Item { Layout.preferredHeight: 8 }
 
         Repeater {
             model: [
-                { label: "Dashboard", icon: "📊", page: "dashboard" },
-                { label: "Content",   icon: "📝", page: "content" },
-                { label: "Analytics", icon: "📈", page: "analytics" },
-                { label: "Connect",   icon: "🔗", page: "connect" },
-                { label: "Schedule",  icon: "📅", page: "schedule" },
-                { label: "Settings",  icon: "⚙", page: "settings" },
-                { label: "About",     icon: "ℹ️", page: "about" }
+                { label: "Dashboard", icon: "D", page: "dashboard" },
+                { label: "Content",   icon: "C", page: "content" },
+                { label: "Analytics", icon: "A", page: "analytics" },
+                { label: "Connect",   icon: "L", page: "connect" },
+                { label: "Schedule",  icon: "S", page: "schedule" },
+                { label: "Settings",  icon: "G", page: "settings" },
+                { label: "About",     icon: "I", page: "about" }
             ]
 
             Rectangle {
+                id: navItem
                 Layout.fillWidth: true
-                Layout.preferredHeight: 44
-                Layout.leftMargin: theme.spacingSm
-                Layout.rightMargin: theme.spacingSm
+                Layout.preferredHeight: 38
                 radius: theme.radiusMd
-                color: navMouse.containsMouse || sidebar.currentPage === modelData.page
-                       ? (sidebar.currentPage === modelData.page ? theme.accentMuted : theme.surfaceAlt)
-                       : "transparent"
+                color: sidebar.currentPage === modelData.page
+                       ? theme.accentMuted
+                       : (navMouse.containsMouse ? theme.surfaceAlt : "transparent")
+
+                Rectangle {
+                    width: 3
+                    height: 18
+                    radius: 2
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: theme.accent
+                    visible: sidebar.currentPage === modelData.page
+                }
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: theme.spacingMd
-                    spacing: theme.spacingMd
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    spacing: 10
+
+                    Rectangle {
+                        Layout.preferredWidth: 24
+                        Layout.preferredHeight: 24
+                        radius: 7
+                        color: sidebar.currentPage === modelData.page ? theme.accent : theme.elevated
+                        border.color: sidebar.currentPage === modelData.page ? theme.accent : theme.separator
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.icon
+                            font.family: theme.fontFamily
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                            color: sidebar.currentPage === modelData.page ? "white" : theme.textSecondary
+                        }
+                    }
 
                     Text {
-                        text: modelData.icon
-                        font.pixelSize: 14
-                        Layout.preferredWidth: 24
-                        horizontalAlignment: Text.AlignHCenter
-                    }
-                    Text {
+                        Layout.fillWidth: true
                         text: modelData.label
-                        font.pixelSize: 13
-                        color: sidebar.currentPage === modelData.page ? theme.accent : theme.textSecondary
-                        visible: sidebar.expanded
+                        font.family: theme.fontFamily
+                        font.pixelSize: theme.fontMd
                         font.weight: sidebar.currentPage === modelData.page ? Font.DemiBold : Font.Normal
+                        color: sidebar.currentPage === modelData.page ? theme.textPrimary : theme.textSecondary
+                        visible: sidebar.expanded
+                        elide: Text.ElideRight
                     }
-                    Item { Layout.fillWidth: true }
                 }
 
                 MouseArea {
@@ -108,56 +154,47 @@ Rectangle {
             }
         }
 
-        // Quick Stats section
+        Item { Layout.preferredHeight: 10 }
+
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: sidebar.expanded ? quickStatsCol.implicitHeight + theme.spacingLg : 0
-            Layout.leftMargin: theme.spacingSm
-            Layout.rightMargin: theme.spacingSm
-            Layout.bottomMargin: theme.spacingSm
-            radius: theme.radiusMd
-            color: theme.surfaceAlt
+            Layout.preferredHeight: sidebar.expanded ? 82 : 0
             visible: sidebar.expanded
+            radius: theme.radiusXl
+            color: theme.elevated
+            border.color: theme.separator
             clip: true
 
             ColumnLayout {
-                id: quickStatsCol
                 anchors.fill: parent
-                anchors.margins: theme.spacingSm
-                spacing: theme.spacingXs
+                anchors.margins: 12
+                spacing: 6
 
                 Text {
-                    text: "Quick Stats"
-                    font.pixelSize: 10
-                    font.bold: true
+                    text: "Today"
+                    font.family: theme.fontFamily
+                    font.pixelSize: 11
+                    font.weight: Font.DemiBold
                     color: theme.textMuted
                 }
 
                 RowLayout {
-                    spacing: theme.spacingSm
+                    Layout.fillWidth: true
+                    spacing: 8
 
                     Text {
-                        text: "📝"
-                        font.pixelSize: 11
-                    }
-                    Text {
-                        id: totalPostsText
                         text: (typeof controller !== "undefined" ? controller.totalPosts : 0) + " posts"
-                        font.pixelSize: 11
-                        color: theme.textSecondary
-                        Behavior on text {
-                            SequentialAnimation {
-                                NumberAnimation { target: totalPostsText; property: "scale"; from: 1.0; to: 1.15; duration: 150; easing.type: Easing.OutCubic }
-                                NumberAnimation { target: totalPostsText; property: "scale"; from: 1.15; to: 1.0; duration: 150; easing.type: Easing.InOutCubic }
-                            }
-                        }
+                        font.family: theme.fontFamily
+                        font.pixelSize: 13
+                        color: theme.textPrimary
                     }
 
                     Item { Layout.fillWidth: true }
 
-                    // Health dot
                     Rectangle {
-                        width: 10; height: 10; radius: 5
+                        width: 10
+                        height: 10
+                        radius: 5
                         color: {
                             try {
                                 if (typeof controller !== "undefined") {
@@ -178,67 +215,80 @@ Rectangle {
                         }
                     }
                 }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: "Local-first. No cloud service."
+                    font.family: theme.fontFamily
+                    font.pixelSize: 11
+                    color: theme.textMuted
+                    elide: Text.ElideRight
+                }
             }
         }
 
         Item { Layout.fillHeight: true }
 
-        // Notification bell (Item 8)
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 44
-            Layout.leftMargin: theme.spacingSm
-            Layout.rightMargin: theme.spacingSm
-            Layout.bottomMargin: theme.spacingSm
+            Layout.preferredHeight: 38
             radius: theme.radiusMd
             color: bellMouse.containsMouse ? theme.surfaceAlt : "transparent"
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: theme.spacingMd
-                spacing: theme.spacingMd
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 10
 
-                // Bell icon with badge
-                Item {
+                Rectangle {
                     Layout.preferredWidth: 24
                     Layout.preferredHeight: 24
+                    radius: 7
+                    color: theme.elevated
+                    border.color: theme.separator
 
                     Text {
-                        text: "🔔"
-                        font.pixelSize: 14
                         anchors.centerIn: parent
+                        text: "N"
+                        font.family: theme.fontFamily
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                        color: theme.textSecondary
                     }
 
-                    // Badge count
                     Rectangle {
-                        width: Math.max(16, badgeText.implicitWidth + 6)
-                        height: 16
-                        radius: 8
+                        width: Math.max(14, badgeText.implicitWidth + 6)
+                        height: 14
+                        radius: 7
                         color: theme.error
                         visible: sidebar.notifCount > 0
                         anchors.top: parent.top
                         anchors.right: parent.right
-                        anchors.topMargin: -4
+                        anchors.topMargin: -5
                         anchors.rightMargin: -6
 
                         Text {
                             id: badgeText
                             anchors.centerIn: parent
                             text: sidebar.notifCount > 99 ? "99+" : String(sidebar.notifCount)
-                            font.pixelSize: 9
+                            font.family: theme.fontFamily
+                            font.pixelSize: 8
                             font.bold: true
-                            color: "#ffffff"
+                            color: "white"
                         }
                     }
                 }
 
                 Text {
+                    Layout.fillWidth: true
                     text: "Notifications"
-                    font.pixelSize: 13
+                    font.family: theme.fontFamily
+                    font.pixelSize: theme.fontMd
                     color: theme.textSecondary
                     visible: sidebar.expanded
+                    elide: Text.ElideRight
                 }
-                Item { Layout.fillWidth: true }
             }
 
             MouseArea {
@@ -246,58 +296,44 @@ Rectangle {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    // Show notification popup
-                    if (notifPopup.visible) {
-                        notifPopup.close()
-                    } else {
-                        notifPopup.open()
-                    }
-                }
+                onClicked: notifPopup.visible ? notifPopup.close() : notifPopup.open()
             }
 
-            // Notification popup
             Popup {
                 id: notifPopup
                 y: -notifPopupContent.implicitHeight - 8
                 x: sidebar.expanded ? 0 : 64
-                width: 280
-                height: Math.min(360, notifPopupContent.implicitHeight + theme.spacingXl)
+                width: 300
+                height: Math.min(360, notifPopupContent.implicitHeight + 24)
                 background: Rectangle {
-                    color: theme.surfaceCard
-                    radius: theme.radiusLg
-                    border.color: theme.surfaceAlt
+                    color: theme.elevated
+                    radius: theme.radiusXl
+                    border.color: theme.separator
                     border.width: 1
                 }
 
                 ColumnLayout {
                     id: notifPopupContent
                     anchors.fill: parent
-                    anchors.margins: theme.spacingMd
-                    spacing: theme.spacingSm
+                    anchors.margins: 14
+                    spacing: 10
 
                     RowLayout {
                         Layout.fillWidth: true
                         Text {
                             text: "Notifications"
-                            font.pixelSize: 13
-                            font.bold: true
+                            font.family: theme.fontFamily
+                            font.pixelSize: 14
+                            font.weight: Font.DemiBold
                             color: theme.textPrimary
                             Layout.fillWidth: true
                         }
-                        Rectangle {
-                            width: clearLabel.implicitWidth + theme.spacingMd
-                            height: 24
-                            radius: theme.radiusSm
-                            color: theme.surfaceAlt
+                        Text {
+                            text: "Clear"
+                            font.family: theme.fontFamily
+                            font.pixelSize: 12
+                            color: theme.accent
                             visible: sidebar.notifCount > 0
-                            Text {
-                                id: clearLabel
-                                anchors.centerIn: parent
-                                text: "Clear"
-                                font.pixelSize: 10
-                                color: theme.textSecondary
-                            }
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
@@ -308,9 +344,8 @@ Rectangle {
                         }
                     }
 
-                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.surfaceAlt }
+                    Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: theme.separator }
 
-                    // Notification list
                     ListView {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -319,29 +354,23 @@ Rectangle {
 
                         delegate: Rectangle {
                             width: parent ? parent.width : 280
-                            height: notifDelegateCol.implicitHeight + theme.spacingMd
+                            height: notifDelegateCol.implicitHeight + 10
                             color: "transparent"
 
                             ColumnLayout {
                                 id: notifDelegateCol
                                 anchors.fill: parent
-                                spacing: 2
+                                spacing: 3
 
-                                RowLayout {
-                                    spacing: theme.spacingXs
-                                    Text {
-                                        text: model.isError ? "❌" : "✅"
-                                        font.pixelSize: 10
-                                    }
-                                    Text {
-                                        text: model.message || ""
-                                        font.pixelSize: 11
-                                        color: theme.textPrimary
-                                        Layout.fillWidth: true
-                                        wrapMode: Text.Wrap
-                                        maximumLineCount: 2
-                                        elide: Text.ElideRight
-                                    }
+                                Text {
+                                    text: model.message || ""
+                                    font.family: theme.fontFamily
+                                    font.pixelSize: 12
+                                    color: theme.textPrimary
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
                                 }
                                 Text {
                                     text: {
@@ -356,17 +385,18 @@ Rectangle {
                                             return d.toLocaleDateString()
                                         } catch(e) { return "" }
                                     }
-                                    font.pixelSize: 9
+                                    font.family: theme.fontFamily
+                                    font.pixelSize: 10
                                     color: theme.textMuted
                                 }
                             }
                         }
 
-                        // Empty state
                         Text {
                             anchors.centerIn: parent
                             text: "No notifications yet"
-                            font.pixelSize: 11
+                            font.family: theme.fontFamily
+                            font.pixelSize: 12
                             color: theme.textMuted
                             visible: typeof notifModel !== "undefined" && notifModel.rowCount() === 0
                         }
@@ -375,34 +405,43 @@ Rectangle {
             }
         }
 
-        // Theme toggle
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 44
-            Layout.leftMargin: theme.spacingSm
-            Layout.rightMargin: theme.spacingSm
-            Layout.bottomMargin: theme.spacingSm
+            Layout.preferredHeight: 38
             radius: theme.radiusMd
             color: themeMouse.containsMouse ? theme.surfaceAlt : "transparent"
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: theme.spacingMd
-                spacing: theme.spacingMd
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 10
+
+                Rectangle {
+                    Layout.preferredWidth: 24
+                    Layout.preferredHeight: 24
+                    radius: 7
+                    color: theme.elevated
+                    border.color: theme.separator
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: theme.darkMode ? "D" : "L"
+                        font.family: theme.fontFamily
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                        color: theme.textSecondary
+                    }
+                }
 
                 Text {
-                    text: theme.darkMode ? "🌙" : "☀️"
-                    font.pixelSize: 14
-                    Layout.preferredWidth: 24
-                    horizontalAlignment: Text.AlignHCenter
-                }
-                Text {
-                    text: theme.darkMode ? "Dark Mode" : "Light Mode"
-                    font.pixelSize: 13
+                    Layout.fillWidth: true
+                    text: theme.darkMode ? "Dark" : "Light"
+                    font.family: theme.fontFamily
+                    font.pixelSize: theme.fontMd
                     color: theme.textSecondary
                     visible: sidebar.expanded
                 }
-                Item { Layout.fillWidth: true }
             }
 
             MouseArea {
@@ -414,13 +453,13 @@ Rectangle {
             }
         }
 
-        // Version
         Text {
             Layout.fillWidth: true
-            Layout.preferredHeight: 32
+            Layout.preferredHeight: 24
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             text: "v0.1.0"
+            font.family: theme.fontFamily
             font.pixelSize: 11
             color: theme.textMuted
             visible: sidebar.expanded
