@@ -17,7 +17,7 @@ Get xPST up and running in 5 minutes.
 ```bash
 # Clone the repository
 git clone https://github.com/xPSTOwner/XPST.git
-cd XPST
+cd ~/XPST
 
 # Create virtual environment (recommended)
 python3 -m venv .venv
@@ -31,7 +31,7 @@ pip install -e .
 
 ```bash
 git clone https://github.com/xPSTOwner/XPST.git
-cd XPST
+cd ~/XPST
 
 # Install with uv
 uv pip install -e .
@@ -41,7 +41,7 @@ uv pip install -e .
 
 ```bash
 git clone https://github.com/xPSTOwner/XPST.git
-cd XPST
+cd ~/XPST
 
 # Build and run
 docker-compose up -d

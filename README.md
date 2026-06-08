@@ -55,7 +55,7 @@ xPST is a local-first, open-source tool that automatically distributes short-for
 
 ```bash
 git clone https://github.com/xPSTOwner/XPST.git
-cd XPST
+cd ~/XPST
 pip install -e .
 ```
 
@@ -480,7 +480,7 @@ Contributions are welcome. Here's how to get started:
 ```bash
 # Clone the repository
 git clone https://github.com/xPSTOwner/XPST.git
-cd XPST
+cd ~/XPST
 
 # Create a virtual environment
 python3 -m venv .venv

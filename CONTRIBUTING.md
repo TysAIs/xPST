@@ -14,8 +14,8 @@ Thank you for your interest in contributing to xPST! This document provides guid
 
 ```bash
 # Clone the repo
-git clone https://github.com/XPST/XPST.git
-cd XPST
+git clone https://github.com/xPSTOwner/XPST.git
+cd ~/XPST
 
 # Create virtual environment
 python3 -m venv .venv
@@ -41,7 +41,7 @@ ruff format src/ tests/
 
 ### Reporting Bugs
 
-1. Check existing [issues](https://github.com/XPST/XPST/issues) first
+1. Check existing [issues](https://github.com/xPSTOwner/XPST/issues) first
 2. Create a new issue with:
    - Clear title and description
    - Steps to reproduce
@@ -51,7 +51,7 @@ ruff format src/ tests/
 
 ### Suggesting Features
 
-1. Check existing [discussions](https://github.com/XPST/XPST/discussions)
+1. Check existing [discussions](https://github.com/xPSTOwner/XPST/discussions)
 2. Open a new discussion with:
    - Use case description
    - Proposed solution
@@ -282,9 +282,9 @@ twine upload dist/*
 
 ### Communication
 
-- [GitHub Issues](https://github.com/XPST/XPST/issues): Bug reports
-- [GitHub Discussions](https://github.com/XPST/XPST/discussions): Questions, ideas
-- [Pull Requests](https://github.com/XPST/XPST/pulls): Code contributions
+- [GitHub Issues](https://github.com/xPSTOwner/XPST/issues): Bug reports
+- [GitHub Discussions](https://github.com/xPSTOwner/XPST/discussions): Questions, ideas
+- [Pull Requests](https://github.com/xPSTOwner/XPST/pulls): Code contributions
 
 ## 🙏 Thank You!
 
