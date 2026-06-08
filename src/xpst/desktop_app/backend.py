@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, QTimer, Signal, Slot, Property
+from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
 
 # ── Optional xPST dependencies (graceful fallback) ───────────────────
 try:
@@ -39,7 +39,9 @@ except ImportError:
     AnalyticsCollector = None  # type: ignore[assignment,misc]
 
 try:
-    from xpst.i18n import tr, set_language as _set_lang, get_language as _get_lang
+    from xpst.i18n import get_language as _get_lang
+    from xpst.i18n import set_language as _set_lang
+    from xpst.i18n import tr
 except ImportError:
     tr = None  # type: ignore[assignment]
     _set_lang = None  # type: ignore[assignment]
@@ -479,7 +481,7 @@ class AppController(QObject):
 
                 # Emit per-platform progress from results
                 total_platforms = len(result.results) or 1
-                for idx, (plat, ur) in enumerate(result.results.items()):
+                for idx, (plat, _upload_result) in enumerate(result.results.items()):
                     pct = ((idx + 1) / total_platforms) * 100.0
                     self.progressChanged.emit(plat, pct)
 
@@ -603,8 +605,9 @@ class AppController(QObject):
             return json.dumps({"ok": False, "error": "Config not loaded"})
 
         try:
-            import yaml
             from pathlib import Path
+
+            import yaml
 
             config_path = Path("~/.xpst/config.yaml").expanduser()
             config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -982,7 +985,7 @@ class AppController(QObject):
         import threading
 
         def _run():
-            result = self.connectPlatform(platform)
+            self.connectPlatform(platform)
             # connectPlatform already emits connectResult internally
             # This method exists for QML to call explicitly
 

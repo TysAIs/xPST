@@ -690,7 +690,7 @@ class TestUnicodePaths:
                 "log_file": str(tmp_path / "logs_кириллица" / "app.log"),
             },
         }
-        config_file.write_text(yaml.dump(config_data, allow_unicode=True))
+        config_file.write_text(yaml.dump(config_data, allow_unicode=True), encoding="utf-8")
 
         loaded = XPSTConfig.load(str(config_file))
         assert "éàü" in loaded.video.download_dir

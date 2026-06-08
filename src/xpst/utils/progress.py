@@ -97,7 +97,7 @@ class ProgressTracker:
         """Log progress with ETA estimation"""
         elapsed = time.time() - self._start_time
 
-        if pct > 0 and self.total_bytes > 0:
+        if pct > 0 and self.total_bytes > 0 and elapsed > 0:
             # Estimate ETA
             rate = self._current_bytes / elapsed
             remaining_bytes = self.total_bytes - self._current_bytes

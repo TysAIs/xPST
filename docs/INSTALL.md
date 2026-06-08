@@ -1,4 +1,4 @@
-# xPST Installation Guide
+﻿# xPST Installation Guide
 
 Complete installation instructions for all platforms and use cases.
 
@@ -98,7 +98,7 @@ pip install "xpst[mcp,desktop]"
 
 ```bash
 # Clone the repository
-git clone https://github.com/xPSTOwner/xPST.git
+git clone https://github.com/TysAIs/xPST.git
 cd xPST
 
 # Create a virtual environment
@@ -120,7 +120,7 @@ pytest
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Clone and install
-git clone https://github.com/xPSTOwner/xPST.git
+git clone https://github.com/TysAIs/xPST.git
 cd xPST
 uv venv
 source .venv/bin/activate
@@ -134,7 +134,7 @@ uv pip install -e ".[dev,mcp]"
 ### Build the Image
 
 ```bash
-git clone https://github.com/xPSTOwner/xPST.git
+git clone https://github.com/TysAIs/xPST.git
 cd xPST
 docker build -t xpst .
 ```

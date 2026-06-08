@@ -21,9 +21,9 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, PlainTextResponse
-import uvicorn
 
 if TYPE_CHECKING:
     from fastapi import Request
@@ -42,7 +42,7 @@ def _load_dashboard_auth(config_dir: str) -> tuple[str, str]:
         config_path = str(Path(config_dir).expanduser() / "config.yaml")
         config = XPSTConfig.load(config_path)
         return config.monitoring.dashboard_username, config.monitoring.dashboard_password
-    except Exception as e:
+    except Exception:
         return "", ""
 
 
@@ -122,7 +122,7 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
         from starlette.middleware.base import BaseHTTPMiddleware
 
         class BasicAuthMiddleware(BaseHTTPMiddleware):
-            async def dispatch(self, request: "Request", call_next):
+            async def dispatch(self, request: Request, call_next):
                 # Skip auth for health and metrics endpoints
                 if request.url.path in ("/health", "/metrics"):
                     return await call_next(request)

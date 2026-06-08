@@ -10,9 +10,9 @@ from typing import Any
 
 from PySide6.QtCore import (
     QAbstractListModel,
+    QByteArray,
     QModelIndex,
     Qt,
-    QByteArray,
 )
 
 # Optional: state manager for real data
@@ -104,7 +104,6 @@ class PostListModel(QAbstractListModel):
         new_posts: list[dict[str, Any]] = []
         for video_id, video_data in posted.items():
             caption = video_data.get("caption") or ""
-            tiktok_url = video_data.get("tiktok_url") or ""
             downloaded_at = video_data.get("downloaded_at") or ""
 
             # Create a row per platform this video was posted to

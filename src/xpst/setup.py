@@ -14,13 +14,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from xpst.utils.platform import get_ffmpeg_name
-
 from rich.console import Console
 from rich.panel import Panel
 
 from xpst.config import XPSTConfig
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import get_ffmpeg_name
 
 console = Console()
 logger = get_logger(__name__)

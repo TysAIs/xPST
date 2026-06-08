@@ -1,4 +1,4 @@
-import QtQuick 2.15
+﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
@@ -83,10 +83,10 @@ Page {
 
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: typeof controller !== "undefined" ? "v1.0.0" : "v1.0.0"
+                        text: "v0.1.0"
                         font.pixelSize: 13
                         color: theme.textMuted
-                        Accessible.name: "Version 1.0.0"
+                        Accessible.name: "Version 0.1.0"
                     }
 
                     Text {
@@ -307,11 +307,11 @@ Page {
 
                         Repeater {
                             model: [
-                                { label: "Homepage", icon: "🌐", url: "https://github.com/xPSTOwner/xPST" },
-                                { label: "Repository", icon: "📦", url: "https://github.com/xPSTOwner/xPST" },
-                                { label: "Documentation", icon: "📖", url: "https://github.com/xPSTOwner/xPST/wiki" },
-                                { label: "Report Issues", icon: "🐛", url: "https://github.com/xPSTOwner/xPST/issues" },
-                                { label: "Changelog", icon: "📋", url: "https://github.com/xPSTOwner/xPST/blob/main/CHANGELOG.md" }
+                                { label: "Homepage", icon: "🌐", url: "https://github.com/TysAIs/xPST" },
+                                { label: "Repository", icon: "📦", url: "https://github.com/TysAIs/xPST" },
+                                { label: "Documentation", icon: "📖", url: "https://github.com/TysAIs/xPST/wiki" },
+                                { label: "Report Issues", icon: "🐛", url: "https://github.com/TysAIs/xPST/issues" },
+                                { label: "Changelog", icon: "📋", url: "https://github.com/TysAIs/xPST/blob/main/CHANGELOG.md" }
                             ]
 
                             Rectangle {

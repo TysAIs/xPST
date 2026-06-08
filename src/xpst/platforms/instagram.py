@@ -15,7 +15,6 @@ Upload specs:
 """
 
 import contextlib
-from datetime import datetime, timezone
 from pathlib import Path
 
 from xpst.config import XPSTConfig
@@ -143,6 +142,7 @@ class InstagramUploader(PlatformUploader):
             thumb_path = video_path.with_suffix(".jpg")
             try:
                 import subprocess
+
                 from xpst.utils.platform import get_ffmpeg_name
                 subprocess.run(
                     [get_ffmpeg_name(), "-y", "-i", str(video_path), "-ss", "1",
@@ -234,7 +234,7 @@ class InstagramUploader(PlatformUploader):
                         "full_name": account.full_name,
                     },
                 )
-            except Exception as e:
+            except Exception:
                 return PlatformHealth(
                     platform="instagram",
                     authenticated=False,

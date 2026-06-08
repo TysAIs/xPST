@@ -190,7 +190,7 @@ class AuthManager:
         if token.is_expired and token.is_refreshable:
             try:
                 token = self.refresh(platform)
-            except Exception as e:
+            except Exception:
                 return None
         elif token.is_expired:
             return None

@@ -15,6 +15,7 @@ Covers:
 """
 
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -840,7 +841,7 @@ class TestUnicode:
             }
         }
         config_file = tmp_path / "config.yaml"
-        config_file.write_text(yaml.dump(config_data, allow_unicode=True))
+        config_file.write_text(yaml.dump(config_data, allow_unicode=True), encoding="utf-8")
 
         config = XPSTConfig.load(str(config_file))
         assert config.tiktok.username == "用户_🔥"
@@ -922,7 +923,8 @@ class TestPathEdgeCases:
 
     def test_path_with_special_chars(self, tmp_path):
         """Paths with special characters."""
-        special_dir = tmp_path / "path'with\"special$chars!@"
+        special_name = "path'with$chars!@" if os.name == "nt" else "path'with\"special$chars!@"
+        special_dir = tmp_path / special_name
         special_dir.mkdir()
         state = StateManager(str(special_dir))
         state.mark_video_posted("video1", "youtube")
@@ -944,6 +946,8 @@ class TestPathEdgeCases:
 
     def test_symlink_state_dir(self, tmp_path):
         """State directory is a symlink."""
+        if os.name == "nt":
+            pytest.skip("Creating symlinks on Windows requires elevated privileges or Developer Mode")
         real_dir = tmp_path / "real"
         real_dir.mkdir()
         link_dir = tmp_path / "link"
@@ -959,7 +963,7 @@ class TestPathEdgeCases:
 
     def test_very_long_path_component(self, tmp_path):
         """Very long directory name (within filesystem limits)."""
-        long_name = "a" * 200  # Max filename is typically 255
+        long_name = "a" * (80 if os.name == "nt" else 200)
         long_dir = tmp_path / long_name
         long_dir.mkdir()
         state = StateManager(str(long_dir))
@@ -972,7 +976,7 @@ class TestPathEdgeCases:
         config.config_dir = "~/test_xpst"
         expanded = XPSTConfig._expand_paths(config)
         assert "~" not in expanded.config_dir
-        assert expanded.config_dir.startswith("/")
+        assert Path(expanded.config_dir).is_absolute()
 
     def test_config_with_relative_paths(self, tmp_path):
         """Config with relative paths."""

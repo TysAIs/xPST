@@ -258,8 +258,9 @@ def display_version_info() -> None:
     table.add_row("Python", f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}", "[green]✓[/green]")
 
     # FFmpeg
-    from xpst.utils.platform import get_ffmpeg_name
     import shutil
+
+    from xpst.utils.platform import get_ffmpeg_name
     if shutil.which(get_ffmpeg_name()):
         try:
             result = subprocess.run(

@@ -14,14 +14,12 @@ Python file that defines a ``register()`` function returning a dict::
 
 from __future__ import annotations
 
-
-import importlib.util
 import importlib
+import importlib.util
 import logging
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
