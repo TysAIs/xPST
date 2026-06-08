@@ -80,7 +80,7 @@ class TikTokSource(VideoSource):
             return yt_dlp
 
         # Check user-local installation
-            from xpst.utils.platform import get_ytdlp_fallback_path
+        from xpst.utils.platform import get_ytdlp_fallback_path
         user_bin = get_ytdlp_fallback_path()
         if user_bin.exists():
             return str(user_bin)
@@ -162,8 +162,8 @@ class TikTokSource(VideoSource):
                 return ContentType.CAROUSEL_VIDEO
 
         # Check format note for slideshow indicators
-        format_note = data.get("format_note", "").lower()
-        data.get("description", "").lower()
+        format_note = (data.get("format_note") or "").lower()
+        (data.get("description") or "").lower()
         if "slideshow" in format_note or "photo" in format_note:
             return ContentType.CAROUSEL_IMAGE
 

@@ -400,13 +400,6 @@ class CrossPostEngine:
 
         return results
 
-    def _filter_new_videos(self, videos: list[VideoMetadata]) -> list[VideoMetadata]:
-        """Filter videos to only those not yet fully posted.
-
-        Delegates to source_service.filter_new().
-        """
-        return self.source_service.filter_new(videos, self.state, self._platforms)
-
     async def _process_video(
         self,
         video: VideoMetadata,

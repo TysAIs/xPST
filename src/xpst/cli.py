@@ -64,6 +64,7 @@ def load_config(config_path: str | None = None) -> XPSTConfig:
 @click.group()
 @click.option("--config", "-c", help="Path to config file")
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
+@click.version_option(version="0.1.0", prog_name="xPST")
 @click.pass_context
 def main(ctx: click.Context, config: str | None, verbose: bool):
     """
@@ -475,7 +476,7 @@ def connect(ctx: click.Context, platform: str | None, test_only: bool):
 # ──────────────────────────────────────────────
 
 @main.group(invoke_without_command=True)
-@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram"]))
+@click.argument("platform", required=False)
 @click.pass_context
 def auth(ctx: click.Context, platform: str | None):
     """Authenticate with a platform or check auth status"""
@@ -484,6 +485,13 @@ def auth(ctx: click.Context, platform: str | None):
     if platform is None:
         # Show help if no platform and no subcommand
         click.echo(ctx.get_help())
+        return
+
+    valid_platforms = {"tiktok", "youtube", "x", "instagram"}
+    if platform not in valid_platforms:
+        click.echo(f"Unknown platform: {platform}")
+        click.echo(f"Valid platforms: {', '.join(sorted(valid_platforms))}")
+        ctx.exit(1)
         return
 
     config = load_config(ctx.obj.get("config_path"))
@@ -510,7 +518,6 @@ def auth_status(ctx: click.Context):
 
     # Credential store status
     cred_store = CredentialStore(config.config_dir)
-    SessionManager(config.config_dir)
     quota_mgr = QuotaManager(config.config_dir)
 
     # Credential store info
@@ -595,7 +602,6 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool):
     from xpst.analytics import AnalyticsCollector
     from xpst.state import StateManager
 
-    StateManager(config.config_dir)
     collector = AnalyticsCollector(config.config_dir)
 
     if refresh:

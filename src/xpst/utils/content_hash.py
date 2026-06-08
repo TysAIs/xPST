@@ -63,7 +63,7 @@ def compute_caption_hash(caption: str) -> str:
     Returns:
         Hex digest string (SHA-256, first 16 chars).
     """
-    normalized = " ".join(caption.lower().split())
+    normalized = " ".join((caption or "").lower().split())
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
@@ -80,8 +80,8 @@ def captions_are_similar(caption_a: str, caption_b: str, threshold: float = 0.85
     Returns:
         True if captions are similar above the threshold.
     """
-    words_a = set(caption_a.lower().split())
-    words_b = set(caption_b.lower().split())
+    words_a = set((caption_a or "").lower().split())
+    words_b = set((caption_b or "").lower().split())
 
     if not words_a or not words_b:
         return False

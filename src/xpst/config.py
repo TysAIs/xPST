@@ -321,6 +321,9 @@ class XPSTConfig:
                 file_config = yaml.safe_load(f) or {}
             config = cls._merge_config(config, file_config)
 
+        # Auto-fix stale .crosspstr paths → .xpst
+        config = cls._fix_legacy_paths(config)
+
         # Override with environment variables
         config = cls._apply_env_vars(config)
 
@@ -423,7 +426,7 @@ class XPSTConfig:
                 config.schedule = ScheduleConfig(**{k: v for k, v in sched.items() if k in ScheduleConfig.__dataclass_fields__})
 
         # Notifications
-        if "notifications" in file_config:
+        if "notifications" in file_config and isinstance(file_config["notifications"], dict):
             notif = file_config["notifications"]
             config.notifications.enabled = notif.get("enabled", config.notifications.enabled)
             config.notifications.on_success = notif.get("on_success", config.notifications.on_success)
@@ -443,6 +446,29 @@ class XPSTConfig:
                 config.rate_limits.x = rl.get("x", config.rate_limits.x)
                 config.rate_limits.tiktok = rl.get("tiktok", config.rate_limits.tiktok)
 
+        return config
+
+    @classmethod
+    def _fix_legacy_paths(cls, config: "XPSTConfig") -> "XPSTConfig":
+        """Auto-replace stale .crosspstr path references with .xpst.
+
+        Handles configs written by older versions before the rename.
+        """
+        def _fix(path: str) -> str:
+            return path.replace(".crosspstr", ".xpst").replace("crosspstr", "xpst")
+
+        config.video.download_dir = _fix(config.video.download_dir)
+        config.monitoring.log_file = _fix(config.monitoring.log_file)
+        if config.tiktok.cookies_file:
+            config.tiktok.cookies_file = _fix(config.tiktok.cookies_file)
+        if config.instagram.session_file:
+            config.instagram.session_file = _fix(config.instagram.session_file)
+        if config.x.cookies_file:
+            config.x.cookies_file = _fix(config.x.cookies_file)
+        if config.youtube.token_file:
+            config.youtube.token_file = _fix(config.youtube.token_file)
+        if config.youtube.client_secrets:
+            config.youtube.client_secrets = _fix(config.youtube.client_secrets)
         return config
 
     @classmethod

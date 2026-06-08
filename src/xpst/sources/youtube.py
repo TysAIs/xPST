@@ -63,7 +63,7 @@ class YouTubeSource(VideoSource):
         if yt_dlp:
             return yt_dlp
 
-            from xpst.utils.platform import get_ytdlp_fallback_path
+        from xpst.utils.platform import get_ytdlp_fallback_path
         user_bin = get_ytdlp_fallback_path()
         if user_bin.exists():
             return str(user_bin)

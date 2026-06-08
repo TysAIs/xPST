@@ -210,7 +210,7 @@ class FFmpegProgressParser:
                 speed_match = self._SPEED_PATTERN.search(line)
                 speed = speed_match.group(1) if speed_match else "?"
 
-                size_match = self._SPEED_PATTERN.search(line)
+                size_match = self._SIZE_PATTERN.search(line)
                 size_match.group(1) if size_match else "?"
 
                 logger.info(

@@ -90,6 +90,16 @@ body.light-mode {
     --card-hover-shadow: 0 4px 12px rgba(0,0,0,0.12);
 }
 
+/* Plotly charts: override text color in light mode */
+body.light-mode .js-plotly-plot .plotly .main-svg text,
+body.light-mode .js-plotly-plot .plotly text {
+    fill: #1c1c1e !important;
+}
+body.light-mode .js-plotly-plot .plotly .main-svg .xtick text,
+body.light-mode .js-plotly-plot .plotly .main-svg .ytick text {
+    fill: #3a3a3c !important;
+}
+
 body, .q-page, .q-layout {
     background: var(--bg) !important;
     color: var(--text) !important;
@@ -858,7 +868,7 @@ def _toggle_theme():
         localStorage.setItem('xpst-theme', isLight ? 'light' : 'dark');
         const icon = document.querySelector('[data-xpst-mark="theme-icon"]');
         const label = document.querySelector('[data-xpst-mark="theme-label"]');
-        if (icon) icon.innerText = isLight ? 'light_mode' : 'dark_mode';
+        if (icon) icon.innerText = isLight ? '☀' : '☽';
         if (label) label.innerText = isLight ? 'Light Mode' : 'Dark Mode';
     """)
 
@@ -879,6 +889,11 @@ def _page_shell(current: str = "/"):
         const theme = localStorage.getItem('xpst-theme');
         if (theme === 'light') {
             document.body.classList.add('light-mode');
+            // Update icon/label to match restored theme
+            const icon = document.querySelector('[data-xpst-mark="theme-icon"]');
+            const label = document.querySelector('[data-xpst-mark="theme-label"]');
+            if (icon) icon.innerText = '☀';
+            if (label) label.innerText = 'Light Mode';
         }
     })();
 
@@ -945,7 +960,7 @@ def _section_header(title: str, subtitle: str = "") -> None:
 # ── Plotly Theme Helper ─────────────────────────────────────────────────
 
 def _plotly_layout(fig, height: int = 280):
-    """Apply consistent dark-themed layout to a Plotly figure."""
+    """Apply consistent layout to a Plotly figure (dark mode default, CSS overrides light)."""
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
@@ -1028,8 +1043,8 @@ def _page_overview(collector: AnalyticsCollector) -> None:
                 fig2 = go.Figure(data=[go.Pie(
                     labels=labels, values=values,
                     hole=0.6,
-                    marker=dict(colors=colors, line=dict(color="#2c2c2e", width=2)),
-                    textfont=dict(color="white", size=11, family="Inter"),
+                    marker=dict(colors=colors, line=dict(color="rgba(0,0,0,0)", width=0)),
+                    textfont=dict(color="#ebebf5", size=11, family="Inter"),
                     hovertemplate="%{label}: %{value}<extra></extra>",
                     sort=False,
                 )])
@@ -1139,7 +1154,7 @@ def _page_content(collector: AnalyticsCollector) -> None:
         # Search & Filters
         with ui.element("div").classes("glass-card w-full").style("margin-bottom:20px; padding:16px 20px;"):
             with ui.row().classes("items-center gap-4 w-full"):
-                ui.input(placeholder="Search posts...").props(
+                search_input = ui.input(placeholder="Search posts...").props(
                     'outlined dense'
                 ).classes("col-grow").style("max-width:380px;")
 
@@ -1148,13 +1163,23 @@ def _page_content(collector: AnalyticsCollector) -> None:
                         ui.button(label, on_click=lambda p=plat: _filter_posts(p)).classes("filter-pill")
 
         posts_container = ui.column().classes("w-full")
+        current_filter = {"platform": "all"}
 
         def _filter_posts(platform: str) -> None:
+            current_filter["platform"] = platform
             posts_container.clear()
             filtered = posts
             if platform != "all":
                 filtered = [p for p in posts if platform in p.get("platforms", {})]
+            query = (search_input.value or "").lower().strip()
+            if query:
+                filtered = [p for p in filtered if query in (p.get("title") or "").lower() or query in (p.get("caption") or "").lower()]
             _render_posts_grid(posts_container, filtered)
+
+        def _on_search(e) -> None:
+            _filter_posts(current_filter["platform"])
+
+        search_input.on("update:model-value", _on_search, throttle=0.3)
 
         _render_posts_grid(posts_container, posts)
 
@@ -1376,7 +1401,7 @@ def _render_analytics_content(container, collector: AnalyticsCollector, platform
                     z = [[hour_day.get(h, {}).get(d, 0) for d in days] for h in hours]
                     fig_heat = go.Figure(data=go.Heatmap(
                         z=z, x=days, y=hours,
-                        colorscale=[[0, "#2c2c2e"], [0.3, "#1e3a5f"], [0.6, "#0a84ff"], [1, "#60c0ff"]],
+                        colorscale=[[0, "rgba(128,128,128,0.1)"], [0.3, "#1e3a5f"], [0.6, "#0a84ff"], [1, "#60c0ff"]],
                         hovertemplate="%{y} %{x}: %{z} posts<extra></extra>",
                         showscale=False,
                     ))
@@ -1625,8 +1650,11 @@ def _page_settings(collector: AnalyticsCollector) -> None:
             async def save_settings() -> None:
                 try:
                     cfg = XPSTConfig.load(str(config_path))
-                    # General
-                    cfg.tiktok.username = tk_input.value or ""
+                    # General — TikTok: if toggle off, clear username to disable
+                    if platform_switches["tiktok"].value:
+                        cfg.tiktok.username = tk_input.value or ""
+                    else:
+                        cfg.tiktok.username = ""
                     cfg.video.download_dir = dl_input.value or "~/.xpst/downloads"
                     # Platform toggles
                     cfg.youtube.enabled = platform_switches["youtube"].value

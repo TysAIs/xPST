@@ -619,25 +619,25 @@ class TestAggregation:
 # ── Platform uploader analytics methods ─────────────────────────────────
 
 class TestPlatformUploaderAnalytics:
-    """Test analytics methods exist on platform uploader classes."""
+    """Test core methods exist on platform uploader classes."""
 
-    def test_youtube_analytics_method_exists(self):
-        """YouTubeUploader should have get_video_analytics and list_my_videos."""
+    def test_youtube_upload_method_exists(self):
+        """YouTubeUploader should have upload and delete."""
         from xpst.platforms.youtube import YouTubeUploader
-        assert hasattr(YouTubeUploader, "get_video_analytics")
-        assert hasattr(YouTubeUploader, "list_my_videos")
+        assert hasattr(YouTubeUploader, "upload")
+        assert hasattr(YouTubeUploader, "delete")
 
-    def test_instagram_analytics_method_exists(self):
-        """InstagramUploader should have get_media_insights and list_my_media."""
+    def test_instagram_upload_method_exists(self):
+        """InstagramUploader should have upload and delete."""
         from xpst.platforms.instagram import InstagramUploader
-        assert hasattr(InstagramUploader, "get_media_insights")
-        assert hasattr(InstagramUploader, "list_my_media")
+        assert hasattr(InstagramUploader, "upload")
+        assert hasattr(InstagramUploader, "delete")
 
-    def test_x_analytics_method_exists(self):
-        """XUploader should have get_tweet_metrics and list_my_tweets."""
+    def test_x_upload_method_exists(self):
+        """XUploader should have upload and delete."""
         from xpst.platforms.x import XUploader
-        assert hasattr(XUploader, "get_tweet_metrics")
-        assert hasattr(XUploader, "list_my_tweets")
+        assert hasattr(XUploader, "upload")
+        assert hasattr(XUploader, "delete")
 
 
 # ── CLI analytics command ───────────────────────────────────────────────

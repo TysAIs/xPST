@@ -602,6 +602,9 @@ def run_connect(platforms: list[str] | None = None, test_only: bool = False) -> 
 
     if test_only:
         results = asyncio.run(test_connections(config))
+        # Filter results to requested platforms
+        if platforms:
+            results = {p: ok for p, ok in results.items() if p in platforms}
         console.print()
         if all(results.values()):
             console.print("[bold green]✅ All connections healthy![/bold green]")
