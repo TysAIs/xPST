@@ -311,6 +311,7 @@ Page {
                         Layout.preferredHeight: 120
                         radius: theme.radiusLg
                         color: theme.surfaceCard
+                        property int cardIndex: index
 
                         ColumnLayout {
                             anchors.fill: parent
@@ -339,7 +340,7 @@ Page {
                             }
                             // Comparison delta (#31)
                             Text {
-                                property int lastWeekVal: Math.round(modelData.rawValue * (parent.parent.parent.lastWeekMultipliers[index] || 0.7))
+                                property int lastWeekVal: Math.round(modelData.rawValue * (parent.cardIndex >= 0 ? parent.parent.parent.lastWeekMultipliers[parent.cardIndex] : 0.7))
                                 property int delta: modelData.rawValue - lastWeekVal
                                 property int deltaPercent: lastWeekVal > 0 ? Math.round((delta / lastWeekVal) * 100) : (modelData.rawValue > 0 ? 100 : 0)
                                 property string deltaText: deltaPercent >= 0 ? ("+" + deltaPercent + "%") : (deltaPercent + "%")
