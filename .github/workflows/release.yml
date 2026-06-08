@@ -55,7 +55,8 @@ jobs:
           python-version: "3.11"
 
       - name: Install FFmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
+        shell: pwsh
+        run: choco install ffmpeg -y --no-progress
 
       - name: Build executable
         shell: pwsh
