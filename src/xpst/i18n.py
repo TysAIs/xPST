@@ -32,6 +32,27 @@ def get_language() -> str:
     return _current_lang
 
 
+def get_available_languages() -> list[str]:
+    """Return a list of available language codes from translation files.
+
+    Scans both the user translations directory and the bundled i18n
+    directory for .json files and returns their stems as language codes.
+
+    Returns:
+        Sorted list of language code strings (e.g. ['en', 'es', 'fr']).
+    """
+    langs: list[str] = []
+    for d in (_translations_dir, _translations_dir_bundled):
+        if d and d.exists():
+            for f in d.glob("*.json"):
+                code = f.stem
+                if code not in langs:
+                    langs.append(code)
+    if not langs:
+        langs = ["en"]
+    return sorted(langs)
+
+
 def _load_translations(lang: str) -> None:
     """Load translation strings from ~/.xpst/translations/<lang>.json."""
     global _translations

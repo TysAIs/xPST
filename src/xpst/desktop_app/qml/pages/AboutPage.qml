@@ -9,6 +9,16 @@ Page {
 
     function closeDialog() {}
 
+    property var gitLogData: {
+        try {
+            if (typeof controller !== "undefined") {
+                var result = JSON.parse(controller.getGitLog())
+                if (result.ok) return result.commits || []
+            }
+        } catch(e) {}
+        return []
+    }
+
     Flickable {
         anchors.fill: parent
         contentHeight: aboutCol.implicitHeight + theme.spacingXxl
@@ -196,6 +206,64 @@ Page {
                             color: theme.textMuted
                         }
                     }
+                }
+            }
+
+            // Recent Changes (Changelog)
+            ColumnLayout {
+                spacing: theme.spacingMd
+                Text {
+                    text: "Recent Changes"
+                    font.pixelSize: 16
+                    font.bold: true
+                    color: theme.textPrimary
+                    Accessible.name: "Recent Changes section"
+                    Accessible.role: Accessible.Heading
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: changelogCol.implicitHeight + theme.spacingXxl
+                    radius: theme.radiusLg
+                    color: theme.surfaceCard
+                    visible: aboutPage.gitLogData.length > 0
+
+                    ColumnLayout {
+                        id: changelogCol
+                        anchors.fill: parent
+                        anchors.margins: theme.spacingXl
+                        spacing: theme.spacingSm
+
+                        Repeater {
+                            model: aboutPage.gitLogData
+
+                            RowLayout {
+                                spacing: theme.spacingMd
+                                Text {
+                                    text: modelData.hash || ""
+                                    font.pixelSize: 11
+                                    font.family: "monospace"
+                                    color: theme.accent
+                                    Layout.preferredWidth: 60
+                                }
+                                Text {
+                                    text: modelData.message || ""
+                                    font.pixelSize: 12
+                                    color: theme.textSecondary
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    maximumLineCount: 1
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: "No git history available"
+                    font.pixelSize: 12
+                    color: theme.textMuted
+                    visible: aboutPage.gitLogData.length === 0
                 }
             }
 

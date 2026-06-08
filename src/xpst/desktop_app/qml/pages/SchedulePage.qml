@@ -1,0 +1,351 @@
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+
+Page {
+    id: schedulePage
+    background: Rectangle { color: theme.canvas }
+
+    property date currentDate: new Date()
+    property int currentMonth: currentDate.getMonth()
+    property int currentYear: currentDate.getFullYear()
+    property var scheduledPosts: []
+
+    function closeDialog() {}
+
+    // Build calendar data
+    property int firstDayOfMonth: new Date(currentYear, currentMonth, 1).getDay()
+    property int daysInMonth: new Date(currentYear, currentMonth + 1, 0).getDate()
+    property string monthName: {
+        var names = ["January", "February", "March", "April", "May", "June",
+                     "July", "August", "September", "October", "November", "December"]
+        return names[currentMonth] + " " + currentYear
+    }
+
+    // Days that have scheduled posts (from controller data)
+    property var scheduledDays: {
+        var days = {}
+        try {
+            if (typeof controller !== "undefined") {
+                var posts = JSON.parse(controller.recentPosts || "[]")
+                for (var i = 0; i < posts.length; i++) {
+                    var ts = posts[i].timestamp || ""
+                    if (ts) {
+                        var d = new Date(ts)
+                        if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+                            days[d.getDate()] = true
+                        }
+                    }
+                }
+            }
+        } catch(e) {}
+        return days
+    }
+
+    function prevMonth() {
+        if (currentMonth === 0) {
+            currentMonth = 11
+            currentYear--
+        } else {
+            currentMonth--
+        }
+    }
+
+    function nextMonth() {
+        if (currentMonth === 11) {
+            currentMonth = 0
+            currentYear++
+        } else {
+            currentMonth++
+        }
+    }
+
+    Flickable {
+        anchors.fill: parent
+        contentHeight: schedCol.implicitHeight + theme.spacingXxl
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+
+        ColumnLayout {
+            id: schedCol
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: theme.spacingXl
+            spacing: theme.spacingXl
+
+            // Header
+            ColumnLayout {
+                spacing: theme.spacingXs
+                Text {
+                    text: "Schedule"
+                    font.pixelSize: 20
+                    font.bold: true
+                    color: theme.textPrimary
+                    Accessible.name: "Schedule page title"
+                    Accessible.role: Accessible.Heading
+                }
+                Text {
+                    text: "View your posting schedule"
+                    font.pixelSize: 13
+                    color: theme.textSecondary
+                }
+            }
+
+            // Calendar card
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: calendarCol.implicitHeight + theme.spacingXxl
+                radius: theme.radiusLg
+                color: theme.surfaceCard
+
+                ColumnLayout {
+                    id: calendarCol
+                    anchors.fill: parent
+                    anchors.margins: theme.spacingXl
+                    spacing: theme.spacingMd
+
+                    // Month navigation
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: theme.spacingMd
+
+                        Rectangle {
+                            width: 32; height: 32
+                            radius: theme.radiusSm
+                            color: theme.surfaceAlt
+                            Text {
+                                anchors.centerIn: parent
+                                text: "←"
+                                font.pixelSize: 14
+                                color: theme.textPrimary
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: schedulePage.prevMonth()
+                            }
+                        }
+
+                        Text {
+                            text: schedulePage.monthName
+                            font.pixelSize: 16
+                            font.bold: true
+                            color: theme.textPrimary
+                            Layout.fillWidth: true
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+
+                        Rectangle {
+                            width: 32; height: 32
+                            radius: theme.radiusSm
+                            color: theme.surfaceAlt
+                            Text {
+                                anchors.centerIn: parent
+                                text: "→"
+                                font.pixelSize: 14
+                                color: theme.textPrimary
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: schedulePage.nextMonth()
+                            }
+                        }
+                    }
+
+                    // Day-of-week headers
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Repeater {
+                            model: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+                            Text {
+                                text: modelData
+                                font.pixelSize: 11
+                                font.bold: true
+                                color: theme.textMuted
+                                horizontalAlignment: Text.AlignHCenter
+                                Layout.fillWidth: true
+                            }
+                        }
+                    }
+
+                    // Calendar grid (7 columns x 6 rows max)
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 7
+                        rowSpacing: theme.spacingXs
+                        columnSpacing: 0
+
+                        Repeater {
+                            model: 42  // 6 rows x 7 days
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 40
+                                radius: theme.radiusSm
+                                color: {
+                                    var dayNum = index - schedulePage.firstDayOfMonth + 1
+                                    if (dayNum <= 0 || dayNum > schedulePage.daysInMonth) return "transparent"
+                                    var today = new Date()
+                                    if (dayNum === today.getDate() && schedulePage.currentMonth === today.getMonth() && schedulePage.currentYear === today.getFullYear()) {
+                                        return theme.accentMuted
+                                    }
+                                    return dayMouse.containsMouse ? theme.surfaceAlt : "transparent"
+                                }
+
+                                property int dayNum: index - schedulePage.firstDayOfMonth + 1
+                                visible: dayNum > 0 && dayNum <= schedulePage.daysInMonth
+
+                                ColumnLayout {
+                                    anchors.centerIn: parent
+                                    spacing: 2
+
+                                    Text {
+                                        text: String(parent.parent.dayNum)
+                                        font.pixelSize: 12
+                                        color: theme.textPrimary
+                                        horizontalAlignment: Text.AlignHCenter
+                                        Layout.alignment: Qt.AlignHCenter
+                                    }
+
+                                    // Dot for scheduled posts
+                                    Rectangle {
+                                        width: 6; height: 6; radius: 3
+                                        color: theme.accent
+                                        visible: schedulePage.scheduledDays[parent.parent.dayNum] === true
+                                        Layout.alignment: Qt.AlignHCenter
+                                    }
+                                }
+
+                                MouseArea {
+                                    id: dayMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Scheduled posts list
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: theme.spacingMd
+
+                Text {
+                    text: "Scheduled Posts"
+                    font.pixelSize: 16
+                    font.bold: true
+                    color: theme.textPrimary
+                }
+
+                Repeater {
+                    model: {
+                        try {
+                            if (typeof controller !== "undefined") {
+                                var posts = JSON.parse(controller.recentPosts || "[]")
+                                var filtered = []
+                                for (var i = 0; i < Math.min(posts.length, 10); i++) {
+                                    filtered.push(posts[i])
+                                }
+                                return filtered
+                            }
+                        } catch(e) {}
+                        return []
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 56
+                        radius: theme.radiusMd
+                        color: theme.surfaceCard
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: theme.spacingMd
+                            spacing: theme.spacingMd
+
+                            Rectangle {
+                                width: 8; height: 8; radius: 4
+                                color: {
+                                    var p = (modelData.platform || "").toLowerCase()
+                                    if (p === "youtube") return theme.youtube
+                                    if (p === "instagram") return theme.instagram
+                                    if (p === "x") return theme.xtwitter
+                                    if (p === "tiktok") return theme.tiktok
+                                    return theme.accent
+                                }
+                            }
+
+                            ColumnLayout {
+                                spacing: 2
+                                Layout.fillWidth: true
+                                Text {
+                                    text: modelData.title || modelData.postId || "Untitled"
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                    color: theme.textPrimary
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: (modelData.platform || "") + " • " + (modelData.status || "")
+                                    font.pixelSize: 11
+                                    color: theme.textMuted
+                                }
+                            }
+
+                            Text {
+                                text: {
+                                    var ts = modelData.timestamp || ""
+                                    if (!ts) return ""
+                                    try {
+                                        var d = new Date(ts)
+                                        return d.toLocaleDateString()
+                                    } catch(e) { return ts }
+                                }
+                                font.pixelSize: 11
+                                color: theme.textMuted
+                            }
+                        }
+                    }
+                }
+
+                // Empty state
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 80
+                    color: "transparent"
+                    visible: {
+                        try {
+                            var posts = JSON.parse(controller.recentPosts || "[]")
+                            return posts.length === 0
+                        } catch(e) { return true }
+                    }
+
+                    ColumnLayout {
+                        anchors.centerIn: parent
+                        spacing: theme.spacingSm
+                        Text {
+                            text: "📅"
+                            font.pixelSize: 24
+                            horizontalAlignment: Text.AlignHCenter
+                            Layout.alignment: Qt.AlignHCenter
+                        }
+                        Text {
+                            text: "No scheduled posts"
+                            font.pixelSize: 13
+                            color: theme.textMuted
+                            horizontalAlignment: Text.AlignHCenter
+                            Layout.alignment: Qt.AlignHCenter
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

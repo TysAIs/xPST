@@ -11,6 +11,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green)
 ![Tests](https://img.shields.io/badge/tests-760%20passing-brightgreen)
+![Coverage](https://img.shields.io/codecov/c/github/xPSTOwner/xPST?label=coverage)
 ![Stars](https://img.shields.io/github/stars/xPSTOwner/xPST?style=social)
 
 ---

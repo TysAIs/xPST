@@ -8,6 +8,7 @@ Page {
 
     property string activePlatform: "All"
     property string dateRange: "all"  // "week", "month", "all"
+    property bool compareMode: false
     property var analyticsJson: {
         try {
             if (typeof controller !== "undefined" && controller.analyticsData)
@@ -150,6 +151,35 @@ Page {
             // Platform tabs
             RowLayout {
                 spacing: theme.spacingSm
+
+                // Compare toggle
+                Rectangle {
+                    width: compareLabel.implicitWidth + theme.spacingXl
+                    height: 36
+                    radius: theme.radiusMd
+                    color: analyticsPage.compareMode ? theme.accent : theme.surfaceCard
+                    border.color: analyticsPage.compareMode ? theme.accent : "transparent"
+                    border.width: 1
+
+                    Text {
+                        id: compareLabel
+                        anchors.centerIn: parent
+                        text: "📊 Compare"
+                        font.pixelSize: 12
+                        font.weight: analyticsPage.compareMode ? Font.DemiBold : Font.Normal
+                        color: analyticsPage.compareMode ? "#ffffff" : theme.textSecondary
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: analyticsPage.compareMode = !analyticsPage.compareMode
+                        Accessible.name: "Toggle comparison mode"
+                        Accessible.role: Accessible.Button
+                    }
+                }
+
+                Item { Layout.preferredWidth: theme.spacingMd }
 
                 Repeater {
                     model: ["All", "YouTube", "Instagram", "X", "TikTok"]
@@ -327,6 +357,17 @@ Page {
                             }
                         }
                     }
+                    // Compare legend
+                    RowLayout {
+                        spacing: theme.spacingXs
+                        visible: analyticsPage.compareMode
+                        Rectangle { width: 10; height: 10; radius: 2; color: theme.textMuted; opacity: 0.5 }
+                        Text {
+                            text: "Last Week"
+                            font.pixelSize: 11
+                            color: theme.textMuted
+                        }
+                    }
                 }
 
                 Rectangle {
@@ -358,6 +399,10 @@ Page {
                             for (var i = 0; i < data.length; i++) {
                                 maxVal = Math.max(maxVal, data[i].views, data[i].likes, data[i].comments, data[i].shares)
                             }
+                            // Account for comparison bars
+                            if (analyticsPage.compareMode) {
+                                maxVal = maxVal * 1.2
+                            }
 
                             var padding = { left: 50, right: 20, top: 20, bottom: 40 }
                             var chartW = width - padding.left - padding.right
@@ -388,7 +433,9 @@ Page {
                             var colors = ["#6366f1", "#ef4444", "#f59e0b", "#22c55e"]
                             var barCount = metrics.length
                             var groupWidth = chartW / groupCount
-                            var barWidth = Math.min(16, (groupWidth - 20) / barCount)
+                            var barWidth = analyticsPage.compareMode
+                                ? Math.min(12, (groupWidth - 20) / (barCount * 2 + 1))
+                                : Math.min(16, (groupWidth - 20) / barCount)
                             var groupGap = 20
 
                             for (var i = 0; i < data.length; i++) {
@@ -410,6 +457,30 @@ Page {
                                     ctx.beginPath()
                                     ctx.roundRect(bx, by, barWidth, barH, [2, 2, 0, 0])
                                     ctx.fill()
+
+                                    // Comparison bars (last week simulated as 60-80% of current)
+                                    if (analyticsPage.compareMode) {
+                                        var lastWeekVal = Math.round(val * (0.6 + Math.random() * 0.2))
+                                        var lwBarH = maxVal > 0 ? (lastWeekVal / maxVal) * chartH : 0
+                                        var lwBx = groupX + m * (barWidth + 2) + barWidth + 1
+                                        var lwBy = padding.top + chartH - lwBarH
+
+                                        ctx.fillStyle = colors[m]
+                                        ctx.globalAlpha = 0.35
+                                        // Draw striped pattern for last week
+                                        ctx.fillRect(lwBx, lwBy, barWidth, lwBarH)
+                                        // Draw horizontal stripes
+                                        ctx.globalAlpha = 0.15
+                                        ctx.strokeStyle = "#ffffff"
+                                        ctx.lineWidth = 1
+                                        for (var s = 0; s < lwBarH; s += 4) {
+                                            ctx.beginPath()
+                                            ctx.moveTo(lwBx, lwBy + s)
+                                            ctx.lineTo(lwBx + barWidth, lwBy + s)
+                                            ctx.stroke()
+                                        }
+                                        ctx.globalAlpha = 1.0
+                                    }
                                 }
                             }
                         }

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,10 @@ class PluginManager:
         self.plugin_dir = Path(plugin_dir).expanduser() if plugin_dir else DEFAULT_PLUGIN_DIR
         self._plugins: dict[str, dict[str, Any]] = {}
         self._loaded: bool = False
+        self._watch_thread: threading.Thread | None = None
+        self._watch_stop: threading.Event = threading.Event()
+        self._watch_interval: float = 2.0
+        self._file_mtimes: dict[str, float] = {}
 
     @property
     def plugins(self) -> dict[str, dict[str, Any]]:
@@ -131,6 +137,66 @@ class PluginManager:
         self._loaded = False
         return self.discover()
 
+    def _get_plugin_files(self) -> list[Path]:
+        """Return list of .py plugin files in plugin_dir."""
+        if not self.plugin_dir.exists():
+            return []
+        return sorted(f for f in self.plugin_dir.glob("*.py") if not f.name.startswith("_"))
+
+    def _snapshot_mtimes(self) -> dict[str, float]:
+        """Snapshot modification times for all plugin files."""
+        return {str(f): f.stat().st_mtime for f in self._get_plugin_files()}
+
+    def _watch_loop(self) -> None:
+        """Background polling loop that detects plugin file changes."""
+        logger.info("Plugin file watcher started (interval=%.1fs)", self._watch_interval)
+        self._file_mtimes = self._snapshot_mtimes()
+        while not self._watch_stop.is_set():
+            self._watch_stop.wait(timeout=self._watch_interval)
+            if self._watch_stop.is_set():
+                break
+            try:
+                current_mtimes = self._snapshot_mtimes()
+                # Detect new or modified files
+                changed = False
+                for fpath, mtime in current_mtimes.items():
+                    if fpath not in self._file_mtimes or self._file_mtimes[fpath] != mtime:
+                        changed = True
+                        logger.info("Detected change in plugin file: %s", fpath)
+                # Detect removed files
+                for fpath in self._file_mtimes:
+                    if fpath not in current_mtimes:
+                        changed = True
+                        logger.info("Detected removed plugin file: %s", fpath)
+                if changed:
+                    self.reload()
+                    logger.info("Plugins reloaded after file change")
+                self._file_mtimes = current_mtimes
+            except Exception as exc:
+                logger.warning("Plugin watcher error: %s", exc)
+        logger.info("Plugin file watcher stopped")
+
+    def start_watching(self, interval: float = 2.0) -> None:
+        """Start watching the plugin directory for file changes.
+
+        Args:
+            interval: Polling interval in seconds (default: 2.0).
+        """
+        if self._watch_thread is not None and self._watch_thread.is_alive():
+            logger.debug("Plugin watcher already running")
+            return
+        self._watch_stop.clear()
+        self._watch_interval = interval
+        self._watch_thread = threading.Thread(target=self._watch_loop, daemon=True, name="plugin-watcher")
+        self._watch_thread.start()
+
+    def stop_watching(self) -> None:
+        """Stop watching the plugin directory for file changes."""
+        if self._watch_thread is None or not self._watch_thread.is_alive():
+            return
+        self._watch_stop.set()
+        self._watch_thread.join(timeout=5.0)
+        self._watch_thread = None
 
 # Module-level convenience instance
 _manager: PluginManager | None = None

@@ -77,6 +77,121 @@ Page {
         }
     }
 
+    // X Cookie Paste Dialog
+    Dialog {
+        id: xCookieDialog
+        anchors.centerIn: parent
+        width: Math.min(500, parent.width - 60)
+        height: Math.min(400, parent.height - 60)
+        modal: true
+        title: "Paste X Cookies"
+        closePolicy: Popup.CloseOnEscape
+
+        contentItem: ColumnLayout {
+            spacing: theme.spacingMd
+
+            Text {
+                text: "Paste your X/Twitter cookies (JSON format) below:"
+                font.pixelSize: 12
+                color: theme.textSecondary
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                radius: theme.radiusMd
+                color: theme.surfaceAlt
+                border.color: theme.textMuted
+                border.width: 1
+
+                Flickable {
+                    anchors.fill: parent
+                    anchors.margins: theme.spacingSm
+                    clip: true
+                    contentHeight: cookieInput.implicitHeight
+
+                    TextEdit {
+                        id: cookieInput
+                        width: parent.width
+                        color: theme.textPrimary
+                        font.pixelSize: 11
+                        font.family: "monospace"
+                        wrapMode: TextEdit.Wrap
+                        property string placeholderText: '[{"name":"ct0","value":"..."}, ...]'
+
+                        Text {
+                            anchors.fill: parent
+                            text: cookieInput.placeholderText
+                            font: cookieInput.font
+                            color: theme.textMuted
+                            visible: cookieInput.text.length === 0
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: theme.spacingMd
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    width: xCookieCancelLabel.implicitWidth + 24
+                    height: 32
+                    radius: theme.radiusMd
+                    color: theme.surfaceAlt
+                    Text {
+                        id: xCookieCancelLabel
+                        anchors.centerIn: parent
+                        text: "Cancel"
+                        font.pixelSize: 12
+                        color: theme.textSecondary
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            cookieInput.text = ""
+                            xCookieDialog.close()
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: xCookieSaveLabel.implicitWidth + 24
+                    height: 32
+                    radius: theme.radiusMd
+                    color: theme.accent
+                    Text {
+                        id: xCookieSaveLabel
+                        anchors.centerIn: parent
+                        text: "Save Cookies"
+                        font.pixelSize: 12
+                        font.bold: true
+                        color: "#ffffff"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (cookieInput.text.length > 0 && typeof controller !== "undefined") {
+                                var settings = { x_cookies: cookieInput.text }
+                                controller.saveSettings(JSON.stringify(settings))
+                                if (typeof showToast !== "undefined") showToast("X cookies saved", false)
+                            }
+                            cookieInput.text = ""
+                            xCookieDialog.close()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Flickable {
         anchors.fill: parent
         contentHeight: contentCol.implicitHeight + theme.spacingXxl
@@ -264,6 +379,31 @@ Page {
                                     enabled: !isConnecting
                                     onClicked: connectPage.connectPlatform(modelData.name)
                                     Accessible.name: (isConnecting ? "Connecting" : (platformStatus.connected ? "Disconnect from " : "Connect to ")) + modelData.name
+                                    Accessible.role: Accessible.Button
+                                }
+                            }
+
+                            // Paste Cookies button (X platform only)
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: modelData.key === "x" ? 32 : 0
+                                radius: theme.radiusMd
+                                color: theme.surfaceAlt
+                                visible: modelData.key === "x"
+                                clip: true
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "🍪 Paste Cookies"
+                                    font.pixelSize: 11
+                                    color: theme.textSecondary
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: xCookieDialog.open()
+                                    Accessible.name: "Paste X cookies"
                                     Accessible.role: Accessible.Button
                                 }
                             }

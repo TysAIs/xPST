@@ -23,7 +23,7 @@ Each entry:
 import json
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +79,7 @@ class ScheduleManager:
         caption: str,
         scheduled_time: datetime,
         platforms: list[str] | None = None,
+        repeat_rule: str | None = None,
     ) -> dict[str, Any]:
         """Add a new scheduled post.
 
@@ -87,10 +88,14 @@ class ScheduleManager:
             caption: Post caption text.
             scheduled_time: When to publish.
             platforms: Target platforms (None = all enabled).
+            repeat_rule: Repeat rule - 'daily', 'weekly', 'monthly', or None.
 
         Returns:
             The created schedule entry.
         """
+        valid_rules = (None, "daily", "weekly", "monthly")
+        if repeat_rule not in valid_rules:
+            raise ValueError(f"Invalid repeat_rule: {repeat_rule}. Must be one of {valid_rules}")
         entry: dict[str, Any] = {
             "id": str(uuid.uuid4())[:8],
             "video_path": str(video_path),
@@ -101,6 +106,7 @@ class ScheduleManager:
             "created_at": datetime.now().isoformat(),
             "completed_at": None,
             "error": None,
+            "repeat_rule": repeat_rule,
         }
         self._entries.append(entry)
         self._save()
@@ -167,5 +173,52 @@ class ScheduleManager:
                 entry["completed_at"] = datetime.now().isoformat()
                 if error:
                     entry["error"] = error
+                # Auto-create next occurrence for recurring entries
+                if success and entry.get("repeat_rule"):
+                    self._create_next_occurrence(entry)
                 break
         self._save()
+
+    def _create_next_occurrence(self, entry: dict[str, Any]) -> None:
+        """Create the next occurrence of a recurring schedule entry.
+
+        Args:
+            entry: The completed schedule entry to base the next occurrence on.
+        """
+        repeat_rule = entry.get("repeat_rule")
+        if not repeat_rule:
+            return
+
+        try:
+            current_time = datetime.fromisoformat(entry["scheduled_time"])
+        except (ValueError, KeyError):
+            logger.warning("Cannot create next occurrence: invalid scheduled_time in entry %s", entry.get("id"))
+            return
+
+        if repeat_rule == "daily":
+            next_time = current_time + timedelta(days=1)
+        elif repeat_rule == "weekly":
+            next_time = current_time + timedelta(weeks=1)
+        elif repeat_rule == "monthly":
+            # Approximate month as 30 days
+            next_time = current_time + timedelta(days=30)
+        else:
+            return
+
+        new_entry: dict[str, Any] = {
+            "id": str(uuid.uuid4())[:8],
+            "video_path": entry["video_path"],
+            "caption": entry["caption"],
+            "platforms": entry.get("platforms", []),
+            "scheduled_time": next_time.isoformat(),
+            "status": "pending",
+            "created_at": datetime.now().isoformat(),
+            "completed_at": None,
+            "error": None,
+            "repeat_rule": repeat_rule,
+        }
+        self._entries.append(new_entry)
+        logger.info(
+            "Created next %s occurrence %s for %s",
+            repeat_rule, new_entry["id"], next_time,
+        )

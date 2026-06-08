@@ -107,6 +107,7 @@ DEFAULT_CONFIG = {
         "enable_metrics": True,
         "dashboard_username": "",
         "dashboard_password": "",
+        "health_check_interval": 300,
     },
     "notifications": {
         "enabled": False,
@@ -230,6 +231,7 @@ class MonitoringConfig:
     enable_metrics: bool = True
     dashboard_username: str = ""
     dashboard_password: str = ""
+    health_check_interval: int = 300
 
 
 @dataclass
@@ -707,6 +709,7 @@ class XPSTConfig:
                 "enable_metrics": self.monitoring.enable_metrics,
                 "dashboard_username": self.monitoring.dashboard_username,
                 "dashboard_password": self._hashed_password(),
+                "health_check_interval": self.monitoring.health_check_interval,
             },
             "schedule": {
                 "check_interval": self.schedule.check_interval,

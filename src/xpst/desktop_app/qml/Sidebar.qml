@@ -62,7 +62,9 @@ Rectangle {
                 { label: "Content",   icon: "📝", page: "content" },
                 { label: "Analytics", icon: "📈", page: "analytics" },
                 { label: "Connect",   icon: "🔗", page: "connect" },
-                { label: "Settings",  icon: "⚙", page: "settings" }
+                { label: "Schedule",  icon: "📅", page: "schedule" },
+                { label: "Settings",  icon: "⚙", page: "settings" },
+                { label: "About",     icon: "ℹ️", page: "about" }
             ]
 
             Rectangle {
@@ -102,6 +104,72 @@ Rectangle {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: sidebar.navigate(modelData.page)
+                }
+            }
+        }
+
+        // Quick Stats section
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: sidebar.expanded ? quickStatsCol.implicitHeight + theme.spacingLg : 0
+            Layout.leftMargin: theme.spacingSm
+            Layout.rightMargin: theme.spacingSm
+            Layout.bottomMargin: theme.spacingSm
+            radius: theme.radiusMd
+            color: theme.surfaceAlt
+            visible: sidebar.expanded
+            clip: true
+
+            ColumnLayout {
+                id: quickStatsCol
+                anchors.fill: parent
+                anchors.margins: theme.spacingSm
+                spacing: theme.spacingXs
+
+                Text {
+                    text: "Quick Stats"
+                    font.pixelSize: 10
+                    font.bold: true
+                    color: theme.textMuted
+                }
+
+                RowLayout {
+                    spacing: theme.spacingSm
+
+                    Text {
+                        text: "📝"
+                        font.pixelSize: 11
+                    }
+                    Text {
+                        text: (typeof controller !== "undefined" ? controller.totalPosts : 0) + " posts"
+                        font.pixelSize: 11
+                        color: theme.textSecondary
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    // Health dot
+                    Rectangle {
+                        width: 10; height: 10; radius: 5
+                        color: {
+                            try {
+                                if (typeof controller !== "undefined") {
+                                    var h = JSON.parse(controller.platformHealth)
+                                    var healthy = 0, total = 0
+                                    for (var k in h) {
+                                        total++
+                                        var s = h[k].status || "unknown"
+                                        if (s === "ok" || s === "healthy" || s === "connected") healthy++
+                                    }
+                                    if (total === 0) return theme.textMuted
+                                    if (healthy === total) return theme.success
+                                    if (healthy > 0) return theme.warning
+                                    return theme.error
+                                }
+                            } catch(e) {}
+                            return theme.textMuted
+                        }
+                    }
                 }
             }
         }

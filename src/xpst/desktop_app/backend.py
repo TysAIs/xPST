@@ -39,6 +39,18 @@ except ImportError:
     AnalyticsCollector = None  # type: ignore[assignment,misc]
 
 try:
+    from xpst.i18n import tr, set_language as _set_lang, get_language as _get_lang
+except ImportError:
+    tr = None  # type: ignore[assignment]
+    _set_lang = None  # type: ignore[assignment]
+    _get_lang = None  # type: ignore[assignment]
+
+try:
+    from xpst.i18n import get_available_languages as _get_available_langs
+except ImportError:
+    _get_available_langs = None  # type: ignore[assignment]
+
+try:
     from xpst.utils.quota import QuotaManager
 except ImportError:
     QuotaManager = None  # type: ignore[assignment,misc]
@@ -85,6 +97,12 @@ class AppController(QObject):
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refreshData)
         self._refresh_timer.start(30_000)
+
+        # Platform health auto-check timer (5 minutes)
+        self._health_check_interval = self._get_health_check_interval()
+        self._health_timer = QTimer(self)
+        self._health_timer.timeout.connect(self._run_health_check)
+        self._health_timer.start(self._health_check_interval)
 
         # Thumbnail cache dir
         self._thumb_dir = Path("~/.xpst/thumbnails").expanduser()
@@ -945,6 +963,184 @@ class AppController(QObject):
         self._captionUpdateReady.emit(post_id, platform, new_caption)
 
     _captionUpdateReady = Signal(str, str, str)
+
+    @Slot(result=str)
+    def getGitLog(self) -> str:
+        """Return the last 10 git commits as a JSON string.
+
+        Returns:
+            JSON string with list of {hash, message} objects.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "log", "--oneline", "-10"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                cwd=str(Path(__file__).resolve().parent.parent.parent.parent),
+            )
+            commits = []
+            if result.returncode == 0:
+                for line in result.stdout.strip().split("\n"):
+                    if not line.strip():
+                        continue
+                    parts = line.split(" ", 1)
+                    commits.append({
+                        "hash": parts[0] if parts else "",
+                        "message": parts[1] if len(parts) > 1 else "",
+                    })
+            return json.dumps({"ok": True, "commits": commits}, default=str)
+        except Exception as exc:
+            logger.debug("getGitLog error: %s", exc)
+            return json.dumps({"ok": False, "commits": [], "error": str(exc)})
+
+    # ── Platform health auto-check (#15) ─────────────────────────────
+
+    def _get_health_check_interval(self) -> int:
+        """Return healthCheckInterval from config (default 5 min = 300000ms)."""
+        try:
+            if self._config is not None:
+                mon = getattr(self._config, "monitoring", None)
+                if mon is not None and hasattr(mon, "health_check_interval"):
+                    return int(getattr(mon, "health_check_interval", 300)) * 1000
+        except Exception:
+            pass
+        return 300_000  # 5 minutes
+
+    def _run_health_check(self) -> None:
+        """Run platform health check in a background thread."""
+        def _check() -> None:
+            try:
+                self._refresh_platform_health()
+                self.dataChanged.emit()
+            except Exception as exc:
+                logger.warning("Background health check failed: %s", exc)
+
+        t = threading.Thread(target=_check, daemon=True)
+        t.start()
+
+    # ── i18n language switcher (#16) ─────────────────────────────────
+
+    @Slot(str)
+    def setLanguage(self, lang: str) -> None:
+        """Switch the application language and reload translations.
+
+        Args:
+            lang: Language code (e.g. 'en', 'es', 'fr').
+        """
+        if _set_lang is not None:
+            try:
+                _set_lang(lang)
+                logger.info("Language switched to '%s'", lang)
+                self.dataChanged.emit()
+            except Exception as exc:
+                logger.error("setLanguage error: %s", exc)
+                self.error.emit(f"Failed to set language: {exc}")
+
+    @Slot(result=str)
+    def getAvailableLanguages(self) -> str:
+        """Return JSON array of available language codes.
+
+        Returns:
+            JSON string like '["en", "es", "fr"]'.
+        """
+        if _get_available_langs is not None:
+            try:
+                langs = _get_available_langs()
+                return json.dumps(langs)
+            except Exception as exc:
+                logger.warning("getAvailableLanguages error: %s", exc)
+
+        # Fallback: scan translations dir
+        try:
+            from pathlib import Path as _Path
+            translations_dir = _Path("~/.xpst/translations").expanduser()
+            bundled_dir = _Path(__file__).resolve().parent.parent / "i18n"
+
+            langs: list[str] = []
+            for d in (translations_dir, bundled_dir):
+                if d.exists():
+                    for f in d.glob("*.json"):
+                        code = f.stem
+                        if code not in langs:
+                            langs.append(code)
+            if not langs:
+                langs = ["en"]
+            return json.dumps(sorted(langs))
+        except Exception as exc:
+            logger.warning("Fallback getAvailableLanguages error: %s", exc)
+            return json.dumps(["en"])
+
+    # ── Config validation on startup (#27) ───────────────────────────
+
+    @Slot(result=str)
+    def validateConfig(self) -> str:
+        """Validate the current configuration and return issues as JSON.
+
+        Returns:
+            JSON string: {"valid": bool, "warnings": [...], "errors": [...]}
+        """
+        warnings: list[str] = []
+        errors: list[str] = []
+
+        if self._config is None:
+            errors.append("Configuration not loaded")
+            return json.dumps({"valid": False, "warnings": warnings, "errors": errors})
+
+        try:
+            # Check encoding configs
+            for name in ("youtube", "instagram", "x"):
+                enc = getattr(self._config.video, f"encoding_{name}", None)
+                if enc is not None:
+                    if enc.resolution and enc.resolution not in (360, 480, 720, 1080, 1440, 1920, 2160):
+                        errors.append(f"Invalid resolution for {name}: {enc.resolution}")
+                    if enc.crf is not None and not (0 <= enc.crf <= 51):
+                        errors.append(f"Invalid CRF for {name}: {enc.crf}")
+                    if enc.fps and enc.fps not in (24, 25, 30, 60):
+                        errors.append(f"Invalid FPS for {name}: {enc.fps}")
+
+            # Check schedule config
+            if self._config.schedule.check_interval < 60:
+                errors.append("Check interval must be at least 60 seconds")
+            if self._config.schedule.catchup_window < 3600:
+                errors.append("Catchup window must be at least 1 hour")
+
+            # Check credentials existence
+            for plat, attr, label in [
+                ("youtube", "client_secrets", "YouTube client secrets"),
+                ("youtube", "token_file", "YouTube token file"),
+                ("x", "cookies_file", "X cookies file"),
+                ("instagram", "session_file", "Instagram session file"),
+            ]:
+                acct = getattr(self._config, plat, None)
+                if acct is not None:
+                    path_val = getattr(acct, attr, "")
+                    if path_val:
+                        expanded = Path(path_val).expanduser()
+                        if not expanded.exists():
+                            warnings.append(f"{label} not found: {expanded}")
+
+            # Check rate limits
+            if hasattr(self._config, "rate_limits"):
+                rl = self._config.rate_limits
+                for plat in ("youtube", "instagram", "x", "tiktok"):
+                    limit = getattr(rl, plat, None)
+                    if limit is not None and (limit < 0 or limit > 100):
+                        warnings.append(f"Unusual rate limit for {plat}: {limit}")
+
+            valid = len(errors) == 0
+            return json.dumps({
+                "valid": valid,
+                "warnings": warnings,
+                "errors": errors,
+            })
+        except Exception as exc:
+            logger.error("validateConfig error: %s", exc)
+            return json.dumps({
+                "valid": False,
+                "warnings": warnings,
+                "errors": [str(exc)],
+            })
 
 
 class ThemeProvider(QObject):

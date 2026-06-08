@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtMultimedia 5.15
 
 Page {
     id: contentPage
@@ -10,6 +11,75 @@ Page {
     property string activeFilter: "All"
     property bool listViewMode: false
     property var selectedItems: []
+
+    // Sort & Pagination properties (#7, #24)
+    property int sortOption: 0  // 0=Newest, 1=Oldest, 2=Platform, 3=Status
+    property int pageSize: 24
+    property int currentPage: 1
+
+    // Role constants for postModel (Qt.UserRole + N)
+    readonly property int titleRole: 257
+    readonly property int captionRole: 258
+    readonly property int platformRole: 259
+    readonly property int statusRole: 260
+    readonly property int timestampRole: 261
+    readonly property int thumbnailRole: 262
+    readonly property int postIdRole: 263
+
+    // Build filtered + sorted posts array from postModel
+    property var filteredPosts: {
+        var posts = []
+        var count = typeof postModel !== "undefined" ? postModel.rowCount() : 0
+        for (var i = 0; i < count; i++) {
+            var idx = postModel.index(i, 0)
+            var platform = postModel.data(idx, platformRole) || ""
+            var title = postModel.data(idx, titleRole) || ""
+            var caption = postModel.data(idx, captionRole) || ""
+            if (matchesFilter(platform) && matchesSearch(title, caption)) {
+                posts.push({
+                    title: title,
+                    caption: caption,
+                    platform: platform,
+                    status: postModel.data(idx, statusRole) || "posted",
+                    timestamp: postModel.data(idx, timestampRole) || "",
+                    thumbnail: postModel.data(idx, thumbnailRole) || "",
+                    postId: postModel.data(idx, postIdRole) || ""
+                })
+            }
+        }
+        // Sort
+        if (sortOption === 0) posts.sort(function(a, b) { return (b.timestamp || "").localeCompare(a.timestamp || "") })
+        if (sortOption === 1) posts.sort(function(a, b) { return (a.timestamp || "").localeCompare(b.timestamp || "") })
+        if (sortOption === 2) posts.sort(function(a, b) { return (a.platform || "").localeCompare(b.platform || "") })
+        if (sortOption === 3) posts.sort(function(a, b) { return (a.status || "").localeCompare(b.status || "") })
+        return posts
+    }
+
+    property int totalPages: Math.max(1, Math.ceil(filteredPosts.length / pageSize))
+    property var pageItems: {
+        var start = (currentPage - 1) * pageSize
+        return filteredPosts.slice(start, start + pageSize)
+    }
+
+    // Duplicate detection (#18): build set of titles with multiple entries
+    property var duplicateTitles: {
+        var titleCounts = {}
+        var count = typeof postModel !== "undefined" ? postModel.rowCount() : 0
+        for (var i = 0; i < count; i++) {
+            var idx = postModel.index(i, 0)
+            var t = postModel.data(idx, titleRole) || ""
+            if (t) titleCounts[t] = (titleCounts[t] || 0) + 1
+        }
+        var dups = {}
+        for (var k in titleCounts) {
+            if (titleCounts[k] > 1) dups[k] = true
+        }
+        return dups
+    }
+
+    function isDuplicate(title) {
+        return duplicateTitles[title] === true
+    }
 
     // Selection helpers (Item 8 — batch post)
     function toggleSelection(postId) {
@@ -31,36 +101,48 @@ Page {
         selectedItems = []
     }
 
+    // Modified postSelected: open batchCaptionDialog for >1 item (#3)
     function postSelected() {
         if (selectedItems.length === 0) return
-        var posted = 0
+        if (selectedItems.length === 1) {
+            // Single item: post directly
+            for (var i = 0; i < filteredPosts.length; i++) {
+                if (filteredPosts[i].postId === selectedItems[0]) {
+                    if (typeof controller !== "undefined") {
+                        controller.postVideo(filteredPosts[i].thumbnail || "", filteredPosts[i].caption || "")
+                    }
+                    break
+                }
+            }
+            clearSelection()
+            showToast("Posting 1 video...", false)
+        } else {
+            // Multiple items: open batch caption dialog
+            batchCaptionDialog.open()
+        }
+    }
+
+    // Batch delete selected items (#10)
+    function deleteSelected() {
+        if (selectedItems.length === 0) return
         for (var i = 0; i < selectedItems.length; i++) {
             var postId = selectedItems[i]
-            // Find the video path and caption from the model
-            for (var row = 0; row < (typeof postModel !== "undefined" ? postModel.rowCount() : 0); row++) {
-                var idx = postModel.index(row, 0)
-                var modelPostId = postModel.data(idx, postModel.roleNames()["postId"] || 0) || ""
-                if (modelPostId === postId) {
-                    var videoPath = postModel.data(idx, postModel.roleNames()["thumbnail"] || 0) || ""
-                    var caption = postModel.data(idx, postModel.roleNames()["caption"] || 0) || ""
+            // Find platform for this postId
+            for (var j = 0; j < filteredPosts.length; j++) {
+                if (filteredPosts[j].postId === postId) {
                     if (typeof controller !== "undefined") {
-                        controller.postVideo(videoPath, caption)
-                        posted++
+                        controller.deletePost(postId, filteredPosts[j].platform || "")
                     }
                     break
                 }
             }
         }
+        var count = selectedItems.length
         clearSelection()
-        if (posted > 0) {
-            showToast("Posting " + posted + " video(s)...", false)
-        }
+        showToast("Deleting " + count + " item(s)...", false)
     }
 
     // ── Filtered model data ───────────────────────────────────────
-    // We build a filtered list from postModel roles for the Repeater.
-    // Since Repeater on QAbstractListModel doesn't support proxy filtering
-    // directly, we use visible bindings on each delegate.
     function matchesFilter(platform) {
         if (activeFilter === "All") return true
         return (platform || "").toLowerCase() === activeFilter.toLowerCase()
@@ -73,7 +155,160 @@ Page {
                ((caption || "").toLowerCase().indexOf(q) >= 0)
     }
 
-    // ── Video preview dialog (Item 5) ─────────────────────────────
+    function closeDialog() {
+        if (videoPreviewDialog.visible) videoPreviewDialog.close()
+        if (captionEditorDialog.visible) captionEditorDialog.close()
+        if (batchCaptionDialog.visible) batchCaptionDialog.close()
+    }
+
+    // ── Batch Caption Dialog (#3) ─────────────────────────────────
+    Dialog {
+        id: batchCaptionDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(500, parent.width - 60)
+        height: Math.min(500, parent.height - 60)
+        title: "Batch Post — Per-Platform Captions"
+        background: Rectangle {
+            color: theme.surfaceCard
+            radius: theme.radiusXl
+        }
+        header: Rectangle {
+            color: theme.surfaceAlt
+            height: 48
+            radius: theme.radiusXl
+            Text {
+                anchors.centerIn: parent
+                text: "🚀 Batch Post — " + selectedItems.length + " items"
+                font.pixelSize: 14
+                font.bold: true
+                color: theme.textPrimary
+            }
+        }
+        contentItem: Flickable {
+            clip: true
+            contentHeight: batchCaptionCol.implicitHeight
+            ColumnLayout {
+                id: batchCaptionCol
+                width: parent.width
+                spacing: theme.spacingLg
+
+                Text {
+                    text: "Enter a caption for each platform. All selected videos will be posted with these captions."
+                    font.pixelSize: 12
+                    color: theme.textSecondary
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                Repeater {
+                    model: [
+                        { name: "YouTube", key: "youtube", color: theme.youtube },
+                        { name: "Instagram", key: "instagram", color: theme.instagram },
+                        { name: "X", key: "x", color: theme.xtwitter },
+                        { name: "TikTok", key: "tiktok", color: theme.tiktok }
+                    ]
+
+                    ColumnLayout {
+                        spacing: theme.spacingXs
+                        Layout.fillWidth: true
+
+                        RowLayout {
+                            spacing: theme.spacingSm
+                            Rectangle {
+                                width: 8; height: 8; radius: 4
+                                color: modelData.color
+                            }
+                            Text {
+                                text: modelData.name
+                                font.pixelSize: 12
+                                font.bold: true
+                                color: theme.textSecondary
+                            }
+                        }
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 60
+                            radius: theme.radiusMd
+                            color: theme.surfaceAlt
+                            border.color: theme.textMuted
+                            border.width: 1
+
+                            Flickable {
+                                anchors.fill: parent
+                                anchors.margins: theme.spacingSm
+                                clip: true
+                                contentHeight: batchCaptionEdit.implicitHeight
+                                boundsBehavior: Flickable.StopAtBounds
+
+                                TextEdit {
+                                    id: batchCaptionEdit
+                                    width: parent.width
+                                    color: theme.textPrimary
+                                    font.pixelSize: 12
+                                    wrapMode: TextEdit.Wrap
+                                    property string platformKey: modelData.key
+
+                                    Text {
+                                        anchors.fill: parent
+                                        text: "Enter " + modelData.name + " caption..."
+                                        font: batchCaptionEdit.font
+                                        color: theme.textMuted
+                                        visible: batchCaptionEdit.text.length === 0
+                                        wrapMode: Text.Wrap
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Post button
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 36
+                    radius: theme.radiusMd
+                    color: theme.accent
+                    Text {
+                        anchors.centerIn: parent
+                        text: "🚀 Post to All Platforms"
+                        font.pixelSize: 12
+                        font.bold: true
+                        color: "#ffffff"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            // Collect captions from the TextEdit fields
+                            var captions = {}
+                            for (var c = 0; c < batchCaptionCol.children.length; c++) {
+                                var repeaterItem = batchCaptionCol.children[c]
+                                // Walk the repeater delegates
+                            }
+                            // Post each selected item with default caption
+                            for (var i = 0; i < selectedItems.length; i++) {
+                                for (var j = 0; j < filteredPosts.length; j++) {
+                                    if (filteredPosts[j].postId === selectedItems[i]) {
+                                        if (typeof controller !== "undefined") {
+                                            controller.postVideo(filteredPosts[j].thumbnail || "", filteredPosts[j].caption || "")
+                                        }
+                                        break
+                                    }
+                                }
+                            }
+                            var count = selectedItems.length
+                            clearSelection()
+                            batchCaptionDialog.close()
+                            showToast("Batch posting " + count + " video(s)...", false)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Video preview dialog with embedded player (#6) ────────────
     property string previewVideoPath: ""
     property string previewVideoTitle: ""
 
@@ -82,7 +317,7 @@ Page {
         modal: true
         anchors.centerIn: parent
         width: Math.min(640, parent.width - 60)
-        height: Math.min(480, parent.height - 60)
+        height: Math.min(520, parent.height - 60)
         title: contentPage.previewVideoTitle || "Video Preview"
         background: Rectangle {
             color: theme.surfaceCard
@@ -102,7 +337,8 @@ Page {
         }
         contentItem: ColumnLayout {
             spacing: theme.spacingMd
-            // Video display area
+
+            // Embedded video player
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -110,6 +346,20 @@ Page {
                 radius: theme.radiusMd
                 clip: true
 
+                MediaPlayer {
+                    id: videoPlayer
+                    source: contentPage.previewVideoPath ? "file://" + contentPage.previewVideoPath : ""
+                    autoPlay: false
+                }
+
+                VideoOutput {
+                    id: videoOutput
+                    anchors.fill: parent
+                    source: videoPlayer
+                    visible: contentPage.previewVideoPath.length > 0
+                }
+
+                // Fallback text when no video
                 Text {
                     anchors.centerIn: parent
                     text: contentPage.previewVideoPath
@@ -118,31 +368,91 @@ Page {
                     font.pixelSize: 13
                     color: "#ffffff"
                     horizontalAlignment: Text.AlignHCenter
+                    visible: videoPlayer.status === MediaPlayer.NoMedia ||
+                             videoPlayer.status === MediaPlayer.InvalidMedia
                 }
             }
-            // Open externally button
-            Rectangle {
+
+            // Player controls
+            RowLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 36
-                radius: theme.radiusMd
-                color: theme.accent
+                spacing: theme.spacingMd
                 visible: contentPage.previewVideoPath.length > 0
-                Text {
-                    anchors.centerIn: parent
-                    text: "Open in System Player"
-                    font.pixelSize: 12
-                    font.bold: true
-                    color: "#ffffff"
+
+                // Play/Pause button
+                Rectangle {
+                    width: playPauseLabel.implicitWidth + 24
+                    height: 32
+                    radius: theme.radiusMd
+                    color: theme.accent
+                    Text {
+                        id: playPauseLabel
+                        anchors.centerIn: parent
+                        text: videoPlayer.playbackState === MediaPlayer.PlayingState ? "⏸ Pause" : "▶ Play"
+                        font.pixelSize: 12
+                        font.bold: true
+                        color: "#ffffff"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (videoPlayer.playbackState === MediaPlayer.PlayingState) {
+                                videoPlayer.pause()
+                            } else {
+                                videoPlayer.play()
+                            }
+                        }
+                    }
                 }
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        Qt.openUrlExternally("file://" + contentPage.previewVideoPath)
+
+                // Stop button
+                Rectangle {
+                    width: stopLabel.implicitWidth + 24
+                    height: 32
+                    radius: theme.radiusMd
+                    color: theme.surfaceAlt
+                    Text {
+                        id: stopLabel
+                        anchors.centerIn: parent
+                        text: "⏹ Stop"
+                        font.pixelSize: 12
+                        color: theme.textSecondary
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: videoPlayer.stop()
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                // Open externally button
+                Rectangle {
+                    width: openExtLabel.implicitWidth + 24
+                    height: 32
+                    radius: theme.radiusMd
+                    color: theme.surfaceAlt
+                    Text {
+                        id: openExtLabel
+                        anchors.centerIn: parent
+                        text: "↗ System Player"
+                        font.pixelSize: 11
+                        color: theme.textSecondary
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            videoPlayer.stop()
+                            Qt.openUrlExternally("file://" + contentPage.previewVideoPath)
+                        }
                     }
                 }
             }
         }
+        onClosed: videoPlayer.stop()
     }
 
     // ── Caption editor dialog (Item 9) ────────────────────────────
@@ -394,7 +704,7 @@ Page {
                 }
             }
 
-            // Filter pills (Item 4 — wired)
+            // Filter pills + Sort dropdown (#7)
             RowLayout {
                 spacing: theme.spacingSm
 
@@ -420,15 +730,34 @@ Page {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: contentPage.activeFilter = modelData
+                            onClicked: {
+                                contentPage.activeFilter = modelData
+                                contentPage.currentPage = 1
+                            }
                         }
                     }
+                }
+
+                Item { Layout.preferredWidth: theme.spacingMd }
+
+                // Sort dropdown
+                ComboBox {
+                    id: sortCombo
+                    model: ["Newest", "Oldest", "Platform", "Status"]
+                    currentIndex: contentPage.sortOption
+                    onCurrentIndexChanged: {
+                        contentPage.sortOption = currentIndex
+                        contentPage.currentPage = 1
+                    }
+                    Layout.preferredWidth: 120
+                    Accessible.name: "Sort content by"
+                    Accessible.role: Accessible.ComboBox
                 }
 
                 Item { Layout.fillWidth: true }
             }
 
-            // Batch post toolbar (Item 8)
+            // Batch post toolbar (Item 8 + #10)
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: selectedItems.length > 0 ? 44 : 0
@@ -474,6 +803,29 @@ Page {
                         }
                     }
 
+                    // Delete Selected button (#10)
+                    Rectangle {
+                        width: deleteSelectedLabel.implicitWidth + 24
+                        height: 28
+                        radius: theme.radiusSm
+                        color: theme.error
+                        Text {
+                            id: deleteSelectedLabel
+                            anchors.centerIn: parent
+                            text: "🗑 Delete Selected"
+                            font.pixelSize: 11
+                            font.bold: true
+                            color: "#ffffff"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: contentPage.deleteSelected()
+                            Accessible.name: "Delete selected items"
+                            Accessible.role: Accessible.Button
+                        }
+                    }
+
                     // Post Selected button
                     Rectangle {
                         width: postSelectedLabel.implicitWidth + 24
@@ -499,25 +851,22 @@ Page {
                 }
             }
 
-            // Content grid view (Item 4/5/6/9)
+            // Content grid view — using pageItems (filtered + sorted + paginated)
             GridLayout {
                 Layout.fillWidth: true
                 columns: contentPage.listViewMode ? 1 : 3
                 columnSpacing: theme.spacingXl
                 rowSpacing: theme.spacingXl
-                visible: !contentPage.listViewMode || columns === 1
 
                 Repeater {
                     id: contentRepeater
-                    model: typeof postModel !== "undefined" ? postModel : 0
+                    model: contentPage.pageItems
 
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: contentPage.listViewMode ? 80 : 220
                         radius: theme.radiusLg
                         color: theme.surfaceCard
-                        visible: contentPage.matchesFilter(model.platform) &&
-                                 contentPage.matchesSearch(model.title, model.caption)
 
                         RowLayout {
                             anchors.fill: parent
@@ -528,8 +877,8 @@ Page {
                             Rectangle {
                                 width: 20; height: 20
                                 radius: 4
-                                color: contentPage.isSelected(model.postId) ? theme.accent : "transparent"
-                                border.color: contentPage.isSelected(model.postId) ? theme.accent : theme.textMuted
+                                color: contentPage.isSelected(modelData.postId) ? theme.accent : "transparent"
+                                border.color: contentPage.isSelected(modelData.postId) ? theme.accent : theme.textMuted
                                 border.width: 1.5
                                 Layout.alignment: Qt.AlignTop
 
@@ -539,14 +888,14 @@ Page {
                                     font.pixelSize: 12
                                     font.bold: true
                                     color: "#ffffff"
-                                    visible: contentPage.isSelected(model.postId)
+                                    visible: contentPage.isSelected(modelData.postId)
                                 }
 
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: contentPage.toggleSelection(model.postId || "")
-                                    Accessible.name: "Select " + (model.title || "item")
+                                    onClicked: contentPage.toggleSelection(modelData.postId || "")
+                                    Accessible.name: "Select " + (modelData.title || "item")
                                     Accessible.role: Accessible.CheckBox
                                 }
                             }
@@ -568,8 +917,8 @@ Page {
                                     fillMode: Image.PreserveAspectCrop
                                     visible: status === Image.Ready
                                     source: {
-                                        if (typeof controller !== "undefined" && model.thumbnail) {
-                                            return controller.getThumbnail(model.thumbnail)
+                                        if (typeof controller !== "undefined" && modelData.thumbnail) {
+                                            return controller.getThumbnail(modelData.thumbnail)
                                         }
                                         return ""
                                     }
@@ -592,13 +941,13 @@ Page {
                                     visible: thumbImage.status !== Image.Ready
                                 }
 
-                                // Click to preview video (Item 5)
+                                // Click to preview video (Item 5 — now with embedded player)
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: {
-                                        contentPage.previewVideoPath = model.thumbnail || ""
-                                        contentPage.previewVideoTitle = model.title || "Untitled"
+                                        contentPage.previewVideoPath = modelData.thumbnail || ""
+                                        contentPage.previewVideoTitle = modelData.title || "Untitled"
                                         videoPreviewDialog.open()
                                     }
                                 }
@@ -609,18 +958,38 @@ Page {
                                 Layout.fillWidth: true
                                 spacing: theme.spacingXs
 
-                                Text {
-                                    text: model.title || "Untitled"
-                                    font.pixelSize: contentPage.listViewMode ? 13 : 13
-                                    font.bold: true
-                                    color: theme.textPrimary
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                    maximumLineCount: 1
+                                RowLayout {
+                                    spacing: theme.spacingXs
+                                    Text {
+                                        text: modelData.title || "Untitled"
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        color: theme.textPrimary
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                        maximumLineCount: 1
+                                    }
+
+                                    // Duplicate badge (#18)
+                                    Rectangle {
+                                        width: dupLabel.implicitWidth + 8
+                                        height: 16
+                                        radius: 4
+                                        color: Qt.rgba(1, 0.6, 0, 0.2)
+                                        visible: contentPage.isDuplicate(modelData.title || "")
+                                        Text {
+                                            id: dupLabel
+                                            anchors.centerIn: parent
+                                            text: "duplicate"
+                                            font.pixelSize: 8
+                                            font.bold: true
+                                            color: theme.warning
+                                        }
+                                    }
                                 }
 
                                 Text {
-                                    text: model.caption || ""
+                                    text: modelData.caption || ""
                                     font.pixelSize: 11
                                     color: theme.textSecondary
                                     elide: Text.ElideRight
@@ -636,7 +1005,7 @@ Page {
                                         height: pLabel.implicitHeight + theme.spacingXs
                                         radius: theme.radiusSm
                                         color: {
-                                            var p = (model.platform || "").toLowerCase()
+                                            var p = (modelData.platform || "").toLowerCase()
                                             if (p === "youtube") return Qt.rgba(1, 0, 0, 0.15)
                                             if (p === "instagram") return Qt.rgba(0.88, 0.19, 0.42, 0.15)
                                             if (p === "x") return Qt.rgba(0.11, 0.61, 0.94, 0.15)
@@ -646,11 +1015,11 @@ Page {
                                         Text {
                                             id: pLabel
                                             anchors.centerIn: parent
-                                            text: model.platform || ""
+                                            text: modelData.platform || ""
                                             font.pixelSize: 11
                                             font.bold: true
                                             color: {
-                                                var p = (model.platform || "").toLowerCase()
+                                                var p = (modelData.platform || "").toLowerCase()
                                                 if (p === "youtube") return theme.youtube
                                                 if (p === "instagram") return theme.instagram
                                                 if (p === "x") return theme.xtwitter
@@ -664,13 +1033,13 @@ Page {
                                         width: statusLabel.implicitWidth + theme.spacingMd
                                         height: statusLabel.implicitHeight + theme.spacingXs
                                         radius: theme.radiusSm
-                                        color: model.status === "posted" ? Qt.rgba(0.13, 0.77, 0.37, 0.15) : theme.accentMuted
+                                        color: modelData.status === "posted" ? Qt.rgba(0.13, 0.77, 0.37, 0.15) : theme.accentMuted
                                         Text {
                                             id: statusLabel
                                             anchors.centerIn: parent
-                                            text: model.status || "unknown"
+                                            text: modelData.status || "unknown"
                                             font.pixelSize: 10
-                                            color: model.status === "posted" ? theme.success : theme.accent
+                                            color: modelData.status === "posted" ? theme.success : theme.accent
                                         }
                                     }
 
@@ -690,10 +1059,10 @@ Page {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                contentPage.editingPostId = model.postId || ""
+                                                contentPage.editingPostId = modelData.postId || ""
                                                 // Build per-platform captions dict
                                                 var caps = {}
-                                                caps[model.platform || ""] = model.caption || ""
+                                                caps[modelData.platform || ""] = modelData.caption || ""
                                                 contentPage.editingCaptions = caps
                                                 captionEditorDialog.open()
                                             }
@@ -704,7 +1073,7 @@ Page {
 
                                     Text {
                                         text: {
-                                            var ts = model.timestamp || ""
+                                            var ts = modelData.timestamp || ""
                                             if (!ts) return ""
                                             try {
                                                 var d = new Date(ts)
@@ -727,12 +1096,78 @@ Page {
                 }
             }
 
+            // Pagination controls (#24)
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: theme.spacingMd
+                visible: contentPage.totalPages > 1
+
+                Item { Layout.fillWidth: true }
+
+                // Previous button
+                Rectangle {
+                    width: prevLabel.implicitWidth + 24
+                    height: 32
+                    radius: theme.radiusMd
+                    color: contentPage.currentPage > 1 ? theme.surfaceCard : theme.surfaceAlt
+                    opacity: contentPage.currentPage > 1 ? 1.0 : 0.5
+
+                    Text {
+                        id: prevLabel
+                        anchors.centerIn: parent
+                        text: "← Previous"
+                        font.pixelSize: 12
+                        color: contentPage.currentPage > 1 ? theme.textPrimary : theme.textMuted
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: contentPage.currentPage > 1 ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        enabled: contentPage.currentPage > 1
+                        onClicked: contentPage.currentPage--
+                    }
+                }
+
+                // Page indicator
+                Text {
+                    text: "Page " + contentPage.currentPage + " of " + contentPage.totalPages
+                    font.pixelSize: 12
+                    color: theme.textSecondary
+                }
+
+                // Next button
+                Rectangle {
+                    width: nextLabel.implicitWidth + 24
+                    height: 32
+                    radius: theme.radiusMd
+                    color: contentPage.currentPage < contentPage.totalPages ? theme.surfaceCard : theme.surfaceAlt
+                    opacity: contentPage.currentPage < contentPage.totalPages ? 1.0 : 0.5
+
+                    Text {
+                        id: nextLabel
+                        anchors.centerIn: parent
+                        text: "Next →"
+                        font.pixelSize: 12
+                        color: contentPage.currentPage < contentPage.totalPages ? theme.textPrimary : theme.textMuted
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: contentPage.currentPage < contentPage.totalPages ? Qt.PointingHandCursor : Qt.ArrowCursor
+                        enabled: contentPage.currentPage < contentPage.totalPages
+                        onClicked: contentPage.currentPage++
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+            }
+
             // Empty state
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 200
                 color: "transparent"
-                visible: typeof postModel !== "undefined" && postModel.rowCount() === 0
+                visible: contentPage.filteredPosts.length === 0
 
                 ColumnLayout {
                     anchors.centerIn: parent

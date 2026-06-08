@@ -494,124 +494,293 @@ Page {
                     color: theme.textSecondary
                 }
 
+                // 3-column side-by-side layout for encoding comparison
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: theme.spacingMd
+
+                    Repeater {
+                        model: [
+                            {
+                                platform: "YouTube",
+                                codec: "H.264 / AVC",
+                                resolution: "1080p (1920×1080)",
+                                fps: "30 fps",
+                                bitrate: "8-12 Mbps",
+                                audioCodec: "AAC",
+                                audioBitrate: "256 kbps",
+                                container: "MP4",
+                                maxDuration: "60s (Shorts)",
+                                color: theme.youtube
+                            },
+                            {
+                                platform: "Instagram",
+                                codec: "H.264 / AVC",
+                                resolution: "1080×1920 (9:16)",
+                                fps: "30 fps",
+                                bitrate: "5-8 Mbps",
+                                audioCodec: "AAC",
+                                audioBitrate: "128 kbps",
+                                container: "MP4",
+                                maxDuration: "90s (Reels)",
+                                color: theme.instagram
+                            },
+                            {
+                                platform: "X",
+                                codec: "H.264 / AVC",
+                                resolution: "1280×720 (16:9)",
+                                fps: "30 fps",
+                                bitrate: "5-8 Mbps",
+                                audioCodec: "AAC",
+                                audioBitrate: "128 kbps",
+                                container: "MP4",
+                                maxDuration: "140s",
+                                color: theme.xtwitter
+                            },
+                            {
+                                platform: "TikTok",
+                                codec: "H.264 / AVC",
+                                resolution: "1080×1920 (9:16)",
+                                fps: "30 fps",
+                                bitrate: "4-6 Mbps",
+                                audioCodec: "AAC",
+                                audioBitrate: "128 kbps",
+                                container: "MP4",
+                                maxDuration: "10m",
+                                color: theme.tiktok
+                            }
+                        ]
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: encPlatformCol.implicitHeight + theme.spacingXl
+                            radius: theme.radiusMd
+                            color: theme.surfaceAlt
+
+                            ColumnLayout {
+                                id: encPlatformCol
+                                anchors.fill: parent
+                                anchors.margins: theme.spacingLg
+                                spacing: theme.spacingSm
+
+                                RowLayout {
+                                    spacing: theme.spacingSm
+                                    Rectangle {
+                                        width: 8; height: 8; radius: 4
+                                        color: modelData.color
+                                    }
+                                    Text {
+                                        text: modelData.platform
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        color: theme.textPrimary
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                }
+
+                                GridLayout {
+                                    columns: 2
+                                    columnSpacing: theme.spacingMd
+                                    rowSpacing: theme.spacingXs
+                                    Layout.fillWidth: true
+
+                                    Text { text: "Codec"; font.pixelSize: 11; color: theme.textMuted }
+                                    Text { text: modelData.codec; font.pixelSize: 11; color: theme.textSecondary }
+
+                                    Text { text: "Resolution"; font.pixelSize: 11; color: theme.textMuted }
+                                    Text { text: modelData.resolution; font.pixelSize: 11; color: theme.textSecondary }
+
+                                    Text { text: "FPS"; font.pixelSize: 11; color: theme.textMuted }
+                                    Text { text: modelData.fps; font.pixelSize: 11; color: theme.textSecondary }
+
+                                    Text { text: "Bitrate"; font.pixelSize: 11; color: theme.textMuted }
+                                    Text { text: modelData.bitrate; font.pixelSize: 11; color: theme.textSecondary }
+
+                                    Text { text: "Audio"; font.pixelSize: 11; color: theme.textMuted }
+                                    Text { text: modelData.audioCodec + " " + modelData.audioBitrate; font.pixelSize: 11; color: theme.textSecondary }
+
+                                    Text { text: "Container"; font.pixelSize: 11; color: theme.textMuted }
+                                    Text { text: modelData.container; font.pixelSize: 11; color: theme.textSecondary }
+
+                                    Text { text: "Max Duration"; font.pixelSize: 11; color: theme.textMuted }
+                                    Text { text: modelData.maxDuration; font.pixelSize: 11; color: theme.textSecondary }
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+            }
+
+            // Keyboard Shortcuts Section (#23)
+            ColumnLayout {
+                spacing: theme.spacingXl
+
+                Text {
+                    text: "Keyboard Shortcuts"
+                    font.pixelSize: 16
+                    font.bold: true
+                    color: theme.textPrimary
+                    Accessible.name: "Keyboard shortcuts section"
+                    Accessible.role: Accessible.Heading
+                }
+
+                Text {
+                    text: "Customize keyboard shortcuts. Click a shortcut field, then press your desired key combination."
+                    font.pixelSize: 12
+                    color: theme.textSecondary
+                }
+
+                property var shortcutDefs: [
+                    { label: "Dashboard",    key: "Ctrl+1", defaultKey: "Ctrl+1" },
+                    { label: "Content",      key: "Ctrl+2", defaultKey: "Ctrl+2" },
+                    { label: "Analytics",    key: "Ctrl+3", defaultKey: "Ctrl+3" },
+                    { label: "Connect",      key: "Ctrl+4", defaultKey: "Ctrl+4" },
+                    { label: "Schedule",     key: "Ctrl+5", defaultKey: "Ctrl+5" },
+                    { label: "Refresh",      key: "Ctrl+R", defaultKey: "Ctrl+R" },
+                    { label: "Quit",         key: "Ctrl+Q", defaultKey: "Ctrl+Q" }
+                ]
+
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: encCol.implicitHeight + theme.spacingXxl
+                    Layout.preferredHeight: shortcutListCol.implicitHeight + theme.spacingXxl
                     radius: theme.radiusLg
                     color: theme.surfaceCard
 
                     ColumnLayout {
-                        id: encCol
+                        id: shortcutListCol
                         anchors.fill: parent
                         anchors.margins: theme.spacingXl
-                        spacing: theme.spacingMd
+                        spacing: 0
 
                         Repeater {
-                            model: [
-                                {
-                                    platform: "YouTube",
-                                    codec: "H.264 / AVC",
-                                    resolution: "1080p (1920×1080)",
-                                    fps: "30 fps",
-                                    bitrate: "8-12 Mbps",
-                                    audioCodec: "AAC",
-                                    audioBitrate: "256 kbps",
-                                    container: "MP4",
-                                    maxDuration: "60s (Shorts)",
-                                    color: theme.youtube
-                                },
-                                {
-                                    platform: "Instagram",
-                                    codec: "H.264 / AVC",
-                                    resolution: "1080×1920 (9:16)",
-                                    fps: "30 fps",
-                                    bitrate: "5-8 Mbps",
-                                    audioCodec: "AAC",
-                                    audioBitrate: "128 kbps",
-                                    container: "MP4",
-                                    maxDuration: "90s (Reels)",
-                                    color: theme.instagram
-                                },
-                                {
-                                    platform: "X",
-                                    codec: "H.264 / AVC",
-                                    resolution: "1280×720 (16:9)",
-                                    fps: "30 fps",
-                                    bitrate: "5-8 Mbps",
-                                    audioCodec: "AAC",
-                                    audioBitrate: "128 kbps",
-                                    container: "MP4",
-                                    maxDuration: "140s",
-                                    color: theme.xtwitter
-                                },
-                                {
-                                    platform: "TikTok",
-                                    codec: "H.264 / AVC",
-                                    resolution: "1080×1920 (9:16)",
-                                    fps: "30 fps",
-                                    bitrate: "4-6 Mbps",
-                                    audioCodec: "AAC",
-                                    audioBitrate: "128 kbps",
-                                    container: "MP4",
-                                    maxDuration: "60s",
-                                    color: theme.tiktok
-                                }
-                            ]
+                            model: parent.parent.parent.shortcutDefs
 
                             Rectangle {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: encPlatformCol.implicitHeight + theme.spacingXl
-                                radius: theme.radiusMd
-                                color: theme.surfaceAlt
+                                Layout.preferredHeight: 44
+                                color: "transparent"
 
-                                ColumnLayout {
-                                    id: encPlatformCol
+                                RowLayout {
                                     anchors.fill: parent
-                                    anchors.margins: theme.spacingLg
-                                    spacing: theme.spacingSm
+                                    anchors.leftMargin: theme.spacingMd
+                                    anchors.rightMargin: theme.spacingMd
+                                    spacing: theme.spacingMd
 
-                                    RowLayout {
-                                        spacing: theme.spacingSm
-                                        Rectangle {
-                                            width: 8; height: 8; radius: 4
-                                            color: modelData.color
-                                        }
-                                        Text {
-                                            text: modelData.platform
-                                            font.pixelSize: 13
-                                            font.bold: true
+                                    Text {
+                                        text: modelData.label
+                                        font.pixelSize: 13
+                                        color: theme.textPrimary
+                                        Layout.preferredWidth: 120
+                                    }
+
+                                    Rectangle {
+                                        Layout.preferredWidth: 160
+                                        Layout.preferredHeight: 32
+                                        radius: theme.radiusSm
+                                        color: theme.surfaceAlt
+                                        border.color: shortcutField.activeFocus ? theme.accent : "transparent"
+                                        border.width: shortcutField.activeFocus ? 2 : 0
+
+                                        TextInput {
+                                            id: shortcutField
+                                            anchors.fill: parent
+                                            anchors.margins: theme.spacingSm
+                                            verticalAlignment: TextInput.AlignVCenter
+                                            font.pixelSize: 12
+                                            font.family: "monospace"
                                             color: theme.textPrimary
+                                            readOnly: true
+                                            text: modelData.key
+
+                                            Keys.onPressed: function(event) {
+                                                var mods = []
+                                                if (event.modifiers & Qt.ControlModifier) mods.push("Ctrl")
+                                                if (event.modifiers & Qt.AltModifier) mods.push("Alt")
+                                                if (event.modifiers & Qt.ShiftModifier) mods.push("Shift")
+                                                if (event.modifiers & Qt.MetaModifier) mods.push("Meta")
+
+                                                var keyName = ""
+                                                if (event.key >= Qt.Key_A && event.key <= Qt.Key_Z) {
+                                                    keyName = String.fromCharCode(event.key)
+                                                } else if (event.key >= Qt.Key_0 && event.key <= Qt.Key_9) {
+                                                    keyName = String.fromCharCode(event.key)
+                                                } else if (event.key === Qt.Key_F1) { keyName = "F1"
+                                                } else if (event.key === Qt.Key_F2) { keyName = "F2"
+                                                } else if (event.key === Qt.Key_F3) { keyName = "F3"
+                                                } else if (event.key === Qt.Key_F4) { keyName = "F4"
+                                                } else if (event.key === Qt.Key_F5) { keyName = "F5"
+                                                } else if (event.key === Qt.Key_F6) { keyName = "F6"
+                                                } else if (event.key === Qt.Key_F7) { keyName = "F7"
+                                                } else if (event.key === Qt.Key_F8) { keyName = "F8"
+                                                } else if (event.key === Qt.Key_F9) { keyName = "F9"
+                                                } else if (event.key === Qt.Key_F10) { keyName = "F10"
+                                                } else if (event.key === Qt.Key_F11) { keyName = "F11"
+                                                } else if (event.key === Qt.Key_F12) { keyName = "F12"
+                                                } else if (event.key === Qt.Key_Escape) { keyName = "Esc"
+                                                } else if (event.key === Qt.Key_Space) { keyName = "Space"
+                                                } else if (event.key === Qt.Key_Tab) { keyName = "Tab"
+                                                } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) { keyName = "Enter"
+                                                } else if (event.key === Qt.Key_Delete) { keyName = "Del"
+                                                } else if (event.key === Qt.Key_Backspace) { keyName = "Backspace"
+                                                } else { keyName = "" }
+
+                                                if (keyName) {
+                                                    if (mods.length > 0) {
+                                                        shortcutField.text = mods.join("+") + "+" + keyName
+                                                    } else {
+                                                        shortcutField.text = keyName
+                                                    }
+                                                    // Update the model
+                                                    var defs = shortcutDefs.slice()
+                                                    defs[index] = { label: modelData.label, key: shortcutField.text, defaultKey: modelData.defaultKey }
+                                                    shortcutDefs = defs
+                                                }
+                                                event.accepted = true
+                                            }
                                         }
-                                        Item { Layout.fillWidth: true }
                                     }
 
-                                    GridLayout {
-                                        columns: 4
-                                        columnSpacing: theme.spacingXl
-                                        rowSpacing: theme.spacingXs
-                                        Layout.fillWidth: true
+                                    Rectangle {
+                                        Layout.preferredWidth: 56
+                                        Layout.preferredHeight: 26
+                                        radius: theme.radiusSm
+                                        color: resetMouse.containsMouse ? theme.surfaceAlt : "transparent"
+                                        border.color: theme.surfaceAlt
+                                        border.width: 1
 
-                                        Text { text: "Codec"; font.pixelSize: 11; color: theme.textMuted }
-                                        Text { text: modelData.codec; font.pixelSize: 11; color: theme.textSecondary }
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "Reset"
+                                            font.pixelSize: 10
+                                            color: theme.textSecondary
+                                        }
 
-                                        Text { text: "Resolution"; font.pixelSize: 11; color: theme.textMuted }
-                                        Text { text: modelData.resolution; font.pixelSize: 11; color: theme.textSecondary }
-
-                                        Text { text: "FPS"; font.pixelSize: 11; color: theme.textMuted }
-                                        Text { text: modelData.fps; font.pixelSize: 11; color: theme.textSecondary }
-
-                                        Text { text: "Bitrate"; font.pixelSize: 11; color: theme.textMuted }
-                                        Text { text: modelData.bitrate; font.pixelSize: 11; color: theme.textSecondary }
-
-                                        Text { text: "Audio"; font.pixelSize: 11; color: theme.textMuted }
-                                        Text { text: modelData.audioCodec + " " + modelData.audioBitrate; font.pixelSize: 11; color: theme.textSecondary }
-
-                                        Text { text: "Container"; font.pixelSize: 11; color: theme.textMuted }
-                                        Text { text: modelData.container; font.pixelSize: 11; color: theme.textSecondary }
-
-                                        Text { text: "Max Duration"; font.pixelSize: 11; color: theme.textMuted }
-                                        Text { text: modelData.maxDuration; font.pixelSize: 11; color: theme.textSecondary }
+                                        MouseArea {
+                                            id: resetMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                var defs = shortcutDefs.slice()
+                                                defs[index] = { label: modelData.label, key: modelData.defaultKey, defaultKey: modelData.defaultKey }
+                                                shortcutDefs = defs
+                                            }
+                                        }
                                     }
+
+                                    Item { Layout.fillWidth: true }
+                                }
+
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.leftMargin: theme.spacingMd
+                                    anchors.rightMargin: theme.spacingMd
+                                    height: 1
+                                    color: theme.surfaceAlt
                                 }
                             }
                         }

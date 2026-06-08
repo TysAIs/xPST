@@ -757,12 +757,15 @@ def auth_status(ctx: click.Context, as_json: bool):
 # Other Commands
 # ──────────────────────────────────────────────
 
-@main.command()
+@main.group(invoke_without_command=True)
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
 @click.option("--refresh", "-r", is_flag=True, help="Force refresh (ignore cache)")
+@json_option
 @click.pass_context
-def analytics(ctx: click.Context, platforms: str | None, refresh: bool):
+def analytics(ctx: click.Context, platforms: str | None, refresh: bool, as_json: bool = False):
     """Show cross-platform analytics summary"""
+    if ctx.invoked_subcommand is not None:
+        return
     import asyncio
 
     config = load_config(ctx.obj.get("config_path"))
@@ -1549,12 +1552,16 @@ def config_export(ctx: click.Context, output_file: str, raw: bool, config_file: 
 @config.command("import")
 @click.argument("input_file", type=click.Path(exists=True))
 @click.option("--merge/--replace", default=True, help="Merge with existing config or replace entirely")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+@click.option("--strict", is_flag=True, help="Fail on validation warnings")
 @json_option
 @click.pass_context
-def config_import(ctx: click.Context, input_file: str, merge: bool, as_json: bool):
+def config_import(ctx: click.Context, input_file: str, merge: bool, yes: bool, strict: bool, as_json: bool):
     """Import configuration from a file.
 
     By default merges with existing config. Use --replace to overwrite entirely.
+    Shows a diff of changes before applying. Use --yes to skip confirmation.
+    Validates the imported config structure. Use --strict to fail on warnings.
     """
     import os
     import yaml
@@ -1571,32 +1578,75 @@ def config_import(ctx: click.Context, input_file: str, merge: bool, as_json: boo
             console.print("[red]Import file must contain a YAML mapping[/red]")
         sys.exit(EXIT_CONFIG_ERROR)
 
+    # ── Validate imported config structure ──
+    validation_errors, validation_warnings = _validate_config_dict(imported)
+
+    if validation_errors:
+        if as_json:
+            json_output({"ok": False, "errors": validation_errors, "warnings": validation_warnings}, True)
+        else:
+            console.print("[red]Validation errors:[/red]")
+            for err in validation_errors:
+                console.print(f"  [red]✗[/red] {err}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    if strict and validation_warnings:
+        if as_json:
+            json_output({"ok": False, "errors": [], "warnings": validation_warnings}, True)
+        else:
+            console.print("[red]Strict mode — warnings treated as errors:[/red]")
+            for warn in validation_warnings:
+                console.print(f"  [yellow]⚠[/yellow] {warn}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    existing: dict = {}
     if merge and Path(config_path).exists():
         with open(config_path) as f:
             existing = yaml.safe_load(f) or {}
 
-        def _deep_merge(base: dict, override: dict) -> dict:
-            """Recursively merge override into base."""
-            for k, v in override.items():
-                if k in base and isinstance(base[k], dict) and isinstance(v, dict):
-                    _deep_merge(base[k], v)
-                else:
-                    base[k] = v
-            return base
-
-        merged = _deep_merge(existing, imported)
+    # ── Compute and display diff ──
+    if merge:
+        merged = _deep_merge_import(existing, imported)
     else:
         merged = imported
+
+    changes = _compute_config_diff(existing, merged)
+
+    if not changes["added"] and not changes["removed"] and not changes["changed"]:
+        if as_json:
+            json_output({"ok": True, "message": "No changes detected", "imported": str(input_file)}, True)
+        else:
+            console.print("[dim]No changes detected — config is identical.[/dim]")
+        return
+
+    if not as_json:
+        _display_config_diff(changes, validation_warnings)
+
+    # Confirm before applying
+    if not yes and not as_json:
+        if not confirm("Apply these changes?"):
+            console.print("[dim]Import cancelled.[/dim]")
+            return
 
     Path(config_path).parent.mkdir(parents=True, exist_ok=True)
     with open(config_path, "w") as f:
         yaml.dump(merged, f, default_flow_style=False, sort_keys=False)
 
     if as_json:
-        json_output({"ok": True, "imported": str(input_file), "mode": "merge" if merge else "replace"}, True)
+        json_output({
+            "ok": True,
+            "imported": str(input_file),
+            "mode": "merge" if merge else "replace",
+            "added": changes["added"],
+            "removed": changes["removed"],
+            "changed": changes["changed"],
+            "warnings": validation_warnings,
+        }, True)
     else:
         mode_label = "merged" if merge else "replaced"
         console.print(f"[green]✓[/green] Config {mode_label} from [bold]{input_file}[/bold]")
+        if validation_warnings:
+            console.print(f"[yellow]{len(validation_warnings)} warning(s) — run `xpst config validate` for details[/yellow]")
 
 
 # ──────────────────────────────────────────────
@@ -1615,14 +1665,16 @@ def schedule(ctx: click.Context):
 @click.option("--caption", "-c", required=True, help="Post caption text")
 @click.option("--at", "scheduled_time", required=True, help="Scheduled time (ISO or 'YYYY-MM-DD HH:MM')")
 @click.option("--platforms", "-p", default=None, help="Comma-separated target platforms")
+@click.option("--repeat", "repeat_rule", default=None, type=click.Choice(["none", "daily", "weekly", "monthly"]), help="Repeat schedule")
 @json_option
 @click.pass_context
-def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: str, platforms: str | None, as_json: bool):
+def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: str, platforms: str | None, repeat_rule: str | None, as_json: bool):
     """Schedule a post for later publishing.
 
     Examples:
         xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00'
         xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08T10:00:00' -p youtube,instagram
+        xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00' --repeat daily
     """
     from datetime import datetime
     from xpst.schedule_manager import ScheduleManager
@@ -1648,11 +1700,13 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
     platform_list = [p.strip() for p in platforms.split(",")] if platforms else None
 
     manager = ScheduleManager()
+    effective_repeat = repeat_rule if repeat_rule and repeat_rule != "none" else None
     entry = manager.add(
         video_path=str(video_path.resolve()),
         caption=caption,
         scheduled_time=dt,
         platforms=platform_list,
+        repeat_rule=effective_repeat,
     )
 
     if as_json:
@@ -1664,6 +1718,8 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
         console.print(f"  Caption:  {caption[:60]}{'...' if len(caption) > 60 else ''}")
         console.print(f"  Time:     {dt.strftime('%Y-%m-%d %H:%M')}")
         console.print(f"  Platforms: {', '.join(platform_list) if platform_list else 'all enabled'}")
+        if effective_repeat:
+            console.print(f"  Repeat:   {effective_repeat}")
 
 
 @schedule.command("list")
@@ -2056,6 +2112,437 @@ def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
         else:
             console.print(f"[red]Unsupported OS:[/red] {system}")
         return False
+
+
+def _deep_merge_import(base: dict, override: dict) -> dict:
+    """Recursively merge override into base for config import."""
+    result = dict(base)
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge_import(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def _flatten_dict(d: dict, prefix: str = "") -> dict[str, Any]:
+    """Flatten a nested dict to dotted-key paths."""
+    items: dict[str, Any] = {}
+    for k, v in d.items():
+        key = f"{prefix}.{k}" if prefix else k
+        if isinstance(v, dict):
+            items.update(_flatten_dict(v, key))
+        else:
+            items[key] = v
+    return items
+
+
+_KNOWN_CONFIG_KEYS = {
+    "accounts", "video", "reliability", "monitoring", "notifications",
+    "rate_limits", "schedule",
+}
+
+_KNOWN_ACCOUNT_PLATFORMS = {"tiktok", "youtube", "x", "instagram", "local"}
+
+_KNOWN_ENCODING_KEYS = {"resolution", "crf", "bitrate", "maxrate", "bufsize", "profile", "level", "gop", "fps", "color", "pix_fmt", "passthrough"}
+
+
+def _validate_config_dict(data: dict) -> tuple[list[str], list[str]]:
+    """Validate an imported config dict against known XPSTConfig structure.
+
+    Returns:
+        (errors, warnings) — errors block import, warnings are informational.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    if not isinstance(data, dict):
+        errors.append("Config must be a YAML mapping (dict)")
+        return errors, warnings
+
+    # Check for unknown top-level keys
+    for key in data:
+        if key not in _KNOWN_CONFIG_KEYS:
+            warnings.append(f"Unknown top-level key: '{key}'")
+
+    # Validate accounts
+    accounts = data.get("accounts", {})
+    if accounts and isinstance(accounts, dict):
+        for plat in accounts:
+            if plat not in _KNOWN_ACCOUNT_PLATFORMS:
+                warnings.append(f"Unknown platform in accounts: '{plat}'")
+
+    # Validate encoding sections
+    video = data.get("video", {})
+    if video and isinstance(video, dict):
+        encoding = video.get("encoding", {})
+        if encoding and isinstance(encoding, dict):
+            for plat, enc in encoding.items():
+                if isinstance(enc, dict):
+                    for key in enc:
+                        if key not in _KNOWN_ENCODING_KEYS:
+                            warnings.append(f"Unknown encoding key for {plat}: '{key}'")
+
+    # Validate required top-level types
+    for key in ("rate_limits", "reliability", "monitoring", "schedule"):
+        if key in data and not isinstance(data[key], dict):
+            errors.append(f"'{key}' must be a mapping, got {type(data[key]).__name__}")
+
+    return errors, warnings
+
+
+def _compute_config_diff(old: dict, new: dict) -> dict[str, list[str]]:
+    """Compute added, removed, and changed keys between two config dicts."""
+    old_flat = _flatten_dict(old)
+    new_flat = _flatten_dict(new)
+
+    old_keys = set(old_flat.keys())
+    new_keys = set(new_flat.keys())
+
+    added = sorted(new_keys - old_keys)
+    removed = sorted(old_keys - new_keys)
+    changed = sorted(k for k in old_keys & new_keys if old_flat[k] != new_flat[k])
+
+    return {"added": added, "removed": removed, "changed": changed}
+
+
+def _display_config_diff(changes: dict[str, list[str]], warnings: list[str]) -> None:
+    """Display config import diff to console."""
+    if changes["added"]:
+        console.print("\n[green]Added keys:[/green]")
+        for key in changes["added"]:
+            console.print(f"  [green]+[/green] {key}")
+    if changes["removed"]:
+        console.print("\n[red]Removed keys:[/red]")
+        for key in changes["removed"]:
+            console.print(f"  [red]-[/red] {key}")
+    if changes["changed"]:
+        console.print("\n[yellow]Changed values:[/yellow]")
+        for key in changes["changed"]:
+            console.print(f"  [yellow]~[/yellow] {key}")
+    if warnings:
+        console.print("\n[yellow]Warnings:[/yellow]")
+        for w in warnings:
+            console.print(f"  [yellow]⚠[/yellow] {w}")
+    console.print()
+
+
+# ──────────────────────────────────────────────
+# Analytics Export Command
+# ──────────────────────────────────────────────
+
+@analytics.command("export")
+@click.option("--format", "fmt", default="json", type=click.Choice(["json", "csv"]), help="Export format")
+@click.option("--output", "-o", required=True, type=click.Path(), help="Output file path")
+@click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
+@click.option("--refresh", "-r", is_flag=True, help="Force refresh (ignore cache)")
+@json_option
+@click.pass_context
+def analytics_export(ctx: click.Context, fmt: str, output: str, platforms: str | None, refresh: bool, as_json: bool):
+    """Export analytics data to a file.
+
+    Collects engagement metrics from all platforms and writes to JSON or CSV.
+    """
+    import asyncio
+    import csv as csv_mod
+    from datetime import datetime as _dt
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    from xpst.analytics import AnalyticsCollector
+
+    collector = AnalyticsCollector(config.config_dir)
+    if refresh:
+        collector._cache_ttl = 0
+
+    post_ids = collector._discover_post_ids()
+    if platforms:
+        platform_list = [p.strip() for p in platforms.split(",")]
+        post_ids = {k: v for k, v in post_ids.items() if k in platform_list}
+
+    total_ids = sum(len(v) for v in post_ids.values())
+    if total_ids == 0:
+        if as_json:
+            json_output({"ok": False, "error": "No posts found in state"}, True)
+        else:
+            console.print("[yellow]No posts found in state. Run `xpst run` first.[/yellow]")
+        return
+
+    data = asyncio.run(collector.collect_all(post_ids))
+    totals = collector.get_total_metrics(data)
+    platform_totals = collector.get_platform_totals(data)
+
+    out_path = Path(output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if fmt == "json":
+        export_data = {
+            "platforms": {p: {pid: m for pid, m in posts.items()} for p, posts in data.items()},
+            "totals": totals,
+            "platform_totals": platform_totals,
+            "exported_at": _dt.now().isoformat(),
+        }
+        with open(out_path, "w") as f:
+            _json.dump(export_data, f, indent=2, default=str, ensure_ascii=False)
+    elif fmt == "csv":
+        with open(out_path, "w", newline="") as f:
+            writer = csv_mod.writer(f)
+            writer.writerow(["platform", "post_id", "views", "likes", "comments", "shares", "saves", "timestamp"])
+            for platform, posts in data.items():
+                for post_id, metrics in posts.items():
+                    writer.writerow([
+                        platform,
+                        post_id,
+                        metrics.get("views", 0),
+                        metrics.get("likes", 0),
+                        metrics.get("comments", 0),
+                        metrics.get("shares", 0),
+                        metrics.get("saves", 0),
+                        metrics.get("timestamp", ""),
+                    ])
+
+    if as_json:
+        json_output({"ok": True, "format": fmt, "output": str(out_path), "totals": totals}, True)
+    else:
+        console.print(f"[green]✓[/green] Analytics exported to [bold]{out_path}[/bold] ({fmt})")
+        console.print(f"  Views: {totals['views']:,}  Likes: {totals['likes']:,}  Comments: {totals['comments']:,}  Shares: {totals['shares']:,}")
+
+
+# ──────────────────────────────────────────────
+# Plugins Group
+# ──────────────────────────────────────────────
+
+@main.group()
+@click.pass_context
+def plugins(ctx: click.Context):
+    """Manage xPST plugins"""
+    pass
+
+
+@plugins.command("docs")
+@click.option("--output", "-o", default=None, type=click.Path(), help="Output file (default: stdout)")
+@json_option
+@click.pass_context
+def plugins_docs(ctx: click.Context, output: str | None, as_json: bool):
+    """Generate markdown documentation for installed plugins.
+
+    Introspects all installed plugins and produces a markdown file
+    documenting each plugin's name, description, capabilities, and
+    configuration options.
+    """
+    from xpst.plugins import PluginManager
+
+    pm = PluginManager()
+    pm.discover()
+    plugin_list = pm.list_plugins()
+
+    if not plugin_list:
+        if as_json:
+            json_output({"ok": True, "plugins": 0, "message": "No plugins installed"}, True)
+        else:
+            console.print("[dim]No plugins installed. Place .py files in ~/.xpst/plugins/[/dim]")
+        return
+
+    # Build markdown
+    from datetime import datetime as _dt
+
+    lines: list[str] = []
+    lines.append("# xPST Plugin Documentation\n")
+    lines.append(f"Auto-generated on {_dt.now().strftime('%Y-%m-%d %H:%M')}\n")
+    lines.append(f"**{len(plugin_list)} plugin(s) installed**\n")
+    lines.append("---\n")
+
+    for pinfo in plugin_list:
+        name = pinfo.get("name", "unknown")
+        lines.append(f"## {name}\n")
+        lines.append(f"- **Version:** {pinfo.get('version', 'unknown')}")
+        lines.append(f"- **Description:** {pinfo.get('description', 'No description')}")
+        caps = []
+        if pinfo.get("has_uploader"):
+            caps.append("Uploader")
+        if pinfo.get("has_source"):
+            caps.append("Source")
+        lines.append(f"- **Capabilities:** {', '.join(caps) if caps else 'None'}")
+
+        # Try to get more details from the plugin
+        plugin_data = pm.get(name)
+        if plugin_data:
+            config_opts = plugin_data.get("config_options", [])
+            if config_opts:
+                lines.append(f"- **Config Options:**")
+                for opt in config_opts:
+                    if isinstance(opt, dict):
+                        opt_name = opt.get("name", "?")
+                        opt_desc = opt.get("description", "")
+                        opt_default = opt.get("default", "")
+                        lines.append(f"  - `{opt_name}`: {opt_desc} (default: `{opt_default}`)")
+                    else:
+                        lines.append(f"  - `{opt}`")
+        lines.append("")
+
+    md_content = "\n".join(lines)
+
+    if output:
+        out_path = Path(output)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w") as f:
+            f.write(md_content)
+        if as_json:
+            json_output({"ok": True, "output": str(out_path), "plugins": len(plugin_list)}, True)
+        else:
+            console.print(f"[green]✓[/green] Plugin docs written to [bold]{out_path}[/bold]")
+    else:
+        if as_json:
+            json_output({"ok": True, "content": md_content, "plugins": len(plugin_list)}, True)
+        else:
+            console.print(md_content)
+
+
+@plugins.command("list")
+@json_option
+@click.pass_context
+def plugins_list(ctx: click.Context, as_json: bool):
+    """List installed plugins."""
+    from xpst.plugins import PluginManager
+
+    pm = PluginManager()
+    pm.discover()
+    plugin_list = pm.list_plugins()
+
+    if as_json:
+        json_output({"plugins": plugin_list, "count": len(plugin_list)}, True)
+        return
+
+    if not plugin_list:
+        console.print("[dim]No plugins installed.[/dim]")
+        return
+
+    table = Table(title="Installed Plugins", show_lines=True)
+    table.add_column("Name", style="bold")
+    table.add_column("Version")
+    table.add_column("Description", max_width=50)
+    table.add_column("Uploader")
+    table.add_column("Source")
+
+    for p in plugin_list:
+        table.add_row(
+            p["name"],
+            p.get("version", "?"),
+            p.get("description", ""),
+            "✓" if p.get("has_uploader") else "✗",
+            "✓" if p.get("has_source") else "✗",
+        )
+
+    console.print(table)
+
+
+# ──────────────────────────────────────────────
+# Build Command
+# ──────────────────────────────────────────────
+
+@main.command()
+@click.option("--target", default=None, type=click.Choice(["macos", "windows", "linux"]), help="Target OS (default: current OS)")
+@click.option("--spec-file", default=None, type=click.Path(), help="PyInstaller .spec file path")
+@json_option
+@click.pass_context
+def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json: bool):
+    """Build a standalone executable using PyInstaller.
+
+    Auto-detects the appropriate .spec file for the current OS (or --target).
+    Checks for PyInstaller and offers to install if missing.
+    """
+    import platform as _platform
+    import subprocess
+    import shutil
+
+    # Determine target OS
+    if target:
+        target_os = target
+    else:
+        system = _platform.system()
+        if system == "Darwin":
+            target_os = "macos"
+        elif system == "Windows":
+            target_os = "windows"
+        else:
+            target_os = "linux"
+
+    # Find spec file
+    if spec_file:
+        spec_path = Path(spec_file)
+        if not spec_path.exists():
+            if as_json:
+                json_output({"ok": False, "error": f"Spec file not found: {spec_file}"}, True)
+            else:
+                console.print(f"[red]Spec file not found:[/red] {spec_file}")
+            sys.exit(EXIT_GENERAL)
+    else:
+        # Auto-detect spec file
+        spec_map = {
+            "macos": "build_macos.spec",
+            "windows": "build_windows.spec",
+            "linux": "build_macos.spec",  # Linux uses macos spec as base
+        }
+        spec_name = spec_map.get(target_os)
+        spec_path = Path.cwd() / spec_name
+        if not spec_path.exists():
+            if as_json:
+                json_output({"ok": False, "error": f"Spec file not found: {spec_path}"}, True)
+            else:
+                console.print(f"[red]Spec file not found:[/red] {spec_path}")
+            sys.exit(EXIT_GENERAL)
+
+    # Check for PyInstaller
+    pyinstaller_bin = shutil.which("pyinstaller")
+    if not pyinstaller_bin:
+        # Check if it's in the current venv
+        if as_json:
+            json_output({"ok": False, "error": "PyInstaller not found. Install with: pip install pyinstaller"}, True)
+        else:
+            console.print("[yellow]PyInstaller not found.[/yellow]")
+            if confirm("Install PyInstaller now?"):
+                console.print("[dim]Installing PyInstaller...[/dim]")
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "pyinstaller"],
+                    capture_output=True, text=True,
+                )
+                if result.returncode != 0:
+                    console.print(f"[red]Installation failed:[/red] {result.stderr}")
+                    sys.exit(EXIT_GENERAL)
+                console.print("[green]✓[/green] PyInstaller installed")
+                pyinstaller_bin = shutil.which("pyinstaller")
+            else:
+                sys.exit(EXIT_GENERAL)
+
+    if not as_json:
+        console.print(f"[bold blue]Building xPST for {target_os}...[/bold blue]")
+        console.print(f"  Spec file: {spec_path}")
+        console.print(f"  PyInstaller: {pyinstaller_bin}\n")
+
+    # Run PyInstaller
+    cmd = [pyinstaller_bin, "--clean", "--noconfirm", str(spec_path)]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode == 0:
+        dist_dir = Path.cwd() / "dist"
+        if as_json:
+            json_output({
+                "ok": True,
+                "target": target_os,
+                "spec_file": str(spec_path),
+                "dist_dir": str(dist_dir),
+            }, True)
+        else:
+            console.print(f"[green]✓[/green] Build complete for [bold]{target_os}[/bold]")
+            console.print(f"  Output: {dist_dir}")
+    else:
+        if as_json:
+            json_output({"ok": False, "error": result.stderr[-500:] if result.stderr else "Build failed"}, True)
+        else:
+            console.print(f"[red]Build failed:[/red]")
+            if result.stderr:
+                console.print(result.stderr[-500:])
+        sys.exit(EXIT_GENERAL)
 
 
 def confirm(message: str) -> bool:

@@ -36,9 +36,27 @@ ApplicationWindow {
                 var y = s.value("window/y", -1)
                 var w = s.value("window/width", 1280)
                 var h = s.value("window/height", 800)
+                var savedScreen = s.value("window/screen", "")
                 if (x >= 0 && y >= 0) {
-                    root.x = x
-                    root.y = y
+                    // Check if saved screen still exists
+                    var screens = Qt.application.screens || []
+                    var screenFound = false
+                    for (var i = 0; i < screens.length; i++) {
+                        if (screens[i].name === savedScreen) {
+                            root.x = x
+                            root.y = y
+                            screenFound = true
+                            break
+                        }
+                    }
+                    // If screen not found, place on primary screen
+                    if (!screenFound && screens.length > 0) {
+                        var primary = screens[0]
+                        root.x = Math.min(x, primary.virtualX + primary.width - root.minimumWidth)
+                        root.y = Math.min(y, primary.virtualY + primary.height - root.minimumHeight)
+                        if (root.x < primary.virtualX) root.x = primary.virtualX
+                        if (root.y < primary.virtualY) root.y = primary.virtualY
+                    }
                 }
                 root.width = Math.max(w, root.minimumWidth)
                 root.height = Math.max(h, root.minimumHeight)
@@ -54,6 +72,10 @@ ApplicationWindow {
                 s.setValue("window/y", root.y)
                 s.setValue("window/width", root.width)
                 s.setValue("window/height", root.height)
+                // Save current screen name for multi-monitor restore
+                if (root.screen && root.screen.name) {
+                    s.setValue("window/screen", root.screen.name)
+                }
             }
         } catch(e) {}
     }
@@ -283,6 +305,9 @@ ApplicationWindow {
         case "settings":
             component = Qt.createComponent("pages/SettingsPage.qml")
             break
+        case "schedule":
+            component = Qt.createComponent("pages/SchedulePage.qml")
+            break
         case "about":
             component = Qt.createComponent("pages/AboutPage.qml")
             break
@@ -407,6 +432,14 @@ ApplicationWindow {
                     filePath = filePath.substring(7)
                 // Prompt for caption via a simple dialog
                 dropCaptionDialog.droppedPath = filePath
+                // Resolve file size
+                dropCaptionDialog.fileSize = ""
+                if (typeof controller !== "undefined") {
+                    try {
+                        var info = controller.getFileInfo(filePath)
+                        if (info) dropCaptionDialog.fileSize = info
+                    } catch(e) {}
+                }
                 dropCaptionDialog.open()
             }
         }
@@ -448,29 +481,66 @@ ApplicationWindow {
     Dialog {
         id: dropCaptionDialog
         anchors.centerIn: parent
-        width: 450
+        width: 520
         modal: true
         title: "Post Video"
         closePolicy: Popup.CloseOnEscape
 
         property string droppedPath: ""
+        property string fileSize: ""
 
         contentItem: ColumnLayout {
             spacing: 16
 
-            Text {
-                text: "Drop Caption Dialog"
-                font.pixelSize: 0
-                visible: false
-                Accessible.ignored: true
+            // Video thumbnail preview
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 140
+                radius: theme.radiusMd
+                color: "#000000"
+                clip: true
+
+                Image {
+                    id: dropThumbnail
+                    anchors.fill: parent
+                    fillMode: Image.PreserveAspectCrop
+                    visible: status === Image.Ready
+                    source: {
+                        if (typeof controller !== "undefined" && dropCaptionDialog.droppedPath) {
+                            return controller.getThumbnail(dropCaptionDialog.droppedPath)
+                        }
+                        return ""
+                    }
+                    asynchronous: true
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "🎬"
+                    font.pixelSize: 36
+                    color: theme.textMuted
+                    visible: dropThumbnail.status !== Image.Ready
+                }
             }
 
-            Text {
-                text: "🎬 " + (dropCaptionDialog.droppedPath ? dropCaptionDialog.droppedPath.split("/").pop() : "")
-                font.pixelSize: 14
-                font.bold: true
-                color: theme.textPrimary
+            // Filename and file size
+            ColumnLayout {
+                spacing: 4
                 Layout.fillWidth: true
+                Text {
+                    text: "🎬 " + (dropCaptionDialog.droppedPath ? dropCaptionDialog.droppedPath.split("/").pop() : "")
+                    font.pixelSize: 14
+                    font.bold: true
+                    color: theme.textPrimary
+                    Layout.fillWidth: true
+                    elide: Text.ElideMiddle
+                }
+                Text {
+                    text: dropCaptionDialog.fileSize.length > 0 ? dropCaptionDialog.fileSize : ""
+                    font.pixelSize: 11
+                    color: theme.textMuted
+                    visible: dropCaptionDialog.fileSize.length > 0
+                }
             }
 
             Rectangle {

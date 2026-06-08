@@ -236,9 +236,13 @@ def main() -> int:
     splash = _create_splash()
     splash.show()
     app.processEvents()  # ensure splash is painted before heavy init
+    splash.showMessage("Loading config...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
+    app.processEvents()
 
     # Create QML engine
     engine = QQmlApplicationEngine()
+    splash.showMessage("Initializing state...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
+    app.processEvents()
 
     # Add QML import path so the engine finds our module
     qml_dir = Path(__file__).parent / "qml"
@@ -248,6 +252,8 @@ def main() -> int:
     controller = AppController()
     post_model = PostListModel()
     post_model.load_from_state()
+    splash.showMessage("Loading plugins...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
+    app.processEvents()
 
     # Connect controller refresh to model reload
     controller.dataChanged.connect(lambda: post_model.load_from_state())
@@ -257,10 +263,14 @@ def main() -> int:
     theme_provider = ThemeProvider()
     engine.rootContext().setContextProperty("theme", theme_provider)
     engine.rootContext().setContextProperty("postModel", post_model)
+    splash.showMessage("Starting engine...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
+    app.processEvents()
 
     # Load main.qml
     qml_path = _find_qml_path()
     logger.info("Loading QML from: %s", qml_path)
+    splash.showMessage("Building UI...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
+    app.processEvents()
 
     if not qml_path.exists():
         splash.close()
