@@ -32,6 +32,7 @@ jobs:
           mypy src/xpst
           pip-audit
           python -m build
+          QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py
           python scripts/release_artifacts.py --dist dist
 
       - name: Upload artifacts

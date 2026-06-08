@@ -1,4 +1,4 @@
-import QtQuick 2.15
+﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
@@ -57,7 +57,7 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacingXl
+            anchors.margins: theme.pageMargin
             spacing: theme.spacingXl
 
             // Header
@@ -65,8 +65,8 @@ Page {
                 spacing: theme.spacingXs
                 Text {
                     text: "Dashboard"
-                    font.pixelSize: 20
-                    font.bold: true
+                    font.pixelSize: 28
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "Dashboard page title"
                     Accessible.role: Accessible.Heading
@@ -85,10 +85,10 @@ Page {
 
                 Repeater {
                     model: [
-                        { label: "Total Posts",     value: typeof controller !== "undefined" ? controller.totalPosts : "0",   icon: "📝" },
-                        { label: "Total Reach",     value: typeof controller !== "undefined" ? controller.totalReach : "0",   icon: "👥" },
-                        { label: "Best Platform",   value: typeof controller !== "undefined" ? controller.bestPlatform : "—", icon: "🏆" },
-                        { label: "Posts This Week",  value: typeof controller !== "undefined" ? controller.postsThisWeek : "0", icon: "📅" }
+                        { label: "Total Posts",     value: typeof controller !== "undefined" ? controller.totalPosts : "0",   icon: "P" },
+                        { label: "Total Reach",     value: typeof controller !== "undefined" ? controller.totalReach : "0",   icon: "R" },
+                        { label: "Best Platform",   value: typeof controller !== "undefined" ? controller.bestPlatform : "-", icon: "B" },
+                        { label: "Posts This Week",  value: typeof controller !== "undefined" ? controller.postsThisWeek : "0", icon: "W" }
                     ]
 
                     Rectangle {
@@ -99,12 +99,17 @@ Page {
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: theme.spacingXl
+                            anchors.margins: theme.pageMargin
                             spacing: theme.spacingSm
 
                             RowLayout {
                                 spacing: theme.spacingSm
-                                Text { text: modelData.icon; font.pixelSize: 14 }
+                                Text {
+                                    text: modelData.icon
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                    color: theme.accent
+                                }
                                 Text {
                                     text: modelData.label
                                     font.pixelSize: 12
@@ -114,7 +119,7 @@ Page {
                             Text {
                                 text: String(modelData.value)
                                 font.pixelSize: 20
-                                font.bold: true
+                                font.weight: Font.DemiBold
                                 color: theme.textPrimary
                             }
                         }
@@ -122,13 +127,13 @@ Page {
                 }
             }
 
-            // Platform Health — from real controller data
+            // Platform Health - from real controller data
             ColumnLayout {
                 spacing: theme.spacingMd
                 Text {
                     text: "Platform Health"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "Platform Health section"
                     Accessible.role: Accessible.Heading
@@ -162,7 +167,7 @@ Page {
 
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.margins: theme.spacingXl
+                                anchors.margins: theme.pageMargin
                                 spacing: theme.spacingMd
 
                                 Rectangle {
@@ -180,7 +185,7 @@ Page {
                                     Text {
                                         text: modelData.label || modelData.name || ""
                                         font.pixelSize: 13
-                                        font.bold: true
+                                        font.weight: Font.DemiBold
                                         color: dashboardPage.platformColor(modelData.name)
                                     }
                                     Text {
@@ -202,13 +207,13 @@ Page {
                 }
             }
 
-            // Recent Posts — from real controller data
+            // Recent Posts - from real controller data
             ColumnLayout {
                 spacing: theme.spacingMd
                 Text {
                     text: "Recent Posts"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "Recent Posts section"
                     Accessible.role: Accessible.Heading
@@ -261,13 +266,13 @@ Page {
 
                             ColumnLayout {
                                 anchors.fill: parent
-                                anchors.margins: theme.spacingXl
+                                anchors.margins: theme.pageMargin
                                 spacing: theme.spacingSm
 
                                 Text {
                                     text: modelData.title
                                     font.pixelSize: 14
-                                    font.bold: true
+                                    font.weight: Font.DemiBold
                                     color: theme.textPrimary
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
@@ -285,7 +290,7 @@ Page {
                                             anchors.centerIn: parent
                                             text: modelData.platform
                                             font.pixelSize: 11
-                                            font.bold: true
+                                            font.weight: Font.DemiBold
                                             color: parent.color
                                             opacity: 5.0
                                         }
@@ -312,7 +317,7 @@ Page {
                         anchors.centerIn: parent
                         spacing: theme.spacingSm
                         Text {
-                            text: "📭 No recent posts"
+                            text: "No recent posts"
                             font.pixelSize: 13
                             color: theme.textMuted
                             horizontalAlignment: Text.AlignHCenter

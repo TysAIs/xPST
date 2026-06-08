@@ -1,4 +1,4 @@
-import QtQuick 2.15
+﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
@@ -86,9 +86,9 @@ Page {
             radius: theme.radiusXl
             Text {
                 anchors.centerIn: parent
-                text: "📅 " + schedulePage.monthName + " " + schedulePage.selectedDay
+                text: "Date " + schedulePage.monthName + " " + schedulePage.selectedDay
                 font.pixelSize: 14
-                font.bold: true
+                font.weight: Font.DemiBold
                 color: theme.textPrimary
             }
         }
@@ -158,7 +158,7 @@ Page {
                     anchors.centerIn: parent
                     text: "+ Schedule New"
                     font.pixelSize: 12
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: "#ffffff"
                 }
                 MouseArea {
@@ -170,7 +170,7 @@ Page {
                         if (typeof navigateTo === "function") {
                             // Try calling parent navigateTo
                         }
-                        showToast("Schedule New — coming soon", false)
+                        showToast("Schedule New - coming soon", false)
                     }
                 }
             }
@@ -210,7 +210,7 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacingXl
+            anchors.margins: theme.pageMargin
             spacing: theme.spacingXl
 
             // Header
@@ -218,8 +218,8 @@ Page {
                 spacing: theme.spacingXs
                 Text {
                     text: "Schedule"
-                    font.pixelSize: 20
-                    font.bold: true
+                    font.pixelSize: 28
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "Schedule page title"
                     Accessible.role: Accessible.Heading
@@ -241,7 +241,7 @@ Page {
                 ColumnLayout {
                     id: calendarCol
                     anchors.fill: parent
-                    anchors.margins: theme.spacingXl
+                    anchors.margins: theme.pageMargin
                     spacing: theme.spacingMd
 
                     // Month navigation
@@ -255,7 +255,7 @@ Page {
                             color: theme.surfaceAlt
                             Text {
                                 anchors.centerIn: parent
-                                text: "←"
+                                text: "<"
                                 font.pixelSize: 14
                                 color: theme.textPrimary
                             }
@@ -269,7 +269,7 @@ Page {
                         Text {
                             text: schedulePage.monthName
                             font.pixelSize: 16
-                            font.bold: true
+                            font.weight: Font.DemiBold
                             color: theme.textPrimary
                             Layout.fillWidth: true
                             horizontalAlignment: Text.AlignHCenter
@@ -281,7 +281,7 @@ Page {
                             color: theme.surfaceAlt
                             Text {
                                 anchors.centerIn: parent
-                                text: "→"
+                                text: ">"
                                 font.pixelSize: 14
                                 color: theme.textPrimary
                             }
@@ -302,7 +302,7 @@ Page {
                             Text {
                                 text: modelData
                                 font.pixelSize: 11
-                                font.bold: true
+                                font.weight: Font.DemiBold
                                 color: theme.textMuted
                                 horizontalAlignment: Text.AlignHCenter
                                 Layout.fillWidth: true
@@ -385,7 +385,7 @@ Page {
                 Text {
                     text: "Scheduled Posts"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                 }
 
@@ -433,13 +433,13 @@ Page {
                                 Text {
                                     text: modelData.title || modelData.postId || "Untitled"
                                     font.pixelSize: 13
-                                    font.bold: true
+                                    font.weight: Font.DemiBold
                                     color: theme.textPrimary
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
                                 }
                                 Text {
-                                    text: (modelData.platform || "") + " • " + (modelData.status || "")
+                                    text: (modelData.platform || "") + " / " + (modelData.status || "")
                                     font.pixelSize: 11
                                     color: theme.textMuted
                                 }
@@ -477,7 +477,7 @@ Page {
                         anchors.centerIn: parent
                         spacing: theme.spacingSm
                         Text {
-                            text: "📅"
+                            text: "Calendar"
                             font.pixelSize: 24
                             horizontalAlignment: Text.AlignHCenter
                             Layout.alignment: Qt.AlignHCenter

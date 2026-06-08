@@ -1198,39 +1198,39 @@ class ThemeProvider(QObject):
 
     # ── Colour maps ──────────────────────────────────────────────────
     _DARK = {
-        "canvas": "#0a0a0f",
-        "surface": "#12121a",
-        "surfaceAlt": "#1a1a25",
-        "surfaceCard": "#1e1e2a",
-        "textPrimary": "#f0f0f5",
-        "textSecondary": "#a0a0b0",
-        "textMuted": "#6b6b80",
-        "accent": "#6366f1",
-        "accentHover": "#818cf8",
-        "accentMuted": "#312e81",
-        "success": "#22c55e",
-        "warning": "#f59e0b",
-        "error": "#ef4444",
+        "canvas": "#1c1c1e",
+        "surface": "#242426",
+        "surfaceAlt": "#2c2c2e",
+        "surfaceCard": "#2c2c2e",
+        "textPrimary": "#f5f5f7",
+        "textSecondary": "#c7c7cc",
+        "textMuted": "#8e8e93",
+        "accent": "#007aff",
+        "accentHover": "#0a84ff",
+        "accentMuted": "#0f355f",
+        "success": "#30d158",
+        "warning": "#ffd60a",
+        "error": "#ff453a",
     }
     _LIGHT = {
-        "canvas": "#f5f5f8",
-        "surface": "#ffffff",
-        "surfaceAlt": "#eeeef2",
+        "canvas": "#f5f5f7",
+        "surface": "#fbfbfd",
+        "surfaceAlt": "#f0f0f2",
         "surfaceCard": "#ffffff",
-        "textPrimary": "#1a1a25",
-        "textSecondary": "#555565",
-        "textMuted": "#888899",
-        "accent": "#6366f1",
-        "accentHover": "#818cf8",
-        "accentMuted": "#c7d2fe",
-        "success": "#16a34a",
-        "warning": "#d97706",
-        "error": "#dc2626",
+        "textPrimary": "#1d1d1f",
+        "textSecondary": "#5f6368",
+        "textMuted": "#8a8f98",
+        "accent": "#007aff",
+        "accentHover": "#0a84ff",
+        "accentMuted": "#dbeafe",
+        "success": "#248a3d",
+        "warning": "#b26a00",
+        "error": "#d70015",
     }
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._dark_mode = True
+        self._dark_mode = False
 
     def _col(self, key: str) -> str:
         return self._DARK[key] if self._dark_mode else self._LIGHT[key]
@@ -1280,7 +1280,7 @@ class ThemeProvider(QObject):
 
     # Platform colors (same in both modes)
     @Property(str, constant=True)
-    def youtube(self): return "#ff0000"
+    def youtube(self): return "#ff0033"
 
     @Property(str, constant=True)
     def instagram(self): return "#e1306c"
@@ -1289,7 +1289,7 @@ class ThemeProvider(QObject):
     def xtwitter(self): return "#1d9bf0"
 
     @Property(str, constant=True)
-    def tiktok(self): return "#00f2ea"
+    def tiktok(self): return "#00b8b8"
 
     # Spacing (constant in both modes)
     @Property(int, constant=True)
@@ -1305,15 +1305,24 @@ class ThemeProvider(QObject):
     @Property(int, constant=True)
     def spacingXxl(self): return 32
 
+    @Property(int, constant=True)
+    def pageMargin(self): return 28
+
     # Radius (constant in both modes)
     @Property(int, constant=True)
-    def radiusSm(self): return 6
+    def radiusSm(self): return 4
     @Property(int, constant=True)
-    def radiusMd(self): return 8
+    def radiusMd(self): return 6
     @Property(int, constant=True)
-    def radiusLg(self): return 12
+    def radiusLg(self): return 8
     @Property(int, constant=True)
-    def radiusXl(self): return 16
+    def radiusXl(self): return 8
+
+    @Property(str, constant=True)
+    def fontFamily(self): return "Segoe UI"
+
+    @Property(str, constant=True)
+    def monoFontFamily(self): return "Cascadia Mono"
 
     # Dark mode toggle
     @Property(bool, notify=darkModeChanged)

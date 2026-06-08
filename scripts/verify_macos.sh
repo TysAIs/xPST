@@ -23,20 +23,7 @@ fi
 "$VENV_DIR/bin/xpst" version --json
 "$VENV_DIR/bin/xpst" health --json
 
-QT_QPA_PLATFORM=offscreen "$VENV_DIR/bin/python" - <<'PY'
-from pathlib import Path
-from PySide6.QtCore import QUrl
-from PySide6.QtWidgets import QApplication
-from PySide6.QtQml import QQmlApplicationEngine
-
-app = QApplication([])
-engine = QQmlApplicationEngine()
-qml = Path("src/xpst/desktop_app/qml/main.qml").resolve()
-engine.load(QUrl.fromLocalFile(str(qml)))
-roots = engine.rootObjects()
-print(f"root_objects {len(roots)}")
-raise SystemExit(0 if roots else 1)
-PY
+QT_QPA_PLATFORM=offscreen "$VENV_DIR/bin/python" scripts/verify_qml_pages.py
 
 "$VENV_DIR/bin/pyinstaller" --clean --noconfirm build_macos.spec
 "$VENV_DIR/bin/python" scripts/release_artifacts.py --dist dist
@@ -47,4 +34,3 @@ if [[ -d "dist/xPST.app" ]]; then
 fi
 
 echo "macOS validation complete"
-

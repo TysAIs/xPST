@@ -1,4 +1,4 @@
-import QtQuick 2.15
+﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
@@ -35,6 +35,15 @@ Page {
         return filtered
     }
 
+    function platformColor(platformName) {
+        var p = (platformName || "").toLowerCase()
+        if (p === "youtube") return theme.youtube
+        if (p === "instagram") return theme.instagram
+        if (p === "x") return theme.xtwitter
+        if (p === "tiktok") return theme.tiktok
+        return theme.accent
+    }
+
     // Bar chart data: per-platform metrics for Canvas rendering
     property var chartPlatforms: {
         var result = []
@@ -46,14 +55,7 @@ Page {
                 likes: data[i].total_likes || 0,
                 comments: data[i].total_comments || 0,
                 shares: data[i].total_shares || 0,
-                color: {
-                    var p = (data[i].platform || "").toLowerCase()
-                    if (p === "youtube") return theme.youtube
-                    if (p === "instagram") return theme.instagram
-                    if (p === "x") return theme.xtwitter
-                    if (p === "tiktok") return theme.tiktok
-                    return theme.accent
-                }
+                color: analyticsPage.platformColor(data[i].platform)
             })
         }
         return result
@@ -80,7 +82,7 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacingXl
+            anchors.margins: theme.pageMargin
             spacing: theme.spacingXl
 
             // Header
@@ -88,8 +90,8 @@ Page {
                 spacing: theme.spacingXs
                 Text {
                     text: "Analytics"
-                    font.pixelSize: 20
-                    font.bold: true
+                    font.pixelSize: 28
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "Analytics page title"
                     Accessible.role: Accessible.Heading
@@ -164,7 +166,7 @@ Page {
                     Text {
                         id: compareLabel
                         anchors.centerIn: parent
-                        text: "📊 Compare"
+                        text: "Compare"
                         font.pixelSize: 12
                         font.weight: analyticsPage.compareMode ? Font.DemiBold : Font.Normal
                         color: analyticsPage.compareMode ? "#ffffff" : theme.textSecondary
@@ -222,15 +224,17 @@ Page {
                     anchors.centerIn: parent
                     spacing: theme.spacingMd
                     Text {
-                        text: "📊"
-                        font.pixelSize: 48
+                        text: "A"
+                        font.pixelSize: 30
+                        font.weight: Font.DemiBold
+                        color: theme.accent
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
                     }
                     Text {
                         text: "No analytics data yet"
                         font.pixelSize: 16
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: theme.textSecondary
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
@@ -261,7 +265,7 @@ Page {
                             rawValue: analyticsPage.analyticsJson.summary
                                    ? (analyticsPage.analyticsJson.summary.total_views || 0)
                                    : 0,
-                            icon: "👁",
+                            icon: "V",
                             color: "#6366f1"
                         },
                         {
@@ -272,7 +276,7 @@ Page {
                             rawValue: analyticsPage.analyticsJson.summary
                                    ? (analyticsPage.analyticsJson.summary.total_likes || 0)
                                    : 0,
-                            icon: "❤️",
+                            icon: "L",
                             color: "#ef4444"
                         },
                         {
@@ -283,7 +287,7 @@ Page {
                             rawValue: analyticsPage.analyticsJson.summary
                                    ? (analyticsPage.analyticsJson.summary.total_comments || 0)
                                    : 0,
-                            icon: "💬",
+                            icon: "C",
                             color: "#f59e0b"
                         },
                         {
@@ -294,7 +298,7 @@ Page {
                             rawValue: analyticsPage.analyticsJson.summary
                                    ? (analyticsPage.analyticsJson.summary.total_shares || 0)
                                    : 0,
-                            icon: "🔄",
+                            icon: "S",
                             color: "#22c55e"
                         }
                     ]
@@ -310,12 +314,17 @@ Page {
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: theme.spacingXl
+                            anchors.margins: theme.pageMargin
                             spacing: theme.spacingSm
 
                             RowLayout {
                                 spacing: theme.spacingSm
-                                Text { text: modelData.icon; font.pixelSize: 14 }
+                                Text {
+                                    text: modelData.icon
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                    color: modelData.color
+                                }
                                 Text {
                                     text: modelData.label
                                     font.pixelSize: 12
@@ -325,7 +334,7 @@ Page {
                             Text {
                                 text: modelData.value
                                 font.pixelSize: 20
-                                font.bold: true
+                                font.weight: Font.DemiBold
                                 color: theme.textPrimary
                             }
                             // Comparison delta (#31)
@@ -337,7 +346,7 @@ Page {
                                 visible: analyticsPage.compareMode && modelData.rawValue > 0
                                 text: deltaText + " vs last week"
                                 font.pixelSize: 10
-                                font.bold: true
+                                font.weight: Font.DemiBold
                                 color: deltaPercent >= 0 ? theme.success : theme.error
                             }
                             Rectangle {
@@ -360,7 +369,7 @@ Page {
                 Text {
                     text: "Engagement by Platform"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                 }
 
@@ -406,7 +415,7 @@ Page {
                     Canvas {
                         id: barChart
                         anchors.fill: parent
-                        anchors.margins: theme.spacingXl
+                        anchors.margins: theme.pageMargin
 
                         property var platforms: analyticsPage.chartPlatforms
                         property color bgColor: theme.surfaceCard
@@ -534,7 +543,7 @@ Page {
                 Text {
                     text: "Platform Breakdown"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                 }
 
@@ -549,7 +558,7 @@ Page {
 
                         RowLayout {
                             anchors.fill: parent
-                            anchors.margins: theme.spacingXl
+                            anchors.margins: theme.pageMargin
                             spacing: theme.spacingXl
 
                             Rectangle {
@@ -567,13 +576,15 @@ Page {
                                     anchors.centerIn: parent
                                     text: {
                                         var p = (modelData.platform || "").toLowerCase()
-                                        if (p === "youtube") return "▶️"
-                                        if (p === "instagram") return "📷"
-                                        if (p === "x") return "𝕏"
-                                        if (p === "tiktok") return "🎵"
-                                        return "📱"
+                                        if (p === "youtube") return "YT"
+                                        if (p === "instagram") return "IG"
+                                        if (p === "x") return "X"
+                                        if (p === "tiktok") return "TT"
+                                        return "P"
                                     }
-                                    font.pixelSize: 16
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                    color: theme.textSecondary
                                 }
                             }
 
@@ -582,7 +593,7 @@ Page {
                                 Text {
                                     text: (modelData.platform || "Unknown").charAt(0).toUpperCase() + (modelData.platform || "Unknown").slice(1)
                                     font.pixelSize: 14
-                                    font.bold: true
+                                    font.weight: Font.DemiBold
                                     color: theme.textPrimary
                                 }
                                 Text {
@@ -625,7 +636,7 @@ Page {
                 Text {
                     text: "Top Posts"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                 }
 
@@ -644,8 +655,10 @@ Page {
                             spacing: theme.spacingMd
 
                             Text {
-                                text: "🏆"
+                                text: "#"
                                 font.pixelSize: 16
+                                font.weight: Font.DemiBold
+                                color: theme.accent
                             }
 
                             ColumnLayout {
@@ -654,13 +667,13 @@ Page {
                                 Text {
                                     text: modelData.title || modelData.video_id || "Untitled"
                                     font.pixelSize: 13
-                                    font.bold: true
+                                    font.weight: Font.DemiBold
                                     color: theme.textPrimary
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
                                 }
                                 Text {
-                                    text: (modelData.platform || "") + " • " + (modelData.views || 0).toLocaleString() + " views"
+                                    text: (modelData.platform || "") + " / " + (modelData.views || 0).toLocaleString() + " views"
                                     font.pixelSize: 11
                                     color: theme.textMuted
                                 }
