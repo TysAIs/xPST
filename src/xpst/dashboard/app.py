@@ -465,7 +465,7 @@ def _sidebar(current: str = "/"):
 
         # Footer
         with ui.column().style("padding:0 8px;"):
-            ui.label("XPST v1.0").style(f"font-size:0.7rem; color:{TEXT_MUTED};")
+            ui.label("XPST v0.1.0").style(f"font-size:0.7rem; color:{TEXT_MUTED};")
             ui.label("Powered by NiceGUI").style(f"font-size:0.65rem; color:{TEXT_MUTED};")
 
 

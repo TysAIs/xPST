@@ -15,7 +15,7 @@ Upload specs:
 """
 
 import contextlib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from xpst.config import XPSTConfig
@@ -26,6 +26,8 @@ logger = get_logger(__name__)
 
 
 class InstagramUploader(PlatformUploader):
+    """Instagram Reels uploader with session persistence and quality encoding."""
+
     async def get_media_insights(self, media_ids: list[str]) -> list[dict]:
         """Get real Instagram media insights via instagrapi.
 
@@ -68,7 +70,7 @@ class InstagramUploader(PlatformUploader):
                     "comments": getattr(info, "comment_count", 0) or 0,
                     "shares": metric_map.get("shares", 0),
                     "saves": metric_map.get("saved", 0),
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
             except Exception as e:
                 logger.warning(f"Instagram insights failed for {media_id}: {e}")

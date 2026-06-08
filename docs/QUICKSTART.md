@@ -16,7 +16,7 @@ Get XPST up and running in 5 minutes.
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/XPST.git
+git clone https://github.com/xPSTOwner/XPST.git
 cd XPST
 
 # Create virtual environment (recommended)
@@ -30,7 +30,7 @@ pip install -e .
 ### Option 2: uv (Fastest)
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/XPST.git
+git clone https://github.com/xPSTOwner/XPST.git
 cd XPST
 
 # Install with uv
@@ -40,7 +40,7 @@ uv pip install -e .
 ### Option 3: Docker
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/XPST.git
+git clone https://github.com/xPSTOwner/XPST.git
 cd XPST
 
 # Build and run
@@ -88,7 +88,7 @@ python3 -c "
 import twikit, asyncio
 async def login():
     c = twikit.Client('en-US')
-    await c.login('YOUR_USERNAME', 'YOUR_PASSWORD')
+    await c.login(os.environ['XPST_USER'], os.environ['XPST_PASS'])
     c.save_cookies('cookies.json')
 asyncio.run(login())
 "
@@ -305,7 +305,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=YOUR_USERNAME
+User=xPSTOwner
 WorkingDirectory=/path/to/XPST
 ExecStart=/path/to/.venv/bin/xpst watch
 Restart=always
@@ -321,9 +321,9 @@ sudo systemctl start xpst
 
 ## Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/YOUR_USERNAME/XPST/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/YOUR_USERNAME/XPST/discussions)
-- **Wiki**: [Documentation Wiki](https://github.com/YOUR_USERNAME/XPST/wiki)
+- **Issues**: [GitHub Issues](https://github.com/xPSTOwner/XPST/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/xPSTOwner/XPST/discussions)
+- **Wiki**: [Documentation Wiki](https://github.com/xPSTOwner/XPST/wiki)
 
 ## Next Steps
 

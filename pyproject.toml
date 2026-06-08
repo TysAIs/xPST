@@ -73,11 +73,11 @@ dev = [
 xpst = "xpst.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USERNAME/XPST"
-Documentation = "https://github.com/YOUR_USERNAME/XPST/wiki"
-Repository = "https://github.com/YOUR_USERNAME/XPST"
-Issues = "https://github.com/YOUR_USERNAME/XPST/issues"
-Changelog = "https://github.com/YOUR_USERNAME/XPST/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/xPSTOwner/XPST"
+Documentation = "https://github.com/xPSTOwner/XPST/wiki"
+Repository = "https://github.com/xPSTOwner/XPST"
+Issues = "https://github.com/xPSTOwner/XPST/issues"
+Changelog = "https://github.com/xPSTOwner/XPST/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/xpst"]

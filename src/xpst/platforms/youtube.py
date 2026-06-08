@@ -14,7 +14,7 @@ Upload specs:
 - Category: 28 (Science & Technology) - configurable
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from xpst.config import XPSTConfig
@@ -30,6 +30,8 @@ logger = get_logger(__name__)
 
 
 class YouTubeUploader(PlatformUploader):
+    """YouTube Shorts uploader with OAuth2 authentication and quality encoding."""
+
     async def get_video_analytics(self, video_ids: list[str]) -> list[dict]:
         """Get real YouTube video statistics via Data API v3.
 
@@ -64,7 +66,7 @@ class YouTubeUploader(PlatformUploader):
                         "likes": int(stats.get("likeCount", 0)),
                         "comments": int(stats.get("commentCount", 0)),
                         "shares": 0,  # YouTube doesn't expose shares via Data API
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
         except Exception as e:
             logger.error(f"YouTube analytics fetch failed: {e}")

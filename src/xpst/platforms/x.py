@@ -15,7 +15,8 @@ Upload specs:
 - Recommended: 1080p @ 10 Mbps, High@L4.0
 """
 
-from datetime import datetime
+import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 
 from xpst.config import XPSTConfig
@@ -26,6 +27,8 @@ logger = get_logger(__name__)
 
 
 class XUploader(PlatformUploader):
+    """X/Twitter uploader with cookie-based authentication via twikit."""
+
     async def get_tweet_metrics(self, tweet_ids: list[str]) -> list[dict]:
         """Get real X/Twitter tweet metrics via twikit.
 
@@ -51,7 +54,7 @@ class XUploader(PlatformUploader):
                     "likes": getattr(tweet, "favorite_count", 0) or 0,
                     "comments": getattr(tweet, "reply_count", 0) or 0,
                     "shares": getattr(tweet, "retweet_count", 0) or 0,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
             except Exception as e:
                 logger.warning(f"X metrics failed for tweet {tweet_id}: {e}")
@@ -260,11 +263,11 @@ class XUploader(PlatformUploader):
                 error=f"Health check failed: {str(e)[:200]}",
             )
 
-    async def delete(self, post_id: str) -> bool:
+    def delete(self, post_id: str) -> bool:
         """Delete a tweet from X"""
         try:
             client = self._get_client()
-            await client.delete_tweet(post_id)
+            asyncio.get_event_loop().run_until_complete(client.delete_tweet(post_id))
             logger.info(f"Deleted X tweet: {post_id}")
             return True
         except Exception as e:

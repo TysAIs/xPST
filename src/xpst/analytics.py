@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +46,7 @@ class PlatformMetrics:
         self.comments = comments
         self.shares = shares
         self.saves = saves
-        self.timestamp = timestamp or datetime.utcnow().isoformat()
+        self.timestamp = timestamp or datetime.now(timezone.utc).isoformat()
         self.extra = extra
 
     def to_dict(self) -> dict[str, Any]:
@@ -210,7 +210,7 @@ class AnalyticsCollector:
                         "likes": int(stats.get("likeCount", 0)),
                         "comments": int(stats.get("commentCount", 0)),
                         "shares": 0,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
             return results
 
@@ -264,7 +264,7 @@ class AnalyticsCollector:
                         "comments": getattr(info, "comment_count", 0) or 0,
                         "shares": metric_map.get("shares", 0),
                         "saves": metric_map.get("saved", 0),
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
                 except Exception as e:
                     logger.warning(f"Instagram insights failed for {media_id}: {e}")
@@ -299,7 +299,7 @@ class AnalyticsCollector:
                         "likes": getattr(tweet, "favorite_count", 0) or 0,
                         "comments": getattr(tweet, "reply_count", 0) or 0,
                         "shares": getattr(tweet, "retweet_count", 0) or 0,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
                 except Exception as e:
                     logger.warning(f"X metrics failed for {tweet_id}: {e}")
@@ -335,7 +335,7 @@ class AnalyticsCollector:
                         "likes": info.get("like_count", 0) or 0,
                         "comments": info.get("comment_count", 0) or 0,
                         "shares": info.get("repost_count", 0) or 0,
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
                 except Exception as e:
                     logger.debug(f"TikTok metrics failed for {video_id}: {e}")
