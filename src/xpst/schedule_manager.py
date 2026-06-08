@@ -27,9 +27,26 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import calendar
+
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _clamp_day(day: int, year: int, month: int) -> int:
+    """Clamp a day-of-month to the maximum valid day for the given month/year.
+
+    Args:
+        day: Desired day (e.g. 31).
+        year: Full year (e.g. 2026).
+        month: Month number 1-12.
+
+    Returns:
+        The clamped day that is valid for the given month/year.
+    """
+    max_day = calendar.monthrange(year, month)[1]
+    return min(day, max_day)
 
 
 class ScheduleManager:
@@ -200,8 +217,18 @@ class ScheduleManager:
         elif repeat_rule == "weekly":
             next_time = current_time + timedelta(weeks=1)
         elif repeat_rule == "monthly":
-            # Approximate month as 30 days
-            next_time = current_time + timedelta(days=30)
+            # Advance by calendar month with day clamping
+            next_month = current_time.month + 1
+            next_year = current_time.year
+            if next_month > 12:
+                next_month = 1
+                next_year += 1
+            clamped_day = _clamp_day(current_time.day, next_year, next_month)
+            try:
+                next_time = current_time.replace(year=next_year, month=next_month, day=clamped_day)
+            except ValueError:
+                # Fallback: should not happen with clamping, but be safe
+                next_time = current_time + timedelta(days=30)
         else:
             return
 

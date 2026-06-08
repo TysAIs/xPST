@@ -966,8 +966,9 @@ def dashboard(ctx: click.Context, port: int):
 
 @main.command()
 @click.option("--port", "-p", default=None, type=int, help="Dashboard HTTP port (default: auto-select free port)")
+@click.option("--no-splash", is_flag=True, help="Skip the splash screen on startup")
 @click.pass_context
-def app(ctx: click.Context, port: int | None):
+def app(ctx: click.Context, port: int | None, no_splash: bool):
     """Launch xPST as a native desktop app (PySide6)"""
     config_path = ctx.obj.get("config_path")
     config_dir = "~/.xpst"
@@ -984,7 +985,7 @@ def app(ctx: click.Context, port: int | None):
     try:
         from xpst.desktop_app.main import main as pyside_main
         console.print("[bold blue]Launching xPST desktop app…[/bold blue]")
-        sys.exit(pyside_main())
+        sys.exit(pyside_main(no_splash=no_splash))
     except ImportError:
         console.print("[yellow]PySide6 not installed — trying pywebview fallback.[/yellow]")
         console.print("[dim]Install with: pip install PySide6[/dim]\n")
@@ -1508,6 +1509,89 @@ def _print_validation_results(checks: list[tuple[str, bool, str]]) -> None:
         console.print(f"\n[green]All {total} checks passed ✓[/green]")
     else:
         console.print(f"\n[red]{total - passed} of {total} checks failed ✗[/red]")
+
+
+@config.command("fix")
+@click.option("--file", "config_file", default=None, help="Config file path")
+@click.option("--yes", "-y", is_flag=True, help="Apply fixes without confirmation")
+@json_option
+@click.pass_context
+def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: bool):
+    """Detect and auto-fix common configuration issues.
+
+    Fixes: missing credentials directory, stale .crosspstr paths,
+    invalid port numbers, and missing required fields.
+    """
+    import os
+
+    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    fixes: list[str] = []
+
+    # Load current config
+    try:
+        cfg = load_config(config_file)
+    except Exception as e:
+        if as_json:
+            json_output({"ok": False, "error": str(e)}, True)
+        else:
+            console.print(f"[red]Cannot load config:[/red] {e}")
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    # Fix 1: Ensure credentials directory exists
+    cred_dir = Path("~/.xpst/credentials").expanduser()
+    if not cred_dir.exists():
+        fixes.append(f"Create missing credentials directory: {cred_dir}")
+        if yes or as_json:
+            cred_dir.mkdir(parents=True, exist_ok=True)
+        elif not yes:
+            console.print(f"[yellow]Missing credentials directory:[/yellow] {cred_dir}")
+            if not confirm("Create it?"):
+                fixes[-1] = fixes[-1] + " (skipped)"
+            else:
+                cred_dir.mkdir(parents=True, exist_ok=True)
+
+    # Fix 2: Stale .crosspstr paths (already handled by _fix_legacy_paths, but check raw YAML)
+    if Path(config_path).exists():
+        with open(config_path) as f:
+            raw_content = f.read()
+        if ".crosspstr" in raw_content:
+            fixes.append("Replace stale .crosspstr paths with .xpst")
+            if yes or as_json:
+                fixed_content = raw_content.replace(".crosspstr", ".xpst")
+                with open(config_path, "w") as f:
+                    f.write(fixed_content)
+
+    # Fix 3: Invalid port numbers (must be 1-65535)
+    port = cfg.monitoring.healthcheck_port
+    if not (1 <= port <= 65535):
+        fixes.append(f"Fix invalid healthcheck_port ({port} → 8080)")
+        if yes or as_json:
+            cfg.monitoring.healthcheck_port = 8080
+
+    # Fix 4: Missing required fields with defaults
+    if not cfg.video.download_dir:
+        fixes.append("Set default download directory (~/.xpst/downloads)")
+        if yes or as_json:
+            cfg.video.download_dir = "~/.xpst/downloads"
+
+    if not cfg.monitoring.log_file:
+        fixes.append("Set default log file path (~/.xpst/logs/xpst.log)")
+        if yes or as_json:
+            cfg.monitoring.log_file = "~/.xpst/logs/xpst.log"
+
+    # Save fixed config
+    if fixes and (yes or as_json):
+        cfg.save(config_path)
+
+    if as_json:
+        json_output({"ok": True, "fixes_applied": len(fixes), "details": fixes}, True)
+    else:
+        if fixes:
+            console.print(f"\n[green]Applied {len(fixes)} fix(es):[/green]")
+            for fix in fixes:
+                console.print(f"  [green]✓[/green] {fix}")
+        else:
+            console.print("[green]No issues detected — configuration looks good ✓[/green]")
 
 
 @config.command("export")
@@ -2203,11 +2287,15 @@ def _compute_config_diff(old: dict, new: dict) -> dict[str, list[str]]:
     removed = sorted(old_keys - new_keys)
     changed = sorted(k for k in old_keys & new_keys if old_flat[k] != new_flat[k])
 
-    return {"added": added, "removed": removed, "changed": changed}
+    # Store old/new values for changed keys so display can show them
+    old_values = {k: old_flat[k] for k in changed}
+    new_values = {k: new_flat[k] for k in changed}
+
+    return {"added": added, "removed": removed, "changed": changed, "_old_values": old_values, "_new_values": new_values}
 
 
 def _display_config_diff(changes: dict[str, list[str]], warnings: list[str]) -> None:
-    """Display config import diff to console."""
+    """Display config import diff to console with color-coded changes."""
     if changes["added"]:
         console.print("\n[green]Added keys:[/green]")
         for key in changes["added"]:
@@ -2219,7 +2307,9 @@ def _display_config_diff(changes: dict[str, list[str]], warnings: list[str]) -> 
     if changes["changed"]:
         console.print("\n[yellow]Changed values:[/yellow]")
         for key in changes["changed"]:
-            console.print(f"  [yellow]~[/yellow] {key}")
+            old_val = changes.get("_old_values", {}).get(key, "?")
+            new_val = changes.get("_new_values", {}).get(key, "?")
+            console.print(f"  [yellow]~[/yellow] {key}: [red]{old_val}[/red] → [green]{new_val}[/green]")
     if warnings:
         console.print("\n[yellow]Warnings:[/yellow]")
         for w in warnings:
@@ -2285,14 +2375,19 @@ def analytics_export(ctx: click.Context, fmt: str, output: str, platforms: str |
         with open(out_path, "w") as f:
             _json.dump(export_data, f, indent=2, default=str, ensure_ascii=False)
     elif fmt == "csv":
-        with open(out_path, "w", newline="") as f:
+        import io
+        with open(out_path, "wb") as raw_f:
+            # Write UTF-8 BOM for Excel compatibility
+            raw_f.write(b"\xef\xbb\xbf")
+            f = io.TextIOWrapper(raw_f, encoding="utf-8", newline="")
             writer = csv_mod.writer(f)
-            writer.writerow(["platform", "post_id", "views", "likes", "comments", "shares", "saves", "timestamp"])
+            writer.writerow(["platform", "post_id", "caption", "views", "likes", "comments", "shares", "saves", "timestamp"])
             for platform, posts in data.items():
                 for post_id, metrics in posts.items():
                     writer.writerow([
                         platform,
                         post_id,
+                        metrics.get("caption", ""),
                         metrics.get("views", 0),
                         metrics.get("likes", 0),
                         metrics.get("comments", 0),
@@ -2300,6 +2395,7 @@ def analytics_export(ctx: click.Context, fmt: str, output: str, platforms: str |
                         metrics.get("saves", 0),
                         metrics.get("timestamp", ""),
                     ])
+            f.detach()  # prevent TextIOWrapper from closing raw_f twice
 
     if as_json:
         json_output({"ok": True, "format": fmt, "output": str(out_path), "totals": totals}, True)
@@ -2450,22 +2546,27 @@ def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json
 
     Auto-detects the appropriate .spec file for the current OS (or --target).
     Checks for PyInstaller and offers to install if missing.
+    Supports cross-compilation via Docker when --target differs from current OS.
+    Streams PyInstaller output in real-time.
     """
     import platform as _platform
     import subprocess
     import shutil
 
-    # Determine target OS
-    if target:
-        target_os = target
+    # Determine current OS
+    system = _platform.system()
+    if system == "Darwin":
+        current_os = "macos"
+    elif system == "Windows":
+        current_os = "windows"
     else:
-        system = _platform.system()
-        if system == "Darwin":
-            target_os = "macos"
-        elif system == "Windows":
-            target_os = "windows"
-        else:
-            target_os = "linux"
+        current_os = "linux"
+
+    # Determine target OS
+    target_os = target if target else current_os
+
+    # Cross-compilation: if target differs from current OS, use Docker
+    use_docker = target is not None and target_os != current_os
 
     # Find spec file
     if spec_file:
@@ -2492,6 +2593,75 @@ def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json
                 console.print(f"[red]Spec file not found:[/red] {spec_path}")
             sys.exit(EXIT_GENERAL)
 
+    # Docker-based cross-compilation
+    if use_docker:
+        docker_bin = shutil.which("docker")
+        if not docker_bin:
+            if as_json:
+                json_output({"ok": False, "error": "Docker is required for cross-compilation. Install Docker and try again."}, True)
+            else:
+                console.print("[red]Docker is required for cross-compilation.[/red]")
+                console.print("[dim]Install Docker: https://docs.docker.com/get-docker/[/dim]")
+            sys.exit(EXIT_GENERAL)
+
+        # Map target OS to Docker image
+        docker_images = {
+            "macos": "ghcr.io/cdrx/pyinstaller-windows:latest",  # macOS not natively possible in Docker
+            "windows": "ghcr.io/cdrx/pyinstaller-windows:latest",
+            "linux": "ghcr.io/cdrx/pyinstaller-linux:latest",
+        }
+        docker_image = docker_images.get(target_os, "python:3.11-slim")
+
+        if not as_json:
+            console.print(f"[bold blue]Cross-compiling for {target_os} via Docker...[/bold blue]")
+            console.print(f"  Docker image: {docker_image}")
+            console.print(f"  Spec file: {spec_path}\n")
+
+        docker_cmd = [
+            docker_bin, "run", "--rm",
+            "-v", f"{Path.cwd()}:/src",
+            "-w", "/src",
+            docker_image,
+            "pyinstaller", "--clean", "--noconfirm", str(spec_path),
+        ]
+
+        # Stream output in real-time
+        try:
+            proc = subprocess.Popen(
+                docker_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            output_lines: list[str] = []
+            for line in proc.stdout:  # type: ignore[union-attr]
+                output_lines.append(line)
+                if not as_json:
+                    console.print(f"  [dim]{line.rstrip()}[/dim]")
+            proc.wait()
+
+            if proc.returncode == 0:
+                dist_dir = Path.cwd() / "dist"
+                if as_json:
+                    json_output({"ok": True, "target": target_os, "spec_file": str(spec_path), "dist_dir": str(dist_dir), "docker": True}, True)
+                else:
+                    console.print(f"\n[green]✓[/green] Cross-compilation complete for [bold]{target_os}[/bold]")
+                    console.print(f"  Output: {dist_dir}")
+            else:
+                stderr_text = "".join(output_lines)[-500:] if output_lines else "Build failed"
+                if as_json:
+                    json_output({"ok": False, "error": stderr_text}, True)
+                else:
+                    console.print(f"\n[red]Cross-compilation failed:[/red]")
+                    console.print(stderr_text)
+                sys.exit(EXIT_GENERAL)
+        except FileNotFoundError:
+            console.print("[red]Docker not found or not running.[/red]")
+            sys.exit(EXIT_GENERAL)
+        return
+
+    # Local build (same OS)
     # Check for PyInstaller
     pyinstaller_bin = shutil.which("pyinstaller")
     if not pyinstaller_bin:
@@ -2519,11 +2689,23 @@ def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json
         console.print(f"  Spec file: {spec_path}")
         console.print(f"  PyInstaller: {pyinstaller_bin}\n")
 
-    # Run PyInstaller
+    # Run PyInstaller with real-time streaming output
     cmd = [pyinstaller_bin, "--clean", "--noconfirm", str(spec_path)]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    output_lines = []
+    for line in proc.stdout:  # type: ignore[union-attr]
+        output_lines.append(line)
+        if not as_json:
+            console.print(f"  [dim]{line.rstrip()}[/dim]")
+    proc.wait()
 
-    if result.returncode == 0:
+    if proc.returncode == 0:
         dist_dir = Path.cwd() / "dist"
         if as_json:
             json_output({
@@ -2536,12 +2718,12 @@ def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json
             console.print(f"[green]✓[/green] Build complete for [bold]{target_os}[/bold]")
             console.print(f"  Output: {dist_dir}")
     else:
+        stderr_text = "".join(output_lines)[-500:] if output_lines else "Build failed"
         if as_json:
-            json_output({"ok": False, "error": result.stderr[-500:] if result.stderr else "Build failed"}, True)
+            json_output({"ok": False, "error": stderr_text}, True)
         else:
             console.print(f"[red]Build failed:[/red]")
-            if result.stderr:
-                console.print(result.stderr[-500:])
+            console.print(stderr_text)
         sys.exit(EXIT_GENERAL)
 
 

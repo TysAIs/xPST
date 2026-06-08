@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtMultimedia 5.15
+import Qt.labs.settings 1.1
 
 Page {
     id: contentPage
@@ -25,6 +26,70 @@ Page {
     readonly property int timestampRole: 261
     readonly property int thumbnailRole: 262
     readonly property int postIdRole: 263
+
+    // Settings persistence for sort option (#21)
+    Settings {
+        id: contentSettings
+        property int savedSortOption: 0
+    }
+
+    Component.onCompleted: {
+        sortOption = contentSettings.savedSortOption
+    }
+
+    onSortOptionChanged: {
+        contentSettings.savedSortOption = sortOption
+    }
+
+    // Pagination keyboard shortcuts (#10)
+    Shortcut {
+        sequence: "Ctrl+Right"
+        onActivated: {
+            if (contentPage.currentPage < contentPage.totalPages)
+                contentPage.currentPage++
+        }
+    }
+    Shortcut {
+        sequence: "Ctrl+Left"
+        onActivated: {
+            if (contentPage.currentPage > 1)
+                contentPage.currentPage--
+        }
+    }
+
+    // Similarity computation for dedup confidence score (#17)
+    function stringSimilarity(a, b) {
+        if (!a && !b) return 100
+        if (!a || !b) return 0
+        a = a.toLowerCase()
+        b = b.toLowerCase()
+        if (a === b) return 100
+        var longer = a.length > b.length ? a : b
+        var shorter = a.length > b.length ? b : a
+        if (longer.length === 0) return 100
+        var matches = 0
+        var pool = shorter.split("")
+        for (var i = 0; i < longer.length; i++) {
+            var idx = pool.indexOf(longer[i])
+            if (idx >= 0) {
+                matches++
+                pool.splice(idx, 1)
+            }
+        }
+        return Math.round((matches / longer.length) * 100)
+    }
+
+    function getSimilarityPercent(post) {
+        var maxSim = 0
+        for (var i = 0; i < filteredPosts.length; i++) {
+            if (filteredPosts[i].postId === post.postId) continue
+            var captionSim = stringSimilarity(post.caption || "", filteredPosts[i].caption || "")
+            var platformMatch = (post.platform || "").toLowerCase() === (filteredPosts[i].platform || "").toLowerCase() ? 1 : 0
+            var score = Math.round(captionSim * 0.7 + platformMatch * 30)
+            if (score > maxSim) maxSim = score
+        }
+        return maxSim
+    }
 
     // Build filtered + sorted posts array from postModel
     property var filteredPosts: {
@@ -159,6 +224,104 @@ Page {
         if (videoPreviewDialog.visible) videoPreviewDialog.close()
         if (captionEditorDialog.visible) captionEditorDialog.close()
         if (batchCaptionDialog.visible) batchCaptionDialog.close()
+        if (deleteConfirmDialog.visible) deleteConfirmDialog.close()
+    }
+
+    // ── Bulk Delete Confirmation Dialog (#22) ─────────────────────
+    Dialog {
+        id: deleteConfirmDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(400, parent.width - 60)
+        height: Math.min(200, parent.height - 60)
+        title: "Confirm Delete"
+        background: Rectangle {
+            color: theme.surfaceCard
+            radius: theme.radiusXl
+        }
+        header: Rectangle {
+            color: theme.surfaceAlt
+            height: 48
+            radius: theme.radiusXl
+            Text {
+                anchors.centerIn: parent
+                text: "🗑 Confirm Delete"
+                font.pixelSize: 14
+                font.bold: true
+                color: theme.textPrimary
+            }
+        }
+        contentItem: ColumnLayout {
+            spacing: theme.spacingXl
+
+            Text {
+                text: "Delete " + contentPage.selectedItems.length + " items from all platforms?"
+                font.pixelSize: 13
+                color: theme.textPrimary
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
+                Layout.fillWidth: true
+            }
+
+            Text {
+                text: "This action cannot be undone."
+                font.pixelSize: 11
+                color: theme.textMuted
+                horizontalAlignment: Text.AlignHCenter
+                Layout.fillWidth: true
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: theme.spacingMd
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    width: cancelDeleteLabel.implicitWidth + 32
+                    height: 36
+                    radius: theme.radiusMd
+                    color: theme.surfaceAlt
+                    Text {
+                        id: cancelDeleteLabel
+                        anchors.centerIn: parent
+                        text: "Cancel"
+                        font.pixelSize: 13
+                        color: theme.textSecondary
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: deleteConfirmDialog.close()
+                    }
+                }
+
+                Rectangle {
+                    width: confirmDeleteLabel.implicitWidth + 32
+                    height: 36
+                    radius: theme.radiusMd
+                    color: theme.error
+                    Text {
+                        id: confirmDeleteLabel
+                        anchors.centerIn: parent
+                        text: "Delete"
+                        font.pixelSize: 13
+                        font.bold: true
+                        color: "#ffffff"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            deleteConfirmDialog.close()
+                            contentPage.deleteSelected()
+                        }
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+            }
+        }
     }
 
     // ── Batch Caption Dialog (#3) ─────────────────────────────────
@@ -311,13 +474,15 @@ Page {
     // ── Video preview dialog with embedded player (#6) ────────────
     property string previewVideoPath: ""
     property string previewVideoTitle: ""
+    property bool videoLoading: false
+    property bool videoError: false
 
     Dialog {
         id: videoPreviewDialog
         modal: true
         anchors.centerIn: parent
         width: Math.min(640, parent.width - 60)
-        height: Math.min(520, parent.height - 60)
+        height: Math.min(560, parent.height - 60)
         title: contentPage.previewVideoTitle || "Video Preview"
         background: Rectangle {
             color: theme.surfaceCard
@@ -350,13 +515,66 @@ Page {
                     id: videoPlayer
                     source: contentPage.previewVideoPath ? "file://" + contentPage.previewVideoPath : ""
                     autoPlay: false
+                    onStatusChanged: {
+                        if (status === MediaPlayer.Loading || status === MediaPlayer.Buffering) {
+                            contentPage.videoLoading = true
+                        } else if (status === MediaPlayer.Loaded || status === MediaPlayer.Buffered || status === MediaPlayer.NoMedia || status === MediaPlayer.InvalidMedia) {
+                            contentPage.videoLoading = false
+                        }
+                    }
+                    onError: function(error, errorString) {
+                        contentPage.videoError = true
+                        contentPage.videoLoading = false
+                    }
+                    onSourceChanged: {
+                        contentPage.videoError = false
+                        contentPage.videoLoading = false
+                    }
                 }
 
                 VideoOutput {
                     id: videoOutput
                     anchors.fill: parent
                     source: videoPlayer
-                    visible: contentPage.previewVideoPath.length > 0
+                    visible: contentPage.previewVideoPath.length > 0 && !contentPage.videoError
+                }
+
+                // Loading spinner (#3)
+                BusyIndicator {
+                    anchors.centerIn: parent
+                    running: contentPage.videoLoading
+                    visible: contentPage.videoLoading
+                    width: 48
+                    height: 48
+                }
+
+                // Codec error message (#3)
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    visible: contentPage.videoError
+                    spacing: theme.spacingSm
+
+                    Text {
+                        text: "⚠️"
+                        font.pixelSize: 32
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                    Text {
+                        text: "Codec not available"
+                        font.pixelSize: 14
+                        font.bold: true
+                        color: "#ffffff"
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                    Text {
+                        text: "The video format may not be supported.\nTry installing additional codecs or use System Player."
+                        font.pixelSize: 11
+                        color: "#cccccc"
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.alignment: Qt.AlignHCenter
+                    }
                 }
 
                 // Fallback text when no video
@@ -368,8 +586,52 @@ Page {
                     font.pixelSize: 13
                     color: "#ffffff"
                     horizontalAlignment: Text.AlignHCenter
-                    visible: videoPlayer.status === MediaPlayer.NoMedia ||
-                             videoPlayer.status === MediaPlayer.InvalidMedia
+                    visible: !contentPage.videoError && !contentPage.videoLoading &&
+                             (videoPlayer.status === MediaPlayer.NoMedia ||
+                              videoPlayer.status === MediaPlayer.InvalidMedia)
+                }
+            }
+
+            // Seek/scrub bar (#3)
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: theme.spacingSm
+                visible: contentPage.previewVideoPath.length > 0 && !contentPage.videoError
+
+                Text {
+                    text: {
+                        var pos = videoPlayer.position || 0
+                        var sec = Math.floor(pos / 1000)
+                        var min = Math.floor(sec / 60)
+                        sec = sec % 60
+                        return min + ":" + (sec < 10 ? "0" : "") + sec
+                    }
+                    font.pixelSize: 10
+                    color: theme.textMuted
+                    Layout.preferredWidth: 36
+                }
+
+                Slider {
+                    id: seekSlider
+                    Layout.fillWidth: true
+                    from: 0
+                    to: videoPlayer.duration > 0 ? videoPlayer.duration : 1
+                    value: videoPlayer.position || 0
+                    onMoved: videoPlayer.seek(value)
+                    enabled: videoPlayer.duration > 0
+                }
+
+                Text {
+                    text: {
+                        var dur = videoPlayer.duration || 0
+                        var sec = Math.floor(dur / 1000)
+                        var min = Math.floor(sec / 60)
+                        sec = sec % 60
+                        return min + ":" + (sec < 10 ? "0" : "") + sec
+                    }
+                    font.pixelSize: 10
+                    color: theme.textMuted
+                    Layout.preferredWidth: 36
                 }
             }
 
@@ -377,7 +639,7 @@ Page {
             RowLayout {
                 Layout.fillWidth: true
                 spacing: theme.spacingMd
-                visible: contentPage.previewVideoPath.length > 0
+                visible: contentPage.previewVideoPath.length > 0 && !contentPage.videoError
 
                 // Play/Pause button
                 Rectangle {
@@ -452,7 +714,7 @@ Page {
                 }
             }
         }
-        onClosed: videoPlayer.stop()
+        onClosed: { videoPlayer.stop(); contentPage.videoError = false; contentPage.videoLoading = false }
     }
 
     // ── Caption editor dialog (Item 9) ────────────────────────────
@@ -820,7 +1082,7 @@ Page {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: contentPage.deleteSelected()
+                            onClicked: deleteConfirmDialog.open()
                             Accessible.name: "Delete selected items"
                             Accessible.role: Accessible.Button
                         }
@@ -970,20 +1232,30 @@ Page {
                                         maximumLineCount: 1
                                     }
 
-                                    // Duplicate badge (#18)
+                                    // Similarity badge (#17) — dedup confidence score
                                     Rectangle {
-                                        width: dupLabel.implicitWidth + 8
+                                        width: simLabel.implicitWidth + 8
                                         height: 16
                                         radius: 4
-                                        color: Qt.rgba(1, 0.6, 0, 0.2)
-                                        visible: contentPage.isDuplicate(modelData.title || "")
+                                        color: {
+                                            var sim = contentPage.getSimilarityPercent(modelData)
+                                            if (sim >= 80) return Qt.rgba(1, 0.2, 0.2, 0.2)
+                                            if (sim >= 50) return Qt.rgba(1, 0.6, 0, 0.2)
+                                            return Qt.rgba(1, 0.6, 0, 0.1)
+                                        }
+                                        visible: contentPage.getSimilarityPercent(modelData) >= 30
                                         Text {
-                                            id: dupLabel
+                                            id: simLabel
                                             anchors.centerIn: parent
-                                            text: "duplicate"
+                                            text: contentPage.getSimilarityPercent(modelData) + "%"
                                             font.pixelSize: 8
                                             font.bold: true
-                                            color: theme.warning
+                                            color: {
+                                                var sim = contentPage.getSimilarityPercent(modelData)
+                                                if (sim >= 80) return theme.error
+                                                if (sim >= 50) return theme.warning
+                                                return theme.textMuted
+                                            }
                                         }
                                     }
                                 }

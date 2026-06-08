@@ -605,6 +605,51 @@ Page {
                                     Text { text: "Max Duration"; font.pixelSize: 11; color: theme.textMuted }
                                     Text { text: modelData.maxDuration; font.pixelSize: 11; color: theme.textSecondary }
                                 }
+
+                                // Generate Sample button (#30)
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: theme.spacingSm
+
+                                    Item { Layout.fillWidth: true }
+
+                                    Rectangle {
+                                        width: genSampleLabel.implicitWidth + 16
+                                        height: 24
+                                        radius: theme.radiusSm
+                                        color: theme.accent
+                                        opacity: genSampleMouse.containsMouse ? 0.85 : 1.0
+                                        Text {
+                                            id: genSampleLabel
+                                            anchors.centerIn: parent
+                                            text: "🎬 Generate Sample"
+                                            font.pixelSize: 9
+                                            font.bold: true
+                                            color: "#ffffff"
+                                        }
+                                        MouseArea {
+                                            id: genSampleMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                // Build ffmpeg command for this platform's encoding
+                                                var res = modelData.resolution.split(" ")[0].replace("×", "x")
+                                                var fps = parseInt(modelData.fps) || 30
+                                                var bitrate = modelData.bitrate.split("-")[0].trim().replace(" Mbps", "M")
+                                                var outDir = settingsPage.downloadDir.length > 0 ? settingsPage.downloadDir : "/tmp"
+                                                var outPath = outDir + "/xpst_sample_" + modelData.platform.toLowerCase() + ".mp4"
+                                                // Use controller to generate sample if available
+                                                if (typeof controller !== "undefined" && controller.generateEncodingSample) {
+                                                    controller.generateEncodingSample(modelData.platform.toLowerCase(), outPath)
+                                                }
+                                                showToast("Generating sample for " + modelData.platform + "...", false)
+                                            }
+                                            Accessible.name: "Generate encoding sample for " + modelData.platform
+                                            Accessible.role: Accessible.Button
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

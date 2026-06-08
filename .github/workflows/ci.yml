@@ -73,7 +73,7 @@ jobs:
       
       - name: Run tests
         run: |
-          pytest --cov=xpst --cov-report=xml
+          pytest --cov=xpst --cov-report=xml --cov-fail-under=80
       
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'

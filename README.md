@@ -13,6 +13,11 @@
 ![Tests](https://img.shields.io/badge/tests-760%20passing-brightgreen)
 ![Coverage](https://img.shields.io/codecov/c/github/xPSTOwner/xPST?label=coverage)
 ![Stars](https://img.shields.io/github/stars/xPSTOwner/xPST?style=social)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![Python Versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)
+![MCP Server](https://img.shields.io/badge/MCP-server-orange)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![License: Apache](https://img.shields.io/badge/License-Apache_2.0-yellow.svg)
 
 ---
 
@@ -52,12 +57,20 @@ xPST is a local-first, open-source tool that automatically distributes short-for
 
 ## Quick Start
 
-### 1. Install
+### 1. Install (3 commands)
 
 ```bash
+# From PyPI (when published)
+pip install xpst
+xpst setup
+xpst run
+
+# Or from source (development)
 git clone https://github.com/xPSTOwner/xPST.git
 cd ~/XPST
 pip install -e .
+xpst setup
+xpst run
 ```
 
 ### 2. Configure
@@ -192,6 +205,46 @@ xpst --config /path/to/config.yaml run
 # Enable verbose/debug logging
 xpst --verbose run
 ```
+
+---
+
+## For AI Agents
+
+xPST is designed for programmatic use by AI assistants, scripts, and automation tools.
+
+### MCP Server (Recommended)
+
+The built-in [MCP server](docs/MCP_TOOLS.md) exposes all xPST capabilities as tools and resources:
+
+```bash
+# Start the MCP server (stdio transport)
+xpst-mcp
+
+# Or via CLI
+xpst mcp
+```
+
+**8 tools available:** `post_video`, `crosspost_new`, `check_status`, `list_platforms`, `get_analytics`, `delete_post`, `health_check`, `get_logs`
+
+**3 resources:** `xpst://config`, `xpst://state`, `xpst://health`
+
+See the full [MCP Tools Reference](docs/MCP_TOOLS.md) for schemas, parameters, and examples.
+
+### CLI `--json` Flag
+
+Every CLI command supports `--json` for machine-readable output:
+
+```bash
+xpst status --json       # Health status as JSON
+xpst run --json           # Cross-posting results as JSON
+xpst health --json        # Platform connectivity as JSON
+xpst analytics --json     # Analytics summary as JSON
+xpst version --json       # Version info as JSON
+```
+
+JSON mode is also auto-enabled when stdout is not a TTY (e.g., piped to another program).
+
+See the full [Agent Guide](docs/AGENT_GUIDE.md) for all commands, output formats, and Python API usage.
 
 ---
 

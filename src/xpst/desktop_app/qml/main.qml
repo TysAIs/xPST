@@ -15,6 +15,7 @@ ApplicationWindow {
 
     property string currentPage: "dashboard"
     property var dialogStack: []
+    property bool noSplashMode: typeof noSplashMode !== "undefined" ? noSplashMode : false
 
     // ── Window State Persistence ───────────────────────────────────
     Component.onCompleted: {

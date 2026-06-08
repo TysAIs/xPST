@@ -132,6 +132,15 @@ DEFAULT_CONFIG = {
         "catchup_window": 172800,  # 48 hours
         "catchup_times_per_day": 3,
     },
+    "shortcuts": {
+        "dashboard": "Ctrl+1",
+        "content": "Ctrl+2",
+        "analytics": "Ctrl+3",
+        "connect": "Ctrl+4",
+        "schedule": "Ctrl+5",
+        "refresh": "Ctrl+R",
+        "quit": "Ctrl+Q",
+    },
 }
 
 
@@ -293,6 +302,17 @@ class XPSTConfig:
     # Paths
     config_dir: str = "~/.xpst"
 
+    # Shortcuts (stored as raw dict, not a dataclass)
+    _shortcuts: dict = field(default_factory=lambda: {
+        "dashboard": "Ctrl+1",
+        "content": "Ctrl+2",
+        "analytics": "Ctrl+3",
+        "connect": "Ctrl+4",
+        "schedule": "Ctrl+5",
+        "refresh": "Ctrl+R",
+        "quit": "Ctrl+Q",
+    })
+
     @classmethod
     def load(cls, config_path: str | None = None) -> "XPSTConfig":
         """
@@ -451,6 +471,10 @@ class XPSTConfig:
                 config.rate_limits.instagram = rl.get("instagram", config.rate_limits.instagram)
                 config.rate_limits.x = rl.get("x", config.rate_limits.x)
                 config.rate_limits.tiktok = rl.get("tiktok", config.rate_limits.tiktok)
+
+        # Shortcuts (stored in config_dir as raw dict)
+        if "shortcuts" in file_config and isinstance(file_config["shortcuts"], dict):
+            config._shortcuts = file_config["shortcuts"]
 
         return config
 
@@ -734,6 +758,7 @@ class XPSTConfig:
                 "x": self.rate_limits.x,
                 "tiktok": self.rate_limits.tiktok,
             },
+            "shortcuts": self._shortcuts,
         }
 
         try:

@@ -216,7 +216,7 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
     return tray
 
 
-def main() -> int:
+def main(no_splash: bool = False) -> int:
     """Launch the xPST desktop application."""
     # Must use QApplication (not QGuiApplication) for system tray support
     app = QApplication(sys.argv)
@@ -233,16 +233,20 @@ def main() -> int:
         os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Material")
 
     # ── Splash Screen ────────────────────────────────────────────────
-    splash = _create_splash()
-    splash.show()
-    app.processEvents()  # ensure splash is painted before heavy init
-    splash.showMessage("Loading config...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
-    app.processEvents()
+    no_splash = "--no-splash" in sys.argv
+    splash = None
+    if not no_splash:
+        splash = _create_splash()
+        splash.show()
+        app.processEvents()  # ensure splash is painted before heavy init
+        splash.showMessage("Loading config...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
+        app.processEvents()
 
     # Create QML engine
     engine = QQmlApplicationEngine()
-    splash.showMessage("Initializing state...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
-    app.processEvents()
+    if splash:
+        splash.showMessage("Initializing state...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
+        app.processEvents()
 
     # Add QML import path so the engine finds our module
     qml_dir = Path(__file__).parent / "qml"
@@ -252,7 +256,8 @@ def main() -> int:
     controller = AppController()
     post_model = PostListModel()
     post_model.load_from_state()
-    splash.showMessage("Loading plugins...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
+    if splash:
+        splash.showMessage("Loading plugins...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
     app.processEvents()
 
     # Connect controller refresh to model reload
@@ -263,17 +268,21 @@ def main() -> int:
     theme_provider = ThemeProvider()
     engine.rootContext().setContextProperty("theme", theme_provider)
     engine.rootContext().setContextProperty("postModel", post_model)
-    splash.showMessage("Starting engine...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
+    engine.rootContext().setContextProperty("noSplashMode", no_splash)
+    if splash:
+        splash.showMessage("Starting engine...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
     app.processEvents()
 
     # Load main.qml
     qml_path = _find_qml_path()
     logger.info("Loading QML from: %s", qml_path)
-    splash.showMessage("Building UI...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
+    if splash:
+        splash.showMessage("Building UI...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
     app.processEvents()
 
     if not qml_path.exists():
-        splash.close()
+        if splash:
+            splash.close()
         logger.error("QML file not found: %s", qml_path)
         logger.error("Create %s or run the QML generation step first.", qml_path)
         # Don't crash — show a minimal window
@@ -291,12 +300,14 @@ def main() -> int:
 
     # Check if QML loaded successfully
     if not engine.rootObjects:
-        splash.close()
+        if splash:
+            splash.close()
         logger.error("Failed to load QML — check main.qml for errors")
         return 1
 
     # Close splash once the window is visible
-    QTimer.singleShot(800, splash.close)
+    if splash:
+        QTimer.singleShot(800, splash.close)
 
     # System tray (after engine is ready)
     tray = _setup_tray(app, engine)

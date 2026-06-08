@@ -7,19 +7,21 @@ Page {
     background: Rectangle { color: theme.canvas }
 
     property date currentDate: new Date()
-    property int currentMonth: currentDate.getMonth()
-    property int currentYear: currentDate.getFullYear()
+    property int displayedMonth: currentDate.getMonth()
+    property int displayedYear: currentDate.getFullYear()
+    property int currentMonth: displayedMonth
+    property int currentYear: displayedYear
     property var scheduledPosts: []
 
-    function closeDialog() {}
+    function closeDialog() { if (dayPostsPopup.visible) dayPostsPopup.close() }
 
     // Build calendar data
-    property int firstDayOfMonth: new Date(currentYear, currentMonth, 1).getDay()
-    property int daysInMonth: new Date(currentYear, currentMonth + 1, 0).getDate()
+    property int firstDayOfMonth: new Date(displayedYear, displayedMonth, 1).getDay()
+    property int daysInMonth: new Date(displayedYear, displayedMonth + 1, 0).getDate()
     property string monthName: {
         var names = ["January", "February", "March", "April", "May", "June",
                      "July", "August", "September", "October", "November", "December"]
-        return names[currentMonth] + " " + currentYear
+        return names[displayedMonth] + " " + displayedYear
     }
 
     // Days that have scheduled posts (from controller data)
@@ -32,7 +34,7 @@ Page {
                     var ts = posts[i].timestamp || ""
                     if (ts) {
                         var d = new Date(ts)
-                        if (d.getMonth() === currentMonth && d.getFullYear() === currentYear) {
+                        if (d.getMonth() === displayedMonth && d.getFullYear() === displayedYear) {
                             days[d.getDate()] = true
                         }
                     }
@@ -42,22 +44,159 @@ Page {
         return days
     }
 
-    function prevMonth() {
-        if (currentMonth === 0) {
-            currentMonth = 11
-            currentYear--
-        } else {
-            currentMonth--
+    // Get posts for a specific day
+    function getPostsForDay(dayNum) {
+        var result = []
+        try {
+            if (typeof controller !== "undefined") {
+                var posts = JSON.parse(controller.recentPosts || "[]")
+                for (var i = 0; i < posts.length; i++) {
+                    var ts = posts[i].timestamp || ""
+                    if (ts) {
+                        var d = new Date(ts)
+                        if (d.getDate() === dayNum && d.getMonth() === displayedMonth && d.getFullYear() === displayedYear) {
+                            result.push(posts[i])
+                        }
+                    }
+                }
+            }
+        } catch(e) {}
+        return result
+    }
+
+    // Selected day for popup
+    property int selectedDay: 0
+    property var selectedDayPosts: []
+
+    // Day posts popup (#5)
+    Dialog {
+        id: dayPostsPopup
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(400, parent.width - 60)
+        height: Math.min(360, parent.height - 60)
+        title: "Posts on " + schedulePage.monthName + " " + schedulePage.selectedDay
+        background: Rectangle {
+            color: theme.surfaceCard
+            radius: theme.radiusXl
+        }
+        header: Rectangle {
+            color: theme.surfaceAlt
+            height: 48
+            radius: theme.radiusXl
+            Text {
+                anchors.centerIn: parent
+                text: "📅 " + schedulePage.monthName + " " + schedulePage.selectedDay
+                font.pixelSize: 14
+                font.bold: true
+                color: theme.textPrimary
+            }
+        }
+        contentItem: ColumnLayout {
+            spacing: theme.spacingMd
+
+            Text {
+                text: schedulePage.selectedDayPosts.length + " post(s) scheduled"
+                font.pixelSize: 12
+                color: theme.textSecondary
+                visible: schedulePage.selectedDayPosts.length > 0
+            }
+
+            Repeater {
+                model: schedulePage.selectedDayPosts
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 40
+                    radius: theme.radiusSm
+                    color: theme.surfaceAlt
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: theme.spacingSm
+                        spacing: theme.spacingSm
+                        Rectangle {
+                            width: 6; height: 6; radius: 3
+                            color: {
+                                var p = (modelData.platform || "").toLowerCase()
+                                if (p === "youtube") return theme.youtube
+                                if (p === "instagram") return theme.instagram
+                                if (p === "x") return theme.xtwitter
+                                if (p === "tiktok") return theme.tiktok
+                                return theme.accent
+                            }
+                        }
+                        Text {
+                            text: modelData.title || modelData.postId || "Untitled"
+                            font.pixelSize: 12
+                            color: theme.textPrimary
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: modelData.platform || ""
+                            font.pixelSize: 10
+                            color: theme.textMuted
+                        }
+                    }
+                }
+            }
+
+            Text {
+                text: "No posts scheduled for this day"
+                font.pixelSize: 12
+                color: theme.textMuted
+                visible: schedulePage.selectedDayPosts.length === 0
+                Layout.alignment: Qt.AlignHCenter
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 36
+                radius: theme.radiusMd
+                color: theme.accent
+                Text {
+                    anchors.centerIn: parent
+                    text: "+ Schedule New"
+                    font.pixelSize: 12
+                    font.bold: true
+                    color: "#ffffff"
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        dayPostsPopup.close()
+                        // Navigate to content page for scheduling
+                        if (typeof navigateTo === "function") {
+                            // Try calling parent navigateTo
+                        }
+                        showToast("Schedule New — coming soon", false)
+                    }
+                }
+            }
         }
     }
 
-    function nextMonth() {
-        if (currentMonth === 11) {
-            currentMonth = 0
-            currentYear++
+    function prevMonth() {
+        if (displayedMonth === 0) {
+            displayedMonth = 11
+            displayedYear--
         } else {
-            currentMonth++
+            displayedMonth--
         }
+        currentMonth = displayedMonth
+        currentYear = displayedYear
+    }
+
+    function nextMonth() {
+        if (displayedMonth === 11) {
+            displayedMonth = 0
+            displayedYear++
+        } else {
+            displayedMonth++
+        }
+        currentMonth = displayedMonth
+        currentYear = displayedYear
     }
 
     Flickable {
@@ -189,7 +328,7 @@ Page {
                                     var dayNum = index - schedulePage.firstDayOfMonth + 1
                                     if (dayNum <= 0 || dayNum > schedulePage.daysInMonth) return "transparent"
                                     var today = new Date()
-                                    if (dayNum === today.getDate() && schedulePage.currentMonth === today.getMonth() && schedulePage.currentYear === today.getFullYear()) {
+                                    if (dayNum === today.getDate() && schedulePage.displayedMonth === today.getMonth() && schedulePage.displayedYear === today.getFullYear()) {
                                         return theme.accentMuted
                                     }
                                     return dayMouse.containsMouse ? theme.surfaceAlt : "transparent"
@@ -224,6 +363,13 @@ Page {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (dayNum > 0 && dayNum <= schedulePage.daysInMonth) {
+                                            schedulePage.selectedDay = dayNum
+                                            schedulePage.selectedDayPosts = schedulePage.getPostsForDay(dayNum)
+                                            dayPostsPopup.open()
+                                        }
+                                    }
                                 }
                             }
                         }

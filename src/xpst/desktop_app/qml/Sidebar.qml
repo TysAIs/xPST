@@ -141,9 +141,16 @@ Rectangle {
                         font.pixelSize: 11
                     }
                     Text {
+                        id: totalPostsText
                         text: (typeof controller !== "undefined" ? controller.totalPosts : 0) + " posts"
                         font.pixelSize: 11
                         color: theme.textSecondary
+                        Behavior on text {
+                            SequentialAnimation {
+                                NumberAnimation { target: totalPostsText; property: "scale"; from: 1.0; to: 1.15; duration: 150; easing.type: Easing.OutCubic }
+                                NumberAnimation { target: totalPostsText; property: "scale"; from: 1.15; to: 1.0; duration: 150; easing.type: Easing.InOutCubic }
+                            }
+                        }
                     }
 
                     Item { Layout.fillWidth: true }

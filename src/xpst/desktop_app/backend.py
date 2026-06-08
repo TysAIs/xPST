@@ -854,6 +854,47 @@ class AppController(QObject):
         }
         return json.dumps(status, default=str)
 
+    @Slot(str, result=str)
+    def saveShortcuts(self, shortcuts_json: str) -> str:
+        """Save custom keyboard shortcuts to config.
+
+        Args:
+            shortcuts_json: JSON string mapping action names to key bindings.
+
+        Returns:
+            JSON string with ok status.
+        """
+        try:
+            shortcuts = json.loads(shortcuts_json)
+            if not isinstance(shortcuts, dict):
+                return json.dumps({"ok": False, "error": "Expected a JSON object"})
+            if self._config is not None:
+                self._config._shortcuts = shortcuts
+                self._config.save()
+            return json.dumps({"ok": True})
+        except Exception as exc:
+            logger.error("saveShortcuts failed: %s", exc)
+            return json.dumps({"ok": False, "error": str(exc)})
+
+    @Slot(result=str)
+    def getShortcuts(self) -> str:
+        """Return current keyboard shortcuts as JSON.
+
+        Returns:
+            JSON string mapping action names to key bindings.
+        """
+        if self._config is not None and hasattr(self._config, "_shortcuts"):
+            return json.dumps(self._config._shortcuts)
+        return json.dumps({
+            "dashboard": "Ctrl+1",
+            "content": "Ctrl+2",
+            "analytics": "Ctrl+3",
+            "connect": "Ctrl+4",
+            "schedule": "Ctrl+5",
+            "refresh": "Ctrl+R",
+            "quit": "Ctrl+Q",
+        })
+
     @Slot(result=str)
     def checkForUpdates(self) -> str:
         """Check for available package updates.

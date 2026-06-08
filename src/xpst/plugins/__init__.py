@@ -14,8 +14,12 @@ Python file that defines a ``register()`` function returning a dict::
 
 from __future__ import annotations
 
+
 import importlib.util
+import importlib
 import logging
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -23,14 +27,51 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Builtins that are restricted in sandboxed plugins
+_RESTRICTED_MODULES = frozenset({"os", "sys", "subprocess", "shutil", "signal", "ctypes"})
+
 # Default plugin directory
 DEFAULT_PLUGIN_DIR = Path("~/.xpst/plugins").expanduser()
+
+
+class RestrictedPlugin:
+    """Wrapper that provides a sandboxed execution environment for plugin modules.
+
+    Removes dangerous builtins (os, sys, subprocess, etc.) so untrusted
+    plugins cannot perform filesystem or process operations.
+    """
+
+    def __init__(self, module: Any) -> None:
+        self._module = module
+        self._name = getattr(module, "__name__", "unknown")
+
+    @property
+    def module(self) -> Any:
+        return self._module
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._module, name)
+
+    @staticmethod
+    def apply_sandbox(module: Any) -> None:
+        """Restrict __builtins__ in a loaded module to block dangerous imports."""
+        if not hasattr(module, "__builtins__"):
+            return
+        builtins = module.__builtins__
+        if isinstance(builtins, dict):
+            original_import = builtins.get("__import__")
+            if original_import:
+                def _restricted_import(name: str, *args: Any, **kwargs: Any) -> Any:
+                    if name in _RESTRICTED_MODULES:
+                        raise ImportError(f"Import of '{name}' is not allowed in sandboxed plugins")
+                    return original_import(name, *args, **kwargs)
+                builtins["__import__"] = _restricted_import
 
 
 class PluginManager:
     """Discovers and loads xPST platform plugins from disk."""
 
-    def __init__(self, plugin_dir: str | Path | None = None) -> None:
+    def __init__(self, plugin_dir: str | Path | None = None, sandbox: bool = False, no_deps: bool = False) -> None:
         self.plugin_dir = Path(plugin_dir).expanduser() if plugin_dir else DEFAULT_PLUGIN_DIR
         self._plugins: dict[str, dict[str, Any]] = {}
         self._loaded: bool = False
@@ -38,6 +79,9 @@ class PluginManager:
         self._watch_stop: threading.Event = threading.Event()
         self._watch_interval: float = 2.0
         self._file_mtimes: dict[str, float] = {}
+        self._on_reload_callback: Any = None
+        self._sandbox: bool = sandbox
+        self._no_deps: bool = no_deps
 
     @property
     def plugins(self) -> dict[str, dict[str, Any]]:
@@ -48,6 +92,9 @@ class PluginManager:
 
     def discover(self) -> list[str]:
         """Scan plugin_dir for .py files and load valid plugins.
+
+        If sandbox=True, plugin modules are wrapped with restricted builtins.
+        If no_deps=True, automatic dependency installation is skipped.
 
         Returns:
             List of successfully loaded plugin names.
@@ -70,10 +117,39 @@ class PluginManager:
                 self._plugins[name] = plugin
                 loaded.append(name)
                 logger.info("Loaded plugin '%s' from %s", name, py_file)
+                # Auto-install plugin dependencies if not skipped
+                if not self._no_deps:
+                    self._install_plugin_deps(plugin)
 
         if loaded:
             logger.info("Loaded %d plugins: %s", len(loaded), ", ".join(loaded))
         return loaded
+
+    def _install_plugin_deps(self, plugin: dict[str, Any]) -> None:
+        """Check and install dependencies declared in plugin's 'requires' key."""
+        requires = plugin.get("requires")
+        if not requires or not isinstance(requires, list):
+            return
+        for dep in requires:
+            if not isinstance(dep, str):
+                continue
+            # Check if already importable
+            module_name = dep.split(">=")[0].split("==")[0].split("<=")[0].split("[")[0].strip()
+            try:
+                importlib.import_module(module_name)
+            except ImportError:
+                logger.info("Installing missing plugin dependency: %s", dep)
+                try:
+                    result = subprocess.run(
+                        [sys.executable, "-m", "pip", "install", dep],
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    if result.returncode == 0:
+                        logger.info("Installed %s successfully", dep)
+                    else:
+                        logger.warning("Failed to install %s: %s", dep, result.stderr[-300:])
+                except Exception as exc:
+                    logger.warning("Error installing %s: %s", dep, exc)
 
     def _load_plugin_file(self, path: Path) -> dict[str, Any] | None:
         """Load a single plugin file and call its register() function."""
@@ -85,6 +161,10 @@ class PluginManager:
 
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
+
+            # Apply sandbox restrictions if enabled
+            if self._sandbox:
+                RestrictedPlugin.apply_sandbox(module)
 
             if not hasattr(module, "register"):
                 logger.warning("Plugin %s has no register() function", path.name)
@@ -158,35 +238,45 @@ class PluginManager:
             try:
                 current_mtimes = self._snapshot_mtimes()
                 # Detect new or modified files
-                changed = False
+                changed_files: list[str] = []
                 for fpath, mtime in current_mtimes.items():
                     if fpath not in self._file_mtimes or self._file_mtimes[fpath] != mtime:
-                        changed = True
+                        changed_files.append(fpath)
                         logger.info("Detected change in plugin file: %s", fpath)
                 # Detect removed files
                 for fpath in self._file_mtimes:
                     if fpath not in current_mtimes:
-                        changed = True
+                        changed_files.append(fpath)
                         logger.info("Detected removed plugin file: %s", fpath)
-                if changed:
+                if changed_files:
                     self.reload()
                     logger.info("Plugins reloaded after file change")
+                    # Invoke on_reload callback for each changed plugin
+                    if self._on_reload_callback is not None:
+                        for fpath in changed_files:
+                            plugin_name = Path(fpath).stem
+                            try:
+                                self._on_reload_callback(plugin_name)
+                            except Exception as exc:
+                                logger.warning("on_reload callback error for %s: %s", plugin_name, exc)
                 self._file_mtimes = current_mtimes
             except Exception as exc:
                 logger.warning("Plugin watcher error: %s", exc)
         logger.info("Plugin file watcher stopped")
 
-    def start_watching(self, interval: float = 2.0) -> None:
+    def start_watching(self, interval: float = 2.0, on_reload: Any = None) -> None:
         """Start watching the plugin directory for file changes.
 
         Args:
             interval: Polling interval in seconds (default: 2.0).
+            on_reload: Optional callback invoked with plugin name when a plugin is reloaded.
         """
         if self._watch_thread is not None and self._watch_thread.is_alive():
             logger.debug("Plugin watcher already running")
             return
         self._watch_stop.clear()
         self._watch_interval = interval
+        self._on_reload_callback = on_reload
         self._watch_thread = threading.Thread(target=self._watch_loop, daemon=True, name="plugin-watcher")
         self._watch_thread.start()
 

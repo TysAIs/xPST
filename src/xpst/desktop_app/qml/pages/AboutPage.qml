@@ -125,16 +125,16 @@ Page {
 
                         Repeater {
                             model: [
-                                { name: "PySide6", desc: "Qt for Python — UI framework" },
-                                { name: "yt-dlp", desc: "Video downloading" },
-                                { name: "instagrapi", desc: "Instagram API client" },
-                                { name: "twikit", desc: "X/Twitter API client" },
-                                { name: "click", desc: "CLI framework" },
-                                { name: "rich", desc: "Terminal formatting" },
-                                { name: "pyyaml", desc: "YAML config parsing" },
-                                { name: "authlib", desc: "OAuth authentication" },
-                                { name: "httpx", desc: "Async HTTP client" },
-                                { name: "nicegui", desc: "Web dashboard framework" }
+                                { name: "PySide6", desc: "Qt for Python — UI framework", license: "LGPL-3.0" },
+                                { name: "yt-dlp", desc: "Video downloading", license: "Unlicense" },
+                                { name: "instagrapi", desc: "Instagram API client", license: "MIT" },
+                                { name: "twikit", desc: "X/Twitter API client", license: "MIT" },
+                                { name: "click", desc: "CLI framework", license: "BSD-3-Clause" },
+                                { name: "rich", desc: "Terminal formatting", license: "MIT" },
+                                { name: "pyyaml", desc: "YAML config parsing", license: "MIT" },
+                                { name: "authlib", desc: "OAuth authentication", license: "BSD-3-Clause" },
+                                { name: "httpx", desc: "Async HTTP client", license: "BSD-3-Clause" },
+                                { name: "nicegui", desc: "Web dashboard framework", license: "MIT" }
                             ]
 
                             RowLayout {
@@ -154,6 +154,20 @@ Page {
                                     font.pixelSize: 12
                                     color: theme.textSecondary
                                     Layout.fillWidth: true
+                                }
+                                Rectangle {
+                                    width: depLicenseText.implicitWidth + theme.spacingMd
+                                    height: 18
+                                    radius: theme.radiusSm
+                                    color: theme.accentMuted
+                                    Text {
+                                        id: depLicenseText
+                                        anchors.centerIn: parent
+                                        text: modelData.license
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                        color: theme.accent
+                                    }
                                 }
                             }
                         }
