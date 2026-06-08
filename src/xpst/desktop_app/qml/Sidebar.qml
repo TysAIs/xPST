@@ -1,4 +1,4 @@
-import QtQuick 2.15
+﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
@@ -38,13 +38,13 @@ Rectangle {
                 spacing: theme.spacingSm
 
                 Text {
-                    text: "⚡"
+                    text: "x"
                     font.pixelSize: 18
                 }
                 Text {
                     text: "xPST"
                     font.pixelSize: 18
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     visible: sidebar.expanded
                 }
@@ -58,13 +58,13 @@ Rectangle {
 
         Repeater {
             model: [
-                { label: "Dashboard", icon: "📊", page: "dashboard" },
-                { label: "Content",   icon: "📝", page: "content" },
-                { label: "Analytics", icon: "📈", page: "analytics" },
-                { label: "Connect",   icon: "🔗", page: "connect" },
-                { label: "Schedule",  icon: "📅", page: "schedule" },
-                { label: "Settings",  icon: "⚙", page: "settings" },
-                { label: "About",     icon: "ℹ️", page: "about" }
+                { label: "Dashboard", icon: "D", page: "dashboard" },
+                { label: "Content",   icon: "C", page: "content" },
+                { label: "Analytics", icon: "A", page: "analytics" },
+                { label: "Connect",   icon: "N", page: "connect" },
+                { label: "Schedule",  icon: "S", page: "schedule" },
+                { label: "Settings",  icon: "G", page: "settings" },
+                { label: "About",     icon: "i", page: "about" }
             ]
 
             Rectangle {
@@ -129,7 +129,7 @@ Rectangle {
                 Text {
                     text: "Quick Stats"
                     font.pixelSize: 10
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textMuted
                 }
 
@@ -137,8 +137,10 @@ Rectangle {
                     spacing: theme.spacingSm
 
                     Text {
-                        text: "📝"
+                        text: "C"
                         font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                        color: theme.accent
                     }
                     Text {
                         id: totalPostsText
@@ -204,8 +206,10 @@ Rectangle {
                     Layout.preferredHeight: 24
 
                     Text {
-                        text: "🔔"
-                        font.pixelSize: 14
+                        text: "N"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        color: theme.textSecondary
                         anchors.centerIn: parent
                     }
 
@@ -226,7 +230,7 @@ Rectangle {
                             anchors.centerIn: parent
                             text: sidebar.notifCount > 99 ? "99+" : String(sidebar.notifCount)
                             font.pixelSize: 9
-                            font.bold: true
+                            font.weight: Font.DemiBold
                             color: "#ffffff"
                         }
                     }
@@ -281,7 +285,7 @@ Rectangle {
                         Text {
                             text: "Notifications"
                             font.pixelSize: 13
-                            font.bold: true
+                            font.weight: Font.DemiBold
                             color: theme.textPrimary
                             Layout.fillWidth: true
                         }
@@ -330,7 +334,7 @@ Rectangle {
                                 RowLayout {
                                     spacing: theme.spacingXs
                                     Text {
-                                        text: model.isError ? "❌" : "✅"
+                                        text: model.isError ? "!" : "OK"
                                         font.pixelSize: 10
                                     }
                                     Text {
@@ -391,8 +395,10 @@ Rectangle {
                 spacing: theme.spacingMd
 
                 Text {
-                    text: theme.darkMode ? "🌙" : "☀️"
-                    font.pixelSize: 14
+                    text: theme.darkMode ? "D" : "L"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: theme.textSecondary
                     Layout.preferredWidth: 24
                     horizontalAlignment: Text.AlignHCenter
                 }

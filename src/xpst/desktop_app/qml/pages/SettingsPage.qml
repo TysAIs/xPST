@@ -1,4 +1,4 @@
-import QtQuick 2.15
+﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
@@ -162,14 +162,14 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacingXl
+            anchors.margins: theme.pageMargin
             spacing: theme.spacingXl
 
             // Header
             Text {
                 text: "Settings"
-                font.pixelSize: 20
-                font.bold: true
+                font.pixelSize: 28
+                font.weight: Font.DemiBold
                 color: theme.textPrimary
             }
 
@@ -180,7 +180,7 @@ Page {
                 Text {
                     text: "General"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                 }
 
@@ -193,7 +193,7 @@ Page {
                     ColumnLayout {
                         id: generalCol
                         anchors.fill: parent
-                        anchors.margins: theme.spacingXl
+                        anchors.margins: theme.pageMargin
                         spacing: theme.spacingXl
 
                         ColumnLayout {
@@ -271,7 +271,7 @@ Page {
                 Text {
                     text: "Platforms"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                 }
 
@@ -284,7 +284,7 @@ Page {
                     ColumnLayout {
                         id: platformsCol
                         anchors.fill: parent
-                        anchors.margins: theme.spacingXl
+                        anchors.margins: theme.pageMargin
                         spacing: theme.spacingMd
 
                         Repeater {
@@ -326,7 +326,7 @@ Page {
                 Text {
                     text: "Rate Limits"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                 }
 
@@ -339,7 +339,7 @@ Page {
                     ColumnLayout {
                         id: rateCol
                         anchors.fill: parent
-                        anchors.margins: theme.spacingXl
+                        anchors.margins: theme.pageMargin
                         spacing: theme.spacingXl
 
                         ColumnLayout {
@@ -431,7 +431,7 @@ Page {
                 Text {
                     text: "Notifications"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                 }
 
@@ -444,7 +444,7 @@ Page {
                     ColumnLayout {
                         id: notifCol
                         anchors.fill: parent
-                        anchors.margins: theme.spacingXl
+                        anchors.margins: theme.pageMargin
                         spacing: theme.spacingMd
 
                         RowLayout {
@@ -484,7 +484,7 @@ Page {
                 Text {
                     text: "Encoding Preview"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                 }
 
@@ -572,7 +572,7 @@ Page {
                                     Text {
                                         text: modelData.platform
                                         font.pixelSize: 13
-                                        font.bold: true
+                                        font.weight: Font.DemiBold
                                         color: theme.textPrimary
                                     }
                                     Item { Layout.fillWidth: true }
@@ -622,9 +622,9 @@ Page {
                                         Text {
                                             id: genSampleLabel
                                             anchors.centerIn: parent
-                                            text: "🎬 Generate Sample"
+                                            text: "Generate sample"
                                             font.pixelSize: 9
-                                            font.bold: true
+                                            font.weight: Font.DemiBold
                                             color: "#ffffff"
                                         }
                                         MouseArea {
@@ -665,7 +665,7 @@ Page {
                 Text {
                     text: "Keyboard Shortcuts"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "Keyboard shortcuts section"
                     Accessible.role: Accessible.Heading
@@ -696,7 +696,7 @@ Page {
                     ColumnLayout {
                         id: shortcutListCol
                         anchors.fill: parent
-                        anchors.margins: theme.spacingXl
+                        anchors.margins: theme.pageMargin
                         spacing: 0
 
                         Repeater {
@@ -734,7 +734,7 @@ Page {
                                             anchors.margins: theme.spacingSm
                                             verticalAlignment: TextInput.AlignVCenter
                                             font.pixelSize: 12
-                                            font.family: "monospace"
+                                            font.family: theme.monoFontFamily
                                             color: theme.textPrimary
                                             readOnly: true
                                             text: modelData.key
@@ -840,7 +840,7 @@ Page {
                 Text {
                     text: "Developer"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "Developer settings section"
                     Accessible.role: Accessible.Heading
@@ -855,13 +855,13 @@ Page {
                     ColumnLayout {
                         id: mcpCol
                         anchors.fill: parent
-                        anchors.margins: theme.spacingXl
+                        anchors.margins: theme.pageMargin
                         spacing: theme.spacingMd
 
                         Text {
                             text: "MCP Server"
                             font.pixelSize: 14
-                            font.bold: true
+                            font.weight: Font.DemiBold
                             color: theme.textPrimary
                         }
 
@@ -890,7 +890,7 @@ Page {
                                     anchors.centerIn: parent
                                     text: mcpRunning ? "Stop" : "Start"
                                     font.pixelSize: 12
-                                    font.bold: true
+                                    font.weight: Font.DemiBold
                                     color: "#ffffff"
                                 }
 
@@ -942,11 +942,11 @@ Page {
                                     Text {
                                         text: modelData.name
                                         font.pixelSize: 12
-                                        font.family: "monospace"
+                                        font.family: theme.monoFontFamily
                                         color: theme.textPrimary
                                     }
                                     Text {
-                                        text: "— " + modelData.desc
+                                        text: "- " + modelData.desc
                                         font.pixelSize: 11
                                         color: theme.textSecondary
                                     }
@@ -957,7 +957,7 @@ Page {
                         Text {
                             text: "Connect via stdio: xpst-mcp"
                             font.pixelSize: 11
-                            font.family: "monospace"
+                            font.family: theme.monoFontFamily
                             color: theme.textMuted
                             visible: mcpRunning
                         }
@@ -982,7 +982,7 @@ Page {
                         anchors.centerIn: parent
                         text: "Save Settings"
                         font.pixelSize: 13
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: hasErrors ? theme.textMuted : "#ffffff"
                     }
 

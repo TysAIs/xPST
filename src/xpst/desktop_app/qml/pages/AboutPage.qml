@@ -30,7 +30,7 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacingXl
+            anchors.margins: theme.pageMargin
             spacing: theme.spacingXl
 
             // Header
@@ -38,8 +38,8 @@ Page {
                 spacing: theme.spacingSm
                 Text {
                     text: "About xPST"
-                    font.pixelSize: 20
-                    font.bold: true
+                    font.pixelSize: 28
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "About xPST page title"
                     Accessible.role: Accessible.Heading
@@ -56,20 +56,20 @@ Page {
                 ColumnLayout {
                     id: aboutHeaderCol
                     anchors.fill: parent
-                    anchors.margins: theme.spacingXl
+                    anchors.margins: theme.pageMargin
                     spacing: theme.spacingLg
 
                     RowLayout {
                         Layout.alignment: Qt.AlignHCenter
                         spacing: theme.spacingMd
                         Text {
-                            text: "⚡"
+                            text: "x"
                             font.pixelSize: 32
                         }
                         Text {
                             text: "xPST"
                             font.pixelSize: 28
-                            font.bold: true
+                            font.weight: Font.DemiBold
                             color: theme.textPrimary
                         }
                     }
@@ -105,7 +105,7 @@ Page {
                 Text {
                     text: "Dependencies"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "Dependencies section"
                     Accessible.role: Accessible.Heading
@@ -120,12 +120,12 @@ Page {
                     ColumnLayout {
                         id: depsCol
                         anchors.fill: parent
-                        anchors.margins: theme.spacingXl
+                        anchors.margins: theme.pageMargin
                         spacing: theme.spacingSm
 
                         Repeater {
                             model: [
-                                { name: "PySide6", desc: "Qt for Python — UI framework", license: "LGPL-3.0" },
+                                { name: "PySide6", desc: "Qt for Python - UI framework", license: "LGPL-3.0" },
                                 { name: "yt-dlp", desc: "Video downloading", license: "Unlicense" },
                                 { name: "instagrapi", desc: "Instagram API client", license: "MIT" },
                                 { name: "twikit", desc: "X/Twitter API client", license: "MIT" },
@@ -146,11 +146,11 @@ Page {
                                 Text {
                                     text: modelData.name
                                     font.pixelSize: 13
-                                    font.bold: true
+                                    font.weight: Font.DemiBold
                                     color: theme.textPrimary
                                 }
                                 Text {
-                                    text: "— " + modelData.desc
+                                    text: "- " + modelData.desc
                                     font.pixelSize: 12
                                     color: theme.textSecondary
                                     Layout.fillWidth: true
@@ -165,7 +165,7 @@ Page {
                                         anchors.centerIn: parent
                                         text: modelData.license
                                         font.pixelSize: 9
-                                        font.bold: true
+                                        font.weight: Font.DemiBold
                                         color: theme.accent
                                     }
                                 }
@@ -181,7 +181,7 @@ Page {
                 Text {
                     text: "License"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "License section"
                     Accessible.role: Accessible.Heading
@@ -196,7 +196,7 @@ Page {
                     ColumnLayout {
                         id: licenseCol
                         anchors.fill: parent
-                        anchors.margins: theme.spacingXl
+                        anchors.margins: theme.pageMargin
                         spacing: theme.spacingSm
 
                         Text {
@@ -205,12 +205,12 @@ Page {
                             color: theme.textSecondary
                         }
                         Text {
-                            text: "• MIT License"
+                            text: "- MIT License"
                             font.pixelSize: 13
                             color: theme.textPrimary
                         }
                         Text {
-                            text: "• Apache License 2.0"
+                            text: "- Apache License 2.0"
                             font.pixelSize: 13
                             color: theme.textPrimary
                         }
@@ -229,7 +229,7 @@ Page {
                 Text {
                     text: "Recent Changes"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "Recent Changes section"
                     Accessible.role: Accessible.Heading
@@ -245,7 +245,7 @@ Page {
                     ColumnLayout {
                         id: changelogCol
                         anchors.fill: parent
-                        anchors.margins: theme.spacingXl
+                        anchors.margins: theme.pageMargin
                         spacing: theme.spacingSm
 
                         Repeater {
@@ -256,7 +256,7 @@ Page {
                                 Text {
                                     text: modelData.hash || ""
                                     font.pixelSize: 11
-                                    font.family: "monospace"
+                                    font.family: theme.monoFontFamily
                                     color: theme.accent
                                     Layout.preferredWidth: 60
                                 }
@@ -287,7 +287,7 @@ Page {
                 Text {
                     text: "Links"
                     font.pixelSize: 16
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "Links section"
                     Accessible.role: Accessible.Heading
@@ -302,16 +302,16 @@ Page {
                     ColumnLayout {
                         id: linksCol
                         anchors.fill: parent
-                        anchors.margins: theme.spacingXl
+                        anchors.margins: theme.pageMargin
                         spacing: theme.spacingMd
 
                         Repeater {
                             model: [
-                                { label: "Homepage", icon: "🌐", url: "https://github.com/TysAIs/xPST" },
-                                { label: "Repository", icon: "📦", url: "https://github.com/TysAIs/xPST" },
-                                { label: "Documentation", icon: "📖", url: "https://github.com/TysAIs/xPST/wiki" },
-                                { label: "Report Issues", icon: "🐛", url: "https://github.com/TysAIs/xPST/issues" },
-                                { label: "Changelog", icon: "📋", url: "https://github.com/TysAIs/xPST/blob/main/CHANGELOG.md" }
+                                { label: "Homepage", icon: "Web", url: "https://github.com/TysAIs/xPST" },
+                                { label: "Repository", icon: "Repo", url: "https://github.com/TysAIs/xPST" },
+                                { label: "Documentation", icon: "Docs", url: "https://github.com/TysAIs/xPST/wiki" },
+                                { label: "Report Issues", icon: "Issue", url: "https://github.com/TysAIs/xPST/issues" },
+                                { label: "Changelog", icon: "Log", url: "https://github.com/TysAIs/xPST/blob/main/CHANGELOG.md" }
                             ]
 
                             Rectangle {
@@ -336,7 +336,7 @@ Page {
                                         Layout.fillWidth: true
                                     }
                                     Text {
-                                        text: "→"
+                                        text: ">"
                                         font.pixelSize: 13
                                         color: theme.textMuted
                                     }

@@ -1,8 +1,8 @@
-import QtQuick 2.15
+﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import QtMultimedia 5.15
-import Qt.labs.settings 1.1
+import QtMultimedia
+import QtCore
 
 Page {
     id: contentPage
@@ -146,7 +146,7 @@ Page {
         return duplicateTitles[title] === true
     }
 
-    // Selection helpers (Item 8 — batch post)
+    // Selection helpers (Item 8 - batch post)
     function toggleSelection(postId) {
         var items = selectedItems.slice()
         var idx = items.indexOf(postId)
@@ -245,9 +245,9 @@ Page {
             radius: theme.radiusXl
             Text {
                 anchors.centerIn: parent
-                text: "🗑 Confirm Delete"
+                text: "Confirm Delete"
                 font.pixelSize: 14
-                font.bold: true
+                font.weight: Font.DemiBold
                 color: theme.textPrimary
             }
         }
@@ -306,7 +306,7 @@ Page {
                         anchors.centerIn: parent
                         text: "Delete"
                         font.pixelSize: 13
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: "#ffffff"
                     }
                     MouseArea {
@@ -331,7 +331,7 @@ Page {
         anchors.centerIn: parent
         width: Math.min(500, parent.width - 60)
         height: Math.min(500, parent.height - 60)
-        title: "Batch Post — Per-Platform Captions"
+        title: "Batch Post - Per-Platform Captions"
         background: Rectangle {
             color: theme.surfaceCard
             radius: theme.radiusXl
@@ -342,9 +342,9 @@ Page {
             radius: theme.radiusXl
             Text {
                 anchors.centerIn: parent
-                text: "🚀 Batch Post — " + selectedItems.length + " items"
+                text: "Batch post - " + selectedItems.length + " items"
                 font.pixelSize: 14
-                font.bold: true
+                font.weight: Font.DemiBold
                 color: theme.textPrimary
             }
         }
@@ -385,7 +385,7 @@ Page {
                             Text {
                                 text: modelData.name
                                 font.pixelSize: 12
-                                font.bold: true
+                                font.weight: Font.DemiBold
                                 color: theme.textSecondary
                             }
                         }
@@ -434,9 +434,9 @@ Page {
                     color: theme.accent
                     Text {
                         anchors.centerIn: parent
-                        text: "🚀 Post to All Platforms"
+                        text: "Post to all platforms"
                         font.pixelSize: 12
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: "#ffffff"
                     }
                     MouseArea {
@@ -494,9 +494,9 @@ Page {
             radius: theme.radiusXl
             Text {
                 anchors.centerIn: parent
-                text: "🎬 " + (contentPage.previewVideoTitle || "Video Preview")
+                text: "Video " + (contentPage.previewVideoTitle || "Video Preview")
                 font.pixelSize: 14
-                font.bold: true
+                font.weight: Font.DemiBold
                 color: theme.textPrimary
             }
         }
@@ -514,15 +514,16 @@ Page {
                 MediaPlayer {
                     id: videoPlayer
                     source: contentPage.previewVideoPath ? "file://" + contentPage.previewVideoPath : ""
+                    videoOutput: videoOutput
                     autoPlay: false
-                    onStatusChanged: {
-                        if (status === MediaPlayer.Loading || status === MediaPlayer.Buffering) {
+                    onMediaStatusChanged: {
+                        if (mediaStatus === MediaPlayer.LoadingMedia || mediaStatus === MediaPlayer.BufferingMedia) {
                             contentPage.videoLoading = true
-                        } else if (status === MediaPlayer.Loaded || status === MediaPlayer.Buffered || status === MediaPlayer.NoMedia || status === MediaPlayer.InvalidMedia) {
+                        } else if (mediaStatus === MediaPlayer.LoadedMedia || mediaStatus === MediaPlayer.BufferedMedia || mediaStatus === MediaPlayer.NoMedia || mediaStatus === MediaPlayer.InvalidMedia) {
                             contentPage.videoLoading = false
                         }
                     }
-                    onError: function(error, errorString) {
+                    onErrorOccurred: function(error, errorString) {
                         contentPage.videoError = true
                         contentPage.videoLoading = false
                     }
@@ -535,7 +536,6 @@ Page {
                 VideoOutput {
                     id: videoOutput
                     anchors.fill: parent
-                    source: videoPlayer
                     visible: contentPage.previewVideoPath.length > 0 && !contentPage.videoError
                 }
 
@@ -555,7 +555,7 @@ Page {
                     spacing: theme.spacingSm
 
                     Text {
-                        text: "⚠️"
+                        text: "!"
                         font.pixelSize: 32
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
@@ -563,7 +563,7 @@ Page {
                     Text {
                         text: "Codec not available"
                         font.pixelSize: 14
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: "#ffffff"
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
@@ -581,14 +581,14 @@ Page {
                 Text {
                     anchors.centerIn: parent
                     text: contentPage.previewVideoPath
-                          ? "📹\n" + contentPage.previewVideoPath.split("/").pop()
+                          ? "Video\n" + contentPage.previewVideoPath.split("/").pop()
                           : "No video file available"
                     font.pixelSize: 13
                     color: "#ffffff"
                     horizontalAlignment: Text.AlignHCenter
                     visible: !contentPage.videoError && !contentPage.videoLoading &&
-                             (videoPlayer.status === MediaPlayer.NoMedia ||
-                              videoPlayer.status === MediaPlayer.InvalidMedia)
+                             (videoPlayer.mediaStatus === MediaPlayer.NoMedia ||
+                              videoPlayer.mediaStatus === MediaPlayer.InvalidMedia)
                 }
             }
 
@@ -652,7 +652,7 @@ Page {
                         anchors.centerIn: parent
                         text: videoPlayer.playbackState === MediaPlayer.PlayingState ? "⏸ Pause" : "▶ Play"
                         font.pixelSize: 12
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: "#ffffff"
                     }
                     MouseArea {
@@ -738,9 +738,9 @@ Page {
             radius: theme.radiusXl
             Text {
                 anchors.centerIn: parent
-                text: "✏️ Edit Captions — " + contentPage.editingPostId
+                text: "Edit Captions - " + contentPage.editingPostId
                 font.pixelSize: 14
-                font.bold: true
+                font.weight: Font.DemiBold
                 color: theme.textPrimary
             }
         }
@@ -779,7 +779,7 @@ Page {
                             Text {
                                 text: modelData.charAt(0).toUpperCase() + modelData.slice(1)
                                 font.pixelSize: 12
-                                font.bold: true
+                                font.weight: Font.DemiBold
                                 color: theme.textSecondary
                             }
                         }
@@ -829,7 +829,7 @@ Page {
                         anchors.centerIn: parent
                         text: "Save Captions"
                         font.pixelSize: 12
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: "#ffffff"
                     }
                     MouseArea {
@@ -861,7 +861,7 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacingXl
+            anchors.margins: theme.pageMargin
             spacing: theme.spacingXl
 
             // Header with grid/list toggle (Item 6)
@@ -869,8 +869,8 @@ Page {
                 Layout.fillWidth: true
                 Text {
                     text: "Content Library"
-                    font.pixelSize: 20
-                    font.bold: true
+                    font.pixelSize: 28
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Layout.fillWidth: true
                     Accessible.name: "Content Library page title"
@@ -905,8 +905,8 @@ Page {
                         color: contentPage.listViewMode ? theme.accentMuted : "transparent"
                         Text {
                             anchors.centerIn: parent
-                            text: "☰"
-                            font.pixelSize: 16
+                            text: "List"
+                            font.pixelSize: 11
                             color: contentPage.listViewMode ? theme.accent : theme.textMuted
                         }
                         MouseArea {
@@ -920,7 +920,7 @@ Page {
                 }
             }
 
-            // Search bar (Item 4 — wired)
+            // Search bar (Item 4 - wired)
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 44
@@ -929,11 +929,11 @@ Page {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: theme.spacingXl
-                    anchors.rightMargin: theme.spacingXl
+                    anchors.leftMargin: theme.pageMargin
+                    anchors.rightMargin: theme.pageMargin
                     spacing: theme.spacingSm
 
-                    Text { text: "🔍"; font.pixelSize: 13 }
+                    Text { text: "Search"; font.pixelSize: 13 }
                     TextField {
                         id: searchField
                         Layout.fillWidth: true
@@ -953,7 +953,7 @@ Page {
                         visible: searchField.text.length > 0
                         Text {
                             anchors.centerIn: parent
-                            text: "✕"
+                            text: "Clear"
                             font.pixelSize: 10
                             color: theme.textMuted
                         }
@@ -1032,14 +1032,14 @@ Page {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: theme.spacingXl
-                    anchors.rightMargin: theme.spacingXl
+                    anchors.leftMargin: theme.pageMargin
+                    anchors.rightMargin: theme.pageMargin
                     spacing: theme.spacingMd
 
                     Text {
-                        text: "☑ " + selectedItems.length + " selected"
+                        text: selectedItems.length + " selected"
                         font.pixelSize: 12
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: theme.textPrimary
                     }
 
@@ -1074,9 +1074,9 @@ Page {
                         Text {
                             id: deleteSelectedLabel
                             anchors.centerIn: parent
-                            text: "🗑 Delete Selected"
+                            text: "Delete selected"
                             font.pixelSize: 11
-                            font.bold: true
+                            font.weight: Font.DemiBold
                             color: "#ffffff"
                         }
                         MouseArea {
@@ -1097,9 +1097,9 @@ Page {
                         Text {
                             id: postSelectedLabel
                             anchors.centerIn: parent
-                            text: "🚀 Post Selected"
+                            text: "Post selected"
                             font.pixelSize: 11
-                            font.bold: true
+                            font.weight: Font.DemiBold
                             color: "#ffffff"
                         }
                         MouseArea {
@@ -1113,7 +1113,7 @@ Page {
                 }
             }
 
-            // Content grid view — using pageItems (filtered + sorted + paginated)
+            // Content grid view - using pageItems (filtered + sorted + paginated)
             GridLayout {
                 Layout.fillWidth: true
                 columns: contentPage.listViewMode ? 1 : 3
@@ -1132,7 +1132,7 @@ Page {
 
                         RowLayout {
                             anchors.fill: parent
-                            anchors.margins: theme.spacingXl
+                            anchors.margins: theme.pageMargin
                             spacing: theme.spacingMd
 
                             // Selection checkbox (Item 8)
@@ -1146,9 +1146,9 @@ Page {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "✓"
+                                    text: "OK"
                                     font.pixelSize: 12
-                                    font.bold: true
+                                    font.weight: Font.DemiBold
                                     color: "#ffffff"
                                     visible: contentPage.isSelected(modelData.postId)
                                 }
@@ -1197,13 +1197,13 @@ Page {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "🎬"
+                                    text: "Video"
                                     font.pixelSize: contentPage.listViewMode ? 16 : 24
                                     color: theme.textMuted
                                     visible: thumbImage.status !== Image.Ready
                                 }
 
-                                // Click to preview video (Item 5 — now with embedded player)
+                                // Click to preview video (Item 5 - now with embedded player)
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
@@ -1225,14 +1225,14 @@ Page {
                                     Text {
                                         text: modelData.title || "Untitled"
                                         font.pixelSize: 13
-                                        font.bold: true
+                                        font.weight: Font.DemiBold
                                         color: theme.textPrimary
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
                                         maximumLineCount: 1
                                     }
 
-                                    // Similarity badge (#17) — dedup confidence score
+                                    // Similarity badge (#17) - dedup confidence score
                                     Rectangle {
                                         width: simLabel.implicitWidth + 8
                                         height: 16
@@ -1249,7 +1249,7 @@ Page {
                                             anchors.centerIn: parent
                                             text: contentPage.getSimilarityPercent(modelData) + "%"
                                             font.pixelSize: 8
-                                            font.bold: true
+                                            font.weight: Font.DemiBold
                                             color: {
                                                 var sim = contentPage.getSimilarityPercent(modelData)
                                                 if (sim >= 80) return theme.error
@@ -1289,7 +1289,7 @@ Page {
                                             anchors.centerIn: parent
                                             text: modelData.platform || ""
                                             font.pixelSize: 11
-                                            font.bold: true
+                                            font.weight: Font.DemiBold
                                             color: {
                                                 var p = (modelData.platform || "").toLowerCase()
                                                 if (p === "youtube") return theme.youtube
@@ -1322,7 +1322,7 @@ Page {
                                         color: editMouseArea.containsMouse ? theme.surfaceAlt : "transparent"
                                         Text {
                                             anchors.centerIn: parent
-                                            text: "✏️"
+                                            text: "Edit"
                                             font.pixelSize: 10
                                         }
                                         MouseArea {
@@ -1387,7 +1387,7 @@ Page {
                     Text {
                         id: prevLabel
                         anchors.centerIn: parent
-                        text: "← Previous"
+                        text: "< Previous"
                         font.pixelSize: 12
                         color: contentPage.currentPage > 1 ? theme.textPrimary : theme.textMuted
                     }
@@ -1418,7 +1418,7 @@ Page {
                     Text {
                         id: nextLabel
                         anchors.centerIn: parent
-                        text: "Next →"
+                        text: "Next >"
                         font.pixelSize: 12
                         color: contentPage.currentPage < contentPage.totalPages ? theme.textPrimary : theme.textMuted
                     }
@@ -1446,15 +1446,15 @@ Page {
                     spacing: theme.spacingMd
 
                     Text {
-                        text: "📭"
-                        font.pixelSize: 36
+                        text: "Empty"
+                        font.pixelSize: 24
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
                     }
                     Text {
                         text: "No content yet"
                         font.pixelSize: 16
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: theme.textSecondary
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter

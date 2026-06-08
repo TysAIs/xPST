@@ -1,4 +1,4 @@
-import QtQuick 2.15
+﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
@@ -117,7 +117,7 @@ Page {
                         width: parent.width
                         color: theme.textPrimary
                         font.pixelSize: 11
-                        font.family: "monospace"
+                        font.family: theme.monoFontFamily
                         wrapMode: TextEdit.Wrap
                         property string placeholderText: '[{"name":"ct0","value":"..."}, ...]'
 
@@ -171,7 +171,7 @@ Page {
                         anchors.centerIn: parent
                         text: "Save Cookies"
                         font.pixelSize: 12
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: "#ffffff"
                     }
                     MouseArea {
@@ -203,7 +203,7 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacingXl
+            anchors.margins: theme.pageMargin
             spacing: theme.spacingXl
 
             // Header
@@ -211,8 +211,8 @@ Page {
                 spacing: theme.spacingXs
                 Text {
                     text: "Connect Platforms"
-                    font.pixelSize: 20
-                    font.bold: true
+                    font.pixelSize: 28
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Accessible.name: "Connect Platforms page title"
                     Accessible.role: Accessible.Heading
@@ -233,10 +233,10 @@ Page {
 
                 Repeater {
                     model: [
-                        { name: "YouTube",   key: "youtube",   icon: "▶️", color: theme.youtube },
-                        { name: "Instagram", key: "instagram", icon: "📷", color: theme.instagram },
-                        { name: "X",         key: "x",         icon: "𝕏",  color: theme.xtwitter },
-                        { name: "TikTok",    key: "tiktok",    icon: "🎵", color: theme.tiktok }
+                        { name: "YouTube",   key: "youtube",   icon: "YT", color: theme.youtube },
+                        { name: "Instagram", key: "instagram", icon: "IG", color: theme.instagram },
+                        { name: "X",         key: "x",         icon: "X",  color: theme.xtwitter },
+                        { name: "TikTok",    key: "tiktok",    icon: "TT", color: theme.tiktok }
                     ]
 
                     Rectangle {
@@ -250,7 +250,7 @@ Page {
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: theme.spacingXl
+                            anchors.margins: theme.pageMargin
                             spacing: theme.spacingMd
 
                             RowLayout {
@@ -262,7 +262,9 @@ Page {
                                     Text {
                                         anchors.centerIn: parent
                                         text: modelData.icon
-                                        font.pixelSize: 18
+                                        font.pixelSize: 14
+                                        font.weight: Font.DemiBold
+                                        color: modelData.color
                                     }
                                 }
 
@@ -271,7 +273,7 @@ Page {
                                     Text {
                                         text: modelData.name
                                         font.pixelSize: 16
-                                        font.bold: true
+                                        font.weight: Font.DemiBold
                                         color: theme.textPrimary
                                     }
                                     RowLayout {
@@ -318,7 +320,7 @@ Page {
 
                                 // Circuit breaker warning
                                 Text {
-                                    text: "⚠ Circuit breaker open"
+                                    text: "Circuit breaker open"
                                     font.pixelSize: 11
                                     color: theme.warning
                                     visible: platformStatus.circuitBreakerOpen
@@ -368,7 +370,7 @@ Page {
                                         text: isConnecting ? "Connecting..."
                                              : platformStatus.connected ? "Disconnect" : "Connect"
                                         font.pixelSize: 13
-                                        font.bold: true
+                                        font.weight: Font.DemiBold
                                         color: platformStatus.connected ? theme.textSecondary : "#ffffff"
                                     }
                                 }
@@ -394,7 +396,7 @@ Page {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "🍪 Paste Cookies"
+                                    text: "Paste cookies"
                                     font.pixelSize: 11
                                     color: theme.textSecondary
                                 }

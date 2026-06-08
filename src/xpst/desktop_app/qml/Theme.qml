@@ -2,64 +2,44 @@ pragma Singleton
 import QtQuick 2.15
 
 QtObject {
-    // Canvas / Background
-    readonly property color canvas: "#0a0a0f"
-    readonly property color surface: "#12121a"
-    readonly property color surfaceAlt: "#1a1a25"
-    readonly property color surfaceCard: "#1e1e2a"
+    property bool darkMode: false
 
-    // Text
-    readonly property color textPrimary: "#f0f0f5"
-    readonly property color textSecondary: "#a0a0b0"
-    readonly property color textMuted: "#6b6b80"
+    readonly property color canvas: darkMode ? "#1c1c1e" : "#f5f5f7"
+    readonly property color surface: darkMode ? "#242426" : "#fbfbfd"
+    readonly property color surfaceAlt: darkMode ? "#2c2c2e" : "#f0f0f2"
+    readonly property color surfaceCard: darkMode ? "#2c2c2e" : "#ffffff"
 
-    // Accent
-    readonly property color accent: "#6366f1"
-    readonly property color accentHover: "#818cf8"
-    readonly property color accentMuted: "#312e81"
+    readonly property color textPrimary: darkMode ? "#f5f5f7" : "#1d1d1f"
+    readonly property color textSecondary: darkMode ? "#c7c7cc" : "#5f6368"
+    readonly property color textMuted: darkMode ? "#8e8e93" : "#8a8f98"
 
-    // Status
-    readonly property color success: "#22c55e"
-    readonly property color warning: "#f59e0b"
-    readonly property color error: "#ef4444"
+    readonly property color accent: "#007aff"
+    readonly property color accentHover: "#0a84ff"
+    readonly property color accentMuted: darkMode ? "#0f355f" : "#dbeafe"
 
-    // Platform
-    readonly property color youtube: "#ff0000"
-    readonly property color instagram: "#e1306c"
-    readonly property color xPlatform: "#1d9bf0"
-    readonly property color tiktok: "#00f2ea"
+    readonly property color success: darkMode ? "#30d158" : "#248a3d"
+    readonly property color warning: darkMode ? "#ffd60a" : "#b26a00"
+    readonly property color error: darkMode ? "#ff453a" : "#d70015"
 
-    // Spacing
-    readonly property int spacing4: 4
-    readonly property int spacing8: 8
-    readonly property int spacing12: 12
-    readonly property int spacing16: 16
-    readonly property int spacing24: 24
-    readonly property int spacing32: 32
+    readonly property color youtube: "#ff0033"
+    readonly property color instagram: "#c13584"
+    readonly property color xtwitter: "#1d9bf0"
+    readonly property color xPlatform: xtwitter
+    readonly property color tiktok: "#00b8b8"
 
-    // Radius
-    readonly property int radius6: 6
-    readonly property int radius8: 8
-    readonly property int radius12: 12
-    readonly property int radius16: 16
+    readonly property int spacingXs: 4
+    readonly property int spacingSm: 8
+    readonly property int spacingMd: 12
+    readonly property int spacingLg: 16
+    readonly property int spacingXl: 24
+    readonly property int spacingXxl: 32
+    readonly property int pageMargin: 28
 
-    // Font sizes
-    readonly property int fontXs: 11
-    readonly property int fontSm: 12
-    readonly property int fontMd: 14
-    readonly property int fontLg: 16
-    readonly property int fontXl: 20
-    readonly property int font2Xl: 26
-    readonly property int font3Xl: 32
+    readonly property int radiusSm: 4
+    readonly property int radiusMd: 6
+    readonly property int radiusLg: 8
+    readonly property int radiusXl: 8
 
-    // Light theme overrides (toggleable)
-    property bool darkMode: true
-
-    readonly property color effectiveCanvas: darkMode ? canvas : "#f5f5f8"
-    readonly property color effectiveSurface: darkMode ? surface : "#ffffff"
-    readonly property color effectiveSurfaceAlt: darkMode ? surfaceAlt : "#eeeef2"
-    readonly property color effectiveSurfaceCard: darkMode ? surfaceCard : "#ffffff"
-    readonly property color effectiveTextPrimary: darkMode ? textPrimary : "#1a1a25"
-    readonly property color effectiveTextSecondary: darkMode ? textSecondary : "#555565"
-    readonly property color effectiveTextMuted: darkMode ? textMuted : "#888899"
+    readonly property string fontFamily: "Segoe UI"
+    readonly property string monoFontFamily: "Cascadia Mono"
 }

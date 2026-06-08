@@ -47,6 +47,10 @@ jobs:
       - name: Build package
         run: python -m build
 
+      - name: Desktop QML smoke
+        shell: bash
+        run: QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py
+
       - name: CLI smoke
         shell: bash
         run: |

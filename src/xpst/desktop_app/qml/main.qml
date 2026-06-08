@@ -1,4 +1,4 @@
-import QtQuick 2.15
+﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
@@ -10,7 +10,7 @@ ApplicationWindow {
     height: 800
     minimumWidth: 960
     minimumHeight: 600
-    title: "xPST — Cross-Posting Suite"
+    title: "xPST - Cross-Posting Suite"
     color: theme.canvas
 
     property string currentPage: "dashboard"
@@ -102,7 +102,7 @@ ApplicationWindow {
             anchors.centerIn: parent
             text: toast.message
             font.pixelSize: 13
-            font.bold: true
+            font.weight: Font.DemiBold
             color: "#ffffff"
         }
 
@@ -138,7 +138,7 @@ ApplicationWindow {
             spacing: 16
 
             Text {
-                text: "⚠️"
+                text: "!"
                 font.pixelSize: 32
                 Layout.alignment: Qt.AlignHCenter
             }
@@ -167,7 +167,7 @@ ApplicationWindow {
                         anchors.centerIn: parent
                         text: "Retry"
                         font.pixelSize: 13
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: "#ffffff"
                     }
 
@@ -462,15 +462,17 @@ ApplicationWindow {
             spacing: 16
 
             Text {
-                text: "📹"
-                font.pixelSize: 48
+                text: "Video"
+                font.pixelSize: 28
+                font.weight: Font.DemiBold
+                color: "#ffffff"
                 horizontalAlignment: Text.AlignHCenter
                 Layout.alignment: Qt.AlignHCenter
             }
             Text {
                 text: "Drop video to post"
                 font.pixelSize: 18
-                font.bold: true
+                font.weight: Font.DemiBold
                 color: "#ffffff"
                 horizontalAlignment: Text.AlignHCenter
                 Layout.alignment: Qt.AlignHCenter
@@ -517,7 +519,7 @@ ApplicationWindow {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "🎬"
+                    text: "Video"
                     font.pixelSize: 36
                     color: theme.textMuted
                     visible: dropThumbnail.status !== Image.Ready
@@ -529,9 +531,9 @@ ApplicationWindow {
                 spacing: 4
                 Layout.fillWidth: true
                 Text {
-                    text: "🎬 " + (dropCaptionDialog.droppedPath ? dropCaptionDialog.droppedPath.split("/").pop() : "")
+                    text: "Video " + (dropCaptionDialog.droppedPath ? dropCaptionDialog.droppedPath.split("/").pop() : "")
                     font.pixelSize: 14
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     color: theme.textPrimary
                     Layout.fillWidth: true
                     elide: Text.ElideMiddle
@@ -616,7 +618,7 @@ ApplicationWindow {
                         anchors.centerIn: parent
                         text: "Post"
                         font.pixelSize: 13
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         color: "#ffffff"
                     }
                     MouseArea {
