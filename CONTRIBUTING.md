@@ -14,7 +14,7 @@ Thank you for your interest in contributing to xPST! This document provides guid
 
 ```bash
 # Clone the repo
-git clone https://github.com/xPSTOwner/XPST.git
+git clone https://github.com/xPSTOwner/xPST.git
 cd ~/XPST
 
 # Create virtual environment
@@ -41,7 +41,7 @@ ruff format src/ tests/
 
 ### Reporting Bugs
 
-1. Check existing [issues](https://github.com/xPSTOwner/XPST/issues) first
+1. Check existing [issues](https://github.com/xPSTOwner/xPST/issues) first
 2. Create a new issue with:
    - Clear title and description
    - Steps to reproduce
@@ -51,7 +51,7 @@ ruff format src/ tests/
 
 ### Suggesting Features
 
-1. Check existing [discussions](https://github.com/xPSTOwner/XPST/discussions)
+1. Check existing [discussions](https://github.com/xPSTOwner/xPST/discussions)
 2. Open a new discussion with:
    - Use case description
    - Proposed solution
@@ -282,9 +282,9 @@ twine upload dist/*
 
 ### Communication
 
-- [GitHub Issues](https://github.com/xPSTOwner/XPST/issues): Bug reports
-- [GitHub Discussions](https://github.com/xPSTOwner/XPST/discussions): Questions, ideas
-- [Pull Requests](https://github.com/xPSTOwner/XPST/pulls): Code contributions
+- [GitHub Issues](https://github.com/xPSTOwner/xPST/issues): Bug reports
+- [GitHub Discussions](https://github.com/xPSTOwner/xPST/discussions): Questions, ideas
+- [Pull Requests](https://github.com/xPSTOwner/xPST/pulls): Code contributions
 
 ## 🙏 Thank You!
 

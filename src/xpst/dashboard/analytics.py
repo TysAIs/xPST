@@ -28,10 +28,10 @@ PLATFORM_COLORS = {
 }
 
 PLATFORM_ICONS = {
-    "youtube": "smart_display",
-    "instagram": "photo_camera",
-    "x": "tag",
-    "tiktok": "music_note",
+    "youtube": "▶",
+    "instagram": "📷",
+    "x": "𝕏",
+    "tiktok": "♪",
 }
 
 PLATFORM_LABELS = {

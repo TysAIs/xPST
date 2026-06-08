@@ -777,14 +777,35 @@ def _status_label(status: str) -> str:
     return {"ok": "Healthy", "degraded": "Degraded", "error": "Error", "unknown": "Unknown"}.get(status, "Unknown")
 
 
+# Material Icons → Unicode mapping (icons that actually render everywhere)
+_ICONS = {
+    "hub": "⚡", "dashboard": "◉", "video_library": "◫", "insights": "◈",
+    "link": "⧫", "settings": "⚙", "dark_mode": "☽", "light_mode": "☀",
+    "smart_display": "▶", "photo_camera": "📷", "tag": "𝕏", "music_note": "♪",
+    "movie": "▶", "circle": "●", "visibility": "👁", "favorite": "♥",
+    "comment": "💬", "share": "↗", "check_circle": "✓", "cancel": "✗",
+    "info": "ℹ", "folder": "📂", "emoji_events": "🏆", "schedule": "⏱",
+    "add_link": "⛓", "search": "🔍", "refresh": "↻",
+}
+
+
+def _icon(name: str, size: str = "20px", color: str = ""):
+    """Render an icon using Unicode (works everywhere, no font CDN needed)."""
+    symbol = _ICONS.get(name, name)
+    style = f"font-size:{size}; line-height:1;"
+    if color:
+        style += f" color:{color};"
+    return ui.label(symbol).style(style)
+
+
 # ── Shared sidebar ──────────────────────────────────────────────────────
 
 _NAV_ITEMS = [
-    ("/", "dashboard", "Overview"),
-    ("/content", "video_library", "Content"),
-    ("/analytics", "insights", "Analytics"),
-    ("/connect", "link", "Connect"),
-    ("/settings", "settings", "Settings"),
+    ("/", "◉", "Overview"),
+    ("/content", "◫", "Content"),
+    ("/analytics", "◈", "Analytics"),
+    ("/connect", "⧫", "Connect"),
+    ("/settings", "⚙", "Settings"),
 ]
 
 
@@ -793,7 +814,7 @@ def _sidebar(current: str = "/"):
     with ui.column().classes("sidebar-container"):
         # Logo
         with ui.row().classes("sidebar-logo"):
-            ui.icon("hub", size="24px", color=ACCENT)
+            _icon("hub", size="24px", color=ACCENT)
             ui.label("xPST").classes("sidebar-logo-text")
 
         # Navigation
@@ -801,7 +822,7 @@ def _sidebar(current: str = "/"):
             is_active = path == current
             cls = "nav-item active" if is_active else "nav-item"
             with ui.link(target=path).classes(cls):
-                ui.icon(icon, size="20px")
+                _icon(icon, size="20px")
                 ui.label(label)
 
         # Spacer
@@ -809,7 +830,7 @@ def _sidebar(current: str = "/"):
 
         # Theme toggle
         with ui.element("div").classes("theme-toggle").on("click", lambda: _toggle_theme()):
-            ui.icon("dark_mode", size="18px").mark("theme-icon")
+            _icon("dark_mode", size="18px").mark("theme-icon")
             ui.label("Dark Mode").mark("theme-label")
 
         # Footer
@@ -897,7 +918,7 @@ def _metric_card(icon: str, value: str, label: str, accent_color: str = ACCENT) 
     """Render a metric card with icon, value, and label."""
     with ui.element("div").classes("metric-card"):
         with ui.element("div").classes("metric-card-icon").style(f"background:{accent_color}18;"):
-            ui.icon(icon, size="20px", color=accent_color)
+            _icon(icon, size="20px", color=accent_color)
         ui.label(value).classes("metric-value")
         ui.label(label).classes("metric-label")
 
@@ -1028,7 +1049,7 @@ def _page_overview(collector: AnalyticsCollector) -> None:
                             with ui.element("div").classes("thumb-placeholder").style(
                                 f"background: linear-gradient(135deg, {plat_color}30 0%, {plat_color}10 100%);"
                             ):
-                                ui.icon(PLATFORM_ICONS.get(main_plat, "video_library"), size="32px", color=plat_color)
+                                _icon(PLATFORM_ICONS.get(main_plat, "video_library"), size="32px", color=plat_color)
 
                             with ui.column().style("padding:14px;"):
                                 caption = (p.get("caption") or "")[:80]
@@ -1049,7 +1070,7 @@ def _page_overview(collector: AnalyticsCollector) -> None:
                                     )
             else:
                 with ui.column().classes("items-center w-full").style("padding:40px 0;"):
-                    ui.icon("video_library", size="48px", color=DARK_TEXT_MUTED)
+                    _icon("video_library", size="48px", color=DARK_TEXT_MUTED)
                     ui.label("No posts yet").style("font-size:14px; color:var(--text-sec); margin-top:12px;")
                     ui.label("Run `xpst run` to get started").style("font-size:13px; color:var(--text-muted);")
 
@@ -1086,7 +1107,7 @@ def _page_overview(collector: AnalyticsCollector) -> None:
                             with ui.element("div").style(
                                 f"width:32px; height:32px; border-radius:8px; background:{color}15; display:flex; align-items:center; justify-content:center;"
                             ):
-                                ui.icon(p["icon"], size="18px", color=color)
+                                _icon(p["icon"], size="18px", color=color)
                             with ui.column().classes("gap-0"):
                                 ui.label(p["label"]).style("font-size:14px; font-weight:600; color:var(--text);")
                                 with ui.row().classes("items-center"):
@@ -1131,7 +1152,7 @@ def _render_posts_grid(container, posts: list):
     with container:
         if not posts:
             with ui.column().classes("items-center w-full").style("padding:60px 0;"):
-                ui.icon("video_library", size="48px", color=DARK_TEXT_MUTED)
+                _icon("video_library", size="48px", color=DARK_TEXT_MUTED)
                 ui.label("No content found").style("font-size:15px; color:var(--text-sec); margin-top:12px;")
                 ui.label("Your cross-posted content will appear here").style("font-size:13px; color:var(--text-muted);")
             return
@@ -1147,7 +1168,7 @@ def _render_posts_grid(container, posts: list):
                     with ui.element("div").classes("thumb-placeholder").style(
                         f"background: linear-gradient(135deg, {plat_color}25 0%, {plat_color}08 100%);"
                     ):
-                        ui.icon(PLATFORM_ICONS.get(main_plat, "movie"), size="36px", color=plat_color)
+                        _icon(PLATFORM_ICONS.get(main_plat, "movie"), size="36px", color=plat_color)
 
                         if status == "posted":
                             status_html = '<span class="badge" style="position:absolute; top:10px; right:10px; background:rgba(48,209,88,0.9); font-size:10px; z-index:1;">✓ POSTED</span>'
@@ -1244,7 +1265,7 @@ def _render_analytics_content(container, collector: AnalyticsCollector, platform
                                 with ui.element("div").style(
                                     f"width:32px; height:32px; border-radius:8px; background:{plat_color}15; display:flex; align-items:center; justify-content:center;"
                                 ):
-                                    ui.icon(PLATFORM_ICONS.get(plat_name, "circle"), size="18px", color=plat_color)
+                                    _icon(PLATFORM_ICONS.get(plat_name, "circle"), size="18px", color=plat_color)
                                 ui.label(plat_label).style("font-size:14px; font-weight:600; color:var(--text);")
 
                             with ui.column().classes("gap-2"):
@@ -1368,7 +1389,7 @@ def _render_analytics_content(container, collector: AnalyticsCollector, platform
                         with ui.element("div").style(
                             f"width:44px; height:30px; border-radius:6px; background:linear-gradient(135deg, {plat_color}25, {plat_color}08); display:flex; align-items:center; justify-content:center;"
                         ):
-                            ui.icon(PLATFORM_ICONS.get(main_plat, "movie"), size="14px", color=plat_color)
+                            _icon(PLATFORM_ICONS.get(main_plat, "movie"), size="14px", color=plat_color)
 
                         with ui.column().classes("gap-0 col-grow"):
                             caption = (p.get("caption") or "")[:40]
@@ -1414,13 +1435,13 @@ def _page_connect(collector: AnalyticsCollector) -> None:
                     with ui.element("div").style(
                         f"width:48px; height:48px; border-radius:12px; background:{color}15; display:flex; align-items:center; justify-content:center; margin:0 auto 16px;"
                     ):
-                        ui.icon(icon, size="24px", color=color)
+                        _icon(icon, size="24px", color=color)
 
                     ui.label(p["label"]).style("font-size:16px; font-weight:600; color:var(--text); margin-bottom:6px;")
 
                     if configured:
                         with ui.row().classes("items-center justify-center gap-1").style("margin-bottom:12px;"):
-                            ui.icon("check_circle", size="16px", color=GREEN)
+                            _icon("check_circle", size="16px", color=GREEN)
                             ui.label("Connected").style("font-size:13px; color:#30d158; font-weight:500;")
 
                         if p["name"] == "tiktok":
@@ -1442,7 +1463,7 @@ def _page_connect(collector: AnalyticsCollector) -> None:
                             ui.label("Status unknown").style("font-size:12px; color:var(--text-muted);")
                     else:
                         with ui.row().classes("items-center justify-center gap-1").style("margin-bottom:12px;"):
-                            ui.icon("cancel", size="16px", color=DARK_TEXT_MUTED)
+                            _icon("cancel", size="16px", color=DARK_TEXT_MUTED)
                             ui.label("Not Connected").style("font-size:13px; color:var(--text-muted); font-weight:500;")
 
                         descriptions = {
@@ -1465,7 +1486,7 @@ def _page_connect(collector: AnalyticsCollector) -> None:
         # Help
         with ui.element("div").classes("glass-card w-full").style("margin-top:24px;"):
             with ui.row().classes("items-center gap-3"):
-                ui.icon("info", size="18px", color=ACCENT)
+                _icon("info", size="18px", color=ACCENT)
                 ui.label("Setup Guide").style("font-size:15px; font-weight:600; color:var(--text);")
 
             ui.label("To connect a platform, run the following command in your terminal:").style(
@@ -1521,7 +1542,7 @@ def _page_settings(collector: AnalyticsCollector) -> None:
                         with ui.element("div").style(
                             f"width:32px; height:32px; border-radius:8px; background:{color}15; display:flex; align-items:center; justify-content:center;"
                         ):
-                            ui.icon(PLATFORM_ICONS[name], size="16px", color=color)
+                            _icon(PLATFORM_ICONS[name], size="16px", color=color)
                         ui.label(label).style("font-size:14px; font-weight:500; color:var(--text);")
                     ui.switch(value=enabled).props(f'color="{color}"')
 
@@ -1579,7 +1600,7 @@ def _page_settings(collector: AnalyticsCollector) -> None:
             ]
             for label, path in paths_info:
                 with ui.row().classes("items-center gap-3 path-row").style("padding:6px 0;"):
-                    ui.icon("folder", size="16px", color=DARK_TEXT_MUTED)
+                    _icon("folder", size="16px", color=DARK_TEXT_MUTED)
                     ui.label(f"{label}:").style("color:var(--text-sec); min-width:120px; font-size:clamp(0.75rem, 1vw, 0.8125rem);")
                     ui.label(path).classes("path-value").style("color:var(--text); font-family:monospace; font-size:clamp(0.7rem, 0.9vw, 0.75rem);")
 
