@@ -938,9 +938,11 @@ def delete(ctx: click.Context, video_id: str, platform: str, yes: bool, as_json:
 
 @main.command()
 @click.option("--port", "-p", default=8080, type=int, help="Dashboard HTTP port")
+@click.option("--api-only", is_flag=True, default=True, hidden=True,
+              help="API-only mode (default, no NiceGUI required)")
 @click.pass_context
-def dashboard(ctx: click.Context, port: int):
-    """Launch the web analytics dashboard"""
+def dashboard(ctx: click.Context, port: int, api_only: bool):
+    """Launch the web API dashboard"""
     config_path = ctx.obj.get("config_path")
     config_dir = "~/.xpst"
     if config_path:

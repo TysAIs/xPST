@@ -1,8 +1,9 @@
 """
 xPST Dashboard
 
-API-only mode: exposes analytics and server modules for programmatic access.
-NiceGUI UI code has been removed; use the desktop app for the GUI.
+API-only server exposing health, metrics, and state endpoints via FastAPI.
+No NiceGUI dependency required — install ``xpst[dashboard]`` for the
+full NiceGUI web UI, or use the native desktop app (``xpst app``).
 """
 
 from xpst.dashboard.analytics import AnalyticsCollector
