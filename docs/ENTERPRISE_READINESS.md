@@ -6,7 +6,7 @@ xPST is designed to remain free, open source, local-first, and user-controlled w
 
 | Area | Status | Notes |
 |---|---:|---|
-| Core tests | Passing | 787 passing, 6 skipped on Windows after the Windows compatibility pass. |
+| Core tests | Passing | 793 tests collected; macOS validation passed and Windows local validation passed with 787 passing, 6 skipped. |
 | Lint | Passing | `ruff check src tests` passes. Qt/QML bridge names are explicitly ignored where camelCase is required by QML. |
 | Vulnerability audit | Passing | `pip-audit` reports no known vulnerabilities in the local environment. |
 | Python package | Passing | Source distribution and wheel build successfully. |
@@ -22,8 +22,10 @@ Every public release should pass these checks:
 ```bash
 python -m pytest
 ruff check src tests
+mypy src/xpst
 pip-audit
 python -m build
+QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py
 xpst version --json
 xpst health --json
 ```
@@ -82,13 +84,13 @@ xPST should not claim that every platform integration is officially approved.
 
 After the Windows pass and release-readiness cleanup, xPST is a strong beta-to-release candidate:
 
-**8.9/10 for engineering readiness**
+**9.1/10 for engineering readiness**
 
 The main remaining gaps are operational rather than code-breaking:
 
-- CI release workflow with Trusted Publishing and artifact attestations
-- SBOM/checksum generation in release scripts
+- GitHub-hosted CI availability depends on repository/account billing and runner limits
+- Trusted Publishing configured and exercised during the tagged release flow
+- Optional artifact attestations for release assets
 - Windows/macOS code signing
 - Fresh external platform credential tests by the account owner
-- Gradually tightening the mypy baseline
-- Clearer UI polish pass on the desktop app
+- macOS notarization for broad public distribution

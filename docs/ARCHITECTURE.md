@@ -4,37 +4,33 @@ This document describes the high-level architecture of xPST, designed for enterp
 
 ## Overview
 
-xPST is a modular, plugin-based system for cross-posting short-form video content. It monitors TikTok for new videos and distributes them to YouTube Shorts, X/Twitter, and Instagram Reels.
+xPST is a modular, plugin-based system for cross-posting short-form video content. It can monitor TikTok, YouTube, Instagram, X/Twitter, and local files as sources, then publish supported video workflows to YouTube Shorts, Instagram Reels, and X/Twitter.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        xPST Engine                      │
-├─────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │   TikTok     │  │   YouTube    │  │   X/Twitter  │      │
-│  │   Source     │  │   Platform   │  │   Platform   │      │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘      │
-│         │                 │                  │               │
-│         ▼                 ▼                  ▼               │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │              Video Processing Pipeline                │   │
-│  │  Download → Encode → Upload → Track State            │   │
-│  └──────────────────────────────────────────────────────┘   │
-│                           │                                  │
-│                           ▼                                  │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │                    Core Services                      │   │
-│  │  State Manager │ Circuit Breakers │ Retry Logic      │   │
-│  │  Logger        │ Config Manager   │ Scheduler        │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
++----------------------+      +----------------------------+
+| Sources              |      | Upload targets             |
+|----------------------|      |----------------------------|
+| TikTok (yt-dlp)      |      | YouTube Shorts             |
+| YouTube              |----->| Instagram Reels            |
+| Instagram            |      | X/Twitter                  |
+| X/Twitter            |      +----------------------------+
+| Local filesystem     |
++----------+-----------+
+           |
+           v
++----------------------------------------------------------+
+| xPST Engine                                              |
+| Download -> Deduplicate -> Encode -> Upload -> Track     |
+|                                                          |
+| State manager | Circuit breakers | Retry | Quota | Logs  |
++----------------------------------------------------------+
 ```
 
 ## Design Principles
 
 ### 1. Separation of Concerns
 Each component has a single responsibility:
-- **Sources**: Download videos (TikTok)
+- **Sources**: Discover and download videos from TikTok, YouTube, Instagram, X/Twitter, and local files
 - **Platforms**: Upload videos (YouTube, X, Instagram)
 - **Engine**: Orchestrate workflow
 - **State**: Persist data
@@ -73,7 +69,7 @@ All settings in YAML config with sensible defaults:
 
 Responsible for downloading videos from source platforms.
 
-**Current**: TikTok (via yt-dlp)
+**Current**: TikTok, YouTube, Instagram, X/Twitter, and local files
 
 **Interface**:
 ```python
@@ -115,7 +111,7 @@ Each platform has research-verified optimal encoding settings:
 
 Orchestrates the entire workflow:
 
-1. **Fetch**: Get recent videos from TikTok
+1. **Fetch**: Get recent videos from enabled sources
 2. **Filter**: Identify new videos not yet posted
 3. **Download**: Download video files
 4. **Encode**: Create platform-specific versions
@@ -220,17 +216,17 @@ ffmpeg -i input.mp4 \
 ## Data Flow
 
 ```
-┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
-│ TikTok  │───▶│ Download│───▶│ Encode  │───▶│ Upload  │
-│ Source  │    │ Video   │    │ Per     │    │ To      │
-│         │    │         │    │ Platform│    │ Platform│
-└─────────┘    └─────────┘    └─────────┘    └─────────┘
-                                    │               │
-                                    ▼               ▼
-                              ┌─────────┐    ┌─────────┐
-                              │ State   │    │ Health  │
-                              │ Manager │    │ Monitor │
-                              └─────────┘    └─────────┘
++----------------+    +----------+    +----------+    +----------+
+| Enabled source |--->| Download |--->| Encode   |--->| Upload   |
+| TikTok/YT/IG/X |    | media    |    | per      |    | target   |
+| or local files |    |          |    | platform |    | platform |
++----------------+    +----------+    +----------+    +----------+
+                                           |              |
+                                           v              v
+                                      +----------+    +----------+
+                                      | State    |    | Health   |
+                                      | Manager  |    | Monitor  |
+                                      +----------+    +----------+
 ```
 
 ## Security Model

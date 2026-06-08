@@ -4,7 +4,7 @@ Get xPST up and running in 5 minutes.
 
 ## Prerequisites
 
-- **Python 3.9+** ([Download](https://python.org))
+- **Python 3.10+** ([Download](https://python.org))
 - **FFmpeg** ([Download](https://ffmpeg.org/download.html))
   - macOS: `brew install ffmpeg`
   - Ubuntu: `sudo apt install ffmpeg`
@@ -17,7 +17,7 @@ Get xPST up and running in 5 minutes.
 ```bash
 # Clone the repository
 git clone https://github.com/TysAIs/xPST.git
-cd ~/XPST
+cd xPST
 
 # Create virtual environment (recommended)
 python3 -m venv .venv
@@ -31,7 +31,7 @@ pip install -e .
 
 ```bash
 git clone https://github.com/TysAIs/xPST.git
-cd ~/XPST
+cd xPST
 
 # Install with uv
 uv pip install -e .
@@ -41,7 +41,7 @@ uv pip install -e .
 
 ```bash
 git clone https://github.com/TysAIs/xPST.git
-cd ~/XPST
+cd xPST
 
 # Build and run
 docker-compose up -d

@@ -10,7 +10,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green)
-![Tests](https://img.shields.io/badge/tests-787%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-793%20collected-brightgreen)
 ![Coverage](https://img.shields.io/codecov/c/github/TysAIs/xPST?label=coverage)
 ![Stars](https://img.shields.io/github/stars/TysAIs/xPST?style=social)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
@@ -21,7 +21,7 @@
 
 ---
 
-xPST is a local-first, open-source tool that automatically distributes short-form video across YouTube Shorts, Instagram Reels, X/Twitter, and TikTok. It downloads from any source, encodes with platform-specific optimizations, uploads with anti-bot protection, and tracks everything — all without your content ever leaving your machine. No subscriptions, no cloud servers, no vendor lock-in. Just run `xpst watch` and let it handle the rest.
+xPST is a local-first, open-source tool that distributes short-form video from TikTok, YouTube, Instagram, X/Twitter, or local files to YouTube Shorts, Instagram Reels, and X/Twitter. It downloads from configured sources, encodes with platform-specific optimizations, uploads with anti-bot protection, and tracks everything — all without your content ever leaving your machine. No subscriptions, no cloud servers, no vendor lock-in. Just run `xpst watch` and let it handle the rest.
 
 ---
 
@@ -36,7 +36,7 @@ xPST is a local-first, open-source tool that automatically distributes short-for
 - **Crash recovery** — checkpoints resume half-uploaded videos after interruptions
 - **Graceful degradation** — one platform failure never blocks the others
 - **Rate limiting** — configurable per-platform daily limits (default: 5/day)
-- **Carousel support** — Instagram albums, X threads, stitched video for YouTube/TikTok
+- **Carousel support** — Instagram albums, X threads, and stitched video for YouTube
 - **Web dashboard** — real-time analytics, upload history, platform health at a glance
 - **Webhook notifications** — Discord and Telegram alerts on success or failure
 - **Unified analytics** — views, likes, comments, and shares across all platforms
@@ -51,7 +51,7 @@ xPST is a local-first, open-source tool that automatically distributes short-for
 - **YouTube Shorts** — via official YouTube Data API v3 (OAuth 2.0)
 - **Instagram Reels** — via instagrapi (browser session cookies)
 - **X/Twitter** — via twikit (browser cookies)
-- **TikTok** — via yt-dlp (browser cookies, optional)
+- **TikTok source** — via yt-dlp (browser cookies optional for higher-quality downloads)
 
 ---
 
@@ -67,7 +67,7 @@ xpst run
 
 # Or from source (development)
 git clone https://github.com/TysAIs/xPST.git
-cd ~/XPST
+cd xPST
 pip install -e .
 xpst setup
 xpst run
@@ -122,7 +122,7 @@ xpst version
 # Check for new videos and cross-post them
 xpst run
 
-# Bidirectional mode: check ALL sources, not just TikTok
+# Bidirectional mode: check ALL configured sources, not just TikTok
 xpst run --bidirectional
 
 # Watch mode: continuous monitoring (default: every 15 minutes)
@@ -296,6 +296,7 @@ The dashboard requires no external services — it reads from the same local sta
                     |     SOURCES      |
                     +------------------+
                     | TikTok (yt-dlp)  |
+                    | YouTube / IG / X |
                     | Local filesystem |
                     +--------+---------+
                              |
@@ -521,9 +522,9 @@ xpst run --bidirectional
 
 In bidirectional mode:
 
-- Post a Reel on Instagram -> automatically goes to YouTube Shorts, X, TikTok
-- Upload a Short on YouTube -> automatically goes to Instagram Reels, X, TikTok
-- Post a video on X -> automatically goes to YouTube Shorts, Instagram Reels, TikTok
+- Post a Reel on Instagram -> automatically goes to YouTube Shorts and X
+- Upload a Short on YouTube -> automatically goes to Instagram Reels and X
+- Post a video on X -> automatically goes to YouTube Shorts and Instagram Reels
 
 The engine deduplicates across platforms so content is never double-posted. Each platform acts as both a source and a destination.
 
@@ -536,7 +537,7 @@ Contributions are welcome. Here's how to get started:
 ```bash
 # Clone the repository
 git clone https://github.com/TysAIs/xPST.git
-cd ~/XPST
+cd xPST
 
 # Create a virtual environment
 python3 -m venv .venv
@@ -554,7 +555,7 @@ pytest --cov=xpst --cov-report=term-missing
 
 ### Guidelines
 
-- **Tests required** — all new features must include tests. The suite has 760+ tests; keep it green.
+- **Tests required** — all new features must include tests. The suite has 793 collected tests; keep it green.
 - **Type hints** — use Python 3.10+ type hints throughout.
 - **Docstrings** — Google-style docstrings for all public functions and classes.
 - **No new dependencies** — discuss in an issue before adding dependencies.
@@ -577,7 +578,7 @@ xPST/
     services/           # Upload and source services
     utils/              # Credentials, logging, quotas, video processing
     dashboard/          # Web dashboard (NiceGUI)
-  tests/                # Test suite (760+ tests)
+  tests/                # Test suite (793 collected tests)
   docs/                 # Documentation
 ```
 
