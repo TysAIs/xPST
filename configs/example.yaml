@@ -1,0 +1,125 @@
+# XPST Example Configuration
+# Copy to ~/.xpst/config.yaml and customize
+
+# Account settings
+accounts:
+  # TikTok source
+  tiktok:
+    username: "your_tiktok_username"
+    
+    # Use browser cookies for HD quality downloads
+    # Set to true if you're logged into TikTok in your browser
+    cookies_from_browser: false
+    
+    # Or specify explicit cookies file (Netscape format)
+    # cookies_file: "~/.xpst/credentials/tiktok_cookies.txt"
+  
+  # YouTube Shorts
+  youtube:
+    enabled: true
+    
+    # Path to OAuth client secrets (download from Google Cloud Console)
+    client_secrets: "~/.xpst/credentials/youtube_client_secrets.json"
+    
+    # Path to store OAuth tokens (auto-generated)
+    token_file: "~/.xpst/credentials/youtube_token.json"
+  
+  # X/Twitter
+  x:
+    enabled: true
+    
+    # Path to cookies file (JSON format from twikit or browser export)
+    cookies_file: "~/.xpst/credentials/x_cookies.json"
+  
+  # Instagram Reels
+  instagram:
+    enabled: true
+    
+    # Path to session file (JSON with sessionid)
+    session_file: "~/.xpst/credentials/instagram_session.json"
+
+# Video processing
+video:
+  # Directory to download videos
+  download_dir: "~/.xpst/downloads"
+  
+  # Delete downloaded videos after posting
+  cleanup_after_post: false
+  
+  # Platform-specific encoding settings
+  encoding:
+    # YouTube: Passthrough (no re-encoding)
+    # YouTube handles quality preservation well
+    youtube:
+      passthrough: true
+    
+    # Instagram: 720p @ CRF 23
+    # Research-verified optimal settings for Instagram Reels
+    # Source: dev.to/alfg/ffmpeg-for-instagram
+    instagram:
+      resolution: 720
+      crf: 23
+      maxrate: "3500k"
+      profile: main
+      level: "3.0"
+      gop: 72          # Fixed GOP 72 frames (2.4s at 30fps)
+      fps: 30
+      color: bt709     # Color space
+      pix_fmt: yuv420p # Required pixel format
+    
+    # X/Twitter: 1080p @ 10 Mbps
+    # Research-verified optimal settings for X/Twitter
+    # Source: gehrcke.de, gist.github.com/transkatgirl
+    x:
+      resolution: 1080
+      bitrate: "10M"
+      maxrate: "12M"
+      profile: high    # REQUIRED: High Profile
+      level: "4.0"
+      gop: 90          # Fixed GOP 90 frames (3s at 30fps)
+      fps: 30
+      color: bt709
+      pix_fmt: yuv420p # CRITICAL: X rejects other formats!
+
+# Reliability settings
+reliability:
+  # Maximum retry attempts per platform
+  max_retries: 3
+  
+  # Exponential backoff base (2^n seconds)
+  retry_backoff: 2
+  
+  # Circuit breaker: failures before disabling platform
+  circuit_breaker_threshold: 5
+  
+  # Circuit breaker: seconds before retrying disabled platform
+  circuit_breaker_reset: 3600
+
+# Monitoring and logging
+monitoring:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  log_level: INFO
+  
+  # Log file path
+  log_file: "~/.xpst/logs/xpst.log"
+  
+  # Log rotation size
+  log_rotation: "10 MB"
+  
+  # Health check HTTP port (set to 0 to disable)
+  healthcheck_port: 8080
+  
+  # Enable Prometheus metrics
+  enable_metrics: true
+
+# Scheduling
+schedule:
+  # Check interval in seconds (default: 15 minutes)
+  check_interval: 900
+  
+  # Catch-up window in seconds (default: 48 hours)
+  # Videos older than this won't be caught up after sleep
+  catchup_window: 172800
+  
+  # Catch-up checks per day
+  catchup_times_per_day: 3

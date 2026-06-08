@@ -1,0 +1,103 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Logs
+*.log
+logs/
+
+# ── Credentials & Secrets (NEVER commit these!) ──────────────────────────
+credentials/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.keystore
+
+# OAuth tokens and secrets
+*token*.json
+*client_secret*.json
+*credentials*.json
+*cookies*.json
+*session*.json
+!configs/*.example.json
+!tests/fixtures/*.json
+
+# Environment files
+.env
+.env.*
+.env.local
+.env.*.local
+!.env.example
+
+# State files (contain user-specific data)
+state.json
+state_*.json
+quotas.json
+*.state
+
+# Session files
+sessions/
+*.session
+
+# Downloaded videos
+downloads/
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+
+# Distribution
+*.tar.gz
+*.whl
+
+# Coverage & type checking
+.mypy_cache/
+.ruff_cache/
+.pytype/
+
+# XPST runtime data (user-specific, never commit)
+.xpst/
+.crosspstr/

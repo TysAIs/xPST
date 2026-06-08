@@ -1,0 +1,44 @@
+# XPST Docker Compose
+# Easy deployment with persistent data
+
+services:
+  xpst:
+    build: .
+    container_name: xpst
+    restart: unless-stopped
+
+    # Mount persistent volumes
+    volumes:
+      # Configuration and credentials (host mount)
+      - xpst-data:/root/.xpst
+
+    # Environment variables (optional overrides)
+    environment:
+      - XPST_TIKTOK_USERNAME=${XPST_TIKTOK_USERNAME:-}
+      - XPST_LOG_LEVEL=${XPST_LOG_LEVEL:-INFO}
+      # Uncomment to enable platforms:
+      # - XPST_YOUTUBE_ENABLED=true
+      # - XPST_X_ENABLED=true
+      # - XPST_INSTAGRAM_ENABLED=true
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "xpst", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  xpst-data:
+    driver: local
