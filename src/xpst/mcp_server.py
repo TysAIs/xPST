@@ -164,33 +164,22 @@ def get_analytics(
     Returns:
         Dict with per-platform analytics and top posts.
     """
-    from xpst.analytics import AnalyticsCollector
+    from xpst.analytics import AnalyticsCollector, normalize_platforms
 
     engine = _get_engine()
     collector = AnalyticsCollector(engine.config.config_dir)
 
+    try:
+        platform_list = normalize_platforms(platforms)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
     post_ids = collector._discover_post_ids()
-    if platforms:
-        post_ids = {k: v for k, v in post_ids.items() if k in platforms}
+    if platform_list:
+        post_ids = {platform: post_ids.get(platform, []) for platform in platform_list}
 
     data = asyncio.run(collector.collect_all(post_ids))
-    totals = collector.get_total_metrics(data)
-    platform_totals = collector.get_platform_totals(data)
-
-    # Top posts
-    all_posts = []
-    for platform, posts_data in data.items():
-        for _post_id, metrics in posts_data.items():
-            metrics["platform"] = platform
-            all_posts.append(metrics)
-    all_posts.sort(key=lambda p: p.get("views", 0), reverse=True)
-
-    return {
-        "totals": totals,
-        "platform_totals": platform_totals,
-        "top_posts": all_posts[:top_n],
-        "post_count": len(all_posts),
-    }
+    return collector.build_report(data, requested_post_ids=post_ids, top_n=top_n)
 
 
 @mcp.tool()

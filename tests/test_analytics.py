@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from xpst.analytics import AnalyticsCollector, PlatformMetrics
+from xpst.analytics import AnalyticsCollector, PlatformMetrics, normalize_platforms
 
 # ── PlatformMetrics ─────────────────────────────────────────────────────
 
@@ -96,6 +96,13 @@ class TestAnalyticsCollectorInit:
         collector._cache = {"youtube": {"vid1": {}}}
         collector._cache_time = time.time() - 10
         assert not collector._is_cache_valid()
+
+    def test_normalize_platforms_aliases(self):
+        assert normalize_platforms("youtube, twitter,instagram") == ["youtube", "x", "instagram"]
+
+    def test_normalize_platforms_rejects_unknown(self):
+        with pytest.raises(ValueError, match="Unknown analytics platform"):
+            normalize_platforms("youtube,threads")
 
 
 # ── Discover post IDs ───────────────────────────────────────────────────
@@ -508,6 +515,28 @@ class TestCollectAll:
         assert data1 == data2
 
     @pytest.mark.asyncio
+    async def test_collect_all_cache_is_keyed_by_requested_ids(self, tmp_path):
+        """A filtered analytics call must not poison later platform requests."""
+        collector = AnalyticsCollector(config_dir=str(tmp_path), cache_ttl=900)
+
+        async def mock_collect_youtube(ids):
+            return [{"platform": "youtube", "post_id": "v1", "views": 42,
+                     "likes": 1, "comments": 0, "shares": 0, "timestamp": ""}]
+
+        async def mock_collect_instagram(ids):
+            return [{"platform": "instagram", "post_id": "ig1", "views": 99,
+                     "likes": 2, "comments": 1, "shares": 0, "timestamp": ""}]
+
+        with patch.object(collector, "_collect_youtube", side_effect=mock_collect_youtube), \
+             patch.object(collector, "_collect_instagram", side_effect=mock_collect_instagram):
+            data1 = await collector.collect_all({"youtube": ["v1"]})
+            data2 = await collector.collect_all({"instagram": ["ig1"]})
+
+        assert "youtube" in data1
+        assert "instagram" in data2
+        assert "youtube" not in data2
+
+    @pytest.mark.asyncio
     async def test_collect_all_graceful_failure(self, tmp_path):
         """One platform failing doesn't break others."""
         collector = AnalyticsCollector(config_dir=str(tmp_path))
@@ -614,6 +643,20 @@ class TestAggregation:
         collector = AnalyticsCollector(config_dir=str(tmp_path))
         pt = collector.get_platform_totals({})
         assert pt == {}
+
+    def test_build_report_has_stable_shape_and_does_not_mutate_metrics(self, tmp_path):
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        metric = {"views": 100, "likes": 10, "comments": 2, "shares": 1}
+        data = {"youtube": {"v1": metric}}
+
+        report = collector.build_report(data, requested_post_ids={"youtube": ["v1"], "instagram": []})
+
+        assert report["ok"] is True
+        assert report["status"] == "ok"
+        assert report["totals"]["posts"] == 1
+        assert report["platform_totals"]["instagram"]["posts"] == 0
+        assert report["top_posts"][0]["platform"] == "youtube"
+        assert "platform" not in metric
 
 
 # ── Platform uploader analytics methods ─────────────────────────────────

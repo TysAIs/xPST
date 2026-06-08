@@ -6,7 +6,7 @@ xPST is designed to remain free, open source, local-first, and user-controlled w
 
 | Area | Status | Notes |
 |---|---:|---|
-| Core tests | Passing | 787 passing, 6 skipped on Windows after the Windows compatibility pass. |
+| Core tests | Passing | 802 tests collected; 796 passing, 6 skipped on Windows after the analytics/MCP/CLI hardening pass. |
 | Lint | Passing | `ruff check src tests` passes. Qt/QML bridge names are explicitly ignored where camelCase is required by QML. |
 | Vulnerability audit | Passing | `pip-audit` reports no known vulnerabilities in the local environment. |
 | Python package | Passing | Source distribution and wheel build successfully. |

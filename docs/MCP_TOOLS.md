@@ -237,16 +237,25 @@ Get engagement analytics across platforms.
 
 ```json
 {
+  "ok": true,
+  "status": "ok",
+  "generated_at": "2026-06-08T10:30:00+00:00",
+  "requested_post_count": 30,
+  "post_count": 30,
   "totals": { "posts": 30, "views": 150000, "likes": 8500, "comments": 320, "shares": 180 },
   "platform_totals": {
-    "youtube": { "posts": 10, "views": 80000, "likes": 5000 },
-    "instagram": { "posts": 10, "views": 45000, "likes": 2500 },
-    "x": { "posts": 10, "views": 25000, "likes": 1000 }
+    "youtube": { "posts": 10, "views": 80000, "likes": 5000, "comments": 200, "shares": 80 },
+    "instagram": { "posts": 10, "views": 45000, "likes": 2500, "comments": 120, "shares": 60 },
+    "x": { "posts": 10, "views": 25000, "likes": 1000, "comments": 0, "shares": 40 }
   },
   "top_posts": [
     { "platform": "youtube", "post_id": "abc", "views": 50000, "likes": 3000, "comments": 150 }
   ],
-  "post_count": 30
+  "platforms": {
+    "youtube": {
+      "abc": { "platform": "youtube", "post_id": "abc", "views": 50000, "likes": 3000 }
+    }
+  }
 }
 ```
 

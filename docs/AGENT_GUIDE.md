@@ -309,9 +309,22 @@ xpst analytics --refresh --json
 
 ```json
 {
+  "ok": true,
+  "status": "ok",
+  "requested_post_count": 20,
+  "post_count": 20,
+  "totals": { "posts": 20, "views": 125000, "likes": 7500, "comments": 320, "shares": 140 },
+  "platform_totals": {
+    "youtube": { "posts": 10, "views": 80000, "likes": 5000, "comments": 200, "shares": 80 },
+    "instagram": { "posts": 10, "views": 45000, "likes": 2500, "comments": 120, "shares": 60 }
+  },
+  "top_posts": [
+    { "platform": "youtube", "post_id": "abc123", "views": 50000, "likes": 3000, "comments": 150 }
+  ],
   "platforms": {
-    "youtube": { "posts": 10, "views": 80000, "likes": 5000, "comments": 200 },
-    "instagram": { "posts": 10, "views": 45000, "likes": 2500, "comments": 120 }
+    "youtube": {
+      "abc123": { "platform": "youtube", "post_id": "abc123", "views": 50000, "likes": 3000 }
+    }
   }
 }
 ```

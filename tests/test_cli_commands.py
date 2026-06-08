@@ -266,3 +266,62 @@ class TestStatusJson:
         assert isinstance(data, dict)
         # Status should contain statistics keys
         assert "total_videos_tracked" in data or "total_processed" in data or len(data) > 0
+
+
+class TestAnalyticsJson:
+    """Analytics command should be machine-readable for agents."""
+
+    def test_analytics_json_no_posts(self, runner, config_file, monkeypatch):
+        """analytics --json returns a stable empty report instead of Rich tables."""
+        from xpst.analytics import AnalyticsCollector
+
+        monkeypatch.setattr(AnalyticsCollector, "_discover_post_ids", lambda self: {"youtube": []})
+
+        result = runner.invoke(main, ["--config", config_file, "analytics", "--json"])
+
+        assert result.exit_code == 0
+        data = extract_json(result.output)
+        assert data["ok"] is True
+        assert data["status"] == "no_posts"
+        assert data["totals"]["posts"] == 0
+        assert data["platform_totals"]["youtube"]["posts"] == 0
+
+    def test_analytics_json_with_metrics(self, runner, config_file, monkeypatch):
+        """analytics --json includes totals, platform totals, raw platforms, and top posts."""
+        from xpst.analytics import AnalyticsCollector
+
+        async def mock_collect_all(self, post_ids):
+            return {
+                "youtube": {
+                    "v1": {
+                        "platform": "youtube",
+                        "post_id": "v1",
+                        "views": 123,
+                        "likes": 4,
+                        "comments": 2,
+                        "shares": 1,
+                    }
+                }
+            }
+
+        monkeypatch.setattr(AnalyticsCollector, "_discover_post_ids", lambda self: {"youtube": ["v1"]})
+        monkeypatch.setattr(AnalyticsCollector, "collect_all", mock_collect_all)
+
+        result = runner.invoke(main, ["--config", config_file, "analytics", "--json"])
+
+        assert result.exit_code == 0
+        data = extract_json(result.output)
+        assert data["status"] == "ok"
+        assert data["totals"]["posts"] == 1
+        assert data["totals"]["views"] == 123
+        assert data["platform_totals"]["youtube"]["likes"] == 4
+        assert data["top_posts"][0]["post_id"] == "v1"
+
+    def test_analytics_json_rejects_unknown_platform(self, runner, config_file):
+        """Invalid platform filters should be explicit JSON errors."""
+        result = runner.invoke(main, ["--config", config_file, "analytics", "--platforms", "threads", "--json"])
+
+        assert result.exit_code == 4
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert "Unknown analytics platform" in data["error"]

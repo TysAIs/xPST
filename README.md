@@ -10,7 +10,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green)
-![Tests](https://img.shields.io/badge/tests-787%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-802%20collected-brightgreen)
 ![Coverage](https://img.shields.io/codecov/c/github/TysAIs/xPST?label=coverage)
 ![Stars](https://img.shields.io/github/stars/TysAIs/xPST?style=social)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
@@ -554,7 +554,7 @@ pytest --cov=xpst --cov-report=term-missing
 
 ### Guidelines
 
-- **Tests required** — all new features must include tests. The suite has 760+ tests; keep it green.
+- **Tests required** — all new features must include tests. The suite has 802 collected tests; keep it green.
 - **Type hints** — use Python 3.10+ type hints throughout.
 - **Docstrings** — Google-style docstrings for all public functions and classes.
 - **No new dependencies** — discuss in an issue before adding dependencies.
@@ -577,7 +577,7 @@ xPST/
     services/           # Upload and source services
     utils/              # Credentials, logging, quotas, video processing
     dashboard/          # Web dashboard (NiceGUI)
-  tests/                # Test suite (760+ tests)
+  tests/                # Test suite (802 collected tests)
   docs/                 # Documentation
 ```
 

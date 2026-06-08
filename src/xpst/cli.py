@@ -768,13 +768,21 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, as_json:
     import asyncio
 
     config = load_config(ctx.obj.get("config_path"))
+    output_json = as_json or ctx.obj.get("json", False)
 
-    platform_list = platforms.split(",") if platforms else None
+    from xpst.analytics import AnalyticsCollector, normalize_platforms
 
-    console.print("[bold blue]xPST - Cross-Platform Analytics[/bold blue]\n")
+    try:
+        platform_list = normalize_platforms(platforms)
+    except ValueError as exc:
+        if output_json:
+            json_output({"ok": False, "error": str(exc)}, True)
+        else:
+            console.print(f"[red]{exc}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
 
-    # Load state to get post IDs
-    from xpst.analytics import AnalyticsCollector
+    if not output_json:
+        console.print("[bold blue]xPST - Cross-Platform Analytics[/bold blue]\n")
 
     collector = AnalyticsCollector(config.config_dir)
 
@@ -785,17 +793,26 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, as_json:
     post_ids = collector._discover_post_ids()
 
     if platform_list:
-        post_ids = {k: v for k, v in post_ids.items() if k in platform_list}
+        post_ids = {platform: post_ids.get(platform, []) for platform in platform_list}
 
     total_ids = sum(len(v) for v in post_ids.values())
     if total_ids == 0:
-        console.print("[yellow]No posts found in state. Run `xpst run` first.[/yellow]")
+        report = collector.build_report({}, requested_post_ids=post_ids)
+        if output_json:
+            json_output(report, True)
+        else:
+            console.print("[yellow]No posts found in state. Run `xpst run` first.[/yellow]")
         return
 
-    console.print(f"[dim]Fetching analytics for {total_ids} posts across {len(post_ids)} platforms...[/dim]\n")
+    if not output_json:
+        console.print(f"[dim]Fetching analytics for {total_ids} posts across {len(post_ids)} platforms...[/dim]\n")
 
     # Collect analytics
     data = asyncio.run(collector.collect_all(post_ids))
+    report = collector.build_report(data, requested_post_ids=post_ids)
+    if output_json:
+        json_output(report, True)
+        return
 
     # Display summary table
     table = Table(title="Platform Analytics")
@@ -807,12 +824,12 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, as_json:
     table.add_column("Shares", style="blue")
 
     totals = {"posts": 0, "views": 0, "likes": 0, "comments": 0, "shares": 0}
-    for platform, posts_data in data.items():
-        posts = len(posts_data)
-        views = sum(m.get("views", 0) for m in posts_data.values())
-        likes = sum(m.get("likes", 0) for m in posts_data.values())
-        comments = sum(m.get("comments", 0) for m in posts_data.values())
-        shares = sum(m.get("shares", 0) for m in posts_data.values())
+    for platform, platform_total in report["platform_totals"].items():
+        posts = platform_total.get("posts", 0)
+        views = platform_total.get("views", 0)
+        likes = platform_total.get("likes", 0)
+        comments = platform_total.get("comments", 0)
+        shares = platform_total.get("shares", 0)
 
         totals["posts"] += posts
         totals["views"] += views
@@ -842,14 +859,9 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, as_json:
     console.print(table)
 
     # Top posts detail
-    all_posts = []
-    for platform, posts_data in data.items():
-        for _post_id, metrics in posts_data.items():
-            metrics["platform"] = platform
-            all_posts.append(metrics)
+    all_posts = report["top_posts"]
 
     if all_posts:
-        all_posts.sort(key=lambda p: p.get("views", 0), reverse=True)
         console.print("\n[bold]Top Posts by Views:[/bold]")
         detail_table = Table(show_header=True, header_style="bold")
         detail_table.add_column("#", style="dim")
@@ -859,7 +871,7 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, as_json:
         detail_table.add_column("Likes", style="red")
         detail_table.add_column("Comments", style="magenta")
 
-        for i, p in enumerate(all_posts[:10], 1):
+        for i, p in enumerate(all_posts, 1):
             detail_table.add_row(
                 str(i),
                 p["platform"].title(),
@@ -2340,29 +2352,38 @@ def analytics_export(ctx: click.Context, fmt: str, output: str, platforms: str |
     from datetime import datetime as _dt
 
     config = load_config(ctx.obj.get("config_path"))
+    output_json = as_json or ctx.obj.get("json", False)
 
-    from xpst.analytics import AnalyticsCollector
+    from xpst.analytics import AnalyticsCollector, normalize_platforms
 
     collector = AnalyticsCollector(config.config_dir)
     if refresh:
         collector._cache_ttl = 0
 
+    try:
+        platform_list = normalize_platforms(platforms)
+    except ValueError as exc:
+        if output_json:
+            json_output({"ok": False, "error": str(exc)}, True)
+        else:
+            console.print(f"[red]{exc}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+
     post_ids = collector._discover_post_ids()
-    if platforms:
-        platform_list = [p.strip() for p in platforms.split(",")]
-        post_ids = {k: v for k, v in post_ids.items() if k in platform_list}
+    if platform_list:
+        post_ids = {platform: post_ids.get(platform, []) for platform in platform_list}
 
     total_ids = sum(len(v) for v in post_ids.values())
     if total_ids == 0:
-        if as_json:
-            json_output({"ok": False, "error": "No posts found in state"}, True)
+        if output_json:
+            json_output(collector.build_report({}, requested_post_ids=post_ids), True)
         else:
             console.print("[yellow]No posts found in state. Run `xpst run` first.[/yellow]")
         return
 
     data = asyncio.run(collector.collect_all(post_ids))
-    totals = collector.get_total_metrics(data)
-    platform_totals = collector.get_platform_totals(data)
+    report = collector.build_report(data, requested_post_ids=post_ids)
+    totals = report["totals"]
 
     out_path = Path(output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2371,7 +2392,8 @@ def analytics_export(ctx: click.Context, fmt: str, output: str, platforms: str |
         export_data = {
             "platforms": {p: {pid: m for pid, m in posts.items()} for p, posts in data.items()},
             "totals": totals,
-            "platform_totals": platform_totals,
+            "platform_totals": report["platform_totals"],
+            "top_posts": report["top_posts"],
             "exported_at": _dt.now().isoformat(),
         }
         with open(out_path, "w") as f:
@@ -2399,7 +2421,7 @@ def analytics_export(ctx: click.Context, fmt: str, output: str, platforms: str |
                     ])
             f.detach()  # prevent TextIOWrapper from closing raw_f twice
 
-    if as_json:
+    if output_json:
         json_output({"ok": True, "format": fmt, "output": str(out_path), "totals": totals}, True)
     else:
         console.print(f"[green]✓[/green] Analytics exported to [bold]{out_path}[/bold] ({fmt})")

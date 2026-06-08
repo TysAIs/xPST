@@ -22,6 +22,38 @@ logger = get_logger(__name__)
 
 # Default cache TTL in seconds (15 minutes)
 CACHE_TTL = 900
+VALID_ANALYTICS_PLATFORMS = ("youtube", "instagram", "x", "tiktok")
+PLATFORM_ALIASES = {
+    "twitter": "x",
+    "x/twitter": "x",
+    "x-twitter": "x",
+}
+
+
+def normalize_platforms(platforms: str | list[str] | tuple[str, ...] | None) -> list[str] | None:
+    """Normalize and validate analytics platform filters."""
+    if platforms is None:
+        return None
+
+    raw_items = platforms.split(",") if isinstance(platforms, str) else list(platforms)
+    normalized: list[str] = []
+    invalid: list[str] = []
+
+    for item in raw_items:
+        platform = PLATFORM_ALIASES.get(str(item).strip().lower(), str(item).strip().lower())
+        if not platform:
+            continue
+        if platform not in VALID_ANALYTICS_PLATFORMS:
+            invalid.append(str(item))
+            continue
+        if platform not in normalized:
+            normalized.append(platform)
+
+    if invalid:
+        valid = ", ".join(VALID_ANALYTICS_PLATFORMS)
+        raise ValueError(f"Unknown analytics platform(s): {', '.join(invalid)}. Valid platforms: {valid}")
+
+    return normalized
 
 
 class PlatformMetrics:
@@ -78,6 +110,7 @@ class AnalyticsCollector:
     def __init__(self, config_dir: str = "~/.xpst", cache_ttl: int = CACHE_TTL) -> None:
         self.config_dir = str(Path(config_dir).expanduser())
         self._cache: dict[str, Any] = {}
+        self._cache_key: str | None = None
         self._cache_time: float = 0
         self._cache_ttl = cache_ttl
         self._config: dict[str, Any] = {}
@@ -94,9 +127,21 @@ class AnalyticsCollector:
         else:
             self._config = {}
 
-    def _is_cache_valid(self) -> bool:
+    def _make_cache_key(self, post_ids: dict[str, list[str]]) -> str:
+        """Create a stable cache key for requested analytics IDs."""
+        normalized = {
+            platform: sorted(str(post_id) for post_id in ids)
+            for platform, ids in sorted(post_ids.items())
+        }
+        return json.dumps(normalized, sort_keys=True)
+
+    def _is_cache_valid(self, post_ids: dict[str, list[str]] | None = None) -> bool:
         """Check if cached data is still within TTL."""
-        return (time.time() - self._cache_time) < self._cache_ttl and bool(self._cache)
+        if not ((time.time() - self._cache_time) < self._cache_ttl and bool(self._cache)):
+            return False
+        if post_ids is None:
+            return True
+        return self._cache_key == self._make_cache_key(post_ids)
 
     def get_cached(self) -> dict[str, Any]:
         """Return cached analytics data (may be empty/stale)."""
@@ -112,12 +157,13 @@ class AnalyticsCollector:
         Returns:
             Structured data: {platform: {post_id: {views, likes, comments, shares, ...}}}
         """
-        if self._is_cache_valid():
-            logger.debug("Returning cached analytics data")
-            return self._cache
-
         if post_ids is None:
             post_ids = self._discover_post_ids()
+
+        cache_key = self._make_cache_key(post_ids)
+        if self._is_cache_valid(post_ids):
+            logger.debug("Returning cached analytics data")
+            return self._cache
 
         # Build tasks for each platform that has post IDs
         tasks: dict[str, asyncio.Task] = {}
@@ -144,6 +190,7 @@ class AnalyticsCollector:
 
         # Update cache
         self._cache = data
+        self._cache_key = cache_key
         self._cache_time = time.time()
 
         return data
@@ -414,3 +461,48 @@ class AnalyticsCollector:
                 totals["shares"] += metrics.get("shares", 0)
             result[platform] = totals
         return result
+
+    def get_top_posts(self, data: dict[str, dict], top_n: int = 10) -> list[dict[str, Any]]:
+        """Return top posts by views without mutating raw metric dictionaries."""
+        all_posts: list[dict[str, Any]] = []
+        for platform, posts_data in data.items():
+            for post_id, metrics in posts_data.items():
+                post = dict(metrics)
+                post.setdefault("post_id", post_id)
+                post["platform"] = platform
+                all_posts.append(post)
+        all_posts.sort(key=lambda p: int(p.get("views", 0) or 0), reverse=True)
+        return all_posts[: max(top_n, 0)]
+
+    def build_report(
+        self,
+        data: dict[str, dict],
+        requested_post_ids: dict[str, list[str]] | None = None,
+        top_n: int = 10,
+    ) -> dict[str, Any]:
+        """Build a stable analytics report for CLI, MCP, and exports."""
+        metric_totals = self.get_total_metrics(data)
+        platform_totals = self.get_platform_totals(data)
+
+        if requested_post_ids is not None:
+            for platform in requested_post_ids:
+                platform_totals.setdefault(
+                    platform,
+                    {"posts": 0, "views": 0, "likes": 0, "comments": 0, "shares": 0},
+                )
+
+        post_count = sum(len(posts) for posts in data.values())
+        requested_post_count = sum(len(ids) for ids in (requested_post_ids or {}).values())
+
+        totals = {"posts": post_count, **metric_totals}
+        return {
+            "ok": True,
+            "status": "ok" if requested_post_count else "no_posts",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "requested_post_count": requested_post_count,
+            "post_count": post_count,
+            "totals": totals,
+            "platform_totals": platform_totals,
+            "top_posts": self.get_top_posts(data, top_n=top_n),
+            "platforms": data,
+        }
