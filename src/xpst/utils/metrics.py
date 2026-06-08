@@ -1,5 +1,5 @@
 """
-Prometheus metrics for XPST.
+Prometheus metrics for xPST.
 
 Optional — only active if prometheus_client is installed.
 Tracks uploads, encoding duration, active platforms, circuit breaker state.
@@ -59,7 +59,7 @@ class _NullMetrics:
 if _HAS_PROMETHEUS:
 
     class MetricsTracker:
-        """Prometheus metrics tracker for XPST."""
+        """Prometheus metrics tracker for xPST."""
 
         def __init__(self) -> None:
             self._uploads_total = Counter(

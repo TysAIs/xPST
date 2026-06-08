@@ -1,7 +1,7 @@
 """
-Cross-platform compatibility tests for XPST.
+Cross-platform compatibility tests for xPST.
 
-Tests that XPST works correctly across Windows, macOS, and Linux:
+Tests that xPST works correctly across Windows, macOS, and Linux:
 - Path handling (expanduser, tilde, platform-native separators)
 - Subprocess handling (FFmpeg/yt-dlp detection with .exe variants)
 - Signal handling (SIGINT/SIGTERM on Unix, skip on Windows)
@@ -386,7 +386,7 @@ class TestConfigLoading:
                 },
             },
             "video": {
-                "download_dir": "/Users/testuser/Movies/XPST",
+                "download_dir": "/Users/testuser/Movies/xPST",
             },
             "monitoring": {
                 "log_file": "/Users/testuser/Library/Logs/xpst.log",
@@ -411,7 +411,7 @@ class TestConfigLoading:
                 },
             },
             "video": {
-                "download_dir": "C:\\Users\\testuser\\Videos\\XPST",
+                "download_dir": "C:\\Users\\testuser\\Videos\\xPST",
             },
             "monitoring": {
                 "log_file": "C:\\Users\\testuser\\AppData\\Local\\xpst\\xpst.log",

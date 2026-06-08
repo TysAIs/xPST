@@ -1,5 +1,5 @@
 """
-Unified Analytics Collector for XPST
+Unified Analytics Collector for xPST
 
 Collects engagement metrics from all platforms in parallel with caching.
 Returns structured data: {platform: {post_id: {views, likes, comments, shares, ...}}}
@@ -84,7 +84,7 @@ class AnalyticsCollector:
         self._load_config()
 
     def _load_config(self) -> None:
-        """Load XPST config.yaml."""
+        """Load xPST config.yaml."""
         config_path = Path(self.config_dir) / "config.yaml"
         if config_path.exists():
             import yaml

@@ -1,5 +1,5 @@
 """
-Error categorization for XPST
+Error categorization for xPST
 
 Classifies errors as retryable vs fatal to optimize retry behavior.
 Retryable errors trigger automatic retries with backoff.

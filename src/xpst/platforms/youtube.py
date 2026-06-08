@@ -1,5 +1,5 @@
 """
-YouTube Shorts uploader for XPST
+YouTube Shorts uploader for xPST
 
 Handles OAuth2 authentication and video uploads to YouTube Shorts.
 

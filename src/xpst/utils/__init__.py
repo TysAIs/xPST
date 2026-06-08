@@ -1,4 +1,4 @@
-"""Shared utilities for XPST"""
+"""Shared utilities for xPST"""
 
 from .circuit_breaker import CircuitBreaker, CircuitBreakerManager, CircuitBreakerOpenError
 from .credentials import CredentialStore

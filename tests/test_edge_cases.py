@@ -1,5 +1,5 @@
 """
-Exhaustive edge case tests for XPST — RED TEAM audit.
+Exhaustive edge case tests for xPST — RED TEAM audit.
 
 Covers all 9 categories from the audit spec:
 1. Platform API changes (unexpected JSON, missing fields)

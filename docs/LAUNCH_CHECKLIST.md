@@ -1,6 +1,6 @@
 # 🚀 GitHub Launch Checklist
 
-Use this checklist before making XPST public on GitHub.
+Use this checklist before making xPST public on GitHub.
 
 ## Pre-Launch Verification
 

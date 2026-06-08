@@ -2,7 +2,7 @@
 
 ## Context
 
-XPST needs a consistent font for its logo, dashboard, and UI elements.
+xPST needs a consistent font for its logo, dashboard, and UI elements.
 
 ## Research
 
@@ -42,7 +42,7 @@ XPST needs a consistent font for its logo, dashboard, and UI elements.
 - Google Fonts: https://fonts.google.com/specimen/Inter
 - GitHub: https://github.com/rsms/inter
 
-## Usage in XPST
+## Usage in xPST
 
 - **Logo/Icons**: Inter Bold (weight 700)
 - **Dashboard UI**: Inter Regular (400) and Inter Medium (500)

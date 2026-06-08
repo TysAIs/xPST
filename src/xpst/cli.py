@@ -1,5 +1,5 @@
 """
-CLI interface for XPST
+CLI interface for xPST
 
 Provides commands for:
 - `xpst run` - One-time check and post
@@ -67,7 +67,7 @@ def load_config(config_path: str | None = None) -> XPSTConfig:
 @click.pass_context
 def main(ctx: click.Context, config: str | None, verbose: bool):
     """
-    XPST - Enterprise-grade cross-posting for short-form video
+    xPST - Enterprise-grade cross-posting for short-form video
 
     Automatically distribute TikTok videos to YouTube Shorts, X/Twitter,
     and Instagram Reels.
@@ -99,7 +99,7 @@ def setup():
 @main.command()
 @click.option("--check", "check_only", is_flag=True, help="Check for updates without installing")
 def update(check_only: bool):
-    """Update XPST dependencies to latest versions"""
+    """Update xPST dependencies to latest versions"""
     from xpst.updater import check_updates, display_update_status, update_all
 
     if check_only:
@@ -124,7 +124,7 @@ def update(check_only: bool):
 
 @main.command()
 def version():
-    """Show XPST version and all dependency versions"""
+    """Show xPST version and all dependency versions"""
     from xpst.updater import display_version_info
     display_version_info()
 
@@ -145,11 +145,11 @@ def run(ctx: click.Context, bidirectional: bool):
     )
 
     if bidirectional:
-        console.print("[bold blue]XPST - Bidirectional cross-posting check...[/bold blue]")
+        console.print("[bold blue]xPST - Bidirectional cross-posting check...[/bold blue]")
         engine = CrossPostEngine(config)
         results = asyncio.run(engine.check_and_post_bidirectional())
     else:
-        console.print("[bold blue]XPST - Checking for new videos...[/bold blue]")
+        console.print("[bold blue]xPST - Checking for new videos...[/bold blue]")
         engine = CrossPostEngine(config)
         results = asyncio.run(engine.check_and_post())
 
@@ -178,7 +178,7 @@ def watch(ctx: click.Context, interval: int | None, bidirectional: bool):
 
     check_interval = interval or config.schedule.check_interval
     mode_label = "Bidirectional" if bidirectional else "Standard"
-    console.print(f"[bold blue]XPST - {mode_label} watching every {check_interval}s (Ctrl+C to stop)[/bold blue]")
+    console.print(f"[bold blue]xPST - {mode_label} watching every {check_interval}s (Ctrl+C to stop)[/bold blue]")
 
     engine = CrossPostEngine(config)
 
@@ -282,7 +282,7 @@ def status(ctx: click.Context):
     """Show health status"""
     config = load_config(ctx.obj.get("config_path"))
 
-    console.print("[bold blue]XPST Health Status[/bold blue]\n")
+    console.print("[bold blue]xPST Health Status[/bold blue]\n")
 
     # Load state
     state = StateManager(config.config_dir)
@@ -351,7 +351,7 @@ def health(ctx: click.Context):
         log_file=config.monitoring.log_file,
     )
 
-    console.print("[bold blue]XPST - Platform Health Check[/bold blue]\n")
+    console.print("[bold blue]xPST - Platform Health Check[/bold blue]\n")
     console.print("[dim]Testing connectivity to all platforms (no uploads)...[/dim]\n")
 
     engine = CrossPostEngine(config)
@@ -506,7 +506,7 @@ def auth_status(ctx: click.Context):
     """Show authentication and quota status for all platforms"""
     config = load_config(ctx.obj.get("config_path"))
 
-    console.print("[bold blue]XPST Authentication Status[/bold blue]\n")
+    console.print("[bold blue]xPST Authentication Status[/bold blue]\n")
 
     # Credential store status
     cred_store = CredentialStore(config.config_dir)
@@ -589,7 +589,7 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool):
 
     platform_list = platforms.split(",") if platforms else None
 
-    console.print("[bold blue]XPST - Cross-Platform Analytics[/bold blue]\n")
+    console.print("[bold blue]xPST - Cross-Platform Analytics[/bold blue]\n")
 
     # Load state to get post IDs
     from xpst.analytics import AnalyticsCollector
@@ -755,7 +755,7 @@ def dashboard(ctx: click.Context, port: int):
         except Exception:
             pass
 
-    console.print(f"[bold blue]Starting XPST Dashboard on http://localhost:{port}[/bold blue]")
+    console.print(f"[bold blue]Starting xPST Dashboard on http://localhost:{port}[/bold blue]")
     console.print("[dim]Press Ctrl+C to stop[/dim]\n")
 
     from xpst.dashboard.server import start_dashboard
@@ -771,7 +771,7 @@ def dashboard(ctx: click.Context, port: int):
 @click.option("--port", "-p", default=None, type=int, help="Dashboard HTTP port (default: auto-select free port)")
 @click.pass_context
 def app(ctx: click.Context, port: int | None):
-    """Launch XPST as a native desktop app (pywebview)"""
+    """Launch xPST as a native desktop app (pywebview)"""
     config_path = ctx.obj.get("config_path")
     config_dir = "~/.xpst"
     if config_path:
@@ -786,7 +786,7 @@ def app(ctx: click.Context, port: int | None):
     # Try native desktop window first, fall back to browser
     try:
         from xpst.desktop import launch_desktop_app
-        console.print("[bold blue]Launching XPST desktop app…[/bold blue]")
+        console.print("[bold blue]Launching xPST desktop app…[/bold blue]")
         launch_desktop_app(config_dir=config_dir, port=port)
     except ImportError:
         console.print("[yellow]pywebview not installed — falling back to browser.[/yellow]")
@@ -864,7 +864,7 @@ def _auth_youtube(config: XPSTConfig) -> None:
     """Guide YouTube OAuth authentication and store credentials.
 
     Args:
-        config: Loaded XPST configuration.
+        config: Loaded xPST configuration.
     """
 
     creds_dir = Path(config.config_dir) / "credentials"
@@ -901,7 +901,7 @@ def _auth_x(config: XPSTConfig) -> None:
     """Guide X/Twitter cookie-based authentication and store credentials.
 
     Args:
-        config: Loaded XPST configuration.
+        config: Loaded xPST configuration.
     """
 
     creds_dir = Path(config.config_dir) / "credentials"
@@ -936,7 +936,7 @@ def _auth_instagram(config: XPSTConfig) -> None:
     """Guide Instagram session-based authentication and store credentials.
 
     Args:
-        config: Loaded XPST configuration.
+        config: Loaded xPST configuration.
     """
 
     creds_dir = Path(config.config_dir) / "credentials"
@@ -975,7 +975,7 @@ def _auth_tiktok(config: XPSTConfig) -> None:
     """Guide TikTok browser cookie configuration.
 
     Args:
-        config: Loaded XPST configuration.
+        config: Loaded xPST configuration.
     """
 
     console.print("""

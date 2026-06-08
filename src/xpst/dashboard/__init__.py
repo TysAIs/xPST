@@ -1,5 +1,5 @@
 """
-XPST Dashboard
+xPST Dashboard
 
 Web-based analytics dashboard built with NiceGUI.
 Provides overview, posts, analytics, platform health, and settings views.

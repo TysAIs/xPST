@@ -1,5 +1,5 @@
 """
-Video sources for XPST
+Video sources for xPST
 
 Source modules handle downloading content from various platforms.
 Each source inherits from VideoSource and registers itself with SourceRegistry.

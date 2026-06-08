@@ -1,6 +1,6 @@
-# Contributing to XPST
+# Contributing to xPST
 
-Thank you for your interest in contributing to XPST! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to xPST! This document provides guidelines and information for contributors.
 
 ## 🚀 Quick Start
 
@@ -75,7 +75,7 @@ ruff format src/ tests/
 ### Project Structure
 
 ```
-XPST/
+xPST/
 ├── src/xpst/          # Main package
 │   ├── cli.py              # CLI commands (Click)
 │   ├── engine.py           # Core cross-posting logic
@@ -288,4 +288,4 @@ twine upload dist/*
 
 ## 🙏 Thank You!
 
-Every contribution helps make XPST better for everyone. We appreciate your time and effort!
+Every contribution helps make xPST better for everyone. We appreciate your time and effort!

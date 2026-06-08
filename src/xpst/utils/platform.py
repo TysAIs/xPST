@@ -1,5 +1,5 @@
 """
-Cross-platform utility functions for XPST.
+Cross-platform utility functions for xPST.
 
 Handles OS-specific differences in paths, signals, and process management.
 """
@@ -15,7 +15,7 @@ def get_config_dir() -> Path:
 
     - macOS: ~/.xpst/
     - Linux: ~/.xpst/
-    - Windows: %APPDATA%\\XPST\\ or ~/.xpst/
+    - Windows: %APPDATA%\\xPST\\ or ~/.xpst/
 
     Returns:
         Path to config directory
@@ -23,7 +23,7 @@ def get_config_dir() -> Path:
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
         if appdata:
-            return Path(appdata) / "XPST"
+            return Path(appdata) / "xPST"
     # macOS and Linux: use home directory
     return Path.home() / ".xpst"
 

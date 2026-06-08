@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/assets/xpst-horizontal.png" alt="XPST — Cross-Platform Studio" width="400">
+  <img src="docs/assets/xpst-horizontal.png" alt="xPST — Cross-Platform Studio" width="400">
 </p>
 
-# XPST
+# xPST
 
 **Cross-Platform Studio — Enterprise-grade, free, local cross-posting for short-form video**
 
@@ -11,11 +11,11 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green)
 ![Tests](https://img.shields.io/badge/tests-760%20passing-brightgreen)
-![Stars](https://img.shields.io/github/stars/xPSTOwner/XPST?style=social)
+![Stars](https://img.shields.io/github/stars/xPSTOwner/xPST?style=social)
 
 ---
 
-XPST is a local-first, open-source tool that automatically distributes short-form video across YouTube Shorts, Instagram Reels, X/Twitter, and TikTok. It downloads from any source, encodes with platform-specific optimizations, uploads with anti-bot protection, and tracks everything — all without your content ever leaving your machine. No subscriptions, no cloud servers, no vendor lock-in. Just run `xpst watch` and let it handle the rest.
+xPST is a local-first, open-source tool that automatically distributes short-form video across YouTube Shorts, Instagram Reels, X/Twitter, and TikTok. It downloads from any source, encodes with platform-specific optimizations, uploads with anti-bot protection, and tracks everything — all without your content ever leaving your machine. No subscriptions, no cloud servers, no vendor lock-in. Just run `xpst watch` and let it handle the rest.
 
 ---
 
@@ -81,7 +81,7 @@ xpst watch
 
 ## CLI Commands
 
-XPST provides 16 commands for complete control over your cross-posting workflow.
+xPST provides 16 commands for complete control over your cross-posting workflow.
 
 ### Setup and Maintenance
 
@@ -298,7 +298,7 @@ The dashboard requires no external services — it reads from the same local sta
 
 ## Configuration
 
-XPST loads configuration from `~/.xpst/config.yaml` with environment variable overrides (`XPST_*` prefix). Priority: environment variables > config file > defaults.
+xPST loads configuration from `~/.xpst/config.yaml` with environment variable overrides (`XPST_*` prefix). Priority: environment variables > config file > defaults.
 
 ```yaml
 # ~/.xpst/config.yaml
@@ -394,11 +394,11 @@ export XPST_RATE_LIMITS_YOUTUBE="10"
 
 ## Security
 
-XPST takes a **local-first, zero-trust** approach to security:
+xPST takes a **local-first, zero-trust** approach to security:
 
 - **OS keychain storage** — credentials are stored in your operating system's secure keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager). Falls back to encrypted file storage if keychain is unavailable.
 - **No passwords in config** — the config file references credential paths, never stores secrets directly.
-- **No cloud servers** — your content, credentials, and state never leave your machine. There is no XPST cloud service.
+- **No cloud servers** — your content, credentials, and state never leave your machine. There is no xPST cloud service.
 - **No third-party OAuth sharing** — Instagram and X use your own browser cookies. Only YouTube uses a standard OAuth 2.0 flow (your own Google Cloud project).
 - **Atomic state writes** — state files are written atomically (write-then-rename) to prevent corruption.
 - **Pidfile locking** — prevents concurrent instances from corrupting shared state.
@@ -414,7 +414,7 @@ XPST takes a **local-first, zero-trust** approach to security:
 
 ## Anti-Bot Protection
 
-XPST includes built-in protections to minimize the risk of platform bans:
+xPST includes built-in protections to minimize the risk of platform bans:
 
 - **Randomized delays** — jittered intervals between uploads mimic human behavior
 - **Time-of-day awareness** — respects typical posting hours, avoids suspicious off-activity patterns
@@ -423,13 +423,13 @@ XPST includes built-in protections to minimize the risk of platform bans:
 - **Randomized platform order** — upload order varies per run to avoid predictable patterns
 - **Conservative defaults** — 5 uploads/day per platform out of the box
 
-**Important:** No automation tool can guarantee you won't be flagged. XPST minimizes risk through conservative defaults and human-like behavior patterns, but use at your own discretion. Start with the default rate limits and increase gradually.
+**Important:** No automation tool can guarantee you won't be flagged. xPST minimizes risk through conservative defaults and human-like behavior patterns, but use at your own discretion. Start with the default rate limits and increase gradually.
 
 ---
 
 ## Rate Limits
 
-XPST enforces configurable per-platform daily upload limits:
+xPST enforces configurable per-platform daily upload limits:
 
 - **Default:** 5 uploads/day per platform (20 total across all platforms)
 - **Configurable:** set per-platform limits in `config.yaml` or via the dashboard
@@ -451,7 +451,7 @@ When a limit is reached, remaining videos are queued and automatically picked up
 
 ## Bidirectional Cross-Posting
 
-Most cross-posting tools work in one direction: pick one source platform, post to the rest. XPST supports **bidirectional cross-posting** — it monitors ALL connected platforms for new content and distributes in every direction.
+Most cross-posting tools work in one direction: pick one source platform, post to the rest. xPST supports **bidirectional cross-posting** — it monitors ALL connected platforms for new content and distributes in every direction.
 
 **How it works:**
 
@@ -507,7 +507,7 @@ pytest --cov=xpst --cov-report=term-missing
 ### Project Structure
 
 ```
-XPST/
+xPST/
   src/xpst/
     cli.py              # CLI interface (Click)
     config.py           # Configuration management
@@ -540,7 +540,7 @@ at your option. You may use this software under the terms of either license.
 
 ## Acknowledgments
 
-XPST stands on the shoulders of these excellent open-source projects:
+xPST stands on the shoulders of these excellent open-source projects:
 
 - **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** — video downloading from TikTok and other platforms
 - **[instagrapi](https://github.com/subzeroid/instagrapi)** — Instagram API client for Reels uploads

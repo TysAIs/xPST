@@ -1,5 +1,5 @@
 """
-XPST Dashboard Server
+xPST Dashboard Server
 
 Launches the NiceGUI web server for the analytics dashboard.
 Supports optional HTTP Basic Auth and Prometheus metrics endpoint.
@@ -42,7 +42,7 @@ def start_dashboard(
     host: str = "0.0.0.0",
     config_dir: str = "~/.xpst",
 ) -> None:
-    """Start the XPST analytics dashboard web server.
+    """Start the xPST analytics dashboard web server.
 
     Launches a NiceGUI-based web dashboard with overview, content library,
     analytics, connect, and settings pages. Supports optional HTTP Basic
@@ -55,7 +55,7 @@ def start_dashboard(
     Args:
         port: HTTP port to listen on. Defaults to 8080.
         host: Bind address. Defaults to ``0.0.0.0`` (all interfaces).
-        config_dir: Path to XPST config directory for reading state.
+        config_dir: Path to xPST config directory for reading state.
     """
 
     username, password = _load_dashboard_auth(config_dir)
@@ -66,7 +66,7 @@ def start_dashboard(
     else:
         logger.info("Dashboard auth not configured (no username/password set)")
 
-    logger.info("Starting XPST Dashboard on http://%s:%d", host, port)
+    logger.info("Starting xPST Dashboard on http://%s:%d", host, port)
     create_dashboard(config_dir)
 
     # Add /metrics endpoint for Prometheus
@@ -87,7 +87,7 @@ def start_dashboard(
     ui.run(
         port=port,
         host=host,
-        title="XPST — Dashboard",
+        title="xPST — Dashboard",
         dark=True,
         favicon="📊",
         show=False,
@@ -115,7 +115,7 @@ def _setup_basic_auth(username: str, password: str) -> None:
                 return JSONResponse(
                     {"detail": "Not authenticated"},
                     status_code=401,
-                    headers={"WWW-Authenticate": "Basic realm=\"XPST Dashboard\""},
+                    headers={"WWW-Authenticate": "Basic realm=\"xPST Dashboard\""},
                 )
 
             try:
@@ -125,14 +125,14 @@ def _setup_basic_auth(username: str, password: str) -> None:
                 return JSONResponse(
                     {"detail": "Invalid authentication"},
                     status_code=401,
-                    headers={"WWW-Authenticate": "Basic realm=\"XPST Dashboard\""},
+                    headers={"WWW-Authenticate": "Basic realm=\"xPST Dashboard\""},
                 )
 
             if user != username or pwd != password:
                 return JSONResponse(
                     {"detail": "Invalid credentials"},
                     status_code=401,
-                    headers={"WWW-Authenticate": "Basic realm=\"XPST Dashboard\""},
+                    headers={"WWW-Authenticate": "Basic realm=\"xPST Dashboard\""},
                 )
 
             return await call_next(request)

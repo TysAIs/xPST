@@ -1,4 +1,4 @@
-"""Tests for XPST quota management"""
+"""Tests for xPST quota management"""
 
 
 from xpst.utils.quota import PlatformQuota, QuotaManager

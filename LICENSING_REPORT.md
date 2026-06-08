@@ -1,8 +1,8 @@
-# Licensing and ToS Compliance Report for XPST
+# Licensing and ToS Compliance Report for xPST
 
 ## Executive Summary
 
-This report details the licensing strategy and Terms of Service (ToS) compliance measures implemented for XPST. The project has been updated to use a dual MIT/Apache-2.0 license, and comprehensive disclaimers have been added to address the use of unofficial APIs.
+This report details the licensing strategy and Terms of Service (ToS) compliance measures implemented for xPST. The project has been updated to use a dual MIT/Apache-2.0 license, and comprehensive disclaimers have been added to address the use of unofficial APIs.
 
 ---
 
@@ -64,7 +64,7 @@ This report details the licensing strategy and Terms of Service (ToS) compliance
 
 **Result: NO CONFLICTS FOUND** ✅
 
-All dependencies use permissive licenses (MIT, Apache-2.0, BSD-3-Clause, or Unlicense) that are fully compatible with XPST's dual MIT/Apache-2.0 license.
+All dependencies use permissive licenses (MIT, Apache-2.0, BSD-3-Clause, or Unlicense) that are fully compatible with xPST's dual MIT/Apache-2.0 license.
 
 ---
 
@@ -85,7 +85,7 @@ All dependencies use permissive licenses (MIT, Apache-2.0, BSD-3-Clause, or Unli
 - **License**: AGPL-3.0
 - **Approach**: Uses ONLY official OAuth flows
 - **Disclaimer**: "Postiz does not automate or scrape content from social media platforms"
-- **Key Difference**: XPST uses unofficial APIs; Postiz uses only official APIs
+- **Key Difference**: xPST uses unofficial APIs; Postiz uses only official APIs
 
 #### gallery-dl (Image Downloader)
 - **License**: GPL-2.0
@@ -201,7 +201,7 @@ All dependencies use permissive licenses (MIT, Apache-2.0, BSD-3-Clause, or Unli
    - Be prepared for potential restrictions
 
 3. **Respect Rate Limits**
-   - Use XPST's built-in rate limiting
+   - Use xPST's built-in rate limiting
    - Avoid excessive posting frequency
    - Monitor platform notifications
 
@@ -229,7 +229,7 @@ All dependencies use permissive licenses (MIT, Apache-2.0, BSD-3-Clause, or Unli
 
 ## 7. Conclusion
 
-XPST is now properly licensed under a dual MIT/Apache-2.0 license, providing:
+xPST is now properly licensed under a dual MIT/Apache-2.0 license, providing:
 - Maximum compatibility (MIT for GPL v2)
 - Patent protection (Apache 2.0 for enterprises)
 - Clear user choice
@@ -241,4 +241,4 @@ The project includes comprehensive disclaimers about the risks of using unoffici
 ---
 
 *Report generated: June 7, 2025*
-*Prepared for: XPST Project*
+*Prepared for: xPST Project*

@@ -1,4 +1,4 @@
-"""Tests for XPST credential storage"""
+"""Tests for xPST credential storage"""
 
 import json
 

@@ -1,5 +1,5 @@
 # Platform Analytics API Research
-## XPST Project — Free/Local Analytics Data Sources
+## xPST Project — Free/Local Analytics Data Sources
 
 ---
 
@@ -165,7 +165,7 @@ TikTok is the **hardest platform** for free analytics. The unofficial TikTok-Api
 - **Tech**: NextJS + NestJS + Prisma + PostgreSQL + Temporal
 - **Analytics**: Performance measurement, engagement tracking
 - **Status**: Very active (2,600 commits, 78 contributors, v2.21.8)
-- **Use for XPST**: Best reference for multi-platform integration patterns
+- **Use for xPST**: Best reference for multi-platform integration patterns
 
 **Mixpost** (⭐ 3.3k stars, MIT)
 - github.com/inovector/mixpost
@@ -195,7 +195,7 @@ TikTok is the **hardest platform** for free analytics. The unofficial TikTok-Api
 **TikTok-Api** (⭐ 5.1k stars) — Library, not dashboard
 - Can serve as TikTok data source (fragile)
 
-### Recommendations for XPST:
+### Recommendations for xPST:
 1. **Use Postiz as architectural reference** — it handles 14+ platforms and has working OAuth integrations
 2. **Build custom dashboard** using the free APIs/scrapers identified above
 3. **Data sources**: YouTube Analytics API + Data API (richest), instagrapi (good), twikit (basic), TikTok-Api (fragile)

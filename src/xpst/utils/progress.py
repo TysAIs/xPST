@@ -1,5 +1,5 @@
 """
-Upload and encoding progress tracking for XPST
+Upload and encoding progress tracking for xPST
 
 Provides progress logging during video encoding and upload operations.
 Uses percentage-based progress reporting with ETA estimation.

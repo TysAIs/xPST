@@ -1,5 +1,5 @@
 """
-X/Twitter video source for XPST
+X/Twitter video source for xPST
 
 Uses yt-dlp for video downloading and twikit for metadata with support for:
 - Video downloading from tweets

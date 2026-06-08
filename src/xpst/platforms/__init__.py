@@ -1,4 +1,4 @@
-"""Platform uploaders for XPST"""
+"""Platform uploaders for xPST"""
 
 from .base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
 

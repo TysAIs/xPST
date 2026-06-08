@@ -1,4 +1,4 @@
-"""Tests for XPST state management"""
+"""Tests for xPST state management"""
 
 
 

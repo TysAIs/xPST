@@ -1,5 +1,5 @@
 """
-Anti-bot protection for XPST
+Anti-bot protection for xPST
 
 Implements human-like behavior patterns to avoid platform bans:
 - Random delays with jitter (±30%)

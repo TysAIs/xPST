@@ -1,4 +1,4 @@
-"""Tests for XPST analytics module.
+"""Tests for xPST analytics module.
 
 Tests the unified AnalyticsCollector, per-platform collectors,
 caching, parallel fetching, and graceful failure handling.

@@ -1,5 +1,5 @@
 """
-Instagram video source for XPST
+Instagram video source for xPST
 
 Uses instagrapi for Instagram content downloading with support for:
 - Instagram Reels (single video clips)

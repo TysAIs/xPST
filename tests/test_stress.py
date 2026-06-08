@@ -1,5 +1,5 @@
 """
-Stress tests for XPST — tries to break everything possible.
+Stress tests for xPST — tries to break everything possible.
 
 Covers:
 1. Invalid inputs (malformed YAML, missing fields, wrong types, empty/binary files)

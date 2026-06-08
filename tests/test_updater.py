@@ -1,4 +1,4 @@
-"""Tests for XPST updater"""
+"""Tests for xPST updater"""
 
 
 from xpst.updater import (
@@ -13,7 +13,7 @@ class TestVersionChecking:
     """Test version checking functions."""
 
     def test_get_xpst_version(self):
-        """Test that XPST version is returned."""
+        """Test that xPST version is returned."""
         ver = get_xpst_version()
         assert ver is not None
         assert ver == "0.1.0"

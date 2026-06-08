@@ -1,4 +1,4 @@
-"""Authlib-based OAuth2 manager for XPST.
+"""Authlib-based OAuth2 manager for xPST.
 
 Provides a platform-agnostic authentication interface using Authlib's
 OAuth2Client. Handles token storage, refresh, and PKCE configuration

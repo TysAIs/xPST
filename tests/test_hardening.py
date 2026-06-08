@@ -1,5 +1,5 @@
 """
-Comprehensive edge case and hardening tests for XPST.
+Comprehensive edge case and hardening tests for xPST.
 
 Covers all hardening requirements:
 - State file locking (cross-process safety)

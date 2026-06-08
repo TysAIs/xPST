@@ -1,5 +1,5 @@
 """
-Secure credential storage for XPST
+Secure credential storage for xPST
 
 Uses the OS keychain (macOS Keychain, Windows Credential Locker, Linux Secret Service)
 for secure credential storage. Falls back to encrypted file storage if keyring is unavailable.

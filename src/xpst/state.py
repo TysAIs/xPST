@@ -1,4 +1,4 @@
-"""State persistence for XPST.
+"""State persistence for xPST.
 
 Handles atomic writes, backup rotation, corruption recovery, and
 cross-process file locking for the cross-posting state file. This ensures

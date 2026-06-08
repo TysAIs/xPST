@@ -1,5 +1,5 @@
 """
-API quota management for XPST
+API quota management for xPST
 
 Tracks and enforces rate limits for each platform:
 

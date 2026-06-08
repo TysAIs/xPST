@@ -1,5 +1,5 @@
 """
-Retry logic with exponential backoff for XPST
+Retry logic with exponential backoff for xPST
 
 Provides configurable retry logic with:
 - Exponential backoff with specific delays (1s, 2s, 4s default)

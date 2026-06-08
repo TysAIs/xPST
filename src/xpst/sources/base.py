@@ -105,7 +105,7 @@ class VideoSource(ABC):
         Initialize the source with configuration.
 
         Args:
-            config: XPST configuration
+            config: xPST configuration
         """
         self.config = config
 

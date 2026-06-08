@@ -1,5 +1,5 @@
 """
-Graceful shutdown handling for XPST
+Graceful shutdown handling for xPST
 
 Handles SIGINT and SIGTERM to ensure clean shutdown during uploads.
 If interrupted during an upload:

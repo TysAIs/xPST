@@ -1,5 +1,5 @@
 """
-Core cross-posting engine for XPST
+Core cross-posting engine for xPST
 
 Orchestrates the entire cross-posting workflow:
 1. Fetch new videos from TikTok
@@ -100,7 +100,7 @@ class CrossPostEngine:
     independently so a single platform failure never blocks others.
 
     Attributes:
-        config: Loaded XPST configuration.
+        config: Loaded xPST configuration.
         state: Persistent state manager for tracking posted videos.
         video_processor: FFmpeg-based video encoder.
         circuit_breakers: Per-platform circuit breaker manager.
@@ -138,7 +138,7 @@ class CrossPostEngine:
         3. Logs recovery actions taken
 
         Args:
-            config: Fully loaded XPST configuration.
+            config: Fully loaded xPST configuration.
 
         Raises:
             RuntimeError: If FFmpeg is not installed (raised by VideoProcessor).

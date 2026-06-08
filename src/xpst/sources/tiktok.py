@@ -1,5 +1,5 @@
 """
-TikTok video source for XPST
+TikTok video source for xPST
 
 Uses yt-dlp for video downloading with support for:
 - Browser cookie authentication (for HD quality)

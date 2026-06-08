@@ -1,4 +1,4 @@
-# XPST — Deep Research & Improvement Plan
+# xPST — Deep Research & Improvement Plan
 
 ## Questions Asked & Answered
 
@@ -336,7 +336,7 @@ class WebhookNotifier:
 
 ## Competitive Analysis
 
-| Feature | XPST | Buffer | Hootsuite | Later |
+| Feature | xPST | Buffer | Hootsuite | Later |
 |---------|-----------|--------|-----------|-------|
 | **Price** | Free | $6/mo | $99/mo | $25/mo |
 | **Self-hosted** | ✅ | ❌ | ❌ | ❌ |
@@ -348,7 +348,7 @@ class WebhookNotifier:
 | **Analytics** | Planned | ✅ | ✅ | ✅ |
 | **Web UI** | Planned | ✅ | ✅ | ✅ |
 
-**XPST's unique advantages:**
+**xPST's unique advantages:**
 1. Free and open source
 2. Self-hosted (data stays local)
 3. TikTok-first workflow

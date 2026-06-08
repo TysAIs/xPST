@@ -62,7 +62,7 @@ class PlatformUploader(ABC):
         Initialize the uploader with configuration.
 
         Args:
-            config: XPST configuration
+            config: xPST configuration
         """
         self.config = config
         self._platform_name = self.__class__.__name__.lower().replace("uploader", "")

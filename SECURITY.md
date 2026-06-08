@@ -2,7 +2,7 @@
 
 ## Credential Storage
 
-XPST takes credential security seriously. All authentication tokens, session cookies, and API keys are stored using a layered security approach:
+xPST takes credential security seriously. All authentication tokens, session cookies, and API keys are stored using a layered security approach:
 
 ### Primary: OS Keychain (Recommended)
 
@@ -20,7 +20,7 @@ This provides:
 
 ### Fallback: Encrypted File Storage
 
-If the OS keychain is unavailable (e.g., headless server, Docker container), XPST falls back to file-based storage in `~/.xpst/credentials/`. These files are JSON-encoded but **not encrypted** — the OS filesystem permissions provide the security layer.
+If the OS keychain is unavailable (e.g., headless server, Docker container), xPST falls back to file-based storage in `~/.xpst/credentials/`. These files are JSON-encoded but **not encrypted** — the OS filesystem permissions provide the security layer.
 
 ### What Is Stored
 
@@ -32,7 +32,7 @@ If the OS keychain is unavailable (e.g., headless server, Docker container), XPS
 
 ### What Is NOT Stored
 
-- Passwords are **never** stored by XPST
+- Passwords are **never** stored by xPST
 - API keys are read from environment variables or config files
 - OAuth client secrets (`client_secrets.json`) must be provided by the user
 
@@ -48,7 +48,7 @@ The repository `.gitignore` is configured to prevent accidental commits of:
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in XPST, please report it responsibly:
+If you discover a security vulnerability in xPST, please report it responsibly:
 
 1. **Do NOT** open a public GitHub issue
 2. Email the maintainers privately (see README.md for contact info)
@@ -66,7 +66,7 @@ If you discover a security vulnerability in XPST, please report it responsibly:
 
 ## Dependencies
 
-XPST's security depends on:
+xPST's security depends on:
 
 - [`keyring`](https://pypi.org/project/keyring/) — OS keychain integration
 - [`google-auth`](https://pypi.org/project/google-auth/) — OAuth2 token management
@@ -77,7 +77,7 @@ XPST's security depends on:
 
 ### ⚠️ Important Notice
 
-XPST uses unofficial APIs and third-party libraries to interact with social media platforms. Users are solely responsible for ensuring their use complies with platform Terms of Service.
+xPST uses unofficial APIs and third-party libraries to interact with social media platforms. Users are solely responsible for ensuring their use complies with platform Terms of Service.
 
 ### Unofficial APIs Used
 
@@ -121,7 +121,7 @@ XPST uses unofficial APIs and third-party libraries to interact with social medi
    - Consider official APIs for other platforms if available
 
 2. **Respect Rate Limits**
-   - Use XPST's built-in rate limiting features
+   - Use xPST's built-in rate limiting features
    - Avoid excessive posting frequency
    - Monitor platform notifications
 
@@ -142,7 +142,7 @@ XPST uses unofficial APIs and third-party libraries to interact with social medi
 
 ### Disclaimer
 
-THE DEVELOPERS OF XPST ARE NOT RESPONSIBLE FOR:
+THE DEVELOPERS OF xPST ARE NOT RESPONSIBLE FOR:
 - Account suspensions, bans, or restrictions
 - Loss of data or content
 - Legal consequences of ToS violations

@@ -1,7 +1,7 @@
 """Pidfile lock to prevent concurrent engine instances.
 
 Uses OS-level file locking (fcntl on Unix, msvcrt on Windows) to ensure
-only one XPST engine instance runs at a time. The lock is automatically
+only one xPST engine instance runs at a time. The lock is automatically
 released when the process exits (even on crash), preventing stale locks.
 
 Usage:
@@ -29,7 +29,7 @@ class PidfileLockError(Exception):
 
 
 class PidfileLock:
-    """Prevents concurrent XPST engine instances using OS-level file locking.
+    """Prevents concurrent xPST engine instances using OS-level file locking.
 
     The lock file stores the PID and start time of the running process.
     On Unix, uses fcntl.flock() which is automatically released on crash.
@@ -44,7 +44,7 @@ class PidfileLock:
         """Initialize pidfile lock.
 
         Args:
-            config_dir: XPST config directory for the lock file.
+            config_dir: xPST config directory for the lock file.
         """
         self.config_dir = Path(config_dir).expanduser()
         self.lock_path = self.config_dir / "xpst.pid"
@@ -68,7 +68,7 @@ class PidfileLock:
                 except OSError:
                     self._check_stale()
                     raise PidfileLockError(
-                        "Another XPST instance is running (lock file: "
+                        "Another xPST instance is running (lock file: "
                         f"{self.lock_path})"
                     )
             else:
@@ -78,7 +78,7 @@ class PidfileLock:
                 except OSError:
                     self._check_stale()
                     raise PidfileLockError(
-                        "Another XPST instance is running (lock file: "
+                        "Another xPST instance is running (lock file: "
                         f"{self.lock_path})"
                     )
 

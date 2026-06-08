@@ -1,5 +1,5 @@
 """
-Streamlined account connection wizard for XPST.
+Streamlined account connection wizard for xPST.
 
 Aims to connect all 4 platforms in under 5 minutes by:
 - YouTube: Auto-opening browser for OAuth via InstalledAppFlow.run_local_server()
@@ -39,7 +39,7 @@ def _get_creds_dir(config: XPSTConfig) -> Path:
     """Get the credentials directory path, creating it if needed.
 
     Args:
-        config: XPST configuration.
+        config: xPST configuration.
 
     Returns:
         Path to the ``credentials/`` subdirectory under config_dir.
@@ -131,7 +131,7 @@ def connect_youtube(config: XPSTConfig) -> bool:
 
     # Run OAuth flow with browser
     console.print("\n[bold]Opening browser for YouTube authorization...[/bold]")
-    console.print("[dim]A browser window will open. Sign in and authorize XPST.[/dim]\n")
+    console.print("[dim]A browser window will open. Sign in and authorize xPST.[/dim]\n")
 
     try:
         from google_auth_oauthlib.flow import InstalledAppFlow
@@ -593,7 +593,7 @@ def run_connect(platforms: list[str] | None = None, test_only: bool = False) -> 
 
     console.print()
     console.print(Panel.fit(
-        "[bold blue]XPST Account Connection[/bold blue]\n"
+        "[bold blue]xPST Account Connection[/bold blue]\n"
         "Connect your social media accounts in minutes\n\n"
         "[dim]Each platform will be connected and tested automatically.[/dim]",
         border_style="blue",

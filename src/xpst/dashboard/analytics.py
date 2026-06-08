@@ -1,5 +1,5 @@
 """
-Analytics Collector for XPST Dashboard
+Analytics Collector for xPST Dashboard
 
 Collects engagement metrics from all platforms:
 - YouTube: via Google Analytics/Data API
@@ -53,7 +53,7 @@ def load_state(config_dir: str = "~/.xpst") -> dict[str, Any]:
     """Load the current state.json and return the raw dict.
 
     Args:
-        config_dir: Path to XPST config directory.
+        config_dir: Path to xPST config directory.
 
     Returns:
         Parsed state dictionary, or empty default structure if file
@@ -90,17 +90,17 @@ def _parse_ts(ts_str: str | None) -> datetime | None:
 
 
 class AnalyticsCollector:
-    """Collects analytics from all XPST platforms.
+    """Collects analytics from all xPST platforms.
 
     Uses real platform APIs where credentials are available.
     Falls back to state.json data for basic post tracking.
     """
 
     def __init__(self, config_dir: str = "~/.xpst") -> None:
-        """Initialize analytics collector and load XPST config.
+        """Initialize analytics collector and load xPST config.
 
         Args:
-            config_dir: Path to XPST config directory.
+            config_dir: Path to xPST config directory.
         """
         self.config_dir = config_dir
         self._yt_service = None  # Cached YouTube Analytics service
@@ -109,7 +109,7 @@ class AnalyticsCollector:
         self._load_config()
 
     def _load_config(self) -> None:
-        """Load XPST config.yaml to determine which platforms are available.
+        """Load xPST config.yaml to determine which platforms are available.
 
         Sets ``self.config`` to the parsed YAML dict and ``self.config_exists``
         to whether the file was found.

@@ -1,14 +1,14 @@
-# XPST Architecture
+# xPST Architecture
 
-This document describes the high-level architecture of XPST, designed for enterprise-grade reliability while remaining simple for individual creators.
+This document describes the high-level architecture of xPST, designed for enterprise-grade reliability while remaining simple for individual creators.
 
 ## Overview
 
-XPST is a modular, plugin-based system for cross-posting short-form video content. It monitors TikTok for new videos and distributes them to YouTube Shorts, X/Twitter, and Instagram Reels.
+xPST is a modular, plugin-based system for cross-posting short-form video content. It monitors TikTok for new videos and distributes them to YouTube Shorts, X/Twitter, and Instagram Reels.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        XPST Engine                      │
+│                        xPST Engine                      │
 ├─────────────────────────────────────────────────────────────┤
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
 │  │   TikTok     │  │   YouTube    │  │   X/Twitter  │      │
@@ -314,7 +314,7 @@ docker-compose up -d
 ### Systemd (Linux)
 ```ini
 [Unit]
-Description=XPST Cross-Poster
+Description=xPST Cross-Poster
 After=network.target
 
 [Service]

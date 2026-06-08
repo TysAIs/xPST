@@ -1,4 +1,4 @@
-"""Disk space utilities for XPST.
+"""Disk space utilities for xPST.
 
 Checks available disk space before downloading large video files to
 prevent disk-full errors that could corrupt state files or leave

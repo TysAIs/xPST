@@ -1,5 +1,5 @@
 """
-Configuration management for XPST
+Configuration management for xPST
 
 Handles loading, validation, and merging of configuration from:
 1. Default values
@@ -258,7 +258,7 @@ class RateLimitConfig:
 
 @dataclass
 class XPSTConfig:
-    """Main configuration for XPST"""
+    """Main configuration for xPST"""
     # Accounts
     tiktok: TikTokAccountConfig = field(default_factory=TikTokAccountConfig)
     youtube: YouTubeAccountConfig = field(default_factory=YouTubeAccountConfig)

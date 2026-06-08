@@ -1,5 +1,5 @@
 """
-XPST Desktop App Launcher
+xPST Desktop App Launcher
 
 Provides a native macOS desktop experience using pywebview.
 The app appears in the Dock with its own window, traffic light buttons,
@@ -69,7 +69,7 @@ def launch_desktop_app(
     config_dir: str = "~/.xpst",
     port: int | None = None,
 ) -> None:
-    """Launch the XPST dashboard as a native desktop window.
+    """Launch the xPST dashboard as a native desktop window.
 
     1. Starts the NiceGUI server on a background thread.
     2. Opens a pywebview native window pointing at the local server.
@@ -77,7 +77,7 @@ def launch_desktop_app(
        process (daemon thread), which is the cleanest shutdown path.
 
     Args:
-        config_dir: Path to the XPST config directory.
+        config_dir: Path to the xPST config directory.
         port: Explicit port. If *None* a free port is chosen automatically.
     """
     try:
@@ -95,13 +95,13 @@ def launch_desktop_app(
     url = f"http://127.0.0.1:{port}"
 
     # ── 1. Start the NiceGUI server in the background ──
-    logger.info("Starting XPST dashboard server on %s", url)
+    logger.info("Starting xPST dashboard server on %s", url)
     _start_nicegui_server(port, config_dir)
 
     # ── 2. Wait for the server to be ready ──
     if not _wait_for_server("127.0.0.1", port, timeout=30):
         raise RuntimeError(
-            f"XPST dashboard server did not become ready on {url} within 30 s"
+            f"xPST dashboard server did not become ready on {url} within 30 s"
         )
     logger.info("Dashboard server is ready at %s", url)
 
@@ -115,7 +115,7 @@ def launch_desktop_app(
 
     # ── 4. Create and show the native window ──
     window = webview.create_window(
-        title="XPST — Cross-Platform Studio",
+        title="xPST — Cross-Platform Studio",
         url=url,
         width=_DEFAULT_WIDTH,
         height=_DEFAULT_HEIGHT,

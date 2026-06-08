@@ -1,5 +1,5 @@
 """
-X/Twitter uploader for XPST
+X/Twitter uploader for xPST
 
 Uses twikit for authentication and video uploads to X/Twitter.
 

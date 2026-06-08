@@ -1,5 +1,5 @@
 """
-Circuit breaker pattern for XPST
+Circuit breaker pattern for xPST
 
 Implements the circuit breaker pattern to prevent cascading failures
 when a platform becomes unavailable.

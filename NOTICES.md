@@ -95,7 +95,7 @@ This project uses the following open-source libraries. Each library is listed wi
 
 ## License Compatibility Summary
 
-All dependencies are compatible with XPST's dual MIT/Apache-2.0 license:
+All dependencies are compatible with xPST's dual MIT/Apache-2.0 license:
 
 | License Type | Count | Compatibility |
 |--------------|-------|---------------|
@@ -109,11 +109,11 @@ All dependencies are compatible with XPST's dual MIT/Apache-2.0 license:
 
 1. **yt-dlp** is licensed under the Unlicense, which dedicates the work to the public domain. This is fully compatible with any license.
 
-2. **structlog** uses the same dual MIT/Apache-2.0 licensing model as XPST.
+2. **structlog** uses the same dual MIT/Apache-2.0 licensing model as xPST.
 
 3. All permissive licenses (MIT, Apache-2.0, BSD-3-Clause) are compatible with each other and allow use in both open-source and proprietary projects.
 
-4. There are **no license conflicts** in XPST's dependency tree.
+4. There are **no license conflicts** in xPST's dependency tree.
 
 ---
 

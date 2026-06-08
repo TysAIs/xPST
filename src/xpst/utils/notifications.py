@@ -1,5 +1,5 @@
 """
-Webhook notifications for XPST
+Webhook notifications for xPST
 
 Send notifications to Discord and/or Telegram when uploads succeed or fail.
 Completely optional - only activates if webhook URLs are configured in YAML.
@@ -96,7 +96,7 @@ class Notification:
                 "description": self.message,
                 "color": color_map.get(self.type, 0x808080),
                 "fields": fields,
-                "footer": {"text": f"XPST • {self.timestamp}"},
+                "footer": {"text": f"xPST • {self.timestamp}"},
             }]
         }
 

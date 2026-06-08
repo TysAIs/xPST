@@ -89,48 +89,48 @@ Postiz is the most popular open-source social media scheduling tool. It position
 
 ### Account Connection
 - **Postiz:** Official OAuth flows only. Users authenticate directly with each platform. No credential storage/proxying. Chrome extension for cookie-based platforms.
-- **XPST:** Unofficial APIs — twikit (X), instagrapi (Instagram), browser cookies (TikTok), OAuth2 (YouTube). More fragile but doesn't require platform developer apps.
+- **xPST:** Unofficial APIs — twikit (X), instagrapi (Instagram), browser cookies (TikTok), OAuth2 (YouTube). More fragile but doesn't require platform developer apps.
 
 ### Content Scheduling
 - **Postiz:** Full calendar view, schedule posts for future dates/times, recurring evergreen posts, RSS auto-posting.
-- **XPST:** No scheduling. Runs on a watch loop (every 15 min), posts immediately when new content detected. No calendar UI.
+- **xPST:** No scheduling. Runs on a watch loop (every 15 min), posts immediately when new content detected. No calendar UI.
 
 ### Analytics
 - **Postiz:** Unified dashboard — impressions, likes, comments, shares, reach, engagement rate. Cross-platform comparison. Post-level and platform-level.
-- **XPST:** Has an analytics dashboard module. Metrics unclear from README — likely basic view/engagement counts.
+- **xPST:** Has an analytics dashboard module. Metrics unclear from README — likely basic view/engagement counts.
 
 ### AI Content Generation
 - **Postiz:** Full AI assistant — generate text, images, short videos via chat. Agentic integration with multiple AI platforms.
-- **XPST:** No AI content generation.
+- **xPST:** No AI content generation.
 
 ### Team Collaboration
 - **Postiz:** Multi-user with roles (Admin/Member), multi-brand management, collaborative scheduling and commenting.
-- **XPST:** Single-user, local tool. No team features.
+- **xPST:** Single-user, local tool. No team features.
 
 ### Content Calendar
 - **Postiz:** Visual calendar planner — see all scheduled posts across all channels.
-- **XPST:** No calendar view.
+- **xPST:** No calendar view.
 
 ### Hashtag Suggestions
 - **Postiz:** Not explicitly documented, but AI assistant likely handles this.
-- **XPST:** Not documented.
+- **xPST:** Not documented.
 
 ### Best Time to Post
 - **Postiz:** Not explicitly documented.
-- **XPST:** Not documented.
+- **xPST:** Not documented.
 
 ### Bulk Upload
 - **Postiz:** API supports bulk operations. CLI can batch-create posts.
-- **XPST:** No bulk upload.
+- **xPST:** No bulk upload.
 
 ### Content Recycling
 - **Postiz:** **Yes** — Evergreen recycling, repeat posts on a schedule (e.g., every 30 days). RSS feed auto-posting.
-- **XPST:** No content recycling.
+- **xPST:** No content recycling.
 
-## 5. Features Postiz Has That XPST Doesn't
+## 5. Features Postiz Has That xPST Doesn't
 
 1. **Visual content calendar** — drag-and-drop scheduling UI
-2. **30+ platform support** — vs XPST's 4
+2. **30+ platform support** — vs xPST's 4
 3. **AI content generation** — text, images, video via chat
 4. **Agentic AI integration** — CLI/MCP for Claude, ChatGPT, etc.
 5. **Team collaboration** — multi-user, roles, multi-brand
@@ -155,25 +155,25 @@ Postiz is the most popular open-source social media scheduling tool. It position
 24. **Auto Actions** — auto-like/comment on milestones
 25. **Helm/Kubernetes deployment** support
 
-## 6. What Postiz Does NOT Do That XPST Does
+## 6. What Postiz Does NOT Do That xPST Does
 
-1. **Anti-bot protection** — Postiz uses only official OAuth; XPST has rate limiting, fingerprint rotation, human-like delays, CAPTCHA detection, circuit breakers
-2. **Platform-native quality encoding** — XPST has research-verified encoding per platform (YouTube: original quality, Instagram: 720p CRF 23 Main@L3.0, X: 1080p 10Mbps High@L4.0). Postiz likely re-encodes generically.
-3. **Bidirectional cross-posting** — XPST can pull FROM TikTok TO other platforms AND vice versa. Postiz is one-directional (write once, publish many).
-4. **TikTok-first workflow** — XPST is purpose-built for short-form video distribution. Postiz is a general scheduler.
-5. **Portrait-optimized pipeline** — XPST is built specifically for 9:16 content. Postiz handles all aspect ratios generically.
-6. **Dead letter queue / enterprise reliability patterns** — XPST has circuit breakers, exponential backoff, DLQ. Postiz relies on Temporal for retries but doesn't expose these patterns.
-7. **Completely free, no paid tier** — XPST is MIT/Apache-2.0 with no SaaS upsell. Postiz is AGPL-3.0 with paid plans.
-8. **True self-contained local operation** — XPST needs only Python + FFmpeg. Postiz needs PostgreSQL, Redis, Temporal, and a full Docker stack.
+1. **Anti-bot protection** — Postiz uses only official OAuth; xPST has rate limiting, fingerprint rotation, human-like delays, CAPTCHA detection, circuit breakers
+2. **Platform-native quality encoding** — xPST has research-verified encoding per platform (YouTube: original quality, Instagram: 720p CRF 23 Main@L3.0, X: 1080p 10Mbps High@L4.0). Postiz likely re-encodes generically.
+3. **Bidirectional cross-posting** — xPST can pull FROM TikTok TO other platforms AND vice versa. Postiz is one-directional (write once, publish many).
+4. **TikTok-first workflow** — xPST is purpose-built for short-form video distribution. Postiz is a general scheduler.
+5. **Portrait-optimized pipeline** — xPST is built specifically for 9:16 content. Postiz handles all aspect ratios generically.
+6. **Dead letter queue / enterprise reliability patterns** — xPST has circuit breakers, exponential backoff, DLQ. Postiz relies on Temporal for retries but doesn't expose these patterns.
+7. **Completely free, no paid tier** — xPST is MIT/Apache-2.0 with no SaaS upsell. Postiz is AGPL-3.0 with paid plans.
+8. **True self-contained local operation** — xPST needs only Python + FFmpeg. Postiz needs PostgreSQL, Redis, Temporal, and a full Docker stack.
 9. **yt-dlp integration** for downloading source content
 10. **Cookie-based authentication** (TikTok HD quality via browser cookies)
 
-## 7. Ideas XPST Can Borrow from Postiz
+## 7. Ideas xPST Can Borrow from Postiz
 
 ### High Impact
 1. **Visual calendar UI** — A web dashboard showing scheduled/posted content on a timeline would dramatically improve UX
 2. **Content recycling** — Auto-repost evergreen content on a configurable schedule (e.g., every 30 days). Simple cron + DB flag.
-3. **Public REST API** — Expose XPST's functionality as an API so others can build integrations (n8n, custom apps)
+3. **Public REST API** — Expose xPST's functionality as an API so others can build integrations (n8n, custom apps)
 4. **Temporal-like workflow engine** — Replace simple cron loops with a durable workflow system for reliable scheduling with retries
 5. **Multi-platform analytics dashboard** — Unified view comparing performance across all 4 platforms
 
@@ -182,10 +182,10 @@ Postiz is the most popular open-source social media scheduling tool. It position
 7. **Per-platform post preview** — Show how a post will look on each platform before publishing
 8. **RSS feed ingestion** — Auto-post from RSS sources
 9. **Webhooks** — Notify external systems when posts succeed/fail
-10. **MCP server** — Let AI agents control XPST programmatically
+10. **MCP server** — Let AI agents control xPST programmatically
 
 ### Architecture Lessons
-11. **NestJS-style modular backend** — XPST already has 45 modules but could benefit from formalized service boundaries
+11. **NestJS-style modular backend** — xPST already has 45 modules but could benefit from formalized service boundaries
 12. **Prisma ORM** — Type-safe database access with migrations
 13. **pnpm monorepo** — Clean separation of frontend/backend/shared code
 14. **Per-platform task queues** — Prevent one slow platform from blocking others (like Temporal's task queues)
@@ -193,19 +193,19 @@ Postiz is the most popular open-source social media scheduling tool. It position
 
 ## 8. Licensing Comparison
 
-| Aspect | Postiz | XPST |
+| Aspect | Postiz | xPST |
 |--------|--------|------|
 | License | AGPL-3.0 | MIT / Apache-2.0 |
 | Copyleft | Yes — modifications to Postiz code must be shared | No — permissive, can be used in proprietary projects |
 | SaaS-friendly | Requires purchasing commercial license or open-sourcing | Free for any use |
 | Self-hosting | Free if AGPL compliant | Completely free |
 
-**Key insight:** Postiz's AGPL license means anyone self-hosting and modifying it must share their changes. XPST's MIT/Apache-2.0 is far more permissive, which is a significant advantage for adoption.
+**Key insight:** Postiz's AGPL license means anyone self-hosting and modifying it must share their changes. xPST's MIT/Apache-2.0 is far more permissive, which is a significant advantage for adoption.
 
 ## 9. Summary
 
 Postiz is a feature-rich, well-architected social media management platform with 30+ platform support, AI integration, team collaboration, and a visual calendar. Its strength is breadth — it's a full Buffer/Hootsuite replacement.
 
-XPST's strengths are **depth over breadth**: superior video encoding quality, anti-bot protection, bidirectional cross-posting, and true zero-dependency local operation. XPST is a specialized tool; Postiz is a general-purpose platform.
+xPST's strengths are **depth over breadth**: superior video encoding quality, anti-bot protection, bidirectional cross-posting, and true zero-dependency local operation. xPST is a specialized tool; Postiz is a general-purpose platform.
 
-**The biggest gap for XPST:** No web UI, no scheduling calendar, no content recycling, and no API. Adding even a simple web dashboard with a calendar view and content recycling would close the most impactful feature gaps.
+**The biggest gap for xPST:** No web UI, no scheduling calendar, no content recycling, and no API. Adding even a simple web dashboard with a calendar view and content recycling would close the most impactful feature gaps.

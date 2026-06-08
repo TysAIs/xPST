@@ -1,5 +1,5 @@
 """
-XPST Dashboard App — Apple macOS Settings Aesthetic
+xPST Dashboard App — Apple macOS Settings Aesthetic
 
 Dark/Light theme with clean typography, proper spacing, and smooth animations.
 Pages: Overview · Content Library · Analytics · Connect · Settings
@@ -794,7 +794,7 @@ def _sidebar(current: str = "/"):
         # Logo
         with ui.row().classes("sidebar-logo"):
             ui.icon("hub", size="24px", color=ACCENT)
-            ui.label("XPST").classes("sidebar-logo-text")
+            ui.label("xPST").classes("sidebar-logo-text")
 
         # Navigation
         for path, icon, label in _NAV_ITEMS:
@@ -814,7 +814,7 @@ def _sidebar(current: str = "/"):
 
         # Footer
         with ui.column().style("padding:0 8px; margin-top:12px;"):
-            ui.label("XPST v0.1.0").style("font-size:11px; color:var(--text-muted);")
+            ui.label("xPST v0.1.0").style("font-size:11px; color:var(--text-muted);")
 
 
 def _toggle_theme():
@@ -1487,7 +1487,7 @@ def _page_settings(collector: AnalyticsCollector) -> None:
     config_path = config_dir / "config.yaml"
 
     with _page_shell("/settings"):
-        _section_header("Settings", "Configure your XPST installation")
+        _section_header("Settings", "Configure your xPST installation")
 
         # General
         with ui.element("div").classes("glass-card w-full").style("margin-bottom:20px;"):

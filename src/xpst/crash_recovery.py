@@ -1,4 +1,4 @@
-"""Crash recovery system for XPST.
+"""Crash recovery system for xPST.
 
 Detects incomplete uploads from state.json and offers to retry or skip.
 Saves upload progress checkpoints for resumability.
@@ -36,7 +36,7 @@ class CrashRecoveryManager:
         Initialize crash recovery manager.
 
         Args:
-            config_dir: Path to XPST config directory
+            config_dir: Path to xPST config directory
         """
         self.config_dir = Path(config_dir).expanduser()
         self.checkpoint_file = self.config_dir / self.CHECKPOINT_FILE

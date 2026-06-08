@@ -1,9 +1,9 @@
-# XPST Comprehensive Codebase Audit Report
+# xPST Comprehensive Codebase Audit Report
 Generated: 2026-06-07
 
 ## Executive Summary
 
-XPST is a 39-module, 14,423-line Python codebase for cross-posting short-form video across TikTok, YouTube, X/Twitter, and Instagram. The architecture is **fundamentally sound** at the layer level but suffers from a critical **God Object** in `engine.py`, **missing abstractions** (no use-case/service layer), and **code duplication** that undermines maintainability. The most impactful flaw is that the central engine module — the most complex module in the project — has **zero test coverage**.
+xPST is a 39-module, 14,423-line Python codebase for cross-posting short-form video across TikTok, YouTube, X/Twitter, and Instagram. The architecture is **fundamentally sound** at the layer level but suffers from a critical **God Object** in `engine.py`, **missing abstractions** (no use-case/service layer), and **code duplication** that undermines maintainability. The most impactful flaw is that the central engine module — the most complex module in the project — has **zero test coverage**.
 
 **Severity Rating:** ⚠️ MODERATE — functional but fragile at scale.
 
@@ -304,7 +304,7 @@ While it's a UI module (UI code tends to be verbose), 1,310 lines and complexity
 ## 8. Comparison with Architecture Patterns
 
 ### vs Clean Architecture (Uncle Bob)
-| Clean Arch Layer | Required | XPST Status |
+| Clean Arch Layer | Required | xPST Status |
 |------------------|----------|-------------|
 | Entities | Core business objects | ❌ Missing — no domain model |
 | Use Cases | Application-specific rules | ❌ Missing — engine does everything |
@@ -409,5 +409,5 @@ CrossPostEngine.check_and_post()
 - This report
 
 ## 12. Issues Encountered
-- Project was renamed from `CrossPSTR` to `XPST` during analysis (directory moved)
+- Project was renamed from `CrossPSTR` to `xPST` during analysis (directory moved)
 - Initial dependency resolution script had matching bugs — fixed in v2

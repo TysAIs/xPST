@@ -1,4 +1,4 @@
-"""XPST - Enterprise-grade, open-source cross-posting for short-form video.
+"""xPST - Enterprise-grade, open-source cross-posting for short-form video.
 
 Automatically distribute short-form video content from TikTok to YouTube Shorts,
 X/Twitter, and Instagram Reels with enterprise reliability features.
@@ -21,7 +21,7 @@ Quick Start:
 """
 
 __version__ = "0.1.0"
-__author__ = "XPST Contributors"
+__author__ = "xPST Contributors"
 
 from .config import NotificationConfig, XPSTConfig
 from .engine import CrossPostEngine

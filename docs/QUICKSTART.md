@@ -1,6 +1,6 @@
-# XPST Quick Start Guide
+# xPST Quick Start Guide
 
-Get XPST up and running in 5 minutes.
+Get xPST up and running in 5 minutes.
 
 ## Prerequisites
 
@@ -23,7 +23,7 @@ cd XPST
 python3 -m venv .venv
 source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 
-# Install XPST
+# Install xPST
 pip install -e .
 ```
 
@@ -242,7 +242,7 @@ Get a fresh `sessionid` from browser cookies and update `~/.xpst/credentials/ins
 
 ### Video quality is poor
 
-**For Instagram/X**: XPST automatically encodes videos with optimal settings. If quality is still poor:
+**For Instagram/X**: xPST automatically encodes videos with optimal settings. If quality is still poor:
 
 1. Check source video quality: `xpst status` shows download format
 2. Enable browser cookies for HD downloads:
@@ -300,13 +300,13 @@ launchctl load ~/Library/LaunchAgents/com.xpst.plist
 # Create service file
 sudo cat > /etc/systemd/system/xpst.service << 'EOF'
 [Unit]
-Description=XPST Cross-Poster
+Description=xPST Cross-Poster
 After=network.target
 
 [Service]
 Type=simple
 User=xPSTOwner
-WorkingDirectory=/path/to/XPST
+WorkingDirectory=/path/to/xPST
 ExecStart=/path/to/.venv/bin/xpst watch
 Restart=always
 

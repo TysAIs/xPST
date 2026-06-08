@@ -1,4 +1,4 @@
-# XPST v2.0 — Universal Cross-Platform Content Manager
+# xPST v2.0 — Universal Cross-Platform Content Manager
 
 ## Vision
 One tool to post from ANY platform to ALL others. Upload once, distribute everywhere.
@@ -8,7 +8,7 @@ Free. Local. Open source. Bulletproof.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   XPST v2.0                     │
+│                   xPST v2.0                     │
 ├─────────────────────────────────────────────────────┤
 │  Sources (Download)  │  Targets (Upload)             │
 │  ┌─────────────┐     │  ┌─────────────────┐         │

@@ -1,5 +1,5 @@
 """
-Structured logging for XPST
+Structured logging for xPST
 
 Provides consistent, structured logging with support for:
 - Human-readable console output (with colors via rich)

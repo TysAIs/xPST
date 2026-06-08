@@ -1,5 +1,5 @@
 """
-Scheduler for XPST
+Scheduler for xPST
 
 Single source of truth for watch-mode scheduling. The CLI ``watch``
 command delegates to this scheduler instead of duplicating the loop.
@@ -39,7 +39,7 @@ class Scheduler:
 
         Args:
             engine: Cross-posting engine
-            config: XPST configuration
+            config: xPST configuration
         """
         self.engine = engine
         self.config = config

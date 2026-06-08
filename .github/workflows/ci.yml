@@ -1,4 +1,4 @@
-# XPST CI/CD Pipeline
+# xPST CI/CD Pipeline
 
 name: CI
 
@@ -164,7 +164,7 @@ jobs:
           context: .
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: |
-            YOUR_USERNAME/XPST:latest
-            YOUR_USERNAME/XPST:${{ github.sha }}
+            YOUR_USERNAME/xPST:latest
+            YOUR_USERNAME/xPST:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

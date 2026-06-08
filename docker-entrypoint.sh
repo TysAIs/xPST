@@ -1,5 +1,5 @@
 #!/bin/bash
-# XPST Docker Entrypoint
+# xPST Docker Entrypoint
 set -e
 
 # If the first argument is a xpst subcommand, run it

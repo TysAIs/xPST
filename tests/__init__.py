@@ -1,4 +1,4 @@
-"""Tests for XPST"""
+"""Tests for xPST"""
 
 
 import pytest

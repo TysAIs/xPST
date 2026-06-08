@@ -1,5 +1,5 @@
 """
-Local file source for XPST
+Local file source for xPST
 
 Handles local video files and directories with support for:
 - Single video files
@@ -31,7 +31,7 @@ ALL_MEDIA_EXTENSIONS = VIDEO_EXTENSIONS | IMAGE_EXTENSIONS
 
 class LocalSource(VideoSource):
     """
-    Local file source for XPST.
+    Local file source for xPST.
 
     Features:
     - Single video file support

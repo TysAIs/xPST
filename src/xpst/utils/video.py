@@ -1,5 +1,5 @@
 """
-Video processing utilities for XPST
+Video processing utilities for xPST
 
 Handles FFmpeg-based video encoding with platform-specific profiles.
 Each platform has research-verified optimal settings for maximum quality

@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT OR Apache-2.0"
 requires-python = ">=3.10"
 authors = [
-    {name = "XPST Contributors"}
+    {name = "xPST Contributors"}
 ]
 keywords = ["cross-posting", "tiktok", "youtube-shorts", "instagram-reels", "x-twitter", "automation", "social-media"]
 classifiers = [

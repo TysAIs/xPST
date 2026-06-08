@@ -1,5 +1,5 @@
 """
-Interactive first-time setup wizard for XPST.
+Interactive first-time setup wizard for xPST.
 
 Guides users through:
 1. System requirements check (ffmpeg, Python version)
@@ -43,7 +43,7 @@ def check_ffmpeg() -> bool:
 
 
 def check_python_version() -> tuple[bool, str]:
-    """Check if the Python version meets XPST requirements (>=3.10).
+    """Check if the Python version meets xPST requirements (>=3.10).
 
     Returns:
         Tuple of (meets_requirement, version_string).
@@ -274,7 +274,7 @@ def test_connectivity(config: XPSTConfig) -> bool:
     making actual API calls.
 
     Args:
-        config: Loaded XPST configuration.
+        config: Loaded xPST configuration.
 
     Returns:
         True if all enabled platforms have credentials present.
@@ -333,7 +333,7 @@ def run_setup() -> XPSTConfig:
     """
     console.print()
     console.print(Panel.fit(
-        "[bold blue]XPST Setup Wizard[/bold blue]\n"
+        "[bold blue]xPST Setup Wizard[/bold blue]\n"
         "Enterprise-grade cross-posting for short-form video\n\n"
         "[dim]This wizard will guide you through first-time configuration.[/dim]",
         border_style="blue",

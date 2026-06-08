@@ -1,7 +1,7 @@
-# XPST GitHub Open Source Integrations Research
+# xPST GitHub Open Source Integrations Research
 
 > **Date:** June 7, 2026
-> **Purpose:** Identify best open-source tools and libraries XPST can integrate or learn from across 10 key categories.
+> **Purpose:** Identify best open-source tools and libraries xPST can integrate or learn from across 10 key categories.
 > **Criteria:** MIT/Apache/BSD license, active maintenance, Python-first or Python-compatible, clear integration path.
 
 ---
@@ -15,11 +15,11 @@
 - **Language:** Python (Django)
 - **Last Updated:** Actively maintained (updated hours ago)
 - **What it does:** Full-featured self-hosted social media management platform. Schedule, publish, and manage content across 12+ platforms (Facebook, Instagram, LinkedIn, TikTok, YouTube, Pinterest, Threads, Bluesky, Mastodon, Google Business). Includes unified social inbox, approval workflows, analytics, media library, and client portal.
-- **How XPST could use it:**
+- **How xPST could use it:**
   - Study its multi-platform publishing engine and OAuth flows for each platform
   - Reference its approval workflow and scheduling queue architecture
-  - Its REST API + MCP server pattern is directly relevant to XPST's agent architecture
-  - Can deploy alongside XPST or use its scheduling logic as a reference
+  - Its REST API + MCP server pattern is directly relevant to xPST's agent architecture
+  - Can deploy alongside xPST or use its scheduling logic as a reference
 - **Integration difficulty:** Medium (Django-based, well-documented, but AGPL requires careful license handling)
 
 ### Honorable Mention: Free-AI-Social-Media-Scheduler
@@ -28,8 +28,8 @@
 - **License:** MIT ✅
 - **Language:** JavaScript (Next.js)
 - **What it does:** Self-hostable scheduler with built-in AI content generation. Currently supports YouTube and TikTok video scheduling with Stripe-powered credits system.
-- **How XPST could use it:** Study its video-first scheduling pipeline and MuAPI integration for AI content generation
-- **Integration difficulty:** Hard (Next.js/JavaScript, different tech stack from Python XPST)
+- **How xPST could use it:** Study its video-first scheduling pipeline and MuAPI integration for AI content generation
+- **Integration difficulty:** Hard (Next.js/JavaScript, different tech stack from Python xPST)
 
 ---
 
@@ -42,8 +42,8 @@
 - **Language:** TypeScript (Next.js 15, Recharts)
 - **Last Updated:** April 2026
 - **What it does:** Universal social media analytics dashboard with automated daily reporting across X, YouTube, LinkedIn, Instagram, and TikTok. Features: KPI cards, time-series charts, per-platform deep dives, branded PDF reports, automated Slack/Discord delivery, demo mode with mock data. Pluggable adapter interface for each platform.
-- **How XPST could use it:**
-  - Study its adapter interface pattern (`PlatformAdapter`) — directly applicable to XPST's multi-platform architecture
+- **How xPST could use it:**
+  - Study its adapter interface pattern (`PlatformAdapter`) — directly applicable to xPST's multi-platform architecture
   - Reference its aggregation logic for cross-platform metrics
   - Its brand.config.ts pattern for white-labeling is useful
   - The cron-based daily report generation pattern
@@ -55,7 +55,7 @@
 - **License:** MIT ✅
 - **Language:** Python
 - **What it does:** The most popular Python framework for building data dashboards. 50+ chart types, reactive callbacks, no JavaScript required.
-- **How XPST could use it:** Build XPST's analytics dashboard using Dash — it's Python-native, battle-tested, and ideal for data visualization
+- **How xPST could use it:** Build xPST's analytics dashboard using Dash — it's Python-native, battle-tested, and ideal for data visualization
 - **Integration difficulty:** Easy (Python, well-documented, `pip install dash`)
 
 ---
@@ -72,7 +72,7 @@ No dedicated open-source content calendar tool with significant adoption was fou
 - Content composer with per-platform overrides and version history
 - Templates, categories, and tags
 
-**Recommendation:** XPST should build its own content calendar module. Key components:
+**Recommendation:** xPST should build its own content calendar module. Key components:
 - Use **FullCalendar** (https://github.com/fullcalendar/fullcalendar, 18k stars, MIT) for the calendar UI
 - Use **Plotly Dash** or **FastAPI + React** for the backend
 - Study BrightBean's queue/slot system for recurring scheduling
@@ -90,7 +90,7 @@ No dedicated open-source content calendar tool with significant adoption was fou
 - **Language:** Python
 - **Last Updated:** Actively maintained (3,927 contributors)
 - **What it does:** The leading agent engineering platform. Chains LLM calls with tools, memory, and retrieval. Supports all major LLM providers (OpenAI, Anthropic, Google, etc.).
-- **How XPST could use it:**
+- **How xPST could use it:**
   - Build a caption generation pipeline: user input → LangChain chain → platform-specific caption with hashtags, CTAs, and emojis
   - Use prompt templates for different platforms (Twitter's 280 chars vs Instagram's 2200 chars)
   - Integrate with RAG for brand voice consistency
@@ -134,11 +134,11 @@ No mature open-source hashtag research tool exists on GitHub (only 3 results, al
 - **Language:** TypeScript (Next.js)
 - **Last Updated:** March 2025
 - **What it does:** Determines optimal posting times based on the user's timezone and their audience's timezone distribution. Simple, focused tool.
-- **How XPST could use it:**
+- **How xPST could use it:**
   - Study its timezone-overlap algorithm
   - Port the core logic to Python
   - Extend with platform-specific engagement data (each platform has different peak hours)
-  - Add historical analytics integration (use XPST's own data to personalize recommendations)
+  - Add historical analytics integration (use xPST's own data to personalize recommendations)
 
 **Supplementary data sources:**
 - Sprout Social, Later, and Hootsuite publish free "best time to post" research annually
@@ -157,8 +157,8 @@ No mature open-source hashtag research tool exists on GitHub (only 3 results, al
 - **Language:** Python
 - **Last Updated:** May 2026 (actively maintained)
 - **What it does:** Full AI content factory: transforms long-form videos into viral short-form highlights. Features include: Whisper transcription, Gemini AI content curation, face-tracking auto-framing, karaoke subtitles (Hormozi style), B-roll integration (Pexels), BGM ducking, auto-thumbnails, cross-platform metadata generation, and auto YouTube upload.
-- **How XPST could use it:**
-  - Use as the core video processing pipeline for XPST's video features
+- **How xPST could use it:**
+  - Use as the core video processing pipeline for xPST's video features
   - Its aspect ratio handling (9:16, 16:9, 1:1, 3:4, 4:5) covers all social platforms
   - Cross-platform metadata generation is directly useful
   - Auto-thumbnail feature with brand styling
@@ -171,7 +171,7 @@ No mature open-source hashtag research tool exists on GitHub (only 3 results, al
 - **License:** Not specified (check before integrating)
 - **Language:** Python
 - **What it does:** Automatic thumbnail generator: video → AI scene generation (Gemini) → branded text overlay (Pillow + Inter font). A24-inspired cinematic aesthetic.
-- **How XPST could use it:** Generate branded thumbnails for scheduled video content automatically
+- **How xPST could use it:** Generate branded thumbnails for scheduled video content automatically
 - **Integration difficulty:** Easy (CLI tool, `uv tool install`)
 
 ### Honorable Mention: pysnippet/thumbnails
@@ -180,7 +180,7 @@ No mature open-source hashtag research tool exists on GitHub (only 3 results, al
 - **License:** Apache 2.0 ✅
 - **Language:** Python
 - **What it does:** Fast video thumbnail generator optimized for web players. Generates WebVTT and JSON thumbnail sprite sheets.
-- **How XPST could use it:** Generate preview thumbnails for video content in the XPST dashboard
+- **How xPST could use it:** Generate preview thumbnails for video content in the xPST dashboard
 - **Integration difficulty:** Easy (`pip install thumbnails`, clean Python API)
 
 ---
@@ -194,9 +194,9 @@ No mature open-source hashtag research tool exists on GitHub (only 3 results, al
 - **Language:** Python
 - **Last Updated:** June 2020 (⚠️ no longer maintained)
 - **What it does:** Unified Python library for scraping data from Facebook, Twitter, Reddit, YouTube, Pinterest, and Tumblr APIs. Provides consistent interface across platforms with CSV export.
-- **How XPST could use it:**
+- **How xPST could use it:**
   - Study its unified interface pattern for multi-platform data collection
-  - Use as reference for XPST's own API wrapper module
+  - Use as reference for xPST's own API wrapper module
   - Note: Twitter/Facebook APIs have changed significantly since 2020 — use as architectural reference only
 
 **Better Alternative: Build custom API wrappers using platform-specific libraries:**
@@ -224,7 +224,7 @@ No mature open-source hashtag research tool exists on GitHub (only 3 results, al
 - **Language:** Python
 - **Last Updated:** Active (83.5k+ dependents)
 - **What it does:** Pythonic FFmpeg wrapper with complex filter graph support. Translates convoluted FFmpeg CLI syntax into readable, maintainable Python code. Supports arbitrarily large directed-acyclic signal graphs.
-- **How XPST could use it:**
+- **How xPST could use it:**
   - Core video processing: format conversion, trimming, merging, overlay, watermarking
   - Aspect ratio conversion for different platforms (9:16 TikTok → 1:1 Instagram)
   - Audio extraction for transcription pipelines
@@ -238,7 +238,7 @@ No mature open-source hashtag research tool exists on GitHub (only 3 results, al
 - **License:** Unlicense ✅
 - **Language:** Python
 - **What it does:** Feature-rich audio/video downloader supporting thousands of websites. Post-processing, format selection, metadata embedding.
-- **How XPST could use it:** Download reference content, competitor analysis, content repurposing from existing videos
+- **How xPST could use it:** Download reference content, competitor analysis, content repurposing from existing videos
 - **Integration difficulty:** Easy (`pip install yt-dlp`, CLI or Python API)
 
 ---
@@ -252,12 +252,12 @@ No mature open-source hashtag research tool exists on GitHub (only 3 results, al
 - **Language:** Python
 - **Last Updated:** May 2026 (actively maintained, 52.4k dependents)
 - **What it does:** The ultimate Python OAuth/OpenID Connect library. Supports OAuth 1.0/2.0, OpenID Connect, JWS/JWE/JWK/JWT. Integrates with Requests, HTTPX, Flask, Django, Starlette, and FastAPI. Can act as both OAuth client and provider.
-- **How XPST could use it:**
+- **How xPST could use it:**
   - Manage OAuth flows for all social platforms (Twitter, Instagram, Facebook, LinkedIn, TikTok, YouTube)
   - Token storage, refresh, and revocation
   - PKCE support for mobile/SPA flows
-  - FastAPI integration is directly relevant to XPST's backend
-  - Can also act as an OAuth provider if XPST offers its own API
+  - FastAPI integration is directly relevant to xPST's backend
+  - Can also act as an OAuth provider if xPST offers its own API
 - **Integration difficulty:** Easy (`pip install authlib`, excellent docs, FastAPI integration built-in)
 
 ### Honorable Mention: Django-Allauth
@@ -266,7 +266,7 @@ No mature open-source hashtag research tool exists on GitHub (only 3 results, al
 - **License:** MIT ✅
 - **Language:** Python (Django)
 - **What it does:** Comprehensive authentication/registration with 3rd party social account authentication. Supports 100+ providers. Rate limiting, account enumeration protection, SAML 2.0.
-- **How XPST could use it:** If XPST uses Django, this is the gold standard for social auth
+- **How xPST could use it:** If xPST uses Django, this is the gold standard for social auth
 - **Integration difficulty:** Easy (if using Django) / Hard (if using FastAPI)
 
 ### Honorable Mention: Python Social Auth
@@ -275,7 +275,7 @@ No mature open-source hashtag research tool exists on GitHub (only 3 results, al
 - **License:** BSD-3-Clause ✅
 - **Language:** Python
 - **What it does:** Easy setup social authentication/registration. Supports Django, Flask, and other frameworks. 100+ provider backends.
-- **How XPST could use it:** Alternative to django-allauth with broader framework support
+- **How xPST could use it:** Alternative to django-allauth with broader framework support
 - **Integration difficulty:** Easy-Medium
 
 ---

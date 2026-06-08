@@ -1,5 +1,5 @@
 """
-Instagram Reels uploader for XPST
+Instagram Reels uploader for xPST
 
 Uses instagrapi for authentication and video uploads to Instagram Reels.
 

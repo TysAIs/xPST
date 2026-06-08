@@ -1,14 +1,14 @@
-# XPST Competitive Analysis — May 2026
+# xPST Competitive Analysis — May 2026
 
-## XPST's Unique Position
-XPST is the **ONLY free, local, open-source** cross-posting tool for short-form video.
+## xPST's Unique Position
+xPST is the **ONLY free, local, open-source** cross-posting tool for short-form video.
 Every competitor is either paid, cloud-based, or both.
 
 ## Direct Competitors
 
 | Tool | Price | Platforms | Open Source | Local | Short-Form Focus |
 |------|-------|-----------|-------------|-------|-----------------|
-| **XPST** | **FREE** | 4 (YT, IG, X, TK) | ✅ MIT/Apache | ✅ | ✅ |
+| **xPST** | **FREE** | 4 (YT, IG, X, TK) | ✅ MIT/Apache | ✅ | ✅ |
 | PostEverywhere | $19-79/mo | 8 | ❌ | ❌ | ✅ |
 | Buffer | Free/$5/ch | 11 | ❌ | ❌ | ❌ |
 | Hootsuite | $99-249/mo | 10+ | ❌ | ❌ | ❌ |
@@ -19,27 +19,27 @@ Every competitor is either paid, cloud-based, or both.
 | OpusClip | $9/mo+ | 6+ | ❌ | ❌ | ✅ |
 | Sprout Social | $79-249/seat | 9 | ❌ | ❌ | ❌ |
 
-## XPST Advantages Over Competitors
+## xPST Advantages Over Competitors
 
 ### 1. Cost: FREE vs $10-249/month
 - Buffer: $5/channel × 4 = $20/mo minimum
 - PostEverywhere: $19/mo minimum
 - Hootsuite: $99/mo minimum
-- XPST: $0 forever
+- xPST: $0 forever
 
 ### 2. Privacy: Local vs Cloud
 - All competitors upload your content to their servers
-- XPST runs 100% locally — your content never leaves your machine
+- xPST runs 100% locally — your content never leaves your machine
 - No third-party OAuth sharing (Instagram/X use your own cookies)
 
 ### 3. Quality: Platform-Specific Encoding
 - Most competitors re-encode once and blast everywhere
-- XPST: YouTube 1080p@8Mbps, Instagram 720p@CRF23, X 1080p@10Mbps
+- xPST: YouTube 1080p@8Mbps, Instagram 720p@CRF23, X 1080p@10Mbps
 - Upscales 720p source to 1080p for YouTube to trigger VP9 codec tier
 
 ### 4. Bidirectional Cross-Posting
 - Most tools: Source → Targets (one direction)
-- XPST: Monitors ALL platforms, cross-posts new content in all directions
+- xPST: Monitors ALL platforms, cross-posts new content in all directions
 - Post on Instagram → auto goes to YouTube, X, TikTok
 
 ### 5. Anti-Bot Protection Built-In
@@ -53,9 +53,9 @@ Every competitor is either paid, cloud-based, or both.
 - X auto thread creation (🧵 1/N)
 - YouTube/TikTok FFmpeg stitch with crossfades
 
-## Competitor Weaknesses XPST Addresses
+## Competitor Weaknesses xPST Addresses
 
-| Pain Point | How XPST Solves It |
+| Pain Point | How xPST Solves It |
 |-----------|-------------------|
 | "$20/mo for basic cross-posting" | Free forever |
 | "My content is on someone else's server" | 100% local |
@@ -69,7 +69,7 @@ Every competitor is either paid, cloud-based, or both.
 ## User Questions We Address
 
 **Q: Will I get banned?**
-A: XPST uses conservative limits (5/day), random delays, and caption variation. We can't guarantee safety, but we minimize risk significantly.
+A: xPST uses conservative limits (5/day), random delays, and caption variation. We can't guarantee safety, but we minimize risk significantly.
 
 **Q: Is my data safe?**
 A: Everything stays on your machine. Credentials stored in OS keychain. No cloud servers.
@@ -88,4 +88,4 @@ A: Yes — `xpst config` or dashboard Settings page. Set per-platform daily limi
 - 70+ billion YouTube Shorts daily views (2024)
 - Cross-posting is now essential for content creators
 - Every paid tool charges $10-249/month for what should be free
-- XPST is the only tool that's free + local + quality-focused + anti-bot protected
+- xPST is the only tool that's free + local + quality-focused + anti-bot protected

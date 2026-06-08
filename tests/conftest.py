@@ -1,4 +1,4 @@
-"""Global test configuration for XPST.
+"""Global test configuration for xPST.
 
 Ensures tests never access the real OS keychain (which would hang waiting
 for authentication prompts on macOS) and never make real network calls.

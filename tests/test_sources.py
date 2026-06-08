@@ -1,4 +1,4 @@
-"""Tests for XPST multi-source support"""
+"""Tests for xPST multi-source support"""
 
 from pathlib import Path
 

@@ -1,5 +1,5 @@
 """
-Session management for XPST
+Session management for xPST
 
 Handles persistent authentication sessions with automatic refresh.
 Each platform has its own session management strategy:

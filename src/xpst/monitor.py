@@ -1,5 +1,5 @@
 """
-Cross-platform post monitor for XPST
+Cross-platform post monitor for xPST
 
 Polls all enabled platforms for new posts and triggers bidirectional
 cross-posting. If a new post is detected on Instagram, it gets posted
@@ -74,7 +74,7 @@ class PostMonitor:
     post with matching content hash, the post is skipped for that platform.
 
     Attributes:
-        config: XPST configuration.
+        config: xPST configuration.
         state: State manager for tracking posted content.
         sources: Dict of enabled source plugins.
         platforms: Set of enabled platform names (for targets).
@@ -90,7 +90,7 @@ class PostMonitor:
         """Initialize the post monitor.
 
         Args:
-            config: XPST configuration.
+            config: xPST configuration.
             state: State manager for tracking posted content.
             sources: Dict mapping source name → VideoSource instance.
             platforms: Set of enabled platform uploader names.

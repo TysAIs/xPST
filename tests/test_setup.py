@@ -1,4 +1,4 @@
-"""Tests for XPST setup wizard"""
+"""Tests for xPST setup wizard"""
 
 from pathlib import Path
 from unittest.mock import MagicMock, patch

@@ -1,5 +1,5 @@
 """
-YouTube video source for XPST
+YouTube video source for xPST
 
 Uses yt-dlp for YouTube video downloading with support for:
 - Video downloading with format selection

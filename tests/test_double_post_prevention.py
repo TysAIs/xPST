@@ -1,5 +1,5 @@
 """
-Tests for double-post prevention in XPST bidirectional cross-posting.
+Tests for double-post prevention in xPST bidirectional cross-posting.
 
 Covers 10 critical scenarios:
 1. Same video to same platform never posted twice

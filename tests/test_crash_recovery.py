@@ -1,4 +1,4 @@
-"""Tests for XPST crash recovery"""
+"""Tests for xPST crash recovery"""
 
 
 from xpst.crash_recovery import CrashRecoveryManager

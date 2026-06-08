@@ -1,8 +1,8 @@
 """
-Auto-update system for XPST dependencies.
+Auto-update system for xPST dependencies.
 
 Provides commands to update yt-dlp, instagrapi, twikit, and the
-XPST package itself.
+xPST package itself.
 """
 
 import importlib
@@ -126,7 +126,7 @@ def get_latest_version(package_name: str) -> str | None:
 
 
 def get_xpst_version() -> str:
-    """Get the current XPST package version.
+    """Get the current xPST package version.
 
     Returns:
         Version string from ``xpst.__version__``.
@@ -140,7 +140,7 @@ def check_updates() -> list[PackageInfo]:
     """Check for available updates without installing."""
     packages = []
 
-    # XPST itself
+    # xPST itself
     current = get_xpst_version()
     info = PackageInfo(name="xpst", current_version=current, installed=True)
     latest = get_latest_version("xpst")
@@ -240,7 +240,7 @@ def display_version_info() -> None:
     """Display comprehensive version information."""
     from xpst import __version__
 
-    console.print(f"\n[bold blue]XPST v{__version__}[/bold blue]\n")
+    console.print(f"\n[bold blue]xPST v{__version__}[/bold blue]\n")
 
     table = Table(title="Dependency Versions")
     table.add_column("Package", style="cyan")
