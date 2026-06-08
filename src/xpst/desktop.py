@@ -173,7 +173,7 @@ def _install_macos_app(icon_path: str | None) -> None:
     # Write launcher script
     launcher = macos_dir / "xpst"
     launcher.write_text(f"""#!/bin/bash
-exec {sys.executable} -m xpst app
+exec {sys.executable} -m xpst app "$@"
 """)
     launcher.chmod(0o755)
 
