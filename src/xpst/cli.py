@@ -964,7 +964,7 @@ def dashboard(ctx: click.Context, port: int):
 @click.option("--port", "-p", default=None, type=int, help="Dashboard HTTP port (default: auto-select free port)")
 @click.pass_context
 def app(ctx: click.Context, port: int | None):
-    """Launch xPST as a native desktop app (pywebview)"""
+    """Launch xPST as a native desktop app (PySide6)"""
     config_path = ctx.obj.get("config_path")
     config_dir = "~/.xpst"
     if config_path:
@@ -976,19 +976,24 @@ def app(ctx: click.Context, port: int | None):
         except Exception as e:
             logger.debug("Could not load config for desktop app: %s", e)
 
-    # Try native desktop window first, fall back to browser
+    # Try PySide6 native desktop app first, fall back to pywebview, then browser
     try:
-        from xpst.desktop import launch_desktop_app
+        from xpst.desktop_app.main import main as pyside_main
         console.print("[bold blue]Launching xPST desktop app…[/bold blue]")
-        launch_desktop_app(config_dir=config_dir, port=port)
+        sys.exit(pyside_main())
     except ImportError:
-        console.print("[yellow]pywebview not installed — falling back to browser.[/yellow]")
-        console.print("[dim]Install with: pip install 'xpst[desktop]'[/dim]\n")
-        from xpst.desktop import launch_browser_fallback
-        launch_browser_fallback(config_dir=config_dir, port=port or 8080)
-    except RuntimeError as e:
-        console.print(f"[red]{e}[/red]")
-        sys.exit(EXIT_PLATFORM_UNAVAILABLE)
+        console.print("[yellow]PySide6 not installed — trying pywebview fallback.[/yellow]")
+        console.print("[dim]Install with: pip install PySide6[/dim]\n")
+        try:
+            from xpst.desktop import launch_desktop_app
+            launch_desktop_app(config_dir=config_dir, port=port)
+        except ImportError:
+            console.print("[yellow]pywebview not installed — falling back to browser.[/yellow]")
+            from xpst.desktop import launch_browser_fallback
+            launch_browser_fallback(config_dir=config_dir, port=port or 8080)
+        except RuntimeError as e:
+            console.print(f"[red]{e}[/red]")
+            sys.exit(EXIT_PLATFORM_UNAVAILABLE)
 
 
 # ──────────────────────────────────────────────

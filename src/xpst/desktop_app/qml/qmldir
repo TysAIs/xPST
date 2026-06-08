@@ -1,0 +1,9 @@
+module xpst.desktop_app.qml
+singleton Theme Theme.qml
+main 1.0 main.qml
+Sidebar 1.0 Sidebar.qml
+DashboardPage 1.0 pages/DashboardPage.qml
+ContentPage 1.0 pages/ContentPage.qml
+AnalyticsPage 1.0 pages/AnalyticsPage.qml
+ConnectPage 1.0 pages/ConnectPage.qml
+SettingsPage 1.0 pages/SettingsPage.qml
