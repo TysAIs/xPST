@@ -11,7 +11,7 @@ Page {
 
     Flickable {
         anchors.fill: parent
-        contentHeight: contentCol.implicitHeight + theme.spacing32
+        contentHeight: contentCol.implicitHeight + theme.spacingXxl
         clip: true
         boundsBehavior: Flickable.StopAtBounds
 
@@ -20,12 +20,12 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacing24
-            spacing: theme.spacing24
+            anchors.margins: theme.spacingXl
+            spacing: theme.spacingXl
 
             // Header
             ColumnLayout {
-                spacing: theme.spacing4
+                spacing: theme.spacingXs
                 Text {
                     text: "Analytics"
                     font.pixelSize: 20
@@ -47,7 +47,7 @@ Page {
                     model: ["All", "YouTube", "Instagram", "X", "TikTok"]
 
                     Rectangle {
-                        width: tabLabel.implicitWidth + theme.spacing24
+                        width: tabLabel.implicitWidth + theme.spacingXl
                         height: 36
                         radius: theme.radiusMd
                         color: analyticsPage.activePlatform === modelData ? theme.accent : theme.surfaceCard
@@ -86,7 +86,7 @@ Page {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 120
-                        radius: theme.radius12
+                        radius: theme.radiusLg
                         color: theme.surfaceCard
 
                         ColumnLayout {
@@ -118,7 +118,7 @@ Page {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 300
-                radius: theme.radius12
+                radius: theme.radiusLg
                 color: theme.surfaceCard
 
                 ColumnLayout {

@@ -9,7 +9,7 @@ Page {
 
     Flickable {
         anchors.fill: parent
-        contentHeight: contentCol.implicitHeight + theme.spacing32
+        contentHeight: contentCol.implicitHeight + theme.spacingXxl
         clip: true
         boundsBehavior: Flickable.StopAtBounds
 
@@ -18,12 +18,12 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacing24
-            spacing: theme.spacing24
+            anchors.margins: theme.spacingXl
+            spacing: theme.spacingXl
 
             // Header
             ColumnLayout {
-                spacing: theme.spacing4
+                spacing: theme.spacingXs
                 Text {
                     text: "Connect Platforms"
                     font.pixelSize: 20
@@ -55,19 +55,19 @@ Page {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 180
-                        radius: theme.radius16
+                        radius: theme.radiusXl
                         color: theme.surfaceCard
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.margins: theme.spacing24
+                            anchors.margins: theme.spacingXl
                             spacing: theme.spacingMd
 
                             RowLayout {
                                 spacing: theme.spacingMd
 
                                 Rectangle {
-                                    width: 48; height: 48; radius: theme.radius12
+                                    width: 48; height: 48; radius: theme.radiusLg
                                     color: Qt.rgba(modelData.color.r, modelData.color.g, modelData.color.b, 0.15)
                                     Text {
                                         anchors.centerIn: parent
@@ -77,7 +77,7 @@ Page {
                                 }
 
                                 ColumnLayout {
-                                    spacing: theme.spacing4
+                                    spacing: theme.spacingXs
                                     Text {
                                         text: modelData.name
                                         font.pixelSize: 16
@@ -85,7 +85,7 @@ Page {
                                         color: theme.textPrimary
                                     }
                                     RowLayout {
-                                        spacing: theme.spacing4
+                                        spacing: theme.spacingXs
                                         Rectangle {
                                             width: 8; height: 8; radius: 4
                                             color: modelData.connected ? theme.success : theme.textMuted

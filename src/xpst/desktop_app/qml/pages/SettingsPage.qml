@@ -18,7 +18,7 @@ Page {
 
     Flickable {
         anchors.fill: parent
-        contentHeight: settingsCol.implicitHeight + theme.spacing32
+        contentHeight: settingsCol.implicitHeight + theme.spacingXxl
         clip: true
         boundsBehavior: Flickable.StopAtBounds
 
@@ -27,8 +27,8 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacing24
-            spacing: theme.spacing24
+            anchors.margins: theme.spacingXl
+            spacing: theme.spacingXl
 
             // Header
             Text {
@@ -51,8 +51,8 @@ Page {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: generalCol.implicitHeight + theme.spacing32
-                    radius: theme.radius12
+                    Layout.preferredHeight: generalCol.implicitHeight + theme.spacingXxl
+                    radius: theme.radiusLg
                     color: theme.surfaceCard
 
                     ColumnLayout {
@@ -62,7 +62,7 @@ Page {
                         spacing: theme.spacingXl
 
                         ColumnLayout {
-                            spacing: theme.spacing4
+                            spacing: theme.spacingXs
                             Text {
                                 text: "TikTok Username"
                                 font.pixelSize: 12
@@ -88,7 +88,7 @@ Page {
                         }
 
                         ColumnLayout {
-                            spacing: theme.spacing4
+                            spacing: theme.spacingXs
                             Text {
                                 text: "Download Directory"
                                 font.pixelSize: 12
@@ -129,8 +129,8 @@ Page {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: platformsCol.implicitHeight + theme.spacing32
-                    radius: theme.radius12
+                    Layout.preferredHeight: platformsCol.implicitHeight + theme.spacingXxl
+                    radius: theme.radiusLg
                     color: theme.surfaceCard
 
                     ColumnLayout {
@@ -182,8 +182,8 @@ Page {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: rateCol.implicitHeight + theme.spacing32
-                    radius: theme.radius12
+                    Layout.preferredHeight: rateCol.implicitHeight + theme.spacingXxl
+                    radius: theme.radiusLg
                     color: theme.surfaceCard
 
                     ColumnLayout {
@@ -193,7 +193,7 @@ Page {
                         spacing: theme.spacingXl
 
                         ColumnLayout {
-                            spacing: theme.spacing4
+                            spacing: theme.spacingXs
                             Text {
                                 text: "Max Posts per Window"
                                 font.pixelSize: 12
@@ -222,7 +222,7 @@ Page {
                         }
 
                         ColumnLayout {
-                            spacing: theme.spacing4
+                            spacing: theme.spacingXs
                             Text {
                                 text: "Window Duration (minutes)"
                                 font.pixelSize: 12
@@ -266,8 +266,8 @@ Page {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: notifCol.implicitHeight + theme.spacing32
-                    radius: theme.radius12
+                    Layout.preferredHeight: notifCol.implicitHeight + theme.spacingXxl
+                    radius: theme.radiusLg
                     color: theme.surfaceCard
 
                     ColumnLayout {
@@ -304,7 +304,7 @@ Page {
                 Layout.topMargin: theme.spacingSm
 
                 Rectangle {
-                    width: saveLabel.implicitWidth + theme.spacing32
+                    width: saveLabel.implicitWidth + theme.spacingXxl
                     height: 40
                     radius: theme.radiusMd
                     color: theme.accent
@@ -340,7 +340,7 @@ Page {
                 }
 
                 Rectangle {
-                    width: resetLabel.implicitWidth + theme.spacing32
+                    width: resetLabel.implicitWidth + theme.spacingXxl
                     height: 40
                     radius: theme.radiusMd
                     color: theme.surfaceAlt

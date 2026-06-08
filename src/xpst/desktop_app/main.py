@@ -59,7 +59,7 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
 
     # Try to find an icon; fall back to default
     icon_paths = [
-        Path(__file__).resolve().parent / "qml" / "icons" / "xpst.png",
+        Path(__file__).resolve().parent.parent / "assets" / "icons" / "icon-32x32.png",
         Path(__file__).resolve().parent / "assets" / "icon.png",
         Path(__file__).resolve().parent.parent.parent.parent / "assets" / "icon.png",
     ]

@@ -12,7 +12,7 @@ Page {
 
     Flickable {
         anchors.fill: parent
-        contentHeight: contentCol.implicitHeight + theme.spacing32
+        contentHeight: contentCol.implicitHeight + theme.spacingXxl
         clip: true
         boundsBehavior: Flickable.StopAtBounds
 
@@ -21,8 +21,8 @@ Page {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: theme.spacing24
-            spacing: theme.spacing24
+            anchors.margins: theme.spacingXl
+            spacing: theme.spacingXl
 
             // Header
             Text {
@@ -67,9 +67,9 @@ Page {
                     model: ["All", "YouTube", "Instagram", "X", "TikTok"]
 
                     Rectangle {
-                        width: filterLabel.implicitWidth + theme.spacing24
+                        width: filterLabel.implicitWidth + theme.spacingXl
                         height: 32
-                        radius: theme.radius16
+                        radius: theme.radiusXl
                         color: contentPage.activeFilter === modelData ? theme.accent : theme.surfaceCard
                         border.color: contentPage.activeFilter === modelData ? theme.accent : "transparent"
                         border.width: 1
@@ -104,7 +104,7 @@ Page {
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 200
-                        radius: theme.radius12
+                        radius: theme.radiusLg
                         color: theme.surfaceCard
 
                         ColumnLayout {
@@ -140,8 +140,8 @@ Page {
                                 spacing: theme.spacingSm
                                 Rectangle {
                                     width: pLabel.implicitWidth + theme.spacingMd
-                                    height: pLabel.implicitHeight + theme.spacing4
-                                    radius: theme.radius6
+                                    height: pLabel.implicitHeight + theme.spacingXs
+                                    radius: theme.radiusSm
                                     color: theme.accentMuted
                                     Text {
                                         id: pLabel
