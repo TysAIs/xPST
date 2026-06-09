@@ -94,9 +94,11 @@ class TestCredentialStore:
 
         assert result == "file_value"
 
-        # Verify file exists
-        cred_file = store.creds_dir / "file_key.json"
+        # Verify encrypted file exists
+        cred_file = store.creds_dir / "file_key.enc"
         assert cred_file.exists()
 
-        data = json.loads(cred_file.read_text())
-        assert data["value"] == "file_value"
+        # Verify file is encrypted (not plaintext)
+        file_content = cred_file.read_bytes()
+        assert b"file_value" not in file_content
+        assert b"file_key" not in file_content

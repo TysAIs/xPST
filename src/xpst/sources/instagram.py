@@ -1,12 +1,11 @@
-"""
-Instagram video source for xPST
+"""Instagram video source for xPST
 
 Uses instagrapi for Instagram content downloading with support for:
 - Instagram Reels (single video clips)
 - Instagram carousels (albums with multiple images/videos)
 - Post type detection (video, carousel, image)
 - User media listing
-- Session persistence for authentication
+- Session persistence via SessionManager
 """
 
 from pathlib import Path
@@ -26,19 +25,18 @@ logger = get_logger(__name__)
 
 
 class InstagramSource(VideoSource):
-    """
-    Instagram video source using instagrapi.
+    """Instagram video source using instagrapi.
 
     Features:
     - Reel (clip) downloading
     - Carousel / album downloading
     - Post type detection
     - User media listing
-    - Session file persistence
+    - Session managed by SessionManager
     """
 
     def __init__(self, config: XPSTConfig) -> None:
-        """Initialize Instagram source with lazy client caching."""
+        """Initialize Instagram source."""
         super().__init__(config)
         self._client = None  # Cached instagrapi Client
 
@@ -47,98 +45,26 @@ class InstagramSource(VideoSource):
         """Return the source platform identifier."""
         return "instagram"
 
-    def _get_client(self):
-        """Get or create an authenticated instagrapi Client.
-
-        Tries to load an existing session from the configured session file.
-        Falls back to an unauthenticated client (will fail on API calls).
+    async def _get_client(self):
+        """Get an authenticated Instagram client via SessionManager.
 
         Returns:
-            instagrapi Client instance (may not be authenticated).
+            Authenticated instagrapi Client.
 
         Raises:
-            ImportError: If instagrapi is not installed.
+            FileNotFoundError: If session file is missing.
+            ValueError: If authentication fails.
         """
-
-        if self._client is not None:
-            return self._client
-
-        try:
-            from instagrapi import Client
-        except ImportError:
-            raise ImportError(
-                "instagrapi is required for Instagram source. "
-                "Install it with: pip install instagrapi"
+        if self._client is None:
+            self._client = await self._session_manager.get_instagram_client(
+                self.config.instagram.session_file,
+                self.config.instagram.username,
+                self.config.instagram.password,
             )
-
-        self._client = Client()
-
-        # Try to load existing session
-        session_file = self.config.instagram.session_file
-        if session_file:
-            session_path = Path(session_file).expanduser()
-            if session_path.exists():
-                try:
-                    self._client.load_settings(session_path)
-                    self._client.login(
-                        self._client.username or "",
-                        self._client.password or "",
-                    )
-                    logger.info("Loaded Instagram session from file")
-                    return self._client
-                except Exception as e:
-                    logger.warning(f"Failed to load Instagram session: {e}")
-                    self._client = Client()
-
-        # No valid session - user needs to authenticate
-        logger.warning(
-            "No valid Instagram session found. "
-            "Call authenticate() with username/password or provide a session file."
-        )
         return self._client
 
-    async def authenticate(self, username: str = "", password: str = "") -> bool:
-        """
-        Authenticate with Instagram.
-
-        Args:
-            username: Instagram username
-            password: Instagram password
-
-        Returns:
-            True if authentication succeeded
-        """
-        try:
-            from instagrapi import Client
-        except ImportError:
-            logger.error("instagrapi not installed")
-            return False
-
-        self._client = Client()
-
-        if not username or not password:
-            logger.error("Username and password required for Instagram authentication")
-            return False
-
-        try:
-            self._client.login(username, password)
-
-            # Save session for future use
-            session_file = self.config.instagram.session_file
-            if session_file:
-                session_path = Path(session_file).expanduser()
-                session_path.parent.mkdir(parents=True, exist_ok=True)
-                self._client.dump_settings(session_path)
-                logger.info(f"Saved Instagram session to {session_path}")
-
-            return True
-        except Exception as e:
-            logger.error(f"Instagram authentication failed: {e}")
-            return False
-
     def _media_to_metadata(self, media, username: str = "") -> VideoMetadata:
-        """
-        Convert an instagrapi Media object to VideoMetadata.
+        """Convert an instagrapi Media object to VideoMetadata.
 
         Args:
             media: instagrapi Media object
@@ -147,7 +73,6 @@ class InstagramSource(VideoSource):
         Returns:
             VideoMetadata instance
         """
-
         # Determine content type
         if media.media_type == 8:  # Album/Carousel
             # Check what's in the carousel
@@ -199,8 +124,7 @@ class InstagramSource(VideoSource):
         )
 
     async def list_videos(self, max_count: int = 10) -> list[VideoMetadata]:
-        """
-        List recent posts from an Instagram user.
+        """List recent posts from an Instagram user.
 
         Args:
             max_count: Maximum number of posts to return
@@ -211,14 +135,14 @@ class InstagramSource(VideoSource):
         Raises:
             ValueError: If username not configured
         """
-        username = self.config.instagram.username if hasattr(self.config.instagram, 'username') else ""
+        username = getattr(self.config.instagram, 'username', None)
         if not username:
             raise ValueError(
                 "Instagram username not configured. "
                 "Add 'username' to accounts.instagram in config."
             )
 
-        client = self._get_client()
+        client = await self._get_client()
 
         try:
             user_id = client.user_id_from_username(username)
@@ -237,8 +161,7 @@ class InstagramSource(VideoSource):
             raise RuntimeError(f"Failed to list Instagram posts: {e}")
 
     async def download(self, video_id: str, output_dir: Path) -> DownloadResult:
-        """
-        Download an Instagram post (video, reel, or carousel).
+        """Download an Instagram post (video, reel, or carousel).
 
         Args:
             video_id: Instagram media ID (pk)
@@ -248,12 +171,11 @@ class InstagramSource(VideoSource):
             DownloadResult with video/media paths and metadata
         """
         output_dir.mkdir(parents=True, exist_ok=True)
-        client = self._get_client()
+        client = await self._get_client()
 
         try:
-            from instagrapi.types import MediaPk  # noqa: F401
             media_pk = int(video_id)
-        except (ValueError, ImportError):
+        except ValueError:
             media_pk = video_id
 
         try:
@@ -278,8 +200,7 @@ class InstagramSource(VideoSource):
     async def _download_reel(
         self, media_pk, video_id: str, output_dir: Path
     ) -> DownloadResult:
-        """
-        Download an Instagram Reel (single video).
+        """Download an Instagram Reel (single video).
 
         Args:
             media_pk: Instagram media PK
@@ -289,7 +210,7 @@ class InstagramSource(VideoSource):
         Returns:
             DownloadResult
         """
-        client = self._get_client()
+        client = await self._get_client()
 
         try:
             # Check if already downloaded
@@ -337,8 +258,7 @@ class InstagramSource(VideoSource):
     async def _download_carousel(
         self, media_info, video_id: str, output_dir: Path
     ) -> DownloadResult:
-        """
-        Download an Instagram carousel (album).
+        """Download an Instagram carousel (album).
 
         Args:
             media_info: instagrapi Media object
@@ -348,7 +268,7 @@ class InstagramSource(VideoSource):
         Returns:
             DownloadResult with media_paths
         """
-        client = self._get_client()
+        client = await self._get_client()
 
         try:
             # Download using instagrapi's album_download
@@ -390,8 +310,7 @@ class InstagramSource(VideoSource):
     async def _download_image(
         self, media_info, video_id: str, output_dir: Path
     ) -> DownloadResult:
-        """
-        Download a single Instagram image post.
+        """Download a single Instagram image post.
 
         Args:
             media_info: instagrapi Media object
@@ -401,7 +320,7 @@ class InstagramSource(VideoSource):
         Returns:
             DownloadResult
         """
-        client = self._get_client()
+        client = await self._get_client()
 
         try:
             # Download the image
@@ -435,8 +354,7 @@ class InstagramSource(VideoSource):
             )
 
     async def check_health(self) -> dict[str, Any]:
-        """
-        Check Instagram source health.
+        """Check Instagram source health.
 
         Returns:
             Health status dictionary
@@ -457,13 +375,11 @@ class InstagramSource(VideoSource):
 
         # Check if client is authenticated
         authenticated = False
-        if self._client:
-            try:
-                # Try a simple API call to verify session
-                authenticated = self._client.user_id is not None
-            except Exception as e:
-                logger.debug("Unexpected error: %s", e)
-                pass
+        try:
+            client = await self._get_client()
+            authenticated = client.user_id is not None
+        except Exception:
+            pass
 
         # Check username config
         username_configured = bool(
@@ -478,6 +394,44 @@ class InstagramSource(VideoSource):
             "username_configured": username_configured,
             "status": "ok" if instagrapi_installed and (authenticated or session_exists) else "error",
         }
+
+    async def authenticate(self, username: str = "", password: str = "") -> bool:
+        """Authenticate with Instagram and save session.
+
+        Args:
+            username: Instagram username
+            password: Instagram password
+
+        Returns:
+            True if authentication succeeded
+        """
+        try:
+            from instagrapi import Client
+        except ImportError:
+            logger.error("instagrapi not installed")
+            return False
+
+        self._client = Client()
+
+        if not username or not password:
+            logger.error("Username and password required for Instagram authentication")
+            return False
+
+        try:
+            self._client.login(username, password)
+
+            # Save session for future use
+            session_file = self.config.instagram.session_file
+            if session_file:
+                session_path = Path(session_file).expanduser()
+                session_path.parent.mkdir(parents=True, exist_ok=True)
+                self._client.dump_settings(session_path)
+                logger.info(f"Saved Instagram session to {session_path}")
+
+            return True
+        except Exception as e:
+            logger.error(f"Instagram authentication failed: {e}")
+            return False
 
 
 # Auto-register this source

@@ -252,7 +252,7 @@ def main(no_splash: bool = False) -> int:
     qml_dir = Path(__file__).parent / "qml"
     engine.addImportPath(str(qml_dir.parent))  # desktop_app/ so 'qml' module resolves
 
-    # Create backend objects
+    # Create backend objects (lightweight - defer heavy init)
     controller = AppController()
     post_model = PostListModel()
     post_model.load_from_state()
@@ -307,7 +307,7 @@ def main(no_splash: bool = False) -> int:
 
     # Close splash once the window is visible
     if splash:
-        QTimer.singleShot(800, splash.close)
+        QTimer.singleShot(500, splash.close)
 
     # System tray (after engine is ready)
     tray = _setup_tray(app, engine)

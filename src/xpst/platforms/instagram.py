@@ -1,11 +1,10 @@
-"""
-Instagram Reels uploader for xPST
+"""Instagram Reels uploader for xPST
 
 Uses instagrapi for authentication and video uploads to Instagram Reels.
 
 Authentication:
 - Session-based authentication via instagrapi
-- Uses login_by_sessionid to bypass anti-bot detection
+- Delegates session management to SessionManager
 - Supports session export from browser cookies
 
 Upload specs:
@@ -26,15 +25,6 @@ logger = get_logger(__name__)
 
 class InstagramUploader(PlatformUploader):
     """Instagram Reels uploader with session persistence and quality encoding."""
-    """
-    Instagram Reels uploader.
-
-    Features:
-    - Session-based authentication via instagrapi
-    - Automatic thumbnail generation
-    - Caption formatting with hashtag limits
-    - Rate limit awareness
-    """
 
     # Instagram limits
     MAX_CAPTION_LENGTH = 2200
@@ -51,11 +41,11 @@ class InstagramUploader(PlatformUploader):
         super().__init__(config)
         self._client = None  # Cached instagrapi Client
 
-    def _get_client(self):
-        """Get an authenticated Instagram client.
+    async def _get_client(self):
+        """Get an authenticated Instagram client via SessionManager.
 
-        Loads session from file, authenticates via ``login_by_sessionid``
-        to bypass anti-bot detection, and optionally stores session in keychain.
+        Loads session from SessionManager, authenticates via ``login_by_sessionid``
+        to bypass anti-bot detection, and caches the client.
 
         Returns:
             Authenticated instagrapi Client.
@@ -64,10 +54,29 @@ class InstagramUploader(PlatformUploader):
             FileNotFoundError: If session file is missing.
             ValueError: If sessionid is not found or session is expired.
         """
+        if self._client is None:
+            if self._session_manager:
+                self._client = await self._session_manager.get_instagram_client(
+                    self.config.instagram.session_file,
+                    self.config.instagram.username,
+                    self.config.instagram.password,
+                )
+            else:
+                # Fallback for direct instantiation (testing)
+                self._client = await self._get_client_direct()
+        return self._client
 
-        from instagrapi import Client
+    async def _get_client_direct(self):
+        """Get Instagram client directly (fallback when no SessionManager)."""
+        try:
+            from instagrapi import Client
+        except ImportError:
+            raise ImportError(
+                "instagrapi is required for Instagram uploader. "
+                "Install it with: pip install instagrapi"
+            )
 
-        # Direct file-based session loading (primary path)
+        # Direct file-based session loading (fallback)
         session_file = Path(self.config.instagram.session_file)
 
         if not session_file.exists():
@@ -83,7 +92,7 @@ class InstagramUploader(PlatformUploader):
             with open(session_file) as f:
                 data = json.load(f)
         except json.JSONDecodeError:
-            raise ValueError(f"Invalid JSON in session file: {session_file}") from None
+            raise ValueError(f"Invalid JSON in session file: {session_file}")
 
         # Extract sessionid from various formats
         sessionid = (
@@ -105,20 +114,10 @@ class InstagramUploader(PlatformUploader):
         except Exception as e:
             raise ValueError(f"Session expired: {e}") from e
 
-        # Store session in keyring if SessionManager available
-        if self._session_manager:
-            try:
-                session_data = client.get_settings()
-                self._session_manager.credentials.store_json("instagram_session", session_data)
-            except Exception as e:
-                logger.debug(f"Failed to store session in keyring: {e}")
-
-        self._client = client
         return client
 
     async def upload(self, video_path: Path, caption: str) -> UploadResult:
-        """
-        Upload a video to Instagram Reels.
+        """Upload a video to Instagram Reels.
 
         Args:
             video_path: Path to video file
@@ -134,7 +133,7 @@ class InstagramUploader(PlatformUploader):
             caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
 
         try:
-            client = self._get_client()
+            client = await self._get_client()
 
             logger.info(f"Uploading to Instagram: {video_path.name}")
 
@@ -144,6 +143,7 @@ class InstagramUploader(PlatformUploader):
                 import subprocess
 
                 from xpst.utils.platform import get_ffmpeg_name
+                # NOTE: This blocks briefly. Could be moved to thread pool if needed.
                 subprocess.run(
                     [get_ffmpeg_name(), "-y", "-i", str(video_path), "-ss", "1",
                      "-vframes", "1", "-q:v", "2", str(thumb_path)],
@@ -212,14 +212,13 @@ class InstagramUploader(PlatformUploader):
             )
 
     async def check_health(self) -> PlatformHealth:
-        """
-        Check Instagram authentication health.
+        """Check Instagram authentication health.
 
         Returns:
             PlatformHealth with authentication status
         """
         try:
-            client = self._get_client()
+            client = await self._get_client()
 
             # Try to get account info to verify auth
             try:
@@ -267,7 +266,7 @@ class InstagramUploader(PlatformUploader):
     async def delete(self, post_id: str) -> bool:
         """Delete a post from Instagram"""
         try:
-            client = self._get_client()
+            client = await self._get_client()
             result = client.media_delete(post_id)
             logger.info(f"Deleted Instagram post: {post_id}")
             return result
@@ -276,8 +275,7 @@ class InstagramUploader(PlatformUploader):
             return False
 
     async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
-        """
-        Upload a carousel/album to Instagram.
+        """Upload a carousel/album to Instagram.
 
         Uses instagrapi's album_upload() for native carousel support.
         Supports up to 10 images/videos in a single carousel post.
@@ -304,7 +302,7 @@ class InstagramUploader(PlatformUploader):
             caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
 
         try:
-            client = self._get_client()
+            client = await self._get_client()
             logger.info(f"Uploading carousel to Instagram: {len(media_paths)} items")
 
             # Upload as album

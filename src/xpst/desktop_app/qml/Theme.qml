@@ -27,6 +27,19 @@ QtObject {
     readonly property color xPlatform: xtwitter
     readonly property color tiktok: "#00b8b8"
 
+    // Platform icons for consistent UI
+    readonly property string iconYouTube: "▶"
+    readonly property string iconInstagram: "📷"
+    readonly property string iconX: "𝕏"
+    readonly property string iconTikTok: "♪"
+
+    // UI icons for sidebar elements
+    readonly property string iconLogo: "⚡"
+    readonly property string iconBell: "🔔"
+    readonly property string iconMoon: "🌙"
+    readonly property string iconSun: "☀️"
+    readonly property string iconStats: "📊"
+
     readonly property int spacingXs: 4
     readonly property int spacingSm: 8
     readonly property int spacingMd: 12

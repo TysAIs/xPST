@@ -106,7 +106,7 @@ DEFAULT_CONFIG = {
         "healthcheck_port": 8080,
         "enable_metrics": True,
         "dashboard_username": "",
-        "dashboard_password": "",
+        "dashboard_password_hash": "",
         "health_check_interval": 300,
     },
     "notifications": {
@@ -239,8 +239,20 @@ class MonitoringConfig:
     healthcheck_port: int = 8080
     enable_metrics: bool = True
     dashboard_username: str = ""
-    dashboard_password: str = ""
+    dashboard_password_hash: str = ""
     health_check_interval: int = 300
+
+    def set_dashboard_password(self, plaintext: str) -> None:
+        """Hash and store a plaintext password."""
+        import bcrypt
+        self.dashboard_password_hash = bcrypt.hashpw(plaintext.encode(), bcrypt.gensalt()).decode()
+
+    def verify_dashboard_password(self, plaintext: str) -> bool:
+        """Verify a plaintext password against the stored hash."""
+        if not self.dashboard_password_hash:
+            return False
+        import bcrypt
+        return bcrypt.checkpw(plaintext.encode(), self.dashboard_password_hash.encode())
 
 
 @dataclass
@@ -347,7 +359,9 @@ class XPSTConfig:
                 file_config = yaml.safe_load(f) or {}
             config = cls._merge_config(config, file_config)
 
-        # Auto-fix stale .crosspstr paths → .xpst
+        # Auto-migrate config from older versions
+        from xpst.config_migration import auto_migrate
+        auto_migrate(config.config_dir)
         config = cls._fix_legacy_paths(config)
 
         # Override with environment variables
@@ -636,14 +650,9 @@ class XPSTConfig:
         if errors:
             raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))
 
-    def _hashed_password(self) -> str:
-        """Return the dashboard password, hashing it on first save if needed."""
-        pwd = self.monitoring.dashboard_password
-        if not pwd:
-            return ""
-        if pwd.startswith("sha256:"):
-            return pwd
-        return "sha256:" + hashlib.sha256(pwd.encode("utf-8")).hexdigest()
+    def _serialized_password_hash(self) -> str:
+        """Return the bcrypt password hash for serialization."""
+        return self.monitoring.dashboard_password_hash
 
     def save(self, config_path: str | None = None) -> None:
         """Save current configuration to a YAML file.
@@ -736,7 +745,7 @@ class XPSTConfig:
                 "healthcheck_port": self.monitoring.healthcheck_port,
                 "enable_metrics": self.monitoring.enable_metrics,
                 "dashboard_username": self.monitoring.dashboard_username,
-                "dashboard_password": self._hashed_password(),
+                "dashboard_password_hash": self._serialized_password_hash(),
                 "health_check_interval": self.monitoring.health_check_interval,
             },
             "schedule": {

@@ -366,10 +366,10 @@ Page {
 
                 Repeater {
                     model: [
-                        { name: "YouTube", key: "youtube", color: theme.youtube },
-                        { name: "Instagram", key: "instagram", color: theme.instagram },
-                        { name: "X", key: "x", color: theme.xtwitter },
-                        { name: "TikTok", key: "tiktok", color: theme.tiktok }
+                        { name: "YouTube", key: "youtube", color: theme.youtube, icon: theme.iconYouTube + " " },
+                        { name: "Instagram", key: "instagram", color: theme.instagram, icon: theme.iconInstagram + " " },
+                        { name: "X", key: "x", color: theme.xtwitter, icon: theme.iconX + " " },
+                        { name: "TikTok", key: "tiktok", color: theme.tiktok, icon: theme.iconTikTok + " " }
                     ]
 
                     ColumnLayout {
@@ -378,8 +378,10 @@ Page {
 
                         RowLayout {
                             spacing: theme.spacingSm
-                            Rectangle {
-                                width: 8; height: 8; radius: 4
+                            Text {
+                                text: modelData.icon
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
                                 color: modelData.color
                             }
                             Text {

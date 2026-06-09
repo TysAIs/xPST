@@ -501,17 +501,19 @@ class TestCredentialStorage:
         assert creds_dir.is_dir()
 
     def test_fallback_file_storage(self, tmp_path):
-        """When keyring is unavailable, credentials are stored in files."""
+        """When keyring is unavailable, credentials are stored in encrypted files."""
         store = CredentialStore(str(tmp_path))
         # Force file storage
         store._use_keyring = False
 
         store.store("test_key", "test_value")
-        cred_file = tmp_path / "credentials" / "test_key.json"
+        cred_file = tmp_path / "credentials" / "test_key.enc"
         assert cred_file.exists()
 
-        data = json.loads(cred_file.read_text())
-        assert data["value"] == "test_value"
+        # Verify file is encrypted (not plaintext)
+        file_content = cred_file.read_bytes()
+        assert b"test_value" not in file_content
+        assert b"test_key" not in file_content
 
     def test_retrieve_from_file_storage(self, tmp_path):
         """Retrieve works with fallback file storage."""

@@ -1,11 +1,10 @@
-"""
-X/Twitter uploader for xPST
+"""X/Twitter uploader for xPST
 
 Uses twikit for authentication and video uploads to X/Twitter.
 
 Authentication:
 - Cookie-based authentication via twikit
-- Supports browser cookie export
+- Delegates session management to SessionManager
 - Automatic session validation
 
 Upload specs:
@@ -26,26 +25,16 @@ logger = get_logger(__name__)
 
 class XUploader(PlatformUploader):
     """X/Twitter uploader with cookie-based authentication via twikit."""
-    """
-    X/Twitter video uploader.
-
-    Features:
-    - Cookie-based authentication via twikit
-    - Automatic media upload with progress tracking
-    - Duplicate detection
-    - Rate limit awareness
-    """
 
     def __init__(self, config: XPSTConfig) -> None:
         """Initialize X/Twitter uploader with lazy client caching."""
         super().__init__(config)
         self._client = None  # Cached twikit Client
 
-    def _get_client(self):
-        """Get an authenticated twikit client.
+    async def _get_client(self):
+        """Get an authenticated twikit client via SessionManager.
 
-        Loads cookies from file, optionally stores in keychain via
-        SessionManager for cross-session persistence.
+        Loads cookies from SessionManager, validates, and caches the client.
 
         Returns:
             Authenticated twikit Client.
@@ -53,10 +42,22 @@ class XUploader(PlatformUploader):
         Raises:
             FileNotFoundError: If cookies file is missing.
         """
+        if self._client is None:
+            if self._session_manager:
+                self._client = await self._session_manager.get_x_client(
+                    self.config.x.cookies_file,
+                    self.config.x.username,
+                    self.config.x.password,
+                )
+            else:
+                # Fallback for direct instantiation (testing)
+                self._client = await self._get_client_direct()
+        return self._client
 
+    async def _get_client_direct(self):
+        """Get X client directly (fallback when no SessionManager)."""
         import twikit
 
-        # Direct file-based cookie loading (primary path)
         cookies_file = Path(self.config.x.cookies_file)
 
         if not cookies_file.exists():
@@ -67,21 +68,10 @@ class XUploader(PlatformUploader):
 
         client = twikit.Client("en-US")
         client.load_cookies(str(cookies_file))
-
-        # Store cookies in keyring if SessionManager available
-        if self._session_manager:
-            try:
-                cookies = client.get_cookies()
-                self._session_manager.credentials.store_json("x_cookies", cookies)
-            except Exception as e:
-                logger.debug(f"Failed to store cookies in keyring: {e}")
-
-        self._client = client
         return client
 
     async def upload(self, video_path: Path, caption: str) -> UploadResult:
-        """
-        Upload a video to X/Twitter.
+        """Upload a video to X/Twitter.
 
         Args:
             video_path: Path to video file
@@ -97,7 +87,7 @@ class XUploader(PlatformUploader):
             caption = caption[:277] + "..."
 
         try:
-            client = self._get_client()
+            client = await self._get_client()
 
             logger.info(f"Uploading to X: {video_path.name}")
 
@@ -162,14 +152,13 @@ class XUploader(PlatformUploader):
             )
 
     async def check_health(self) -> PlatformHealth:
-        """
-        Check X/Twitter authentication health.
+        """Check X/Twitter authentication health.
 
         Returns:
             PlatformHealth with authentication status
         """
         try:
-            client = self._get_client()
+            client = await self._get_client()
 
             # Try to get current user to verify auth
             try:
@@ -210,7 +199,7 @@ class XUploader(PlatformUploader):
     async def delete(self, post_id: str) -> bool:
         """Delete a tweet from X"""
         try:
-            client = self._get_client()
+            client = await self._get_client()
             await client.delete_tweet(post_id)
             logger.info(f"Deleted X tweet: {post_id}")
             return True
@@ -219,8 +208,7 @@ class XUploader(PlatformUploader):
             return False
 
     async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
-        """
-        Upload a carousel as a thread on X/Twitter.
+        """Upload a carousel as a thread on X/Twitter.
 
         Creates a tweet thread: first tweet has the caption + first media,
         then reply tweets for each subsequent media file.
@@ -245,11 +233,11 @@ class XUploader(PlatformUploader):
             caption = caption[:max_caption - 3] + "..."
 
         try:
-            client = self._get_client()
+            client = await self._get_client()
 
             logger.info(f"Creating X thread with {len(media_paths)} items")
 
-            # First tweet🧵caption + first media
+            # First tweet: caption + first media
             media_id_1 = await client.upload_media(
                 str(media_paths[0]),
                 wait_for_completion=True,

@@ -1,12 +1,11 @@
-"""
-YouTube Shorts uploader for xPST
+"""YouTube Shorts uploader for xPST
 
 Handles OAuth2 authentication and video uploads to YouTube Shorts.
 
 Authentication:
 - Uses OAuth2 with client_secrets.json
+- Delegates token management to SessionManager
 - Supports automatic token refresh
-- Warns if OAuth app is in Testing mode (7-day token expiry for Gmail/Brand accounts)
 
 Upload specs:
 - Shorts: Vertical video (9:16), max 60 seconds
@@ -15,15 +14,11 @@ Upload specs:
 """
 
 from pathlib import Path
+import asyncio
 
 from xpst.config import XPSTConfig
 from xpst.platforms.base import PlatformHealth, PlatformUploader, UploadResult
 from xpst.utils.logger import get_logger
-
-try:
-    from xpst.auth.auth_manager import AuthManager
-except ImportError:
-    AuthManager = None  # type: ignore[assignment,misc]
 
 logger = get_logger(__name__)
 
@@ -43,113 +38,35 @@ class YouTubeUploader(PlatformUploader):
     DEFAULT_TAGS = ["Shorts", "AI", "tech", "video"]
 
     def __init__(self, config: XPSTConfig) -> None:
-        """Initialize YouTube uploader with lazy service/credential caching."""
+        """Initialize YouTube uploader with lazy service caching."""
         super().__init__(config)
         self._service = None  # Cached YouTube API service
-        self._creds = None  # Cached OAuth2 credentials
 
-    def _get_credentials(self):
-        """Get YouTube OAuth2 credentials via Authlib with automatic refresh.
-
-        Uses Authlib-based AuthManager for token management. Falls back to
-        google-auth if Authlib is not available.
+    async def _get_service(self):
+        """Get or create a YouTube Data API v3 service object via SessionManager.
 
         Returns:
-            Valid google.oauth2.credentials.Credentials object for use
-            with googleapiclient.
-
-        Raises:
-            FileNotFoundError: If client_secrets.json is missing.
-            ValueError: If credentials are expired and cannot be refreshed.
+            Authenticated YouTube API service (cached after first call).
         """
-        # Try Authlib path first
-        if AuthManager is not None:
-            return self._get_credentials_authlib()
-        return self._get_credentials_google_auth()
-
-    def _get_credentials_authlib(self):
-        """Authlib-based credential loading with token refresh."""
-        from google.oauth2.credentials import Credentials
-
-        token_file = Path(self.config.youtube.token_file)
-        client_secrets = Path(self.config.youtube.client_secrets)
-
-        if not client_secrets.exists():
-            raise FileNotFoundError(
-                f"YouTube client_secrets.json not found at {client_secrets}. "
-                "Download from Google Cloud Console: https://console.cloud.google.com/apis/credentials"
-            )
-
-        # Load client secrets for client_id/client_secret
-        import json
-        secrets_data = json.loads(client_secrets.read_text())
-        installed = secrets_data.get("installed", secrets_data.get("web", {}))
-        client_id = installed.get("client_id", "")
-        client_secret = installed.get("client_secret", "")
-
-        auth = AuthManager(config_dir=str(self.config.config_dir).replace("~", str(Path.home())))
-
-        # Try to load existing token
-        token = auth.load_token("youtube")
-
-        # Import from google-auth token file if no Authlib token
-        if token is None and token_file.exists():
-            try:
-                auth.load_from_google_credentials("youtube", token_file.read_text())
-                token = auth.load_token("youtube")
-            except Exception as e:
-                logger.warning("Failed to import google-auth token: %s", e)
-
-        if token is None:
-            raise ValueError(
-                "YouTube credentials expired or missing. "
-                "Run: xpst auth youtube"
-            )
-
-        # Refresh if expired
-        if token.is_expired:
-            if token.is_refreshable:
-                try:
-                    token = auth.refresh("youtube")
-                except Exception as e:
-                    logger.warning("Authlib refresh failed: %s, trying google-auth fallback", e)
-                    return self._get_credentials_google_auth()
-            else:
-                raise ValueError(
-                    "YouTube credentials expired and no refresh token available. "
-                    "Run: xpst auth youtube"
+        if self._service is None:
+            if self._session_manager:
+                self._service = await self._session_manager.get_youtube_service(
+                    self.config.youtube.client_secrets,
+                    self.config.youtube.token_file,
                 )
+            else:
+                # Fallback for direct instantiation (testing)
+                self._service = await self._get_service_direct()
+        return self._service
 
-        # Build google-auth Credentials object from Authlib token
-        creds = Credentials(
-            token=token.access_token,
-            refresh_token=token.refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=client_id,
-            client_secret=client_secret,
-            scopes=self.SCOPES,
-        )
-
-        # Save back to token file for compatibility
-        token_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(token_file, "w") as f:
-            f.write(creds.to_json())
-
-        if self._session_manager:
-            self._session_manager.credentials.store("youtube_token", creds.to_json())
-
-        self._creds = creds
-        return creds
-
-    def _get_credentials_google_auth(self):
-        """Fallback: google-auth-oauthlib credential loading."""
+    async def _get_service_direct(self):
+        """Get YouTube service directly (fallback when no SessionManager)."""
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
 
-
-        # Direct file-based credential loading (primary path)
-        token_file = Path(self.config.youtube.token_file)
         client_secrets = Path(self.config.youtube.client_secrets)
+        token_file = Path(self.config.youtube.token_file)
 
         if not client_secrets.exists():
             raise FileNotFoundError(
@@ -188,28 +105,12 @@ class YouTubeUploader(PlatformUploader):
         with open(token_file, "w") as f:
             f.write(creds.to_json())
 
-        # Store in keyring if SessionManager available
-        if self._session_manager:
-            self._session_manager.credentials.store("youtube_token", creds.to_json())
-
-        self._creds = creds
-        return creds
-
-    def _get_service(self):
-        """Get or create a YouTube Data API v3 service object.
-
-        Returns:
-            Authenticated YouTube API service (cached after first call).
-        """
-        if self._service is None:
-            from googleapiclient.discovery import build
-            creds = self._get_credentials()
-            self._service = build("youtube", "v3", credentials=creds)
-        return self._service
+        # Build service
+        service = build("youtube", "v3", credentials=creds)
+        return service
 
     async def upload(self, video_path: Path, caption: str) -> UploadResult:
-        """
-        Upload a video to YouTube Shorts.
+        """Upload a video to YouTube Shorts.
 
         Args:
             video_path: Path to video file
@@ -223,7 +124,7 @@ class YouTubeUploader(PlatformUploader):
         self._validate_video(video_path)
 
         try:
-            service = self._get_service()
+            service = await self._get_service()
 
             # Extract title and description from caption
             lines = caption.split("\n", 1)
@@ -267,13 +168,8 @@ class YouTubeUploader(PlatformUploader):
                 media_body=media,
             )
 
-            # Execute upload with progress tracking
-            response = None
-            while response is None:
-                status, response = request.next_chunk()
-                if status:
-                    progress = int(status.progress() * 100)
-                    logger.info(f"YouTube upload: {progress}%")
+            # Execute upload in thread pool to avoid blocking event loop
+            response = await self._execute_upload(request)
 
             video_id = response.get("id") or ""
             if not video_id:
@@ -318,15 +214,24 @@ class YouTubeUploader(PlatformUploader):
                 platform="youtube",
             )
 
+    def _execute_upload(self, request):
+        """Blocking upload execution for thread pool."""
+        response = None
+        while response is None:
+            status, response = request.next_chunk()
+            if status:
+                progress = int(status.progress() * 100)
+                logger.info(f"YouTube upload: {progress}%")
+        return response
+
     async def check_health(self) -> PlatformHealth:
-        """
-        Check YouTube authentication health.
+        """Check YouTube authentication health.
 
         Returns:
             PlatformHealth with authentication status
         """
         try:
-            service = self._get_service()
+            service = await self._get_service()
 
             # Try to list channels to verify auth works
             request = service.channels().list(part="snippet", mine=True)
@@ -380,7 +285,7 @@ class YouTubeUploader(PlatformUploader):
     async def delete(self, post_id: str) -> bool:
         """Delete a video from YouTube"""
         try:
-            service = self._get_service()
+            service = await self._get_service()
             service.videos().delete(id=post_id).execute()
             logger.info(f"Deleted YouTube video: {post_id}")
             return True

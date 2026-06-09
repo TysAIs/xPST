@@ -233,10 +233,10 @@ Page {
 
                 Repeater {
                     model: [
-                        { name: "YouTube",   key: "youtube",   icon: "YT", color: theme.youtube },
-                        { name: "Instagram", key: "instagram", icon: "IG", color: theme.instagram },
-                        { name: "X",         key: "x",         icon: "X",  color: theme.xtwitter },
-                        { name: "TikTok",    key: "tiktok",    icon: "TT", color: theme.tiktok }
+                        { name: "YouTube",   key: "youtube",   icon: theme.iconYouTube,   color: theme.youtube },
+                        { name: "Instagram", key: "instagram", icon: theme.iconInstagram, color: theme.instagram },
+                        { name: "X",         key: "x",         icon: theme.iconX,         color: theme.xtwitter },
+                        { name: "TikTok",    key: "tiktok",    icon: theme.iconTikTok,    color: theme.tiktok }
                     ]
 
                     Rectangle {

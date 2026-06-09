@@ -15,6 +15,7 @@ Quality notes:
 - Pre-processing with FFmpeg is recommended for X/Instagram uploads
 """
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
@@ -88,7 +89,33 @@ class TikTokSource(VideoSource):
         # Default to PATH
         return "yt-dlp"
 
-    def _build_base_command(self) -> list[str]:
+    async def _run_yt_dlp(self, cmd: list[str], timeout: int = 60) -> tuple[int, str, str]:
+        """Run yt-dlp command asynchronously.
+
+        Args:
+            cmd: Command list
+            timeout: Timeout in seconds
+
+        Returns:
+            Tuple of (returncode, stdout, stderr)
+
+        Raises:
+            asyncio.TimeoutError: If command times out
+        """
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            return proc.returncode or 1, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise
+
+    async def _build_base_command(self) -> list[str]:
         """Build base yt-dlp command with common options.
 
         Adds browser cookies if configured, explicit cookies file if provided,
@@ -105,16 +132,14 @@ class TikTokSource(VideoSource):
             from xpst.utils.platform import get_browser_list
             for browser in get_browser_list():
                 try:
-                    test_result = subprocess.run(
+                    rc, _, _ = await self._run_yt_dlp(
                         [self._yt_dlp_path, "--cookies-from-browser", browser, "--version"],
-                        capture_output=True,
-                        text=True,
                         timeout=5,
                     )
-                    if test_result.returncode == 0:
+                    if rc == 0:
                         cmd.extend(["--cookies-from-browser", browser])
                         break
-                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                except (asyncio.TimeoutError, FileNotFoundError, OSError):
                     continue
 
         # Add explicit cookies file if provided
@@ -194,7 +219,7 @@ class TikTokSource(VideoSource):
 
         url = f"https://www.tiktok.com/@{username}"
 
-        cmd = self._build_base_command()
+        cmd = await self._build_base_command()
         cmd.extend([
             "--flat-playlist",
             "--dump-json",
@@ -204,19 +229,14 @@ class TikTokSource(VideoSource):
 
         logger.info(f"Fetching videos from @{username}")
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        rc, stdout, stderr = await self._run_yt_dlp(cmd, timeout=120)
 
-        if result.returncode != 0:
-            logger.error(f"yt-dlp failed: {result.stderr[:300]}")
-            raise RuntimeError(f"Failed to fetch videos: {result.stderr[:200]}")
+        if rc != 0:
+            logger.error(f"yt-dlp failed: {stderr[:300]}")
+            raise RuntimeError(f"Failed to fetch videos: {stderr[:200]}")
 
         videos = []
-        for line in result.stdout.strip().split("\n"):
+        for line in stdout.strip().split("\n"):
             if not line.strip():
                 continue
 
@@ -328,7 +348,7 @@ class TikTokSource(VideoSource):
         Returns:
             List of downloaded image paths, empty if not a slideshow
         """
-        cmd = self._build_base_command()
+        cmd = await self._build_base_command()
         cmd.extend([
             "--dump-json",
             "--skip-download",
@@ -336,17 +356,12 @@ class TikTokSource(VideoSource):
         ])
 
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            rc, stdout, stderr = await self._run_yt_dlp(cmd, timeout=60)
 
-            if result.returncode != 0:
+            if rc != 0:
                 return []
 
-            data = json.loads(result.stdout.strip().split("\n")[0])
+            data = json.loads(stdout.strip().split("\n")[0])
             content_type = self._detect_content_type(data)
 
             if content_type not in (
@@ -383,22 +398,17 @@ class TikTokSource(VideoSource):
             for i, img_url in enumerate(image_urls):
                 img_path = output_dir / f"{video_id}_{i:03d}.jpg"
                 try:
-                    dl_cmd = self._build_base_command()
+                    dl_cmd = await self._build_base_command()
                     dl_cmd.extend(["-o", str(img_path), img_url])
-                    dl_result = subprocess.run(
-                        dl_cmd,
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                    )
-                    if dl_result.returncode == 0 and img_path.exists():
+                    rc, _, _ = await self._run_yt_dlp(dl_cmd, timeout=30)
+                    if rc == 0 and img_path.exists():
                         downloaded_paths.append(img_path)
                 except Exception as e:
                     logger.warning(f"Failed to download slideshow image {i}: {e}")
 
             return downloaded_paths
 
-        except (json.JSONDecodeError, subprocess.TimeoutExpired) as e:
+        except (json.JSONDecodeError, asyncio.TimeoutError) as e:
             logger.debug(f"Not a slideshow or detection failed: {e}")
             return []
 
@@ -421,7 +431,7 @@ class TikTokSource(VideoSource):
         Returns:
             DownloadResult
         """
-        cmd = self._build_base_command()
+        cmd = await self._build_base_command()
         cmd.extend([
             "-f", format_spec,
             "-o", str(output_path),
@@ -430,26 +440,21 @@ class TikTokSource(VideoSource):
 
         logger.info(f"Trying download format: {format_name}")
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=180,  # 3 minute timeout
-        )
+        rc, stdout, stderr = await self._run_yt_dlp(cmd, timeout=180)
 
-        if result.returncode != 0:
-            logger.warning(f"yt-dlp returned {result.returncode}: {result.stderr[:200]}")
+        if rc != 0:
+            logger.warning(f"yt-dlp returned {rc}: {stderr[:200]}")
 
             # Check for specific errors
-            if "Sign in to confirm" in result.stderr:
+            if "Sign in to confirm" in stderr:
                 raise RuntimeError("Bot detection - try enabling browser cookies")
 
-            if "Video unavailable" in result.stderr:
+            if "Video unavailable" in stderr:
                 raise RuntimeError("Video unavailable")
 
             return DownloadResult(
                 success=False,
-                error=f"Download failed: {result.stderr[:200]}",
+                error=f"Download failed: {stderr[:200]}",
                 format_used=format_name,
             )
 
@@ -488,14 +493,12 @@ class TikTokSource(VideoSource):
         version = None
         if yt_dlp_exists:
             try:
-                result = subprocess.run(
+                rc, stdout, stderr = await self._run_yt_dlp(
                     [self._yt_dlp_path, "--version"],
-                    capture_output=True,
-                    text=True,
                     timeout=10,
                 )
-                if result.returncode == 0:
-                    version = result.stdout.strip()
+                if rc == 0:
+                    version = stdout.strip()
             except Exception as e:
                 logger.debug("Unexpected error: %s", e)
                 pass

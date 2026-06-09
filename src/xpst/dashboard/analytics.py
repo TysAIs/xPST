@@ -19,6 +19,14 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Try to import CredentialStore
+try:
+    from xpst.utils.credentials import CredentialStore
+    HAS_CREDENTIAL_STORE = True
+except ImportError:
+    CredentialStore = None
+    HAS_CREDENTIAL_STORE = False
+
 # Platform color scheme for dashboard
 PLATFORM_COLORS = {
     "youtube": "#ff0000",
@@ -136,6 +144,12 @@ class AnalyticsCollector:
         self._yt_service = None  # Cached YouTube Analytics service
         self._ig_client = None  # Cached instagrapi Client
         self._x_client = None  # Cached twikit Client
+        self._cred_store = None
+        if HAS_CREDENTIAL_STORE:
+            try:
+                self._cred_store = CredentialStore(config_dir)
+            except Exception as e:
+                logger.debug(f"Could not create CredentialStore: {e}")
         self._load_config()
 
     def _load_config(self) -> None:
@@ -211,12 +225,21 @@ class AnalyticsCollector:
         try:
             from instagrapi import Client
 
-            session_path = Path(self.config_dir).expanduser() / "credentials" / "instagram_session.json"
-            if not session_path.exists():
-                return None
+            session_data = None
+            # Try CredentialStore first
+            if self._cred_store is not None:
+                try:
+                    session_data = self._cred_store.retrieve_json("instagram_session")
+                except Exception:
+                    pass
 
-            with open(session_path) as f:
-                session_data = json.load(f)
+            # Fall back to file
+            if session_data is None:
+                session_path = Path(self.config_dir).expanduser() / "credentials" / "instagram_session.json"
+                if not session_path.exists():
+                    return None
+                with open(session_path) as f:
+                    session_data = json.load(f)
 
             cl = Client()
             auth_data = session_data.get("authorization_data", session_data)
@@ -245,9 +268,25 @@ class AnalyticsCollector:
         try:
             from twikit import Client as TwikitClient
 
-            cookies_path = Path(self.config_dir).expanduser() / "credentials" / "x_cookies.json"
-            if not cookies_path.exists():
-                return None
+            cookies_data = None
+            # Try CredentialStore first
+            if self._cred_store is not None:
+                try:
+                    cookies_data = self._cred_store.retrieve_json("x_cookies")
+                except Exception:
+                    pass
+
+            # Fall back to file
+            if cookies_data is not None:
+                # Write to temp file for twikit
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                    json.dump(cookies_data, f)
+                    cookies_path = f.name
+            else:
+                cookies_path = Path(self.config_dir).expanduser() / "credentials" / "x_cookies.json"
+                if not cookies_path.exists():
+                    return None
 
             client = TwikitClient("en-US")
             client.load_cookies(str(cookies_path))
@@ -507,8 +546,20 @@ class AnalyticsCollector:
             if ts and ts >= week_ago:
                 posts_this_week += 1
 
-        # Best platform
-        best_platform = max(platform_counts, key=lambda k: platform_counts[k]) if any(platform_counts.values()) else None
+        # Best platform by engagement (views + likes + comments + shares)
+        engagement = self.get_engagement_data()
+        best_platform = None
+        max_engagement = 0
+        for platform, metrics in engagement.items():
+            if metrics["posts"] > 0:  # Only consider platforms with posts
+                total_engagement = metrics["views"] + metrics["likes"] + metrics["comments"] + metrics["shares"]
+                if total_engagement > max_engagement:
+                    max_engagement = total_engagement
+                    best_platform = platform
+
+        # Fallback to post count if no engagement data
+        if best_platform is None and any(platform_counts.values()):
+            best_platform = max(platform_counts, key=lambda k: platform_counts[k])
 
         return {
             "total_posts": len(posted),
@@ -517,8 +568,9 @@ class AnalyticsCollector:
             "platform_health": health.get("platforms", {}),
             "last_check": health.get("last_check"),
             "posts_this_week": posts_this_week,
-            "best_platform": best_platform,
+            "best_platform": best_platform or "—",
             "total_platform_posts": total_platform_posts,
+            "engagement_by_platform": engagement,
         }
 
     def get_posts_over_time(self, days: int = 30) -> dict[str, int]:

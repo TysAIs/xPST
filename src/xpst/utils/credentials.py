@@ -1,16 +1,18 @@
-﻿"""
-Secure credential storage for xPST
+"""Secure credential storage for xPST
 
 Uses the OS keychain (macOS Keychain, Windows Credential Locker, Linux Secret Service)
-for secure credential storage. Falls back to local JSON files protected by OS filesystem permissions if keyring is unavailable.
+for secure credential storage. Falls back to local encrypted files if keyring is unavailable.
 
 Security model:
 - Credentials stored in OS keychain (encrypted, requires auth to access)
 - Never stored in plain text on disk
+- Fallback files encrypted with machine-derived Fernet key
 - Session files contain only non-sensitive metadata
 - OAuth tokens stored separately from session data
 """
 
+import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -27,24 +29,30 @@ except ImportError:
     HAS_KEYRING = False
     logger.warning("keyring not installed. Using fallback file storage. Install with: pip install keyring")
 
+# Try to import cryptography for encrypted fallback
+try:
+    from cryptography.fernet import Fernet
+    HAS_CRYPTO = True
+except ImportError:
+    HAS_CRYPTO = False
+    logger.warning("cryptography not installed. Fallback files will be unencrypted. Install with: pip install cryptography")
+
 
 class CredentialStore:
-    """
-    Secure credential storage using OS keychain.
+    """Secure credential storage using OS keychain.
 
     Stores credentials in the system keychain:
     - macOS: Keychain (encrypted, requires Touch ID/password)
     - Windows: Credential Locker (encrypted, tied to user account)
     - Linux: Secret Service (GNOME Keyring, KWallet)
 
-    Falls back to file-based storage if keyring is unavailable.
+    Falls back to encrypted file-based storage if keyring is unavailable.
     """
 
     SERVICE_NAME = "xpst"
 
     def __init__(self, config_dir: str = "~/.xpst"):
-        """
-        Initialize credential store.
+        """Initialize credential store.
 
         Args:
             config_dir: Configuration directory for fallback storage
@@ -62,14 +70,48 @@ class CredentialStore:
                 self._use_keyring = True
                 logger.info("Using OS keychain for credential storage")
             except Exception as e:
-                logger.warning(f"Keyring not available: {e}. Using file storage.")
+                logger.warning(f"Keyring not available: {e}. Using encrypted file storage.")
                 self._use_keyring = False
         else:
             self._use_keyring = False
 
+        # Initialize encryption for fallback
+        if HAS_CRYPTO:
+            self._fernet_key = self._derive_fernet_key()
+            self._fernet = Fernet(self._fernet_key)
+        else:
+            self._fernet = None
+
+    def _derive_fernet_key(self) -> bytes:
+        """Derive a Fernet key from machine-specific data."""
+        machine_id = ""
+        for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"]:
+            try:
+                machine_id = Path(path).read_text().strip()
+                break
+            except OSError:
+                pass
+        if not machine_id:
+            machine_id = str(Path.home())
+        key_material = hashlib.sha256(
+            f"xpst-fallback-{machine_id}".encode()
+        ).digest()
+        return base64.urlsafe_b64encode(key_material)
+
+    def _fernet_encrypt(self, value: str) -> bytes:
+        """Encrypt a value using Fernet."""
+        if self._fernet:
+            return self._fernet.encrypt(value.encode())
+        return value.encode()
+
+    def _fernet_decrypt(self, data: bytes) -> str:
+        """Decrypt a value using Fernet."""
+        if self._fernet:
+            return self._fernet.decrypt(data).decode()
+        return data.decode()
+
     def store(self, key: str, value: str) -> None:
-        """
-        Store a credential securely.
+        """Store a credential securely.
 
         Args:
             key: Credential key (e.g., "youtube_token", "instagram_sessionid")
@@ -82,16 +124,16 @@ class CredentialStore:
                 logger.debug(f"Stored credential in keychain: {key}")
                 return
             except Exception as e:
-                logger.warning(f"Keyring store failed: {e}. Falling back to file.")
+                logger.warning(f"Keyring store failed: {e}. Falling back to encrypted file.")
 
-        # Fallback: file storage
-        cred_file = self.creds_dir / f"{key}.json"
-        cred_file.write_text(json.dumps({"value": value}))
-        logger.debug(f"Stored credential in file: {cred_file}")
+        # Fallback: encrypted file storage
+        cred_file = self.creds_dir / f"{key}.enc"
+        encrypted = self._fernet_encrypt(value)
+        cred_file.write_bytes(encrypted)
+        logger.debug(f"Stored credential in encrypted file: {cred_file}")
 
     def retrieve(self, key: str) -> str | None:
-        """
-        Retrieve a credential.
+        """Retrieve a credential.
 
         Args:
             key: Credential key
@@ -105,22 +147,21 @@ class CredentialStore:
                 if value is not None:
                     return value
             except Exception as e:
-                logger.warning(f"Keyring retrieve failed: {e}. Trying file.")
+                logger.warning(f"Keyring retrieve failed: {e}. Trying encrypted file.")
 
-        # Fallback: file storage
-        cred_file = self.creds_dir / f"{key}.json"
+        # Fallback: encrypted file storage
+        cred_file = self.creds_dir / f"{key}.enc"
         if cred_file.exists():
             try:
-                data = json.loads(cred_file.read_text())
-                return data.get("value")
-            except (json.JSONDecodeError, KeyError):
+                data = cred_file.read_bytes()
+                return self._fernet_decrypt(data)
+            except Exception:
                 return None
 
         return None
 
     def delete(self, key: str) -> bool:
-        """
-        Delete a credential.
+        """Delete a credential.
 
         Args:
             key: Credential key
@@ -141,7 +182,7 @@ class CredentialStore:
                 logger.warning(f"Keyring delete failed: {e}")
 
         # Also delete from file storage
-        cred_file = self.creds_dir / f"{key}.json"
+        cred_file = self.creds_dir / f"{key}.enc"
         if cred_file.exists():
             cred_file.unlink()
             deleted = True
@@ -149,8 +190,7 @@ class CredentialStore:
         return deleted
 
     def list_keys(self) -> list[str]:
-        """
-        List all stored credential keys.
+        """List all stored credential keys.
 
         Returns:
             List of credential keys
@@ -158,7 +198,7 @@ class CredentialStore:
         keys = []
 
         # List from file storage
-        for cred_file in self.creds_dir.glob("*.json"):
+        for cred_file in self.creds_dir.glob("*.enc"):
             if cred_file.name == "_keyring_index.json":
                 continue
             keys.append(cred_file.stem)
@@ -177,7 +217,6 @@ class CredentialStore:
         Returns:
             List of credential key names stored in keyring.
         """
-
         try:
             if self._keyring_index_file.exists():
                 data = json.loads(self._keyring_index_file.read_text())
@@ -193,7 +232,6 @@ class CredentialStore:
         Args:
             keys: List of key names to save.
         """
-
         try:
             self._keyring_index_file.write_text(json.dumps(sorted(set(keys)), indent=2))
         except OSError as e:
@@ -205,7 +243,6 @@ class CredentialStore:
         Args:
             key: Credential key name to add.
         """
-
         keys = self._load_keyring_index()
         if key not in keys:
             keys.append(key)
@@ -217,15 +254,13 @@ class CredentialStore:
         Args:
             key: Credential key name to remove.
         """
-
         keys = self._load_keyring_index()
         if key in keys:
             keys.remove(key)
             self._save_keyring_index(keys)
 
     def store_json(self, key: str, data: dict) -> None:
-        """
-        Store JSON data as a credential.
+        """Store JSON data as a credential.
 
         Args:
             key: Credential key
@@ -234,8 +269,7 @@ class CredentialStore:
         self.store(key, json.dumps(data))
 
     def retrieve_json(self, key: str) -> dict | None:
-        """
-        Retrieve JSON credential data.
+        """Retrieve JSON credential data.
 
         Args:
             key: Credential key
@@ -252,8 +286,7 @@ class CredentialStore:
         return None
 
     def migrate_from_files(self) -> int:
-        """
-        Migrate credentials from file storage to keyring.
+        """Migrate credentials from file storage to keyring.
 
         Returns:
             Number of credentials migrated
@@ -263,6 +296,7 @@ class CredentialStore:
 
         migrated = 0
 
+        # Migrate legacy plaintext .json files
         for cred_file in self.creds_dir.glob("*.json"):
             key = cred_file.stem
             try:
@@ -273,6 +307,19 @@ class CredentialStore:
                     cred_file.unlink()
                     migrated += 1
                     logger.info(f"Migrated credential to keychain: {key}")
+            except Exception as e:
+                logger.warning(f"Failed to migrate {key}: {e}")
+
+        # Migrate encrypted .enc files
+        for cred_file in self.creds_dir.glob("*.enc"):
+            key = cred_file.stem
+            try:
+                value = self.retrieve(key)
+                if value:
+                    keyring.set_password(self.SERVICE_NAME, key, value)
+                    cred_file.unlink()
+                    migrated += 1
+                    logger.info(f"Migrated encrypted credential to keychain: {key}")
             except Exception as e:
                 logger.warning(f"Failed to migrate {key}: {e}")
 

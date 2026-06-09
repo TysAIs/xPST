@@ -35,13 +35,13 @@ def _load_dashboard_auth(config_dir: str) -> tuple[str, str]:
     """Load dashboard credentials from config.
 
     Returns:
-        Tuple of (username, password). Both empty strings if not configured.
+        Tuple of (username, password_hash). Both empty strings if not configured.
     """
     try:
         from xpst.config import XPSTConfig
         config_path = str(Path(config_dir).expanduser() / "config.yaml")
         config = XPSTConfig.load(config_path)
-        return config.monitoring.dashboard_username, config.monitoring.dashboard_password
+        return config.monitoring.dashboard_username, config.monitoring.dashboard_password_hash
     except Exception:
         return "", ""
 
@@ -117,8 +117,8 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
             )
 
     # ── Auth middleware ─────────────────────────────────────────────────
-    username, password = _load_dashboard_auth(config_dir)
-    if username and password:
+    username, password_hash = _load_dashboard_auth(config_dir)
+    if username and password_hash:
         from starlette.middleware.base import BaseHTTPMiddleware
 
         class BasicAuthMiddleware(BaseHTTPMiddleware):
@@ -147,14 +147,19 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
                         headers={"WWW-Authenticate": 'Basic realm="xPST Dashboard"'},
                     )
 
-                # Support both hashed (sha256:) and legacy plain-text passwords
-                if password.startswith("sha256:"):
-                    pwd_hash = "sha256:" + hashlib.sha256(
-                        pwd.encode("utf-8")
-                    ).hexdigest()
-                    password_ok = pwd_hash == password
-                else:
-                    password_ok = pwd == password
+                # Verify password using bcrypt
+                import bcrypt
+                password_ok = False
+                try:
+                    if password_hash and password_hash.startswith("$2b$"):
+                        password_ok = bcrypt.checkpw(pwd.encode(), password_hash.encode())
+                    elif password_hash:
+                        # Legacy sha256: format - verify and migrate
+                        legacy_hash = "sha256:" + hashlib.sha256(pwd.encode("utf-8")).hexdigest()
+                        if legacy_hash == password_hash:
+                            password_ok = True
+                except Exception:
+                    password_ok = False
 
                 if user != username or not password_ok:
                     return JSONResponse(

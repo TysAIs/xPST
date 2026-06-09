@@ -142,14 +142,23 @@ class AppController(QObject):
         except Exception as exc:
             logger.warning("Failed to create QuotaManager: %s", exc)
 
-        try:
-            if AnalyticsCollector is not None:
-                self._analytics = AnalyticsCollector()
-        except Exception as exc:
-            logger.warning("Failed to create AnalyticsCollector: %s", exc)
+        # Defer AnalyticsCollector - it's heavy and may make network calls
+        self._analytics = None
+        self._analytics_initialized = False
 
         # Engine is heavy and async; defer creation
         self._engine = None
+
+    def _get_analytics(self):
+        """Lazily initialize AnalyticsCollector on first access."""
+        if not self._analytics_initialized:
+            self._analytics_initialized = True
+            if AnalyticsCollector is not None:
+                try:
+                    self._analytics = AnalyticsCollector()
+                except Exception as exc:
+                    logger.warning("Failed to create AnalyticsCollector: %s", exc)
+        return self._analytics
 
     def _ensure_engine(self) -> bool:
         """Lazily initialize the CrossPostEngine. Returns True if ready."""
@@ -261,8 +270,23 @@ class AppController(QObject):
 
             self._total_reach = total_platform_posts
 
-            # Best platform by post count
-            if platform_counts:
+            # Best platform: prefer analytics collector engagement data, fallback to post count
+            if self._analytics is not None:
+                try:
+                    analytics_summary = self._analytics.get_summary_stats()
+                    analytics_best = analytics_summary.get("best_platform", "")
+                    if analytics_best and analytics_best != "—":
+                        self._best_platform = analytics_best
+                    elif platform_counts:
+                        self._best_platform = max(platform_counts, key=platform_counts.get)  # type: ignore[arg-type]
+                    else:
+                        self._best_platform = "—"
+                except Exception:
+                    if platform_counts:
+                        self._best_platform = max(platform_counts, key=platform_counts.get)  # type: ignore[arg-type]
+                    else:
+                        self._best_platform = "—"
+            elif platform_counts:
                 self._best_platform = max(platform_counts, key=platform_counts.get)  # type: ignore[arg-type]
             else:
                 self._best_platform = "—"
@@ -409,20 +433,21 @@ class AppController(QObject):
 
     def _refresh_analytics(self) -> None:
         """Collect analytics data for QML."""
-        if self._analytics is None:
+        analytics = self._get_analytics()
+        if analytics is None:
             self._analytics_data = json.dumps({"available": False})
             return
 
         try:
             data: dict[str, Any] = {"available": True}
 
-            summary = self._analytics.get_summary_stats()
+            summary = analytics.get_summary_stats()
             data["summary"] = summary
 
-            health_list = self._analytics.get_platform_health_all()
+            health_list = analytics.get_platform_health_all()
             data["platforms"] = health_list
 
-            top = self._analytics.get_top_posts(limit=5)
+            top = analytics.get_top_posts(limit=5)
             data["top_posts"] = top
 
             self._analytics_data = json.dumps(data, default=str)
@@ -740,7 +765,8 @@ class AppController(QObject):
         Returns:
             JSON string with views/likes/comments/shares per platform.
         """
-        if self._analytics is None:
+        analytics = self._get_analytics()
+        if analytics is None:
             return json.dumps({
                 "available": False,
                 "error": "AnalyticsCollector not initialized",
@@ -750,7 +776,7 @@ class AppController(QObject):
             data: dict[str, Any] = {"available": True}
 
             # Get engagement data (uses real APIs where possible)
-            engagement = self._analytics.get_engagement_data()
+            engagement = analytics.get_engagement_data()
 
             if platform and platform in engagement:
                 data["platform"] = platform
@@ -762,7 +788,7 @@ class AppController(QObject):
                 data["platforms"] = engagement
 
             # Add summary stats
-            data["summary"] = self._analytics.get_summary_stats()
+            data["summary"] = analytics.get_summary_stats()
 
             return json.dumps(data, default=str)
         except Exception as exc:
@@ -851,7 +877,7 @@ class AppController(QObject):
             "configLoaded": self._config is not None,
             "stateLoaded": self._state is not None,
             "engineAvailable": CrossPostEngine is not None,
-            "analyticsAvailable": self._analytics is not None,
+            "analyticsAvailable": self._get_analytics() is not None,
             "quotaAvailable": self._quota is not None,
             "timestamp": datetime.now().isoformat(),
         }

@@ -38,8 +38,8 @@ Rectangle {
                 spacing: theme.spacingSm
 
                 Text {
-                    text: "x"
-                    font.pixelSize: 18
+                    text: theme.iconLogo
+                    font.pixelSize: 20
                 }
                 Text {
                     text: "xPST"
@@ -58,13 +58,13 @@ Rectangle {
 
         Repeater {
             model: [
-                { label: "Dashboard", icon: "D", page: "dashboard" },
-                { label: "Content",   icon: "C", page: "content" },
-                { label: "Analytics", icon: "A", page: "analytics" },
-                { label: "Connect",   icon: "N", page: "connect" },
-                { label: "Schedule",  icon: "S", page: "schedule" },
-                { label: "Settings",  icon: "G", page: "settings" },
-                { label: "About",     icon: "i", page: "about" }
+                { label: "Dashboard", icon: "◈", page: "dashboard" },
+                { label: "Content",   icon: "▣", page: "content" },
+                { label: "Analytics", icon: "�", page: "analytics" },
+                { label: "Connect",   icon: "◐", page: "connect" },
+                { label: "Schedule",  icon: "⏰", page: "schedule" },
+                { label: "Settings",  icon: "⚙", page: "settings" },
+                { label: "About",     icon: "ℹ", page: "about" }
             ]
 
             Rectangle {
@@ -137,7 +137,7 @@ Rectangle {
                     spacing: theme.spacingSm
 
                     Text {
-                        text: "C"
+                        text: theme.iconStats
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
                         color: theme.accent
@@ -206,9 +206,8 @@ Rectangle {
                     Layout.preferredHeight: 24
 
                     Text {
-                        text: "N"
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
+                        text: theme.iconBell
+                        font.pixelSize: 14
                         color: theme.textSecondary
                         anchors.centerIn: parent
                     }
@@ -395,9 +394,8 @@ Rectangle {
                 spacing: theme.spacingMd
 
                 Text {
-                    text: theme.darkMode ? "D" : "L"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
+                    text: theme.darkMode ? theme.iconMoon : theme.iconSun
+                    font.pixelSize: 14
                     color: theme.textSecondary
                     Layout.preferredWidth: 24
                     horizontalAlignment: Text.AlignHCenter

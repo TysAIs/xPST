@@ -22,7 +22,8 @@ Page {
                            (analyticsJson.summary.total_views > 0 ||
                             analyticsJson.summary.total_likes > 0 ||
                             analyticsJson.summary.total_comments > 0 ||
-                            analyticsJson.summary.total_shares > 0)
+                            analyticsJson.summary.total_shares > 0 ||
+                            analyticsJson.summary.engagement_by_platform)
 
     property var platformData: {
         if (!analyticsJson.platforms) return []
@@ -184,28 +185,34 @@ Page {
                 Item { Layout.preferredWidth: theme.spacingMd }
 
                 Repeater {
-                    model: ["All", "YouTube", "Instagram", "X", "TikTok"]
+                    model: [
+                        { name: "All", key: "All", icon: "" },
+                        { name: "YouTube", key: "YouTube", icon: theme.iconYouTube + " " },
+                        { name: "Instagram", key: "Instagram", icon: theme.iconInstagram + " " },
+                        { name: "X", key: "X", icon: theme.iconX + " " },
+                        { name: "TikTok", key: "TikTok", icon: theme.iconTikTok + " " }
+                    ]
 
                     Rectangle {
                         width: tabLabel.implicitWidth + theme.spacingXl
                         height: 36
                         radius: theme.radiusMd
-                        color: analyticsPage.activePlatform === modelData ? theme.accent : theme.surfaceCard
+                        color: analyticsPage.activePlatform === modelData.key ? theme.accent : theme.surfaceCard
 
                         Text {
                             id: tabLabel
                             anchors.centerIn: parent
-                            text: modelData
+                            text: modelData.icon + modelData.name
                             font.pixelSize: 12
-                            font.weight: analyticsPage.activePlatform === modelData ? Font.DemiBold : Font.Normal
-                            color: analyticsPage.activePlatform === modelData ? "#ffffff" : theme.textSecondary
+                            font.weight: analyticsPage.activePlatform === modelData.key ? Font.DemiBold : Font.Normal
+                            color: analyticsPage.activePlatform === modelData.key ? "#ffffff" : theme.textSecondary
                         }
 
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: analyticsPage.activePlatform = modelData
-                            Accessible.name: "Filter by " + modelData + " platform"
+                            onClicked: analyticsPage.activePlatform = modelData.key
+                            Accessible.name: "Filter by " + modelData.name + " platform"
                             Accessible.role: Accessible.Button
                         }
                     }

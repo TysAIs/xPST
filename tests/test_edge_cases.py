@@ -127,7 +127,8 @@ class TestXAPIEdgeCases:
 class TestInstagramAPIEdgeCases:
     """Test Instagram platform handles unexpected API responses."""
 
-    def test_instagram_session_file_missing_sessionid(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_instagram_session_file_missing_sessionid(self, tmp_path):
         """If session file exists but has no sessionid, should raise ValueError."""
         from xpst.platforms.instagram import InstagramUploader
 
@@ -140,9 +141,10 @@ class TestInstagramAPIEdgeCases:
         uploader = InstagramUploader(config)
 
         with pytest.raises(ValueError, match="No sessionid found"):
-            uploader._get_client()
+            await uploader._get_client()
 
-    def test_instagram_session_file_invalid_json(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_instagram_session_file_invalid_json(self, tmp_path):
         """If session file has invalid JSON, should raise ValueError."""
         from xpst.platforms.instagram import InstagramUploader
 
@@ -155,9 +157,10 @@ class TestInstagramAPIEdgeCases:
         uploader = InstagramUploader(config)
 
         with pytest.raises(ValueError, match="Invalid JSON"):
-            uploader._get_client()
+            await uploader._get_client()
 
-    def test_instagram_session_file_missing(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_instagram_session_file_missing(self, tmp_path):
         """If session file doesn't exist, should raise FileNotFoundError."""
         from xpst.platforms.instagram import InstagramUploader
 
@@ -167,7 +170,7 @@ class TestInstagramAPIEdgeCases:
         uploader = InstagramUploader(config)
 
         with pytest.raises(FileNotFoundError):
-            uploader._get_client()
+            await uploader._get_client()
 
     def test_instagram_carousel_truncation(self):
         """Instagram carousels with >10 items should be truncated."""
@@ -203,18 +206,25 @@ class TestAuthEdgeCases:
         categorized = categorize_error(Exception(error_msg), "instagram")
         assert categorized.is_fatal
 
-    def test_youtube_refresh_token_expired(self, tmp_path):
-        """If YouTube refresh token is expired, should raise ValueError."""
+    @pytest.mark.asyncio
+    async def test_youtube_refresh_token_expired(self, tmp_path):
+        """If YouTube refresh token is expired, should raise ValueError.
+        
+        Now uses SessionManager.get_youtube_service which handles token refresh.
+        """
         from xpst.platforms.youtube import YouTubeUploader
+        from xpst.utils.sessions import SessionManager
 
         config = XPSTConfig()
         config.youtube.client_secrets = str(tmp_path / "secrets.json")
 
+        # Create uploader with a mocked session manager
         uploader = YouTubeUploader(config)
+        uploader._session_manager = None  # Test fallback path
 
         # No token file and no secrets → FileNotFoundError
         with pytest.raises(FileNotFoundError):
-            uploader._get_credentials()
+            await uploader._get_service()
 
     def test_x_cookies_expired_returns_fatal(self):
         """X session expired should be classified as fatal error."""
