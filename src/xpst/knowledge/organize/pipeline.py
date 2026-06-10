@@ -7,13 +7,13 @@ runs AFTER ingestion and never re-runs the Phase 1/2 ingest path -- it only
 layers area/difficulty/assignment data onto already-stored nuggets through the
 stable store port (``upsert_area`` / ``set_difficulty`` / ``assign``).
 
-Re-running over unchanged nuggets is stable WHEN labels are deterministic:
-clustering is deterministic and difficulty/assignment are stable functions of
-content. Caveat: ``Area.id`` is derived from the label, so a LIVE LLM that
-returns a slightly different label for the same cluster across runs creates a
-new area instead of overwriting the old one (stale-area accumulation). The
-deterministic fallback path (LLM down) is unaffected. Keying ``Area.id`` on
-cluster membership rather than the label is a Phase 5 hardening follow-up."""
+Re-running is idempotent and non-accumulating: clustering is deterministic,
+``Area.id`` is keyed on cluster membership (not the LLM label), and organize
+reconciles the stored area set against the freshly discovered one. A
+non-deterministic LLM that re-phrases a label for the same cluster re-keys to
+the same area, and areas whose membership no longer exists after the corpus
+changes are pruned rather than orphaned. Difficulty and assignment are stable
+functions of content."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -59,6 +59,14 @@ def organize_store(store: KnowledgeStore, client: _Chatter, *,
     tagged = [n.with_difficulty(tag_difficulty(n)) for n in nuggets]
 
     areas = discover_areas(tagged, client, threshold=threshold)
+    # Reconcile the stored area set with the freshly discovered authoritative
+    # set: prune areas whose membership no longer exists, then upsert the rest.
+    # With membership-keyed ids this overwrites in place on an unchanged corpus
+    # and never leaves orphan/ghost areas.
+    keep = {a.id for a in areas}
+    for stale in store.areas():
+        if stale.id not in keep:
+            store.remove_area(stale.id)
     for area in areas:
         store.upsert_area(area)
 
@@ -72,6 +80,11 @@ def organize_store(store: KnowledgeStore, client: _Chatter, *,
         if not decision.grow_new and decision.area is not None:
             store.assign(nugget.id, decision.area.id)
             assigned += 1
+        elif nugget.area_id is not None and nugget.area_id not in keep:
+            # Nothing fits and the prior area was pruned -> clear the dangling
+            # pointer so no nugget references a non-existent area (an unembedded
+            # nugget can never be re-routed, so this is its only cleanup path).
+            store.assign(nugget.id, None)
 
     return OrganizeResult(
         area_count=len(areas),

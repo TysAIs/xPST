@@ -26,10 +26,22 @@ def cosine(a: Sequence[float], b: Sequence[float]) -> float:
 
 def centroid(vectors: Sequence[Sequence[float]]) -> tuple[float, ...]:
     """Component-wise mean of equal-length vectors. Empty input -> empty tuple.
-    Ragged input is truncated to the shortest member (defensive, never raises)."""
+
+    Ragged input (vectors of differing width) raises ``ValueError`` instead of
+    silently truncating to the shortest member. Truncation dropped tail
+    dimensions and still divided by the full count, producing a meaningless
+    centroid that corrupted routing with no signal. Mixed widths in one store
+    mean the embedding model changed without a re-embed; failing loud beats
+    degrading silently."""
     vecs = [v for v in vectors if v]
     if not vecs:
         return ()
-    width = min(len(v) for v in vecs)
+    widths = {len(v) for v in vecs}
+    if len(widths) > 1:
+        raise ValueError(
+            "ragged embeddings: cannot average vectors of differing widths "
+            f"{sorted(widths)} (embedding model likely changed without a re-embed)"
+        )
+    width = widths.pop()
     n = len(vecs)
     return tuple(sum(v[i] for v in vecs) / n for i in range(width))

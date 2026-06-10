@@ -92,7 +92,7 @@ def test_organize_is_idempotent(tmp_path):
     n_nuggets_first = len(list(store.all_nuggets()))
 
     # Re-running over the same content must not duplicate areas or nuggets
-    # (Area.id is a function of label; clustering is deterministic).
+    # (Area.id is keyed on cluster membership; clustering is deterministic).
     organize_store(store, _CannedClient({"label": "A"}, {"label": "B"}), threshold=0.8)
     assert len(store.areas()) == n_areas_first
     assert len(list(store.all_nuggets())) == n_nuggets_first
@@ -116,3 +116,45 @@ def test_organize_graceful_when_llm_dead(tmp_path):
     result = organize_store(store, _Dead(), threshold=0.8)
     assert result.area_count >= 1
     assert all(a.label.strip() for a in store.areas())
+
+
+def test_organize_prunes_stale_areas_on_recluster(tmp_path):
+    """Re-organizing after the corpus changes reconciles the area set: areas
+    whose membership no longer exists are pruned, not orphaned."""
+    store = _store(tmp_path)
+    store.add_nugget(_n("a1", (1.0, 0.0)))
+    store.add_nugget(_n("b1", (0.0, 1.0)))
+    organize_store(store, _CannedClient({"label": "A"}, {"label": "B"}), threshold=0.8)
+    assert len(store.areas()) == 2
+
+    # A third nugget collapses into the first cluster, changing its membership
+    # (and therefore its membership-keyed id).
+    store.add_nugget(_n("a2", (0.99, 0.01)))
+    organize_store(store, _CannedClient({"label": "A"}, {"label": "B"}), threshold=0.8)
+
+    # Exactly the latest discovered set survives -- no ghost areas accumulate.
+    assert len(store.areas()) == 2
+    live = {a.id for a in store.areas()}
+    for n in store.all_nuggets():
+        if n.area_id is not None:
+            assert n.area_id in live
+
+
+def test_organize_clears_dangling_area_id(tmp_path):
+    """An unembedded nugget pointing at a pruned area gets its area_id cleared:
+    it can never be re-routed, so organize must not leave it dangling."""
+    from xpst.knowledge.models import Nugget
+
+    store = _store(tmp_path)
+    store.add_nugget(_n("real", (1.0, 0.0)))  # embedded -> forms a real area
+    bare = Nugget.create(
+        point="bare", source_video_id="v",
+        timestamp_start=0.0, timestamp_end=1.0,
+    ).with_area("ghost-area-id")  # stale pointer, no embedding
+    store.add_nugget(bare)
+
+    organize_store(store, _CannedClient({"label": "A"}), threshold=0.8)
+
+    got = store.get_nugget(bare.id)
+    assert got is not None
+    assert got.area_id is None  # dangling pointer cleared

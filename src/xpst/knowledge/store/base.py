@@ -36,13 +36,21 @@ class KnowledgeStore(ABC):
         ...
 
     @abstractmethod
+    def remove_area(self, area_id: str) -> None:
+        """Remove an area by id. No-op if absent. Stored nuggets are not
+        modified here; ``organize_store`` clears the ``area_id`` of any nugget
+        left pointing at a removed area on its next run."""
+        ...
+
+    @abstractmethod
     def areas(self) -> list[Area]:
         """Return all areas, ordered by ``order_index`` then label."""
         ...
 
     @abstractmethod
-    def assign(self, nugget_id: str, area_id: str) -> None:
-        """Assign a stored nugget to an area. No-op if the nugget is absent."""
+    def assign(self, nugget_id: str, area_id: str | None) -> None:
+        """Assign a stored nugget to an area, or clear its area when ``area_id``
+        is None. No-op if the nugget is absent."""
         ...
 
     @abstractmethod

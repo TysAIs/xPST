@@ -89,8 +89,8 @@ def test_search_empty_store(store):
 
 
 def test_upsert_and_list_areas_ordered(store):
-    a = Area.create(label="Second", order_index=1)
-    b = Area.create(label="First", order_index=0)
+    a = Area.create(label="Second", order_index=1, nugget_ids=("n2",))
+    b = Area.create(label="First", order_index=0, nugget_ids=("n1",))
     store.upsert_area(a)
     store.upsert_area(b)
     listed = store.areas()
@@ -98,14 +98,30 @@ def test_upsert_and_list_areas_ordered(store):
 
 
 def test_upsert_area_replaces_same_id(store):
-    a = Area.create(label="Topic", order_index=0)
+    a = Area.create(label="Topic", order_index=0, nugget_ids=("n1",))
     store.upsert_area(a)
-    updated = Area.create(label="Topic", order_index=5, nugget_ids=("n1",))
+    # Same membership -> same id -> upsert replaces in place (label is mutable).
+    updated = Area.create(label="Topic Renamed", order_index=5, nugget_ids=("n1",))
+    assert updated.id == a.id
     store.upsert_area(updated)
     listed = store.areas()
     assert len(listed) == 1
     assert listed[0].order_index == 5
-    assert listed[0].nugget_ids == ("n1",)
+    assert listed[0].label == "Topic Renamed"
+
+
+def test_remove_area(store):
+    a = Area.create(label="Gone", order_index=0, nugget_ids=("n1",))
+    b = Area.create(label="Stays", order_index=1, nugget_ids=("n2",))
+    store.upsert_area(a)
+    store.upsert_area(b)
+    store.remove_area(a.id)
+    assert [x.label for x in store.areas()] == ["Stays"]
+
+
+def test_remove_area_missing_is_noop(store):
+    store.remove_area("does-not-exist")  # must not raise
+    assert store.areas() == []
 
 
 def test_assign_nugget_to_area(store):

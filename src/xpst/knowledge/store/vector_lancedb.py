@@ -122,6 +122,11 @@ class LanceDBStore(KnowledgeStore):
         else:
             db.create_table(_AREAS, data=[row])
 
+    def remove_area(self, area_id: str) -> None:
+        db = self._conn()
+        if _AREAS in db.table_names():
+            db.open_table(_AREAS).delete(f"id = '{area_id}'")
+
     def areas(self) -> list[Area]:
         db = self._conn()
         if _AREAS not in db.table_names():
@@ -130,7 +135,7 @@ class LanceDBStore(KnowledgeStore):
         areas = [Area.from_dict(json.loads(r["payload"])) for r in rows]
         return sorted(areas, key=lambda a: (a.order_index, a.label))
 
-    def assign(self, nugget_id: str, area_id: str) -> None:
+    def assign(self, nugget_id: str, area_id: str | None) -> None:
         existing = self.get_nugget(nugget_id)
         if existing is None:
             return

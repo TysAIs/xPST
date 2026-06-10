@@ -17,7 +17,9 @@ def _nugget(point: str, vec: tuple[float, ...]) -> Nugget:
 
 
 def _area(label: str, centroid: tuple[float, ...]) -> Area:
-    return Area.create(label=label, centroid=centroid)
+    # Distinct membership per label so each area gets a distinct, stable id
+    # (Area.id is keyed on membership, not the label).
+    return Area.create(label=label, centroid=centroid, nugget_ids=(label.lower(),))
 
 
 def test_routes_to_nearest_area_above_threshold():

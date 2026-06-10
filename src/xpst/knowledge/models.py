@@ -81,7 +81,12 @@ class Nugget:
 @dataclass(frozen=True)
 class Area:
     """A course module — discovered by clustering, not seeded. The id is a
-    function of ``label`` only so re-labeling/re-centroiding is stable per label.
+    function of cluster MEMBERSHIP (sorted ``nugget_ids``) when members are
+    known, falling back to ``label`` only for degenerate empty-membership areas
+    so they do not all collide on one constant id. Keying on membership means a
+    non-deterministic LLM that re-phrases the label for the same cluster re-keys
+    to the same area instead of accumulating ghost areas. ``label`` is a mutable
+    display field replaced in place via ``upsert_area``.
     """
 
     id: str
@@ -93,11 +98,15 @@ class Area:
     @classmethod
     def create(cls, *, label: str, centroid: Sequence[float] = (),
                nugget_ids: Iterable[str] = (), order_index: int = 0) -> Area:
+        ids = tuple(nugget_ids)
+        # Key on membership for real (clustered) areas; fall back to the label
+        # for degenerate empty-membership areas so they keep distinct ids.
+        key_parts = sorted(ids) if ids else [label]
         return cls(
-            id=_hash("area", label),
+            id=_hash("area", *key_parts),
             label=label,
             centroid=tuple(float(x) for x in centroid),
-            nugget_ids=tuple(nugget_ids),
+            nugget_ids=ids,
             order_index=order_index,
         )
 

@@ -93,9 +93,20 @@ def test_area_roundtrip():
     assert isinstance(restored.nugget_ids, tuple)
 
 
-def test_area_create_assigns_stable_id_from_label():
-    a = Area.create(label="Networking Basics")
-    b = Area.create(label="Networking Basics")
-    assert a.id == b.id  # id is a function of label only
-    c = Area.create(label="Advanced Routing")
+def test_area_create_keys_id_on_membership_not_label():
+    a = Area.create(label="Networking Basics", nugget_ids=("n1", "n2"))
+    # Same membership (order-independent) with a different label -> same id.
+    b = Area.create(label="Totally Different Label", nugget_ids=("n2", "n1"))
+    assert a.id == b.id  # id is a function of cluster membership, not the label
+    # Different membership -> different id.
+    c = Area.create(label="Networking Basics", nugget_ids=("n3",))
     assert a.id != c.id
+
+
+def test_area_create_empty_membership_keys_on_label_not_constant():
+    # Degenerate empty-membership areas must NOT all collide on _hash("area");
+    # they fall back to label keying so distinct labels stay distinct.
+    a = Area.create(label="Alpha")
+    b = Area.create(label="Beta")
+    assert a.id != b.id
+    assert Area.create(label="Alpha").id == a.id

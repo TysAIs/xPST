@@ -81,11 +81,16 @@ class JsonKnowledgeStore(KnowledgeStore):
         self._areas[area.id] = area
         self._flush_areas()
 
+    def remove_area(self, area_id: str) -> None:
+        if area_id in self._areas:
+            del self._areas[area_id]
+            self._flush_areas()
+
     def areas(self) -> list[Area]:
         return sorted(self._areas.values(),
                       key=lambda a: (a.order_index, a.label))
 
-    def assign(self, nugget_id: str, area_id: str) -> None:
+    def assign(self, nugget_id: str, area_id: str | None) -> None:
         existing = self._nuggets.get(nugget_id)
         if existing is None:
             return
