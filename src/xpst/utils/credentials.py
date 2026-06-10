@@ -55,7 +55,7 @@ _SECRET_BYTES = 32
 _SALT_BYTES = 16
 
 
-class PlaintextStorageRefused(RuntimeError):
+class PlaintextStorageError(RuntimeError):
     """Raised when xPST would have to store a credential in cleartext.
 
     xPST never writes secrets to disk unencrypted. When neither the OS keychain
@@ -163,12 +163,12 @@ class CredentialStore:
         """Encrypt a value using Fernet.
 
         Raises:
-            PlaintextStorageRefused: if Fernet encryption is unavailable.
+            PlaintextStorageError: if Fernet encryption is unavailable.
                 xPST never writes credentials in cleartext.
         """
         if self._fernet:
             return self._fernet.encrypt(value.encode())
-        raise PlaintextStorageRefused(
+        raise PlaintextStorageError(
             "Refusing to store credential without encryption. "
             "Install the 'cryptography' package: pip install cryptography"
         )
@@ -177,12 +177,12 @@ class CredentialStore:
         """Decrypt a value using Fernet.
 
         Raises:
-            PlaintextStorageRefused: if Fernet is unavailable; xPST does not
+            PlaintextStorageError: if Fernet is unavailable; xPST does not
                 read credentials it would have refused to write in cleartext.
         """
         if self._fernet:
             return self._fernet.decrypt(data).decode()
-        raise PlaintextStorageRefused(
+        raise PlaintextStorageError(
             "Cannot decrypt fallback credential without the 'cryptography' package."
         )
 
@@ -194,7 +194,7 @@ class CredentialStore:
             value: Credential value (JSON string or plain text)
 
         Raises:
-            PlaintextStorageRefused: if the OS keychain is unavailable AND the
+            PlaintextStorageError: if the OS keychain is unavailable AND the
                 ``cryptography`` package is not installed. xPST refuses to write
                 credentials in cleartext rather than silently degrading security.
         """
@@ -214,7 +214,7 @@ class CredentialStore:
                 "keychain is not usable. Install 'cryptography' or 'keyring'.",
                 key,
             )
-            raise PlaintextStorageRefused(
+            raise PlaintextStorageError(
                 "Refusing to store credential without encryption. "
                 "Install 'cryptography' (pip install cryptography) or enable the OS keychain."
             )

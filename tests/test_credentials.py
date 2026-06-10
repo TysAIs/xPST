@@ -5,7 +5,7 @@ import stat
 import pytest
 
 import xpst.utils.credentials as cred_mod
-from xpst.utils.credentials import CredentialStore, PlaintextStorageRefused
+from xpst.utils.credentials import CredentialStore, PlaintextStorageError
 
 
 class TestCredentialStore:
@@ -158,7 +158,7 @@ class TestPlaintextRefused:
         # Constructor leaves _fernet=None when HAS_CRYPTO is False.
         assert store._fernet is None
 
-        with pytest.raises(PlaintextStorageRefused):
+        with pytest.raises(PlaintextStorageError):
             store.store("token", "super-secret")
 
         # Nothing written in cleartext.
