@@ -6,14 +6,20 @@ for secure credential storage. Falls back to local encrypted files if keyring is
 Security model:
 - Credentials stored in OS keychain (encrypted, requires auth to access)
 - Never stored in plain text on disk
-- Fallback files encrypted with machine-derived Fernet key
+- Fallback files encrypted with a Fernet key derived (via scrypt KDF) from a
+  per-install random secret. The secret and KDF salt are generated on first use
+  and stored ``0600`` (owner read/write only) under the credentials directory.
+- If the ``cryptography`` dependency is unavailable, xPST REFUSES to write
+  credentials in plaintext and logs an error instead.
 - Session files contain only non-sensitive metadata
 - OAuth tokens stored separately from session data
 """
 
 import base64
-import hashlib
 import json
+import os
+import secrets
+import stat
 from pathlib import Path
 
 from xpst.utils.logger import get_logger
@@ -32,10 +38,30 @@ except ImportError:
 # Try to import cryptography for encrypted fallback
 try:
     from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
     HAS_CRYPTO = True
 except ImportError:
     HAS_CRYPTO = False
-    logger.warning("cryptography not installed. Fallback files will be unencrypted. Install with: pip install cryptography")
+    logger.warning(
+        "cryptography not installed. Fallback credential storage is disabled "
+        "(xPST refuses to write plaintext secrets). Install with: pip install cryptography"
+    )
+
+# scrypt KDF parameters (RFC 7914 recommended interactive cost factors)
+_SCRYPT_N = 2 ** 14
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_SECRET_BYTES = 32
+_SALT_BYTES = 16
+
+
+class PlaintextStorageRefused(RuntimeError):
+    """Raised when xPST would have to store a credential in cleartext.
+
+    xPST never writes secrets to disk unencrypted. When neither the OS keychain
+    nor the ``cryptography`` package is available, storing fails loudly with this
+    error instead of silently persisting a plaintext token.
+    """
 
 
 class CredentialStore:
@@ -61,6 +87,9 @@ class CredentialStore:
         self.creds_dir = self.config_dir / "credentials"
         self.creds_dir.mkdir(parents=True, exist_ok=True)
         self._keyring_index_file = self.creds_dir / "_keyring_index.json"
+        # Per-install secret + salt used to derive the fallback Fernet key.
+        self._secret_file = self.creds_dir / ".fallback_secret"
+        self._salt_file = self.creds_dir / ".fallback_salt"
 
         # Check keyring availability
         if HAS_KEYRING:
@@ -82,33 +111,80 @@ class CredentialStore:
         else:
             self._fernet = None
 
+    @staticmethod
+    def _write_secret_file(path: Path, data: bytes) -> None:
+        """Write secret material to ``path`` with restrictive 0600 permissions.
+
+        The file is created with owner read/write only. On platforms where
+        ``os.open`` honours the mode (POSIX) the permissions are correct from
+        creation; ``chmod`` is also applied for defence in depth and to fix any
+        pre-existing file that may have looser permissions.
+        """
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        fd = os.open(path, flags, 0o600)
+        try:
+            os.write(fd, data)
+        finally:
+            os.close(fd)
+        try:
+            os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
+
+    def _load_or_create_secret_material(self) -> tuple[bytes, bytes]:
+        """Return ``(secret, salt)``, generating and persisting them on first use.
+
+        Both values are random per install and stored 0600 under the
+        credentials directory. They are never derived from world-readable
+        machine identifiers.
+        """
+        if self._secret_file.exists():
+            secret = self._secret_file.read_bytes()
+        else:
+            secret = secrets.token_bytes(_SECRET_BYTES)
+            self._write_secret_file(self._secret_file, secret)
+
+        if self._salt_file.exists():
+            salt = self._salt_file.read_bytes()
+        else:
+            salt = secrets.token_bytes(_SALT_BYTES)
+            self._write_secret_file(self._salt_file, salt)
+
+        return secret, salt
+
     def _derive_fernet_key(self) -> bytes:
-        """Derive a Fernet key from machine-specific data."""
-        machine_id = ""
-        for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"]:
-            try:
-                machine_id = Path(path).read_text().strip()
-                break
-            except OSError:
-                pass
-        if not machine_id:
-            machine_id = str(Path.home())
-        key_material = hashlib.sha256(
-            f"xpst-fallback-{machine_id}".encode()
-        ).digest()
+        """Derive a Fernet key from a per-install random secret via scrypt KDF."""
+        secret, salt = self._load_or_create_secret_material()
+        kdf = Scrypt(salt=salt, length=32, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P)
+        key_material = kdf.derive(secret)
         return base64.urlsafe_b64encode(key_material)
 
     def _fernet_encrypt(self, value: str) -> bytes:
-        """Encrypt a value using Fernet."""
+        """Encrypt a value using Fernet.
+
+        Raises:
+            PlaintextStorageRefused: if Fernet encryption is unavailable.
+                xPST never writes credentials in cleartext.
+        """
         if self._fernet:
             return self._fernet.encrypt(value.encode())
-        return value.encode()
+        raise PlaintextStorageRefused(
+            "Refusing to store credential without encryption. "
+            "Install the 'cryptography' package: pip install cryptography"
+        )
 
     def _fernet_decrypt(self, data: bytes) -> str:
-        """Decrypt a value using Fernet."""
+        """Decrypt a value using Fernet.
+
+        Raises:
+            PlaintextStorageRefused: if Fernet is unavailable; xPST does not
+                read credentials it would have refused to write in cleartext.
+        """
         if self._fernet:
             return self._fernet.decrypt(data).decode()
-        return data.decode()
+        raise PlaintextStorageRefused(
+            "Cannot decrypt fallback credential without the 'cryptography' package."
+        )
 
     def store(self, key: str, value: str) -> None:
         """Store a credential securely.
@@ -116,6 +192,11 @@ class CredentialStore:
         Args:
             key: Credential key (e.g., "youtube_token", "instagram_sessionid")
             value: Credential value (JSON string or plain text)
+
+        Raises:
+            PlaintextStorageRefused: if the OS keychain is unavailable AND the
+                ``cryptography`` package is not installed. xPST refuses to write
+                credentials in cleartext rather than silently degrading security.
         """
         if self._use_keyring:
             try:
@@ -126,10 +207,21 @@ class CredentialStore:
             except Exception as e:
                 logger.warning(f"Keyring store failed: {e}. Falling back to encrypted file.")
 
-        # Fallback: encrypted file storage
+        # Fallback: encrypted file storage. Refuse rather than write plaintext.
+        if self._fernet is None:
+            logger.error(
+                "Cannot store credential '%s': encryption unavailable and the OS "
+                "keychain is not usable. Install 'cryptography' or 'keyring'.",
+                key,
+            )
+            raise PlaintextStorageRefused(
+                "Refusing to store credential without encryption. "
+                "Install 'cryptography' (pip install cryptography) or enable the OS keychain."
+            )
+
         cred_file = self.creds_dir / f"{key}.enc"
         encrypted = self._fernet_encrypt(value)
-        cred_file.write_bytes(encrypted)
+        self._write_secret_file(cred_file, encrypted)
         logger.debug(f"Stored credential in encrypted file: {cred_file}")
 
     def retrieve(self, key: str) -> str | None:

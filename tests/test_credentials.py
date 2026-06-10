@@ -1,7 +1,11 @@
 """Tests for xPST credential storage"""
 
+import stat
 
-from xpst.utils.credentials import CredentialStore
+import pytest
+
+import xpst.utils.credentials as cred_mod
+from xpst.utils.credentials import CredentialStore, PlaintextStorageRefused
 
 
 class TestCredentialStore:
@@ -101,3 +105,62 @@ class TestCredentialStore:
         file_content = cred_file.read_bytes()
         assert b"file_value" not in file_content
         assert b"file_key" not in file_content
+
+
+class TestFallbackKeyDerivation:
+    """Tests for the per-install KDF-derived fallback Fernet key."""
+
+    def test_secret_and_salt_files_created_with_0600(self, tmp_path):
+        """First fallback use generates a random secret + salt stored 0600."""
+        store = CredentialStore(str(tmp_path))
+        store._use_keyring = False
+        store.store("k", "v")
+
+        for f in (store._secret_file, store._salt_file):
+            assert f.exists()
+            mode = stat.S_IMODE(f.stat().st_mode)
+            assert mode == 0o600, f"{f.name} mode is {oct(mode)}"
+
+        # Secret is random per install, not derived from machine-id.
+        assert len(store._secret_file.read_bytes()) == 32
+        assert len(store._salt_file.read_bytes()) == 16
+
+    def test_key_is_stable_across_instances(self, tmp_path):
+        """A second store over the same dir derives the same key and decrypts."""
+        store1 = CredentialStore(str(tmp_path))
+        store1._use_keyring = False
+        store1.store("token", "secret-value")
+
+        store2 = CredentialStore(str(tmp_path))
+        store2._use_keyring = False
+        assert store2.retrieve("token") == "secret-value"
+
+    def test_secret_file_not_listed_as_credential(self, tmp_path):
+        """Internal secret/salt files must not appear in list_keys()."""
+        store = CredentialStore(str(tmp_path))
+        store._use_keyring = False
+        store.store("real_key", "v")
+
+        keys = store.list_keys()
+        assert "real_key" in keys
+        assert ".fallback_secret" not in keys
+        assert ".fallback_salt" not in keys
+
+
+class TestPlaintextRefused:
+    """xPST must refuse to write credentials in cleartext."""
+
+    def test_store_refuses_when_crypto_unavailable(self, tmp_path, monkeypatch):
+        """With no keyring and no cryptography, store() raises instead of plaintext."""
+        monkeypatch.setattr(cred_mod, "HAS_CRYPTO", False)
+        store = CredentialStore(str(tmp_path))
+        store._use_keyring = False
+        # Constructor leaves _fernet=None when HAS_CRYPTO is False.
+        assert store._fernet is None
+
+        with pytest.raises(PlaintextStorageRefused):
+            store.store("token", "super-secret")
+
+        # Nothing written in cleartext.
+        cred_file = store.creds_dir / "token.enc"
+        assert not cred_file.exists()

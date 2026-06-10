@@ -22,10 +22,20 @@ This provides:
 
 If the OS keychain is unavailable (for example in a headless server or Docker
 container), xPST falls back to file-based storage in `~/.xpst/credentials/`.
-Fallback credentials are written as `.enc` files and encrypted with Fernet when
-the `cryptography` dependency is available, which is part of the normal xPST
-install. If `cryptography` is deliberately removed or unavailable, xPST can only
-fall back to filesystem permissions and logs a warning.
+Fallback credentials are written as `.enc` files and encrypted with Fernet
+(AES-128-CBC + HMAC-SHA256). The `cryptography` dependency is part of the normal
+xPST install.
+
+The Fernet key is **not** derived from any world-readable machine identifier.
+Instead, on first use xPST generates a random 32-byte per-install secret and a
+random 16-byte salt, both written with `0600` (owner read/write only)
+permissions to `~/.xpst/credentials/`. The Fernet key is then derived from that
+secret using the **scrypt** key-derivation function. Encrypted `.enc` files are
+also written `0600`.
+
+If `cryptography` is deliberately removed or unavailable **and** the OS keychain
+is also unusable, xPST **refuses to store the credential** (raising an error and
+logging it) rather than ever writing the secret to disk in cleartext.
 
 ### What Is Stored
 
