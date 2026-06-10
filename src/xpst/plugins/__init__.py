@@ -10,6 +10,21 @@ Python file that defines a ``register()`` function returning a dict::
         "version": "1.0.0",             # plugin version
         "description": "...",           # human-readable description
     }
+
+SECURITY
+--------
+Loading a plugin **executes arbitrary Python code** from the plugin file. xPST
+does NOT sandbox plugins: the ``RestrictedPlugin`` helper only tweaks a module's
+``__builtins__`` *after* the module body has already run, so it cannot prevent a
+malicious plugin from doing anything at import time. Treat plugin files in
+``~/.xpst/plugins/`` as fully trusted code that you have reviewed yourself.
+
+To reduce the blast radius:
+
+* Automatic dependency installation is **disabled by default**. xPST will never
+  run ``pip install`` based on a plugin's ``requires`` list unless you explicitly
+  opt in with ``PluginManager(install_deps=True)``.
+* Only place plugins you trust in the plugin directory.
 """
 
 from __future__ import annotations
@@ -33,10 +48,15 @@ DEFAULT_PLUGIN_DIR = Path("~/.xpst/plugins").expanduser()
 
 
 class RestrictedPlugin:
-    """Wrapper that provides a sandboxed execution environment for plugin modules.
+    """Best-effort wrapper around an already-loaded plugin module.
 
-    Removes dangerous builtins (os, sys, subprocess, etc.) so untrusted
-    plugins cannot perform filesystem or process operations.
+    .. warning::
+        This is **not** a security sandbox. By the time a module is wrapped it
+        has already been fully executed by ``exec_module`` (including any code at
+        module top level), so patching ``__builtins__`` here cannot stop a
+        malicious plugin from importing ``os``/``subprocess`` or touching the
+        filesystem during import. It only discourages *post-load* dynamic imports
+        of a small set of modules. Do not rely on it to run untrusted code.
     """
 
     def __init__(self, module: Any) -> None:
@@ -52,7 +72,11 @@ class RestrictedPlugin:
 
     @staticmethod
     def apply_sandbox(module: Any) -> None:
-        """Restrict __builtins__ in a loaded module to block dangerous imports."""
+        """Discourage *post-load* dynamic imports of a few modules.
+
+        Not a security boundary — see the class docstring. The module body has
+        already executed before this runs.
+        """
         if not hasattr(module, "__builtins__"):
             return
         builtins = module.__builtins__
@@ -69,7 +93,28 @@ class RestrictedPlugin:
 class PluginManager:
     """Discovers and loads xPST platform plugins from disk."""
 
-    def __init__(self, plugin_dir: str | Path | None = None, sandbox: bool = False, no_deps: bool = False) -> None:
+    def __init__(
+        self,
+        plugin_dir: str | Path | None = None,
+        sandbox: bool = False,
+        install_deps: bool = False,
+        no_deps: bool | None = None,
+    ) -> None:
+        """Create a plugin manager.
+
+        Args:
+            plugin_dir: Directory to scan for plugin ``.py`` files.
+            sandbox: Apply the best-effort ``RestrictedPlugin`` post-load tweak.
+                This is NOT a security boundary (see ``RestrictedPlugin``).
+            install_deps: Explicit opt-in to automatically ``pip install`` a
+                plugin's declared ``requires`` dependencies. **Off by default** —
+                xPST never installs packages on a plugin's behalf unless asked.
+                Installing dependencies a plugin requested can pull arbitrary
+                code from PyPI, so only enable this for plugins you trust.
+            no_deps: Deprecated. Retained for backward compatibility. When given,
+                ``no_deps=False`` does NOT enable auto-install (the default is
+                still off); only ``install_deps=True`` enables it.
+        """
         self.plugin_dir = Path(plugin_dir).expanduser() if plugin_dir else DEFAULT_PLUGIN_DIR
         self._plugins: dict[str, dict[str, Any]] = {}
         self._loaded: bool = False
@@ -79,7 +124,9 @@ class PluginManager:
         self._file_mtimes: dict[str, float] = {}
         self._on_reload_callback: Any = None
         self._sandbox: bool = sandbox
-        self._no_deps: bool = no_deps
+        # Auto-install is opt-in only. The legacy ``no_deps`` flag can no longer
+        # turn it on; it is accepted solely so old call sites do not break.
+        self._install_deps: bool = bool(install_deps)
 
     @property
     def plugins(self) -> dict[str, dict[str, Any]]:
@@ -91,8 +138,10 @@ class PluginManager:
     def discover(self) -> list[str]:
         """Scan plugin_dir for .py files and load valid plugins.
 
-        If sandbox=True, plugin modules are wrapped with restricted builtins.
-        If no_deps=True, automatic dependency installation is skipped.
+        Loading a plugin executes its module body (arbitrary code); this is not
+        sandboxed. If ``sandbox=True``, a best-effort post-load tweak is applied
+        (not a security boundary). Automatic dependency installation only runs
+        when the manager was created with ``install_deps=True``.
 
         Returns:
             List of successfully loaded plugin names.
@@ -115,16 +164,31 @@ class PluginManager:
                 self._plugins[name] = plugin
                 loaded.append(name)
                 logger.info("Loaded plugin '%s' from %s", name, py_file)
-                # Auto-install plugin dependencies if not skipped
-                if not self._no_deps:
+                # Auto-install plugin dependencies ONLY when explicitly opted in.
+                if self._install_deps:
                     self._install_plugin_deps(plugin)
+                elif plugin.get("requires"):
+                    logger.info(
+                        "Plugin '%s' declares dependencies %s; auto-install is "
+                        "disabled. Install them manually or re-run with "
+                        "install_deps=True if you trust this plugin.",
+                        name, plugin.get("requires"),
+                    )
 
         if loaded:
             logger.info("Loaded %d plugins: %s", len(loaded), ", ".join(loaded))
         return loaded
 
     def _install_plugin_deps(self, plugin: dict[str, Any]) -> None:
-        """Check and install dependencies declared in plugin's 'requires' key."""
+        """Install dependencies declared in a plugin's 'requires' key.
+
+        Only invoked when the manager was created with ``install_deps=True``.
+        Running ``pip install`` on values supplied by a dropped plugin file is a
+        remote-code-execution vector, so this is gated behind explicit opt-in and
+        guarded here as defence in depth.
+        """
+        if not self._install_deps:
+            return
         requires = plugin.get("requires")
         if not requires or not isinstance(requires, list):
             return
