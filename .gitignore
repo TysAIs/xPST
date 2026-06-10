@@ -86,9 +86,6 @@ downloads/
 .DS_Store
 Thumbs.db
 
-# Docker
-.dockerignore
-
 # Distribution
 *.tar.gz
 *.whl
