@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+# The MCP server requires the optional 'mcp' extra. Skip cleanly if absent.
 pytest.importorskip("mcp", reason="mcp extra not installed")
 
 from xpst.config import XPSTConfig

@@ -15,7 +15,97 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+# PySide6 is an optional ('desktop'/'pyside6') extra. Import it gracefully so
+# that importing this module does not hard-fail when the extra is absent. The
+# clear install message is surfaced only when the GUI is actually launched
+# (see require_pyside6 / run_desktop_app in main.py).
+try:
+    from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+    _PYSIDE6_IMPORT_ERROR: ImportError | None = None
+    HAS_PYSIDE6 = True
+except ImportError as exc:  # pragma: no cover - exercised only without the extra
+    _PYSIDE6_IMPORT_ERROR = exc
+    HAS_PYSIDE6 = False
+
+    class QObject:  # type: ignore[no-redef]
+        """Minimal stand-in for QObject so this module imports without PySide6."""
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+    class _Signal:
+        """Stand-in for a Qt Signal; supports .emit/.connect as no-ops."""
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def emit(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def connect(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+    def Signal(*args: Any, **kwargs: Any) -> _Signal:  # type: ignore[no-redef]
+        return _Signal()
+
+    class QTimer:  # type: ignore[no-redef]
+        """Stand-in for QTimer (only constructed when the GUI runs)."""
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.timeout = _Signal()
+
+        def start(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+    def Slot(*args: Any, **kwargs: Any):  # type: ignore[no-redef]
+        """Stand-in for the @Slot(...) decorator: returns the function as-is."""
+
+        def decorator(func):
+            return func
+
+        return decorator
+
+    class Property:  # type: ignore[no-redef]
+        """Stand-in for Qt's Property.
+
+        Supports both call forms used in this module:
+        ``Property(int, getter, notify=...)`` and the ``@Property(str, notify=...)``
+        decorator form. Behaves as a plain (read-only) descriptor returning the
+        getter's value, which is enough for module import; the real GUI requires
+        the actual PySide6 package.
+        """
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self._getter = None
+            for a in args:
+                if callable(a) and not isinstance(a, type):
+                    self._getter = a
+            self._setter_kwargs = kwargs
+
+        def __call__(self, func):
+            # Decorator form: @Property(str, notify=...)
+            self._getter = func
+            return self
+
+        def setter(self, func):
+            return self
+
+        def __get__(self, obj, objtype=None):
+            if obj is None:
+                return self
+            if self._getter is not None:
+                return self._getter(obj)
+            return None
+
+
+def require_pyside6() -> None:
+    """Raise a clear, actionable error if the optional PySide6 extra is missing."""
+    if not HAS_PYSIDE6:
+        raise ModuleNotFoundError(
+            "The desktop app requires the optional PySide6 extra. "
+            "Install it with: pip install 'xpst[pyside6]'"
+        ) from _PYSIDE6_IMPORT_ERROR
+
 
 # ── Optional xPST dependencies (graceful fallback) ───────────────────
 try:

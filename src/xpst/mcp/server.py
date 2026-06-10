@@ -13,20 +13,73 @@ import asyncio
 import json
 from typing import Any
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import (
-    CallToolResult,
-    ListToolsResult,
-    TextContent,
-    Tool,
-)
+# The 'mcp' package is an optional extra. Import it gracefully so that simply
+# importing this module (e.g. for build_provider_catalog) does not hard-fail
+# when the extra is not installed. The clear install message is surfaced only
+# when the server is actually invoked (see _require_mcp / get_server / main).
+try:
+    from mcp.server import Server
+    from mcp.server.stdio import stdio_server
+    from mcp.types import (
+        CallToolResult,
+        ListToolsResult,
+        TextContent,
+        Tool,
+    )
+    _MCP_IMPORT_ERROR: ImportError | None = None
+    HAS_MCP = True
+except ImportError as exc:  # pragma: no cover - exercised only without the extra
+    _MCP_IMPORT_ERROR = exc
+    HAS_MCP = False
+
+    class _MCPStub:
+        """Lightweight stand-in so this module imports without the 'mcp' extra.
+
+        Instances simply record their keyword arguments as attributes. Real MCP
+        behavior (running the server) is gated behind ``_require_mcp`` and only
+        attempted at invocation time, where a clear install message is raised.
+        """
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+        def __call__(self, *args: Any, **kwargs: Any) -> Any:
+            # Used for ``@app.list_tools()`` style decorators: return the
+            # decorated function unchanged so module import succeeds.
+            if len(args) == 1 and callable(args[0]) and not kwargs:
+                return args[0]
+            return self
+
+        def __getattr__(self, name: str) -> Any:
+            # Any attribute access (e.g. app.list_tools) returns a no-op factory
+            # that yields a pass-through decorator, so module-level decorators
+            # like ``@app.list_tools()`` succeed without the real mcp package.
+            return _MCPStub()
+
+        def create_initialization_options(self, *args: Any, **kwargs: Any) -> Any:
+            return None
+
+    Server = _MCPStub  # type: ignore[assignment,misc]
+    stdio_server = None  # type: ignore[assignment]
+    CallToolResult = _MCPStub  # type: ignore[assignment,misc]
+    ListToolsResult = _MCPStub  # type: ignore[assignment,misc]
+    TextContent = _MCPStub  # type: ignore[assignment,misc]
+    Tool = _MCPStub  # type: ignore[assignment,misc]
 
 from xpst.config import XPSTConfig
 from xpst.engine_v2 import CrossPostEngine
 from xpst.utils.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
+
+_MCP_INSTALL_HINT = "The MCP server requires the optional 'mcp' extra. Install it with: pip install 'xpst[mcp]'"
+
+
+def _require_mcp() -> None:
+    """Raise a clear, actionable error if the optional 'mcp' extra is missing."""
+    if not HAS_MCP:
+        raise ModuleNotFoundError(_MCP_INSTALL_HINT) from _MCP_IMPORT_ERROR
 
 
 class XPSTMCPServer:
@@ -517,7 +570,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
 
 async def main(config: XPSTConfig | None = None) -> None:
-    """Run the MCP server over stdio."""
+    """Run the MCP server over stdio.
+
+    Raises:
+        ModuleNotFoundError: with an install hint if the 'mcp' extra is missing.
+    """
+    _require_mcp()
     await get_server(config)
 
     # Run the MCP server
