@@ -5,17 +5,20 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from xpst.knowledge.models import Area, Nugget
 from xpst.knowledge.store.base import KnowledgeStore
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     if not a or not b or len(a) != len(b):
         return -1.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     if na == 0.0 or nb == 0.0:

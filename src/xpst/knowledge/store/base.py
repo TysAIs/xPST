@@ -3,9 +3,12 @@ Graphify later) implement this so swapping one means rewriting one adapter."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING
 
-from xpst.knowledge.models import Area, Nugget
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
+    from xpst.knowledge.models import Area, Nugget
 
 
 class KnowledgeStore(ABC):

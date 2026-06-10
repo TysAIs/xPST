@@ -11,11 +11,14 @@ covers the same contract for fast default runs.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from xpst.knowledge.models import Area, Nugget
 from xpst.knowledge.store.base import KnowledgeStore
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 _NUGGETS = "nuggets"
 _AREAS = "areas"

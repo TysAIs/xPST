@@ -17,7 +17,7 @@ class Workspace:
     root: Path
 
     @classmethod
-    def resolve(cls, name: str = "default") -> "Workspace":
+    def resolve(cls, name: str = "default") -> Workspace:
         root = _xpst_home() / "knowledge" / name
         root.mkdir(parents=True, exist_ok=True)
         return cls(name=name, root=root)

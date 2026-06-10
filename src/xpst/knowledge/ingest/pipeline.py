@@ -12,16 +12,19 @@ nugget is successfully built and embedded.
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from xpst.knowledge.ingest.extract import extract_nuggets as _default_extract
 from xpst.knowledge.ingest.resolve import resolve_source, source_id
 from xpst.knowledge.ingest.transcribe import Transcriber, Transcript
-from xpst.knowledge.manifest import Manifest
 from xpst.knowledge.models import Nugget
-from xpst.knowledge.store.base import KnowledgeStore
+
+if TYPE_CHECKING:
+    from xpst.knowledge.llm.embeddings import Embedder
+    from xpst.knowledge.manifest import Manifest
+    from xpst.knowledge.store.base import KnowledgeStore
 
 
 @dataclass(frozen=True)
@@ -35,14 +38,8 @@ class IngestResult:
 Extractor = Callable[[Transcript, Any], list[dict[str, Any]]]
 
 
-class _Embedder:  # structural; matches llm.embeddings.Embedder
-    dim: int
-
-    def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
-
-
 def ingest(source: str, *, store: KnowledgeStore, transcriber: Transcriber,
-           manifest: Manifest, embedder: _Embedder, llm_client: Any,
+           manifest: Manifest, embedder: Embedder, llm_client: Any,
            extractor: Extractor | None = None) -> IngestResult:
     extractor = extractor or _default_extract
     sid = source_id(source)
@@ -65,7 +62,7 @@ def ingest(source: str, *, store: KnowledgeStore, transcriber: Transcriber,
         vectors = embedder.embed(points) if points else []
         embed_dim = embedder.dim if points else 0
         built: list[Nugget] = []
-        for raw, vec in zip(raw_nuggets, vectors):
+        for raw, vec in zip(raw_nuggets, vectors, strict=False):
             nugget = Nugget.create(
                 point=raw["point"],
                 source_video_id=sid,

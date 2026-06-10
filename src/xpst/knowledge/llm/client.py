@@ -4,8 +4,10 @@ request is actually made (keeps the wall and import cost low)."""
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def _httpx_client(timeout: float):

@@ -5,10 +5,11 @@ OpenAI-compatible ``/embeddings`` endpoint. Both keep their heavy imports inside
 methods so importing this module never pulls in fastembed or httpx."""
 from __future__ import annotations
 
-from collections.abc import Sequence
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Sequence
+
     from xpst.knowledge.config import KnowledgeConfig
 
 

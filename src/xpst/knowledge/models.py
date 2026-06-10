@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, field, replace
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 
 def _hash(*parts: str) -> str:
@@ -32,7 +35,7 @@ class Nugget:
                source_url: str | None = None,
                difficulty: str = "beginner",
                prerequisites: Iterable[str] = (),
-               created_at: float = 0.0) -> "Nugget":
+               created_at: float = 0.0) -> Nugget:
         return cls(
             id=_hash(source_video_id, point),
             point=point,
@@ -45,17 +48,17 @@ class Nugget:
             created_at=created_at,
         )
 
-    def with_embedding(self, vec: Sequence[float]) -> "Nugget":
+    def with_embedding(self, vec: Sequence[float]) -> Nugget:
         """Return a new Nugget carrying ``vec``. The id is unchanged because it
         is a function of (source_video_id, point) only, so re-embedding never
         re-keys an existing nugget."""
         return replace(self, embedding=tuple(float(x) for x in vec))
 
-    def with_area(self, area_id: str | None) -> "Nugget":
+    def with_area(self, area_id: str | None) -> Nugget:
         """Return a new Nugget assigned to ``area_id`` (id unchanged)."""
         return replace(self, area_id=area_id)
 
-    def with_difficulty(self, difficulty: str) -> "Nugget":
+    def with_difficulty(self, difficulty: str) -> Nugget:
         """Return a new Nugget tagged with ``difficulty`` (id unchanged)."""
         return replace(self, difficulty=difficulty)
 
@@ -66,7 +69,7 @@ class Nugget:
         return d
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Nugget":
+    def from_dict(cls, d: dict) -> Nugget:
         d = dict(d)
         d["prerequisites"] = tuple(d.get("prerequisites", ()))
         # Phase 1 nuggets.json predates these keys — tolerate their absence.
@@ -89,7 +92,7 @@ class Area:
 
     @classmethod
     def create(cls, *, label: str, centroid: Sequence[float] = (),
-               nugget_ids: Iterable[str] = (), order_index: int = 0) -> "Area":
+               nugget_ids: Iterable[str] = (), order_index: int = 0) -> Area:
         return cls(
             id=_hash("area", label),
             label=label,
@@ -105,7 +108,7 @@ class Area:
         return d
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Area":
+    def from_dict(cls, d: dict) -> Area:
         d = dict(d)
         d["centroid"] = tuple(float(x) for x in d.get("centroid", ()))
         d["nugget_ids"] = tuple(d.get("nugget_ids", ()))

@@ -6,9 +6,10 @@ to the transcript's own bounds so a hallucinated time can never escape the clip.
 """
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
-from xpst.knowledge.ingest.transcribe import Transcript
+if TYPE_CHECKING:
+    from xpst.knowledge.ingest.transcribe import Transcript
 
 
 class ExtractionError(RuntimeError):

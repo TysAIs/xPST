@@ -1,4 +1,4 @@
-from xpst.knowledge.ingest.transcribe import Transcript, Segment
+from xpst.knowledge.ingest.transcribe import Segment, Transcript
 
 
 def test_transcript_full_span():

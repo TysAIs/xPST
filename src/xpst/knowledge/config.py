@@ -19,7 +19,7 @@ class KnowledgeConfig:
     whisper_model: str = "base"
 
     @classmethod
-    def from_env(cls) -> "KnowledgeConfig":
+    def from_env(cls) -> KnowledgeConfig:
         defaults = cls()
 
         def _get(name: str, default: str) -> str:
