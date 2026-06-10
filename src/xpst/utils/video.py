@@ -17,6 +17,7 @@ Key findings:
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
 from xpst.config import EncodingConfig
@@ -24,6 +25,34 @@ from xpst.utils.logger import get_logger
 from xpst.utils.platform import get_ffmpeg_name, get_ffprobe_name
 
 logger = get_logger(__name__)
+
+
+def ffmpeg_install_hint() -> str:
+    """Return a platform-specific, actionable FFmpeg install instruction."""
+    if sys.platform == "darwin":
+        return "Install it with: brew install ffmpeg (macOS)"
+    if sys.platform == "win32":
+        return "Download it from https://ffmpeg.org/download.html and add it to PATH (Windows)"
+    return "Install it with your package manager (Linux), e.g. apt install ffmpeg, dnf install ffmpeg, or pacman -S ffmpeg"
+
+
+class FFmpegNotFoundError(RuntimeError):
+    """Raised when the FFmpeg binary cannot be found or run.
+
+    Subclasses RuntimeError so existing callers that catch RuntimeError keep
+    working, while carrying an actionable, platform-specific install hint so
+    the desktop app can surface a friendly first-run message instead of a raw
+    traceback (W3-3).
+    """
+
+    def __init__(self, ffmpeg_path: str, hint: str | None = None) -> None:
+        self.ffmpeg_path = ffmpeg_path
+        self.hint = hint or ffmpeg_install_hint()
+        super().__init__(
+            f"FFmpeg not found at '{ffmpeg_path}'. "
+            "FFmpeg is required for video encoding. "
+            f"{self.hint} or see https://ffmpeg.org/download.html"
+        )
 
 
 class VideoProcessor:
@@ -47,7 +76,9 @@ class VideoProcessor:
         """Verify FFmpeg is installed and accessible on PATH.
 
         Raises:
-            RuntimeError: If FFmpeg binary is not found or returns error.
+            FFmpegNotFoundError: If FFmpeg binary is not found or returns
+                error. Subclasses RuntimeError, so existing RuntimeError
+                handlers keep working while gaining an actionable install hint.
         """
 
         try:
@@ -58,12 +89,9 @@ class VideoProcessor:
                 timeout=10,
             )
             if result.returncode != 0:
-                raise RuntimeError(f"FFmpeg returned non-zero exit code: {result.returncode}")
+                raise FFmpegNotFoundError(self.ffmpeg_path)
         except (FileNotFoundError, PermissionError, OSError):
-            raise RuntimeError(
-                f"FFmpeg not found at {self.ffmpeg_path}. "
-                "Please install FFmpeg: https://ffmpeg.org/download.html"
-            ) from None
+            raise FFmpegNotFoundError(self.ffmpeg_path) from None
 
     def get_video_info(self, video_path: Path) -> dict:
         """

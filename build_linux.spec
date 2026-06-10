@@ -1,5 +1,10 @@
-﻿# -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for building xPST macOS .app bundle."""
+# -*- mode: python ; coding: utf-8 -*-
+"""PyInstaller spec for building the xPST Linux binary (onefile).
+
+Mirrors build_windows.spec: a single self-contained executable at dist/xPST.
+Linux desktop bundles are distributed as a tarball of this binary plus
+checksums/attestation produced by the release workflow (W3-2).
+"""
 
 import sys
 from pathlib import Path
@@ -10,11 +15,10 @@ project_root = Path(SPECPATH)
 src_dir = project_root / "src"
 qml_dir = src_dir / "xpst" / "desktop_app" / "qml"
 assets_dir = project_root / "assets"
-# Unified icon sourcing: prefer assets/ (shared with Windows), fall back to
-# the legacy docs/ location for backward compatibility (W3-6).
-mac_icon = assets_dir / "icon.icns"
-if not mac_icon.exists():
-    mac_icon = project_root / "docs" / "assets" / "xpst-icon.icns"
+# Unified icon sourcing under assets/ (shared with Windows/macOS, W3-6).
+# Linux executables do not embed an icon the way Windows/macOS do; PyInstaller
+# ignores a missing icon, so this is best-effort.
+linux_icon = assets_dir / "icon.png"
 
 a = Analysis(
     [str(src_dir / "xpst" / "desktop_app" / "main.py")],
@@ -22,7 +26,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(qml_dir), "xpst/desktop_app/qml"),
-        (str(assets_dir), "assets") if assets_dir.exists() else (str(project_root / "build_macos.spec"), "assets"),
+        (str(assets_dir), "assets") if assets_dir.exists() else (str(project_root / "build_linux.spec"), "assets"),
     ],
     hiddenimports=[
         "xpst",
@@ -72,44 +76,22 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     [],
-    exclude_binaries=True,
     name="xPST",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
-    argv_emulation=True,
+    argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(mac_icon) if mac_icon.exists() else None,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name="xPST",
-)
-
-app = BUNDLE(
-    coll,
-    name="xPST.app",
-    icon=str(mac_icon) if mac_icon.exists() else None,
-    bundle_identifier="com.xpst.app",
-    info_plist={
-        "CFBundleName": "xPST",
-        "CFBundleDisplayName": "xPST - Cross-Posting Suite",
-        "CFBundleVersion": "0.1.0",
-        "CFBundleShortVersionString": "0.1.0",
-        "NSHighResolutionCapable": True,
-        "NSRequiresAquaSystemAppearance": False,
-    },
+    icon=str(linux_icon) if linux_icon.exists() else None,
 )

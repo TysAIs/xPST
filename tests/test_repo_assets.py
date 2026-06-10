@@ -127,7 +127,12 @@ def test_release_workflow_preserves_required_ship_gates():
 
     assert workflow["permissions"]["id-token"] == "write"
     assert workflow["permissions"]["attestations"] == "write"
-    assert workflow["jobs"]["github-release"]["needs"] == ["build-python", "build-windows", "build-macos"]
+    assert workflow["jobs"]["github-release"]["needs"] == ["build-python", "build-windows", "build-linux", "build-macos"]
+
+    # W3-2: the Linux desktop release lane must build, smoke, and attest a binary.
+    linux_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-linux"]["steps"])
+    assert "pyinstaller --clean --noconfirm build_linux.spec" in linux_steps
+    assert "scripts/verify_linux_binary.py" in linux_steps
 
     python_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-python"]["steps"])
     for required in [

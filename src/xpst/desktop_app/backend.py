@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from xpst.utils.platform import get_config_dir
+
 # PySide6 is an optional ('desktop'/'pyside6') extra. Import it gracefully so
 # that importing this module does not hard-fail when the extra is absent. The
 # clear install message is surfaced only when the GUI is actually launched
@@ -124,6 +126,11 @@ except ImportError:
     CrossPostEngine = None  # type: ignore[assignment,misc]
 
 try:
+    from xpst.utils.video import FFmpegNotFoundError
+except ImportError:
+    FFmpegNotFoundError = None  # type: ignore[assignment,misc]
+
+try:
     from xpst.dashboard.analytics import AnalyticsCollector
 except ImportError:
     AnalyticsCollector = None  # type: ignore[assignment,misc]
@@ -197,8 +204,9 @@ class AppController(QObject):
         self._health_timer.timeout.connect(self._run_health_check)
         self._health_timer.start(self._health_check_interval)
 
-        # Thumbnail cache dir
-        self._thumb_dir = Path("~/.xpst/thumbnails").expanduser()
+        # Thumbnail cache dir (routed through get_config_dir so Windows uses
+        # %APPDATA% rather than ~/.xpst — W3-4).
+        self._thumb_dir = get_config_dir() / "thumbnails"
         self._thumb_dir.mkdir(parents=True, exist_ok=True)
 
         # Wire error signal to notification signal
@@ -263,7 +271,15 @@ class AppController(QObject):
             self._engine = CrossPostEngine(self._config)
             return True
         except Exception as exc:
-            logger.error("Failed to create CrossPostEngine: %s", exc)
+            # Surface a friendly, actionable first-run message when FFmpeg is
+            # missing instead of letting a raw traceback escape (W3-3).
+            if FFmpegNotFoundError is not None and isinstance(exc, FFmpegNotFoundError):
+                logger.error("FFmpeg not available: %s", exc)
+                # self.error is wired to notification in __init__, so a single
+                # emit surfaces the friendly message once (no double-notify).
+                self.error.emit(str(exc))
+            else:
+                logger.error("Failed to create CrossPostEngine: %s", exc)
             return False
 
     # ── Q_PROPERTY definitions ───────────────────────────────────────

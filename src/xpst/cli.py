@@ -19,6 +19,7 @@ Uses Click for CLI framework with rich for beautiful output.
 
 import asyncio
 import json as _json
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ from xpst.engine import CrossPostEngine, CrossPostResult
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger, setup_logging
+from xpst.utils.platform import get_config_dir
 from xpst.utils.quota import QuotaManager
 
 console = Console()
@@ -1077,7 +1079,7 @@ def delete(ctx: click.Context, video_id: str, platform: str, yes: bool, as_json:
 def dashboard(ctx: click.Context, port: int, api_only: bool):
     """Launch the web API dashboard"""
     config_path = ctx.obj.get("config_path")
-    config_dir = "~/.xpst"
+    config_dir = str(get_config_dir())
     if config_path:
         config_dir = str(Path(config_path).parent)
     else:
@@ -1106,7 +1108,7 @@ def dashboard(ctx: click.Context, port: int, api_only: bool):
 def app(ctx: click.Context, port: int | None, no_splash: bool):
     """Launch xPST as a native desktop app (PySide6)"""
     config_path = ctx.obj.get("config_path")
-    config_dir = "~/.xpst"
+    config_dir = str(get_config_dir())
     if config_path:
         config_dir = str(Path(config_path).parent)
     else:
@@ -2147,9 +2149,9 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>{os.path.expanduser("~/.xpst/logs/launchagent.log")}</string>
+    <string>{get_config_dir() / "logs" / "launchagent.log"}</string>
     <key>StandardErrorPath</key>
-    <string>{os.path.expanduser("~/.xpst/logs/launchagent.err")}</string>
+    <string>{get_config_dir() / "logs" / "launchagent.err"}</string>
 </dict>
 </plist>"""
         with open(plist_path, "w") as f:
@@ -2179,7 +2181,16 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
 
     elif system == "Linux":
         import subprocess
-        cron_line = f"*/{interval} * * * * {xpst_bin} schedule run --quiet >> ~/.xpst/logs/cron.log 2>&1"
+
+        if shutil.which("crontab") is None:
+            raise RuntimeError(
+                "crontab not found on PATH. Install cron to use scheduled posting on "
+                "Linux (e.g. 'sudo apt install cron' or 'sudo dnf install cronie')."
+            )
+
+        # cron does NOT expand '~', so the log path must be fully resolved.
+        cron_log = get_config_dir() / "logs" / "cron.log"
+        cron_line = f"*/{interval} * * * * {xpst_bin} schedule run --quiet >> {cron_log} 2>&1"
 
         # Read existing crontab
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
@@ -2274,6 +2285,11 @@ def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
         return True
 
     elif system == "Linux":
+        if shutil.which("crontab") is None:
+            raise RuntimeError(
+                "crontab not found on PATH. Install cron to manage scheduled posting on Linux."
+            )
+
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         if existing.returncode != 0 or not existing.stdout.strip():
             if as_json:

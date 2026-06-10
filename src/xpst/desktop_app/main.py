@@ -21,6 +21,11 @@ from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication, QMenu, QSplashScreen, QSystemTrayIcon
 
+from xpst.desktop_app.resource_path import (
+    first_existing,
+    resolve_app_icon,
+    resource_path,
+)
 from xpst.desktop_app.splash_sizing import scaled_splash_size
 
 # Attempt Material style import (QtQuick.Controls)
@@ -36,34 +41,41 @@ from xpst.desktop_app.models import PostListModel
 
 
 def _find_qml_path() -> Path:
-    """Locate main.qml relative to this file."""
+    """Locate main.qml in the frozen bundle or the source tree."""
+    # Frozen bundles ship QML under xpst/desktop_app/qml relative to _MEIPASS.
+    frozen_qml = resource_path("xpst", "desktop_app", "qml", "main.qml")
+
     here = Path(__file__).resolve().parent
-    qml_path = here / "qml" / "main.qml"
-    if qml_path.exists():
-        return qml_path
+    found = first_existing(
+        frozen_qml,
+        here / "qml" / "main.qml",
+        here / "main.qml",
+    )
+    if found is not None:
+        return found
 
-    # Fallback: next to this file
-    qml_path = here / "main.qml"
-    if qml_path.exists():
-        return qml_path
-
-    # Last resort: return expected path (engine will report error)
+    # Last resort: return expected path (engine will report error). Warn so a
+    # frozen-build QML-not-found is diagnosable rather than silent.
+    logger.warning(
+        "main.qml not found in frozen bundle (%s) or source tree; "
+        "falling back to %s — QML load will likely fail.",
+        frozen_qml,
+        here / "qml" / "main.qml",
+    )
     return here / "qml" / "main.qml"
 
 
 def _create_splash() -> QSplashScreen:
     """Create a splash screen with xPST branding."""
-    # Try to load the real icon/logo first
-    icon_paths = [
-        Path(__file__).resolve().parent.parent.parent.parent / "assets" / "xpst-full.png",
-        Path(__file__).resolve().parent.parent.parent.parent / "assets" / "icon.png",
-    ]
+    # Try to load the real brand image first (frozen-aware, unified under
+    # assets/). The splash keeps its programmatic fallback below, so a missing
+    # image is non-fatal here — only the tray/app icon hard-fails (W3-6).
+    splash_image = first_existing(
+        resource_path("assets", "xpst-full.png"),
+        resource_path("assets", "icon.png"),
+    )
 
-    pixmap = None
-    for ip in icon_paths:
-        if ip.exists():
-            pixmap = QPixmap(str(ip))
-            break
+    pixmap = QPixmap(str(splash_image)) if splash_image is not None else None
 
     if pixmap is None or pixmap.isNull():
         # Generate a branded splash programmatically
@@ -125,21 +137,17 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
 
     tray = QSystemTrayIcon(app)
 
-    # Try to find an icon; fall back to default
-    icon_paths = [
-        Path(__file__).resolve().parent.parent / "assets" / "icons" / "icon-32x32.png",
-        Path(__file__).resolve().parent / "assets" / "icon.png",
-        Path(__file__).resolve().parent.parent.parent.parent / "assets" / "icon.png",
-    ]
-    icon_found = False
-    for ip in icon_paths:
-        if ip.exists():
-            tray.setIcon(QIcon(str(ip)))
-            icon_found = True
-            break
-
-    if not icon_found:
-        # Use a stock icon as fallback
+    # Resolve the tray icon from the unified assets/ source (frozen-aware).
+    tray_icon = resolve_app_icon(required=False)
+    if tray_icon is not None:
+        tray.setIcon(QIcon(str(tray_icon)))
+    else:
+        # No bundled icon: fall back to a stock theme icon and warn loudly so
+        # the missing-asset condition is visible (W3-6).
+        logger.warning(
+            "No app icon found under assets/ (expected icon.png, xpst-full.png, "
+            "or xpst-icon.png); falling back to a stock theme icon."
+        )
         tray.setIcon(QIcon.fromTheme("video-x-generic"))
 
     tray.setToolTip("xPST — Cross-Posting Tool")
@@ -258,9 +266,11 @@ def main(no_splash: bool = False) -> int:
         splash.showMessage("Initializing state...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
         app.processEvents()
 
-    # Add QML import path so the engine finds our module
-    qml_dir = Path(__file__).parent / "qml"
-    engine.addImportPath(str(qml_dir.parent))  # desktop_app/ so 'qml' module resolves
+    # Add QML import path so the engine finds our 'qml' module. Frozen bundles
+    # ship it under xpst/desktop_app/qml relative to _MEIPASS; in source it is
+    # next to this file. We add the *parent* of the qml dir so 'qml' resolves.
+    qml_main = _find_qml_path()
+    engine.addImportPath(str(qml_main.parent.parent))
 
     # Create backend objects (lightweight - defer heavy init)
     controller = AppController()
