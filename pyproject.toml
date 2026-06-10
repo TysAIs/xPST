@@ -85,6 +85,7 @@ pyside6 = [
 ]
 knowledge = [
     "faster-whisper>=1.0.0",
+    "fastembed>=0.3",
 ]
 full = [
     "xpst[mcp,desktop,pyside6,dashboard,windows,knowledge]",
