@@ -37,6 +37,9 @@ xPST is dual licensed as `MIT OR Apache-2.0`. This file lists direct runtime and
 | nicegui | `dashboard` | `>=1.4.0,<4.0.0` | MIT | Browser dashboard |
 | plotly | `dashboard` | `>=5.18.0,<7.0.0` | MIT | Dashboard charts |
 | PySide6 | `pyside6` | `>=6.5.0` | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only | Native QML desktop app |
+| faster-whisper | `knowledge` | `>=1.0.0` | MIT | Knowledge base transcription |
+| fastembed | `knowledge` | `>=0.3` | Apache-2.0 | Knowledge base in-process embeddings |
+| lancedb | `knowledge` | `>=0.5` | Apache-2.0 | Knowledge base embedded vector store |
 
 ## License Compatibility Summary
 
