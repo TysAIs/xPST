@@ -211,8 +211,18 @@ class StateStore:
     def _atomic_write(self, state: dict[str, Any]) -> None:
         """Write state atomically using temp file + rename.
         
-        Also saves a forensic copy before overwriting for corruption recovery.
+        Also creates a backup of the current state before overwriting.
         """
+        # Create backup of current state before overwriting
+        if self.path.exists():
+            backup_path = self.path.parent / f"state.json.backup.{int(time.time())}"
+            try:
+                shutil.copy2(self.path, backup_path)
+                # Rotate old backups after creating new one
+                self._rotate_backups()
+            except Exception:
+                pass
+        
         # Save forensic copy before overwriting (for corruption recovery tests)
         if self.path.exists():
             forensic_path = self.path.with_suffix(".json.forensic")

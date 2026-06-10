@@ -124,6 +124,7 @@ class StateManager:
             "last_success": platform_state.get("last_success"),
             "failures": platform_state.get("failures", 0),
             "last_error": platform_state.get("last_error"),
+            "circuit_breaker_open": self._new_manager.is_circuit_breaker_open(platform),
         }
 
     def get_statistics(self) -> dict[str, Any]:

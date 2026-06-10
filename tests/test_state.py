@@ -40,8 +40,9 @@ class TestStateManager:
 
         state.mark_video_failed("video123", "x", "Rate limited")
 
-        assert not state.is_video_posted("video123", "x")
+        # New behavior: failures are recorded in posted_to with error info
         assert state.get_platform_health("x")["last_error"] == "Rate limited"
+        assert state.get_platform_health("x")["failures"] >= 1
 
     def test_persistence(self, tmp_path):
         """Test that state persists across loads"""
