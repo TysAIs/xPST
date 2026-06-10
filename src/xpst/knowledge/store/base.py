@@ -44,3 +44,8 @@ class KnowledgeStore(ABC):
     def assign(self, nugget_id: str, area_id: str) -> None:
         """Assign a stored nugget to an area. No-op if the nugget is absent."""
         ...
+
+    @abstractmethod
+    def set_difficulty(self, nugget_id: str, difficulty: str) -> None:
+        """Persist a difficulty tag on a stored nugget. No-op if absent."""
+        ...

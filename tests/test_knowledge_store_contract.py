@@ -121,3 +121,29 @@ def test_assign_missing_nugget_is_noop(store):
     # Must not raise even when the nugget does not exist.
     store.assign("does-not-exist", "area-1")
     assert store.get_nugget("does-not-exist") is None
+
+
+def test_set_difficulty_persists(store):
+    n = _nugget()
+    store.add_nugget(n)
+    store.set_difficulty(n.id, "advanced")
+    assert store.get_nugget(n.id).difficulty == "advanced"
+
+
+def test_set_difficulty_missing_nugget_is_noop(store):
+    # Must not raise when the nugget does not exist.
+    store.set_difficulty("does-not-exist", "advanced")
+    assert store.get_nugget("does-not-exist") is None
+
+
+def test_set_difficulty_preserves_id_and_area(store):
+    n = _nugget(embedding=(1.0, 0.0))
+    store.add_nugget(n)
+    area = Area.create(label="Mod")
+    store.upsert_area(area)
+    store.assign(n.id, area.id)
+    store.set_difficulty(n.id, "intermediate")
+    got = store.get_nugget(n.id)
+    assert got.id == n.id
+    assert got.area_id == area.id
+    assert got.difficulty == "intermediate"

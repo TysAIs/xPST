@@ -139,3 +139,13 @@ class LanceDBStore(KnowledgeStore):
         tbl = db.open_table(_NUGGETS)
         tbl.delete(f"id = '{nugget_id}'")
         tbl.add([_nugget_to_row(updated, self._dim)])
+
+    def set_difficulty(self, nugget_id: str, difficulty: str) -> None:
+        existing = self.get_nugget(nugget_id)
+        if existing is None:
+            return
+        updated = existing.with_difficulty(difficulty)
+        db = self._conn()
+        tbl = db.open_table(_NUGGETS)
+        tbl.delete(f"id = '{nugget_id}'")
+        tbl.add([_nugget_to_row(updated, self._dim)])

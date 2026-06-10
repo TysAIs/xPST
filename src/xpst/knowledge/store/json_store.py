@@ -91,3 +91,10 @@ class JsonKnowledgeStore(KnowledgeStore):
             return
         self._nuggets[nugget_id] = existing.with_area(area_id)
         self._flush()
+
+    def set_difficulty(self, nugget_id: str, difficulty: str) -> None:
+        existing = self._nuggets.get(nugget_id)
+        if existing is None:
+            return
+        self._nuggets[nugget_id] = existing.with_difficulty(difficulty)
+        self._flush()

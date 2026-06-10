@@ -99,3 +99,47 @@ def kb_query(text: str, workspace: str) -> None:
             f"[bold]{n.point}[/bold]\n  ({cite} @ "
             f"{n.timestamp_start:.1f}-{n.timestamp_end:.1f}s)"
         )
+
+
+@kb.command("organize")
+@click.option("--workspace", "-w", default="default", help="Workspace name")
+@click.option("--threshold", "-t", default=None, type=float,
+              help="Cosine similarity threshold for clustering/routing")
+def kb_organize(workspace: str, threshold: float | None) -> None:
+    """Discover areas, tag difficulty, and assign nuggets (Phase 3)."""
+    from xpst.knowledge.config import KnowledgeConfig
+    from xpst.knowledge.organize.cluster import DEFAULT_CLUSTER_THRESHOLD
+    from xpst.knowledge.organize.pipeline import organize_store
+    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.workspace import Workspace
+
+    config = KnowledgeConfig.from_env()
+    ws = Workspace.resolve(workspace)
+    store = JsonKnowledgeStore(ws.nuggets_path)
+    thr = threshold if threshold is not None else DEFAULT_CLUSTER_THRESHOLD
+    result = organize_store(store, _build_llm_client(config), threshold=thr)
+    console.print(
+        f"[green]Organized[/green] {result.nugget_count} nuggets into "
+        f"{result.area_count} areas ({result.assigned} assigned)"
+    )
+
+
+@kb.command("areas")
+@click.option("--workspace", "-w", default="default", help="Workspace name")
+def kb_areas(workspace: str) -> None:
+    """List discovered areas in course order (beginner -> advanced)."""
+    from xpst.knowledge.organize.difficulty import order_areas
+    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.workspace import Workspace
+
+    ws = Workspace.resolve(workspace)
+    store = JsonKnowledgeStore(ws.nuggets_path)
+    areas = order_areas(store.areas())
+    if not areas:
+        console.print("[yellow]No areas yet. Run 'xpst kb organize'.[/yellow]")
+        return
+    for area in areas:
+        console.print(
+            f"[bold]{area.order_index + 1}. {area.label}[/bold] "
+            f"({len(area.nugget_ids)} nuggets)"
+        )

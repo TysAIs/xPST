@@ -80,3 +80,47 @@ def test_kb_add_twice_reports_skipped(tmp_path, monkeypatch):
     second = runner.invoke(main, ["kb", "add", str(media)])
     assert second.exit_code == 0, second.output
     assert "Skipped" in second.output
+
+
+class _FakeLabelClient:
+    """Canned area-label client for the organize CLI path (no network)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def chat_json(self, messages):
+        self.calls += 1
+        return {"label": f"Area {self.calls}"}
+
+
+def test_kb_organize_then_areas(tmp_path, monkeypatch):
+    monkeypatch.setenv("XPST_HOME", str(tmp_path))
+    _patch_kb(monkeypatch)
+    # organize/areas read the LLM client through _build_llm_client; swap to a
+    # canned label client so no network is touched.
+    monkeypatch.setattr(
+        "xpst.knowledge.cli_kb._build_llm_client",
+        lambda config: _FakeLabelClient(),
+    )
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"fake")
+    runner = CliRunner()
+
+    add = runner.invoke(main, ["kb", "add", str(media)])
+    assert add.exit_code == 0, add.output
+
+    org = runner.invoke(main, ["kb", "organize"])
+    assert org.exit_code == 0, org.output
+    assert "Organized" in org.output
+
+    areas = runner.invoke(main, ["kb", "areas"])
+    assert areas.exit_code == 0, areas.output
+    assert "Area 1" in areas.output
+
+
+def test_kb_areas_empty_is_friendly(tmp_path, monkeypatch):
+    monkeypatch.setenv("XPST_HOME", str(tmp_path))
+    runner = CliRunner()
+    out = runner.invoke(main, ["kb", "areas"])
+    assert out.exit_code == 0, out.output
+    assert "No areas" in out.output
