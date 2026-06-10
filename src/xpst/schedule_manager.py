@@ -70,7 +70,7 @@ class ScheduleManager:
         """Load schedule entries from disk."""
         if self.schedule_file.exists():
             try:
-                with open(self.schedule_file) as f:
+                with open(self.schedule_file, encoding="utf-8") as f:
                     data = json.load(f)
                 if isinstance(data, list):
                     self._entries = data
@@ -85,7 +85,7 @@ class ScheduleManager:
     def _save(self) -> None:
         """Persist schedule entries to disk."""
         self.schedule_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.schedule_file, "w") as f:
+        with open(self.schedule_file, "w", encoding="utf-8") as f:
             json.dump(self._entries, f, indent=2, ensure_ascii=False, default=str)
 
     def add(

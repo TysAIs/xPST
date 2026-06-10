@@ -2735,7 +2735,7 @@ def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json
         spec_map = {
             "macos": "build_macos.spec",
             "windows": "build_windows.spec",
-            "linux": "build_macos.spec",  # Linux uses macos spec as base
+            "linux": "build_linux.spec",
         }
         spec_name = spec_map.get(target_os)
         spec_path = Path.cwd() / spec_name
