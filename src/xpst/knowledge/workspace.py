@@ -29,3 +29,7 @@ class Workspace:
     @property
     def manifest_path(self) -> Path:
         return self.root / "manifest.json"
+
+    @property
+    def lancedb_path(self) -> Path:
+        return self.root / "lancedb"
