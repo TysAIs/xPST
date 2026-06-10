@@ -4,7 +4,7 @@ from xpst.knowledge.config import KnowledgeConfig
 def test_defaults():
     c = KnowledgeConfig()
     assert c.embed_backend == "fastembed"
-    assert c.embed_model == "nomic-embed-text-v1.5"
+    assert c.embed_model == "nomic-ai/nomic-embed-text-v1.5"
     assert c.embed_base_url is None
     assert c.workspace == "default"
     assert c.whisper_model == "base"

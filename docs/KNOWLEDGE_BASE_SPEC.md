@@ -161,7 +161,7 @@ KnowledgeConfig:
   llm_model: str                # e.g. qwen3.6-35b-a3b OR gemma-12b OR a cloud model
   llm_api_key: str | None       # optional; local needs none
   embed_backend: str = "fastembed"             # "fastembed" (in-process ONNX/CPU, default) or "endpoint"
-  embed_model: str = "nomic-embed-text-v1.5"   # CPU/RAM only, ~100MB, 8192-token context
+  embed_model: str = "nomic-ai/nomic-embed-text-v1.5"   # CPU/RAM only, ~100MB, 8192-token context
   embed_base_url: str | None = None            # only used when embed_backend == "endpoint"
   workspace: str = "default"
   whisper_model: str = "base"   # faster-whisper size; tunable per machine
@@ -236,7 +236,7 @@ Each phase produces working, testable software on its own and has a hard accepta
 
 ## 8. Open Questions (decide before Phase 2/3)
 
-1. **Embedding model — RESOLVED 2026-06-10.** `nomic-embed-text-v1.5`, run in-process via `fastembed` (ONNX on CPU, no PyTorch). RAM-only, ~200–500MB while actively embedding, ~100MB on disk, 8192-token context for long transcript chunks. Loaded lazily by the ingestion worker only when embedding or querying — not always-on, never loaded by the core cross-poster. Power users can override to any OpenAI-compatible embedding endpoint via `embed_backend="endpoint"`. The model + dimension are recorded in `manifest.json`; changing the model triggers a full re-embed of the workspace.
+1. **Embedding model — RESOLVED 2026-06-10.** `nomic-ai/nomic-embed-text-v1.5` (fastembed's canonical id; the bare `nomic-embed-text-v1.5` is not recognized by `TextEmbedding`), run in-process via `fastembed` (ONNX on CPU, no PyTorch). RAM-only, ~200–500MB while actively embedding, ~100MB on disk, 8192-token context for long transcript chunks. Loaded lazily by the ingestion worker only when embedding or querying — not always-on, never loaded by the core cross-poster. Power users can override to any OpenAI-compatible embedding endpoint via `embed_backend="endpoint"`. The model + dimension are recorded in `manifest.json`; changing the model triggers a full re-embed of the workspace.
 2. **Graph layer integration.** Graphify invoked as a subprocess on the nugget set, vs a light in-process clustering (e.g. HDBSCAN) with Graphify only for the human-facing graph view. Driver: keep it simple and small-model-independent. (Needed at Phase 3.)
 3. **Desktop "areas" UI scope.** CLI-first now and add the drag-a-link-into-an-area UI later, vs build a minimal desktop intake in Phase 5. Driver: how soon Owner wants the visual workflow vs proving the engine first.
 

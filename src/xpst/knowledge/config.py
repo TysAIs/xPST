@@ -13,7 +13,7 @@ class KnowledgeConfig:
     llm_model: str = "qwen3.6-35b-a3b"
     llm_api_key: str | None = None
     embed_backend: str = "fastembed"
-    embed_model: str = "nomic-embed-text-v1.5"
+    embed_model: str = "nomic-ai/nomic-embed-text-v1.5"
     embed_base_url: str | None = None
     workspace: str = "default"
     whisper_model: str = "base"

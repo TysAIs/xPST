@@ -31,7 +31,7 @@ def _httpx_client(timeout: float):
 class FastEmbedEmbedder:
     """In-process ONNX/CPU embedder via ``fastembed``. Model loads lazily."""
 
-    def __init__(self, model_name: str = "nomic-embed-text-v1.5") -> None:
+    def __init__(self, model_name: str = "nomic-ai/nomic-embed-text-v1.5") -> None:
         self.model_name = model_name
         self._model = None
         self._dim: int | None = None

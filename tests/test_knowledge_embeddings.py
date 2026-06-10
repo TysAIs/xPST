@@ -55,7 +55,7 @@ def test_build_embedder_unknown_backend():
 
 def test_fastembed_does_not_load_model_until_used():
     # Constructing the adapter must not import fastembed.
-    e = FastEmbedEmbedder(model_name="nomic-embed-text-v1.5")
+    e = FastEmbedEmbedder(model_name="nomic-ai/nomic-embed-text-v1.5")
     assert e._model is None
 
 
@@ -112,7 +112,7 @@ def test_endpoint_embedder_posts_openai_shape(monkeypatch):
 )
 def test_real_fastembed_embeds(tmp_path):
     pytest.importorskip("fastembed")
-    e = FastEmbedEmbedder(model_name="nomic-embed-text-v1.5")
+    e = FastEmbedEmbedder(model_name="nomic-ai/nomic-embed-text-v1.5")
     out = e.embed(["hello world"])
     assert len(out) == 1
     assert len(out[0]) == e.dim > 0
