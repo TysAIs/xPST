@@ -156,8 +156,8 @@ class StateManager:
         tiktok_url: str | None = None,
     ) -> None:
         """Legacy method for marking a video as posted."""
-        from datetime import datetime
-        now = datetime.utcnow().isoformat()
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         posted_to = {}
         if platform:
             posted_to[platform] = {
@@ -215,8 +215,8 @@ class StateManager:
         content_hash: str | None = None,
     ) -> None:
         """Legacy method - mark video as cross-posted to platform with optional content_hash."""
-        from datetime import datetime
-        now = datetime.utcnow().isoformat()
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         posted_to = {platform: {"id": post_id or "", "url": post_url or "", "timestamp": now}}
         self._new_manager.add_posted_video(
             video_id=video_id,

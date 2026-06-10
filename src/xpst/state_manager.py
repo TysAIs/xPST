@@ -7,7 +7,7 @@ dead letter queue, circuit breaker state, and health metrics.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,19 @@ from xpst.state_store import StateStore
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _utc_now_iso() -> str:
+    """Return the current UTC time as a naive ISO-8601 string.
+
+    Uses ``datetime.now(timezone.utc)`` (replacing the deprecated
+    ``datetime.utcnow()``) but strips the tzinfo so the serialized string keeps
+    the same naive-UTC shape that the rest of xPST persists and compares against
+    naive ``datetime.now()`` values (desktop weekly counts, analytics relative
+    times, monitor age checks). This avoids mixing offset-aware and offset-naive
+    datetimes while still recording UTC.
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 class StateManager:
@@ -98,7 +111,7 @@ class StateManager:
         caption: str,
         content_hash: str | None,
     ) -> dict[str, Any]:
-        now = datetime.utcnow().isoformat()
+        now = _utc_now_iso()
 
         if video_id not in state["posted_videos"]:
             state["posted_videos"][video_id] = {
@@ -156,7 +169,7 @@ class StateManager:
         platform: str,
         error: str,
     ) -> dict[str, Any]:
-        now = datetime.utcnow().isoformat()
+        now = _utc_now_iso()
 
         if video_id not in state["posted_videos"]:
             state["posted_videos"][video_id] = {
@@ -282,7 +295,7 @@ class StateManager:
         last_success: str | None = None,
     ) -> None:
         """Update platform health status."""
-        now = last_success or datetime.utcnow().isoformat()
+        now = last_success or _utc_now_iso()
 
         # Handle boolean status for backward compatibility
         status_str = ("ok" if status else "error") if isinstance(status, bool) else status
@@ -311,7 +324,7 @@ class StateManager:
 
     def update_last_check_time(self) -> None:
         """Update the last check timestamp."""
-        now = datetime.utcnow().isoformat()
+        now = _utc_now_iso()
 
         def update_check(state: dict[str, Any]) -> dict[str, Any]:
             state["health"]["last_check"] = now
@@ -321,7 +334,7 @@ class StateManager:
 
     def update_last_wake_check(self) -> None:
         """Update the last wake check timestamp."""
-        now = datetime.utcnow().isoformat()
+        now = _utc_now_iso()
 
         def update_wake(state: dict[str, Any]) -> dict[str, Any]:
             state["health"]["last_wake_check"] = now
@@ -345,7 +358,7 @@ class StateManager:
 
     def record_circuit_breaker_success(self, platform: str) -> None:
         """Record a circuit breaker success (reset failures)."""
-        now = datetime.utcnow().isoformat()
+        now = _utc_now_iso()
 
         def update_cb(state: dict[str, Any]) -> dict[str, Any]:
             if platform in state["health"]["platforms"]:
