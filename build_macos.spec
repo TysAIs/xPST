@@ -10,6 +10,7 @@ project_root = Path(SPECPATH)
 src_dir = project_root / "src"
 qml_dir = src_dir / "xpst" / "desktop_app" / "qml"
 assets_dir = project_root / "assets"
+mac_icon = project_root / "docs" / "assets" / "xpst-icon.icns"
 
 a = Analysis(
     [str(src_dir / "xpst" / "desktop_app" / "main.py")],
@@ -25,15 +26,26 @@ a = Analysis(
         "xpst.state",
         "xpst.engine",
         "xpst.cli",
+        "xpst.diagnostics",
         "xpst.desktop_app.backend",
         "xpst.desktop_app.models",
+        "xpst.providers",
+        "xpst.readiness",
+        "xpst.updater",
+        "xpst.platforms.base",
         "xpst.platforms.youtube",
         "xpst.platforms.instagram",
         "xpst.platforms.x",
+        "xpst.sources.base",
         "xpst.sources.local",
+        "xpst.sources.tiktok",
+        "xpst.sources.youtube",
+        "xpst.sources.instagram",
+        "xpst.sources.x",
         "xpst.utils.retry",
         "xpst.utils.circuit_breaker",
         "xpst.utils.quota",
+        "xpst.utils.credentials",
         "xpst.analytics",
         "xpst.plugins",
         "PySide6.QtQuick",
@@ -69,7 +81,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(assets_dir / "icon.png") if (assets_dir / "icon.png").exists() else None,
+    icon=str(mac_icon) if mac_icon.exists() else None,
 )
 
 coll = COLLECT(
@@ -86,7 +98,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name="xPST.app",
-    icon=str(assets_dir / "icon.png") if (assets_dir / "icon.png").exists() else None,
+    icon=str(mac_icon) if mac_icon.exists() else None,
     bundle_identifier="com.xpst.app",
     info_plist={
         "CFBundleName": "xPST",

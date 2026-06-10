@@ -17,7 +17,8 @@ import contextlib
 from pathlib import Path
 
 from xpst.config import XPSTConfig
-from xpst.platforms.base import PlatformHealth, PlatformUploader, UploadResult
+from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -40,6 +41,32 @@ class InstagramUploader(PlatformUploader):
         """Initialize Instagram uploader with lazy client caching."""
         super().__init__(config)
         self._client = None  # Cached instagrapi Client
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return Instagram destination capabilities."""
+        return ProviderManifest(
+            name="instagram",
+            display_name="Instagram Reels",
+            roles=(ProviderRole.DESTINATION,),
+            capabilities=(
+                ProviderCapability.UPLOAD,
+                ProviderCapability.DELETE,
+                ProviderCapability.CAROUSEL,
+                ProviderCapability.HEALTH,
+                ProviderCapability.COOKIE_AUTH,
+                ProviderCapability.RATE_LIMITS,
+            ),
+            auth_mode=AuthMode.SESSION,
+            is_official_api=False,
+            docs_url="https://github.com/subzeroid/instagrapi",
+            notes="Uses persisted Instagram sessions through instagrapi; not an official Meta publishing API.",
+            extra={
+                "content": ("video", "image", "carousel"),
+                "max_caption_length": self.MAX_CAPTION_LENGTH,
+                "max_carousel_items": 10,
+            },
+        )
 
     async def _get_client(self):
         """Get an authenticated Instagram client via SessionManager.
@@ -350,3 +377,6 @@ class InstagramUploader(PlatformUploader):
                 error=f"IG_CAROUSEL_ERROR: {str(e)[:200]}",
                 platform="instagram",
             )
+
+
+PlatformRegistry.register("instagram", InstagramUploader)

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.config import XPSTConfig
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.sources.base import (
     ContentType,
     DownloadResult,
@@ -54,6 +55,32 @@ class YouTubeSource(VideoSource):
     def source_name(self) -> str:
         """Return the source platform identifier."""
         return "youtube"
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return YouTube source capabilities."""
+        return ProviderManifest(
+            name="youtube",
+            display_name="YouTube",
+            roles=(ProviderRole.SOURCE,),
+            capabilities=(
+                ProviderCapability.LIST,
+                ProviderCapability.DOWNLOAD,
+                ProviderCapability.HEALTH,
+                ProviderCapability.COOKIE_AUTH,
+                ProviderCapability.RATE_LIMITS,
+            ),
+            auth_mode=AuthMode.COOKIES,
+            is_official_api=False,
+            docs_url="https://github.com/yt-dlp/yt-dlp",
+            notes="Reads public channel videos with yt-dlp; browser cookies can help with age, region, or bot checks.",
+            extra={
+                "content": ("video",),
+                "helper": "yt-dlp",
+                "auth_optional": True,
+                "official_upload_api_available": True,
+            },
+        )
 
     def _find_yt_dlp(self) -> str:
         """Find yt-dlp binary"""

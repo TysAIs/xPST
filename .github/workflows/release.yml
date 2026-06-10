@@ -9,6 +9,7 @@ on:
 permissions:
   contents: write
   id-token: write
+  attestations: write
 
 jobs:
   build-python:
@@ -31,15 +32,24 @@ jobs:
           ruff check src tests
           mypy src/xpst
           pip-audit
-          python -m build
+          python scripts/scan_public_safety.py --json
+          python scripts/build_package.py
+          python scripts/release_preflight.py --json
+          python scripts/clean_install_smoke.py --dist dist --artifact both
+          python scripts/verify_desktop_package.py
           QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py
-          python scripts/release_artifacts.py --dist dist
+          python scripts/release_artifacts.py --dist dist --output-dir release/python --skip-checks
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: python-dist
-          path: dist/*
+          name: python-release
+          path: release/python/*
+
+      - name: Attest Python artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: release/python/*
 
       - name: Publish to PyPI
         if: github.event_name == 'push'
@@ -62,6 +72,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install -e ".[full,dev]" pyinstaller pip-audit build
+          python scripts/verify_desktop_package.py
           pyinstaller --clean --noconfirm build_windows.spec
 
       - name: Sign Windows executable
@@ -79,16 +90,30 @@ jobs:
           .\scripts\sign_windows.ps1 -Path dist\xPST.exe
           Remove-Item -LiteralPath "xpst-signing.pfx" -Force
 
+      - name: Smoke Windows executable
+        shell: pwsh
+        run: |
+          $smokeArgs = @("--path", "dist\xPST.exe", "--seconds", "12", "--json", "--clean-profile")
+          if ("${{ github.event_name }}" -eq "push") {
+            $smokeArgs += "--require-signed"
+          }
+          python scripts/verify_windows_exe.py @smokeArgs
+
       - name: Release metadata
         shell: pwsh
         run: |
-          python scripts/release_artifacts.py --dist dist
+          python scripts/release_artifacts.py --dist dist --output-dir release/windows --skip-checks
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-dist
-          path: dist/*
+          name: windows-release
+          path: release/windows/*
+
+      - name: Attest Windows artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: release/windows/*
 
   build-macos:
     runs-on: macos-latest
@@ -103,13 +128,28 @@ jobs:
         run: brew install ffmpeg
 
       - name: Validate macOS build
-        run: bash scripts/verify_macos.sh
+        env:
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          macos_args=()
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            macos_args+=(--public)
+          fi
+          bash scripts/verify_macos.sh "${macos_args[@]}"
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dist
-          path: dist/*
+          name: macos-release
+          path: release/*
+
+      - name: Attest macOS artifacts
+        uses: actions/attest@v4
+        with:
+          subject-path: release/*
 
   github-release:
     if: github.event_name == 'push'

@@ -242,6 +242,31 @@ xpst logs --json
 
 ---
 
+#### `xpst diagnostics --json`
+
+Create a redacted local support bundle with readiness checks, provider metadata,
+update status, dependency versions, state counts, credential key status, and
+recent redacted logs.
+
+```bash
+xpst diagnostics --output ./xpst-diagnostics.zip --json
+```
+
+**Output:**
+
+```json
+{
+  "ok": true,
+  "output": "xpst-diagnostics.zip",
+  "redacted": true
+}
+```
+
+The zip contains `diagnostics.json` and `README.txt`. Review the bundle before
+sharing if logs may include private captions, filenames, or local folder names.
+
+---
+
 #### `xpst backfill --json`
 
 Retry failed or incomplete posts.
@@ -491,20 +516,21 @@ xpst mcp
 
 ### Tool Schemas
 
-See the full [MCP Tools Reference](MCP_TOOLS.md) for all 8 tools and 3 resources with complete schemas.
+See the full [MCP Tools Reference](MCP_TOOLS.md) for the current tool schemas.
 
 **Quick reference:**
 
 | Tool | Purpose | Key Parameters |
 |------|---------|---------------|
-| `post_video` | Upload video to platforms | `video_path`, `caption`, `platforms` |
-| `crosspost_new` | Check & cross-post new videos | `bidirectional`, `limit` |
-| `check_status` | System health + quotas + circuit breakers | *(none)* |
-| `list_platforms` | Configured platforms + capabilities | *(none)* |
-| `get_analytics` | Engagement metrics | `platforms`, `top_n` |
-| `delete_post` | Remove a post | `post_id`, `platform` |
-| `health_check` | Connectivity test (no uploads) | *(none)* |
-| `get_logs` | Recent log entries | `lines`, `level` |
+| `xpst_providers` | Source/destination capabilities | *(none)* |
+| `xpst_config_show` | Sanitized configuration | *(none)* |
+| `xpst_auth_status` | Credential storage and quota status | *(none)* |
+| `xpst_status` | Local state statistics | *(none)* |
+| `xpst_health` | Live connectivity test | *(none)* |
+| `xpst_run` | Check and cross-post new videos | `max_posts`, `source`, `catch_up`, `dry_run` |
+| `xpst_post` | Upload video or carousel | `video_path`, `caption`, `platforms`, `dry_run` |
+| `xpst_backfill` | Retry incomplete posts | `max_count`, `source`, `platforms`, `dry_run` |
+| `xpst_delete` | Remove a post from local state | `video_id`, `platform` |
 
 ---
 

@@ -17,7 +17,8 @@ Upload specs:
 from pathlib import Path
 
 from xpst.config import XPSTConfig
-from xpst.platforms.base import PlatformHealth, PlatformUploader, UploadResult
+from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,6 +31,32 @@ class XUploader(PlatformUploader):
         """Initialize X/Twitter uploader with lazy client caching."""
         super().__init__(config)
         self._client = None  # Cached twikit Client
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return X destination capabilities."""
+        return ProviderManifest(
+            name="x",
+            display_name="X",
+            roles=(ProviderRole.DESTINATION,),
+            capabilities=(
+                ProviderCapability.UPLOAD,
+                ProviderCapability.DELETE,
+                ProviderCapability.CAROUSEL,
+                ProviderCapability.HEALTH,
+                ProviderCapability.COOKIE_AUTH,
+                ProviderCapability.RATE_LIMITS,
+            ),
+            auth_mode=AuthMode.COOKIES,
+            is_official_api=False,
+            docs_url="https://github.com/d60/twikit",
+            notes="Uses persisted X cookies through twikit; carousel posts are published as threads.",
+            extra={
+                "content": ("video", "thread"),
+                "max_caption_length": 280,
+                "max_video_duration_seconds": 140,
+            },
+        )
 
     async def _get_client(self):
         """Get an authenticated twikit client via SessionManager.
@@ -300,3 +327,6 @@ class XUploader(PlatformUploader):
                 error=f"X_THREAD_ERROR: {str(e)[:200]}",
                 platform="x",
             )
+
+
+PlatformRegistry.register("x", XUploader)

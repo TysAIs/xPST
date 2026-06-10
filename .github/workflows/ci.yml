@@ -44,15 +44,34 @@ jobs:
       - name: Vulnerability audit
         run: pip-audit
 
+      - name: Public safety scan
+        run: python scripts/scan_public_safety.py --json
+
       - name: Build package
-        run: python -m build
+        run: |
+          python scripts/build_package.py
+          python scripts/release_preflight.py --json
 
       - name: Desktop QML smoke
         shell: bash
-        run: QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py
+        run: |
+          python scripts/verify_desktop_package.py
+          QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py
 
       - name: CLI smoke
         shell: bash
         run: |
           xpst version --json
           xpst health --json
+
+  docker:
+    name: Docker build smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t xpst:ci .
+
+      - name: Smoke Docker CLI
+        run: docker run --rm xpst:ci version --json

@@ -1,138 +1,72 @@
 # Third-Party Notices
 
-This project uses the following open-source libraries. Each library is listed with its license type and a link to its full license text.
+xPST is dual licensed as `MIT OR Apache-2.0`. This file lists direct runtime and optional distribution dependencies declared in `pyproject.toml`. Transitive dependency notices should be generated for each release artifact from the locked environment used to build that artifact.
 
-## Core Dependencies
+## Core Runtime
 
-### click
-- **License**: BSD-3-Clause
-- **Repository**: https://github.com/pallets/click
-- **License Text**: https://github.com/pallets/click/blob/main/LICENSE.rst
+| Package | Declared range | License | Role |
+|---|---:|---|---|
+| click | `>=8.1.0` | BSD-3-Clause | CLI command parsing |
+| PyYAML | `>=6.0` | MIT | YAML config parsing |
+| rich | `>=13.0.0` | MIT | Terminal output |
+| yt-dlp | `>=2025.1.1` | Unlicense | Source media extraction/downloads |
+| google-api-python-client | `>=2.0.0` | Apache-2.0 | YouTube Data API client |
+| google-auth-oauthlib | `>=1.0.0` | Apache-2.0 | YouTube OAuth flow |
+| google-auth-httplib2 | `>=0.1.0` | Apache-2.0 | Google auth HTTP transport |
+| twikit | `>=2.0.0` | MIT | X cookie/session client |
+| instagrapi | `>=2.0.0` | MIT | Instagram session client |
+| structlog | `>=23.0.0` | MIT OR Apache-2.0 | Structured logging |
+| prometheus-client | `>=0.19.0` | Apache-2.0 | Metrics exposition |
+| keyring | `>=25.0.0` | MIT | OS credential storage |
+| bcrypt | `>=4.0.0` | Apache-2.0 | Password hashing |
+| cryptography | `>=41.0.0` | Apache-2.0 OR BSD-3-Clause | Encrypted credential fallback |
+| fastapi | `>=0.100.0` | MIT | Dashboard/API server |
+| uvicorn | `>=0.23.0` | BSD-3-Clause | ASGI server |
+| authlib | `>=1.3.0` | BSD-3-Clause | OAuth support |
+| httpx | `>=0.24.0` | BSD-3-Clause | HTTP client |
+| pydantic-settings | `>=2.0.0` | MIT | Settings helpers |
 
-### pyyaml
-- **License**: MIT
-- **Repository**: https://github.com/yaml/pyyaml
-- **License Text**: https://github.com/yaml/pyyaml/blob/main/LICENSE
+## Optional Extras
 
-### rich
-- **License**: MIT
-- **Repository**: https://github.com/Textualize/rich
-- **License Text**: https://github.com/Textualize/rich/blob/master/LICENSE
-
-## Video Downloading
-
-### yt-dlp
-- **License**: Unlicense (Public Domain)
-- **Repository**: https://github.com/yt-dlp/yt-dlp
-- **License Text**: https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE
-
-## Platform APIs
-
-### google-api-python-client
-- **License**: Apache-2.0
-- **Repository**: https://github.com/googleapis/google-api-python-client
-- **License Text**: https://github.com/googleapis/google-api-python-client/blob/main/LICENSE
-
-### google-auth-oauthlib
-- **License**: Apache-2.0
-- **Repository**: https://github.com/googleapis/google-auth-oauthlib
-- **License Text**: https://github.com/googleapis/google-auth-oauthlib/blob/main/LICENSE
-
-### google-auth-httplib2
-- **License**: Apache-2.0
-- **Repository**: https://github.com/googleapis/google-auth-httplib2
-- **License Text**: https://github.com/googleapis/google-auth-httplib2/blob/main/LICENSE
-
-### twikit
-- **License**: MIT
-- **Repository**: https://github.com/david-lev/twikit
-- **License Text**: https://github.com/david-lev/twikit/blob/main/LICENSE
-
-### instagrapi
-- **License**: MIT
-- **Repository**: https://github.com/subzeroid/instagrapi
-- **License Text**: https://github.com/subzeroid/instagrapi/blob/master/LICENSE
-
-## Video Processing
-
-### ffmpeg-python
-- **License**: Apache-2.0
-- **Repository**: https://github.com/kkroening/ffmpeg-python
-- **License Text**: https://github.com/kkroening/ffmpeg-python/blob/master/LICENSE
-
-## Monitoring
-
-### structlog
-- **License**: MIT OR Apache-2.0 (Dual License)
-- **Repository**: https://github.com/hynek/structlog
-- **License Text**: https://github.com/hynek/structlog/blob/main/LICENSE.txt
-
-### prometheus-client
-- **License**: Apache-2.0
-- **Repository**: https://github.com/prometheus/client_python
-- **License Text**: https://github.com/prometheus/client_python/blob/master/LICENSE
-
-## Security
-
-### keyring
-- **License**: MIT
-- **Repository**: https://github.com/jaraco/keyring
-- **License Text**: https://github.com/jaraco/keyring/blob/main/LICENSE
-
-## Dashboard
-
-### nicegui
-- **License**: MIT
-- **Repository**: https://github.com/zauberzeug/nicegui
-- **License Text**: https://github.com/zauberzeug/nicegui/blob/main/LICENSE.txt
-
-### plotly
-- **License**: MIT
-- **Repository**: https://github.com/plotly/plotly.py
-- **License Text**: https://github.com/plotly/plotly.py/blob/master/LICENSE.txt
-
----
+| Package | Extra | Declared range | License | Role |
+|---|---|---:|---|---|
+| mcp | `mcp` | `>=1.0.0` | MIT | MCP server framework |
+| pywebview | `desktop` | `>=4.0` | BSD-3-Clause | Desktop webview fallback |
+| pywin32 | `windows` | `>=306` | PSF | Windows integration |
+| winshell | `windows` | `>=0.6` | MIT | Windows shortcut/shell helpers |
+| nicegui | `dashboard` | `>=1.4.0,<4.0.0` | MIT | Browser dashboard |
+| plotly | `dashboard` | `>=5.18.0,<7.0.0` | MIT | Dashboard charts |
+| PySide6 | `pyside6` | `>=6.5.0` | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only | Native QML desktop app |
 
 ## License Compatibility Summary
 
-All dependencies are compatible with xPST's dual MIT/Apache-2.0 license:
+The direct dependency set is compatible with xPST's open-source distribution model when packaged carefully:
 
-| License Type | Count | Compatibility |
-|--------------|-------|---------------|
-| MIT | 8 | ✅ Fully compatible |
-| Apache-2.0 | 5 | ✅ Fully compatible |
-| BSD-3-Clause | 1 | ✅ Fully compatible |
-| Unlicense | 1 | ✅ Public domain, fully compatible |
-| Dual MIT/Apache-2.0 | 1 | ✅ Fully compatible |
+- MIT, BSD, PSF, Unlicense, and Apache-2.0 dependencies are permissive and compatible with `MIT OR Apache-2.0`.
+- `structlog` uses a compatible dual MIT/Apache-2.0 license.
+- `PySide6` is available under LGPL/GPL/commercial terms. xPST should distribute PySide6/Qt notices with desktop bundles and avoid static linking unless the release uses a compatible commercial or copyleft strategy.
+- Release builds should include generated transitive notices because wheel, desktop, and executable artifacts can include different dependency sets.
 
-### Notes
+## Provider Risk Notice
 
-1. **yt-dlp** is licensed under the Unlicense, which dedicates the work to the public domain. This is fully compatible with any license.
+xPST should not imply that all integrations are official platform APIs:
 
-2. **structlog** uses the same dual MIT/Apache-2.0 licensing model as xPST.
+- YouTube destination uses the official YouTube Data API v3.
+- Instagram and X adapters use user-owned sessions/cookies through open-source clients.
+- TikTok source workflows use yt-dlp extraction and optional browser cookies.
 
-3. All permissive licenses (MIT, Apache-2.0, BSD-3-Clause) are compatible with each other and allow use in both open-source and proprietary projects.
+Users are responsible for complying with platform terms, account policies, and applicable law.
 
-4. There are **no license conflicts** in xPST's dependency tree.
+## Regenerating Release Notices
 
----
-
-## Generating This File
-
-To regenerate this file with current dependency information:
+For a release environment, generate a full transitive report after installing the exact extras being shipped:
 
 ```bash
-# Install licensecheck
-pip install licensecheck
-
-# Generate license report
-licensecheck --format markdown > NOTICES.md
-
-# Or use pip-licenses
-pip install pip-licenses
-pip-licenses --format=markdown --with-urls --with-license-file > NOTICES.md
+python -m pip install ".[full]"
+python -m pip install pip-licenses
+pip-licenses --format=markdown --with-urls --with-license-file > LICENSING_REPORT.generated.md
 ```
 
----
+For Python package releases without desktop extras, install the package/extras being published and regenerate the report from that environment.
 
-*Last updated: June 2025*
+Last updated: June 2026.

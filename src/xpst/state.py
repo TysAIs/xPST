@@ -4,8 +4,7 @@ This module provides backward compatibility for the old StateManager API
 while delegating to the new StateStore/StateManager split.
 """
 
-import json
-import os
+import json  # noqa: F401 - exposed for legacy monkeypatch callers
 from pathlib import Path
 from typing import Any
 
@@ -16,29 +15,31 @@ from xpst.state_store import StateStore
 class StateManager:
     """Legacy StateManager API - delegates to new split implementation."""
 
-    def __init__(self, config_or_dir):
+    def __init__(self, config_or_dir=None, *, state_dir=None):
         """Initialize state manager.
 
         Args:
             config_or_dir: XPSTConfig instance or config directory path
+            state_dir: Backward-compatible keyword for desktop models/tests.
         """
-        if hasattr(config_or_dir, 'config_dir'):
-            config_dir = config_or_dir.config_dir
-        else:
-            config_dir = config_or_dir
-        
+        if state_dir is not None:
+            config_or_dir = state_dir
+        if config_or_dir is None:
+            config_or_dir = Path.home() / ".xpst"
+        config_dir = config_or_dir.config_dir if hasattr(config_or_dir, 'config_dir') else config_or_dir
+
         self.config_dir = config_dir
         self._new_manager = NewStateManager(config_dir)
         self._store = StateStore(config_dir)
-        
+
         # Expose properties for backward compatibility
         self.state_dir = self._new_manager.state_dir
         self.state_file = self._new_manager.state_file
         self.state = self._new_manager._state  # Raw state dict for test compatibility
-        
+
         # Expose lock file descriptor for test compatibility
         self._lock_fd = self._store._lock_fd
-        
+
         # Expose _state for backward compatibility
         self._state = self._new_manager._state
         # Use regular Lock for test compatibility (tests expect threading.Lock)
@@ -89,8 +90,11 @@ class StateManager:
     def get_dead_letter_queue(self) -> list[dict[str, Any]]:
         return self._new_manager.get_dead_letter_queue()
 
-    def clear_dead_letter_queue(self) -> int:
-        return self._new_manager.clear_dead_letter_queue()
+    def _load_state(self) -> None:
+        """Legacy method - reload state from disk."""
+        self._new_manager.reload()
+        self.state = self._new_manager._state
+        self._state = self._new_manager._state
 
     def update_platform_health(
         self,
@@ -148,7 +152,8 @@ class StateManager:
         post_id: str | None = None,
         post_url: str | None = None,
         content_hash: str | None = None,
-        caption: str = "",
+        caption: str | None = "",
+        tiktok_url: str | None = None,
     ) -> None:
         """Legacy method for marking a video as posted."""
         from datetime import datetime
@@ -160,14 +165,29 @@ class StateManager:
                 "url": post_url or "",
                 "timestamp": now,
             }
-        self._new_manager.add_posted_video(
-            video_id=video_id,
-            source_url="",
-            source_platform="",
-            posted_to=posted_to,
-            caption=caption,
-            content_hash=content_hash,
-        )
+        with self._new_manager._save_lock:
+            self._new_manager._add_posted_video_inner(
+                self._state,
+                video_id=video_id,
+                source_url=tiktok_url or "",
+                source_platform="",
+                posted_to=posted_to,
+                caption=caption,
+                content_hash=content_hash,
+            )
+
+    def clear_dead_letter_queue(self, video_id: str | None = None) -> int:
+        """Clear dead-letter queue entries, optionally for one video."""
+        if video_id is None:
+            return self._new_manager.clear_dead_letter_queue()
+
+        video = self._state.get("posted_videos", {}).get(video_id)
+        if not video or not video.get("errors"):
+            return 0
+        cleared = 1
+        del self._state["posted_videos"][video_id]
+        self.save()
+        return cleared
 
     def mark_video_failed(self, video_id: str, platform: str, error: str) -> None:
         """Legacy method - mark a video as failed on a platform."""
@@ -206,7 +226,7 @@ class StateManager:
             caption=caption,
             content_hash=content_hash,
         )
-        
+
         # Also maintain legacy cross_posted key for test compatibility
         composite_key = f"tiktok:{video_id}"  # Use tiktok as default source
         if composite_key not in self._state.get("cross_posted", {}):
@@ -240,19 +260,19 @@ class StateManager:
         existing_video_id = self._new_manager.get_by_hash(content_hash)
         if not existing_video_id:
             return None
-        
+
         video = self._new_manager.get_video(existing_video_id)
         if not video:
             return None
-        
+
         # Get platforms this video was posted to
         posted_to = video.get("posted_to", {})
         if exclude_platform and exclude_platform in posted_to:
             posted_to = {k: v for k, v in posted_to.items() if k != exclude_platform}
-        
+
         if not posted_to:
             return None
-        
+
         return {
             "video_id": existing_video_id,
             "posted_platforms": list(posted_to.keys()),
@@ -267,10 +287,10 @@ class StateManager:
 
     def is_content_hash_posted(self, content_hash: str, platform: str | None = None) -> bool:
         """Legacy method - check if content hash exists.
-        
+
         If platform is specified, checks if the content hash was posted to that platform.
         Otherwise checks if the hash exists anywhere.
-        
+
         Args:
             content_hash: The content hash to check
             platform: Optional platform to check (for backward compatibility with tests)
@@ -302,12 +322,12 @@ class StateManager:
         """Legacy method - release file lock."""
         self._store._release_file_lock()
         self._lock_fd = None  # Sync with store
-        
+
     def _close(self):
         """Legacy method - close state manager (release lock)."""
         self._store._release_file_lock()
         self._lock_fd = None  # Sync with store
-        
+
     def close(self):
         """Close state manager and release file lock."""
         self._store._release_file_lock()

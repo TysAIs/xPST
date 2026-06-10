@@ -12,7 +12,6 @@ import shutil
 import tempfile
 import threading
 import time
-import fcntl
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -20,6 +19,16 @@ from typing import Any
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+try:
+    import fcntl  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - exercised on Windows
+    fcntl = None  # type: ignore[assignment]
+
+try:
+    import msvcrt  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - exercised on POSIX
+    msvcrt = None  # type: ignore[assignment]
 
 
 class StateStore:
@@ -40,20 +49,20 @@ class StateStore:
         """
         self.path = Path(config_dir) / "state.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Create backups directory (for test compatibility)
         backup_dir = self.path.parent / "backups"
         backup_dir.mkdir(exist_ok=True)
-        
+
         # Lock file for cross-process synchronization (test compatibility: .state.lock)
         self.lock_path = self.path.parent / ".state.lock"
-        
+
         # Thread lock for in-process synchronization
         self._thread_lock = threading.RLock()
-        
+
         # Lock file descriptor for test compatibility (-der)
         self._lock_fd = None
-        
+
         # Load on init
         self._state = self._load()
 
@@ -63,10 +72,44 @@ class StateStore:
         self.lock_path.touch(exist_ok=True)
         with open(self.lock_path, "w") as lock_file:
             try:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                self._lock_file(lock_file, blocking=True)
                 yield
             finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                self._unlock_file(lock_file)
+
+    def _lock_file(self, lock_file, blocking: bool) -> bool:
+        """Acquire a cross-platform exclusive file lock."""
+        if fcntl is not None:
+            flags = fcntl.LOCK_EX
+            if not blocking:
+                flags |= fcntl.LOCK_NB
+            try:
+                fcntl.flock(lock_file.fileno(), flags)
+                return True
+            except BlockingIOError:
+                return False
+
+        if msvcrt is not None:
+            lock_file.seek(0)
+            mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
+            try:
+                msvcrt.locking(lock_file.fileno(), mode, 1)
+                return True
+            except OSError:
+                return False
+
+        return True
+
+    def _unlock_file(self, lock_file) -> None:
+        """Release a cross-platform file lock."""
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        elif msvcrt is not None:
+            lock_file.seek(0)
+            try:
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
 
     def _load(self) -> dict[str, Any]:
         """Load state from file with corruption recovery and migration."""
@@ -85,13 +128,14 @@ class StateStore:
                 with open(self.path, "rb") as f:
                     data = f.read()
                 # Save corrupted file as forensic evidence in backups
-                import hashlib, time
+                import hashlib
+                import time
                 h = hashlib.md5(data).hexdigest()[:8]
                 corrupted_path = self.path.parent / "backups" / f"corrupted_{int(time.time())}_{h}.json"
                 corrupted_path.write_bytes(data)
             except Exception:
                 pass
-            
+
             # Also save forensic copy with fixed name for compatibility
             forensic_path = self.path.with_suffix(".json.forensic")
             try:
@@ -100,7 +144,7 @@ class StateStore:
                 pass
 
         # Try backups in reverse chronological order
-        backups = sorted(self.path.parent.glob("state.json.backup.*"), reverse=True)
+        backups = sorted((self.path.parent / "backups").glob("state_*.json"), reverse=True)
         for backup in backups:
             state = self._try_load_file(backup)
             if state is not None:
@@ -119,7 +163,7 @@ class StateStore:
     def _try_load_file(self, path: Path) -> dict[str, Any] | None:
         """Try to load and validate a state file."""
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             if not isinstance(data, dict):
                 return None
@@ -133,10 +177,31 @@ class StateStore:
         version = state.get("version")
         if version is None or version == 1:
             logger.info(f"Migrating state from v{version or 1} to v{self.SCHEMA_VERSION}")
-            
+
             # Ensure all required keys exist
             state = self._ensure_state_keys(state)
-            
+
+            if "posted_video_ids" in state and "posted_to" in state:
+                posted_to_by_platform = state.get("posted_to", {})
+                for video_id in state.get("posted_video_ids", []):
+                    posted_to = {}
+                    for platform, video_ids in posted_to_by_platform.items():
+                        if video_id in video_ids:
+                            posted_to[platform] = {
+                                "id": "",
+                                "url": "",
+                                "timestamp": "",
+                            }
+                    state["posted_videos"][video_id] = {
+                        "source_url": "",
+                        "source_platform": "unknown",
+                        "caption": "",
+                        "posted_to": posted_to,
+                        "downloaded_at": "",
+                        "last_attempt": "",
+                        "content_hash": None,
+                    }
+
             # Migrate old cross_posted format to posted_videos
             if "cross_posted" in state and not state.get("posted_videos"):
                 for composite_key, platforms in state["cross_posted"].items():
@@ -146,7 +211,7 @@ class StateStore:
                     else:
                         video_id = composite_key
                         source_platform = "unknown"
-                    
+
                     posted_to = {}
                     first_timestamp = ""
                     for platform, info in platforms.items():
@@ -157,7 +222,7 @@ class StateStore:
                         }
                         if not first_timestamp:
                             first_timestamp = info.get("timestamp", "")
-                    
+
                     state["posted_videos"][video_id] = {
                         "source_url": "",
                         "source_platform": source_platform,
@@ -167,10 +232,10 @@ class StateStore:
                         "last_attempt": "",
                         "content_hash": None,
                     }
-            
+
             state["version"] = self.SCHEMA_VERSION
             return state
-        
+
         return state
 
     def _ensure_state_keys(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -210,19 +275,21 @@ class StateStore:
 
     def _atomic_write(self, state: dict[str, Any]) -> None:
         """Write state atomically using temp file + rename.
-        
+
         Also creates a backup of the current state before overwriting.
         """
         # Create backup of current state before overwriting
         if self.path.exists():
-            backup_path = self.path.parent / f"state.json.backup.{int(time.time())}"
+            backup_dir = self.path.parent / "backups"
+            backup_dir.mkdir(exist_ok=True)
+            backup_path = backup_dir / f"state_{time.time_ns()}.json"
             try:
                 shutil.copy2(self.path, backup_path)
                 # Rotate old backups after creating new one
                 self._rotate_backups()
             except Exception:
                 pass
-        
+
         # Save forensic copy before overwriting (for corruption recovery tests)
         if self.path.exists():
             forensic_path = self.path.with_suffix(".json.forensic")
@@ -230,7 +297,7 @@ class StateStore:
                 shutil.copy2(self.path, forensic_path)
             except Exception:
                 pass  # Forensic copy is best-effort
-        
+
         # Create temp file in same directory (for atomic rename)
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -254,7 +321,7 @@ class StateStore:
     def _rotate_backups(self) -> None:
         """Rotate backup files, keeping only MAX_BACKUPS."""
         backups = sorted(
-            self.path.parent.glob("state.json.backup.*"),
+            (self.path.parent / "backups").glob("state_*.json"),
             key=lambda p: p.stat().st_mtime,
             reverse=True
         )
@@ -269,28 +336,21 @@ class StateStore:
     def _acquire_file_lock(self, blocking=True):
         """Acquire file lock for state operations (test compatibility)."""
         self.lock_path.touch(exist_ok=True)
-        self._lock_fd = open(self.lock_path, "w")
-        flags = fcntl.LOCK_EX
-        if not blocking:
-            flags |= fcntl.LOCK_NB
-        try:
-            fcntl.flock(self._lock_fd.fileno(), flags)
-            return True
-        except BlockingIOError:
-            return False
+        self._lock_fd = open(self.lock_path, "w")  # noqa: SIM115 - intentionally held until release
+        return self._lock_file(self._lock_fd, blocking=blocking)
 
     def _release_file_lock(self):
         """Release file lock (test compatibility)."""
         if hasattr(self, '_lock_fd') and self._lock_fd:
             try:
-                fcntl.flock(self._lock_fd.fileno(), fcntl.LOCK_UN)
+                self._unlock_file(self._lock_fd)
             except Exception:
                 pass
             self._lock_fd.close()
             self._lock_fd = None
 
     # ── Public API ──
-    
+
     def get(self) -> dict[str, Any]:
         """Get current state (thread-safe)."""
         with self._thread_lock:

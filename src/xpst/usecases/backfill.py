@@ -1,8 +1,6 @@
 """Use-case for backfill operations."""
 
-from xpst.platforms.base import UploadResult
-from xpst.sources.base import VideoMetadata
-from xpst.usecases.base import BaseUseCase, BackfillResult, UseCaseDependencies
+from xpst.usecases.base import BackfillResult, BaseUseCase
 
 
 class BackfillUseCase(BaseUseCase):
@@ -27,26 +25,26 @@ class BackfillUseCase(BaseUseCase):
         if platforms is None:
             platforms = list(self.deps.platforms.keys())
         target_platforms = [p for p in platforms if p in self.deps.platforms]
-        
+
         # Fetch many videos (backfill needs more candidates)
         videos = await self.deps.source_service.fetch_new_videos(source_name, max_count * 3)
-        
+
         if not videos:
             return BackfillResult(attempted=0, successful=0, results=[])
-        
+
         # Filter to only truly new (not in state)
         new_videos = self.deps.source_service.filter_new(
             videos, self.deps.state, self.deps.platforms
         )
-        
+
         # Limit to max_count
         videos_to_post = new_videos[:max_count]
-        
+
         results = []
         successful = 0
-        
+
         cross_post_uc = self.deps.usecase_factory.create_cross_post()
-        
+
         for video in videos_to_post:
             result = await cross_post_uc.execute(
                 video_id=video.video_id,
@@ -56,11 +54,11 @@ class BackfillUseCase(BaseUseCase):
             results.append(result)
             if result.all_success:
                 successful += 1
-            
+
             # Respect rate limits - small delay between posts
             import asyncio
             await asyncio.sleep(1)
-        
+
         return BackfillResult(
             attempted=len(videos_to_post),
             successful=successful,

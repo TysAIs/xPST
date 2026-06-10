@@ -9,23 +9,24 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Any
+from typing import TypeAlias
 
 from xpst.config import XPSTConfig
 from xpst.platforms.base import PlatformUploader
 from xpst.sources.base import VideoSource
 from xpst.state import StateManager
+from xpst.usecases import UseCaseDeps, UseCaseFactory
 from xpst.utils.circuit_breaker import CircuitBreakerManager
 from xpst.utils.logger import setup_logging
 from xpst.utils.quota import QuotaManager
-from xpst.utils.shutdown import ShutdownHandler
 from xpst.utils.sessions import SessionManager
-from xpst.usecases import UseCaseDeps, UseCaseFactory
+from xpst.utils.shutdown import ShutdownHandler
 
 logger = logging.getLogger(__name__)
+
+PlatformUploaderClass: TypeAlias = type[PlatformUploader]
+VideoSourceClass: TypeAlias = type[VideoSource]
 
 
 class CrossPostEngine:
@@ -39,23 +40,23 @@ class CrossPostEngine:
         """
         self.config = config or XPSTConfig()
         self._initialized = False
-        
+
         # Core components
         self._state: StateManager | None = None
         self._circuit_breakers: CircuitBreakerManager | None = None
         self._quota_manager: QuotaManager | None = None
         self._shutdown_handler: ShutdownHandler | None = None
         self._session_manager: SessionManager | None = None
-        
+
         # Platform uploaders
         self._platforms: dict[str, PlatformUploader] = {}
-        
+
         # Video sources
         self._sources: dict[str, VideoSource] = {}
-        
+
         # Use-case factory
         self._usecase_factory: UseCaseFactory | None = None
-        
+
         # Background task
         self._background_task: asyncio.Task | None = None
 
@@ -99,41 +100,41 @@ class CrossPostEngine:
 
         # Setup logging
         setup_logging(self.config.monitoring.log_level)
-        
+
         # Initialize core components
         self._state = StateManager(self.config)
         self._circuit_breakers = CircuitBreakerManager()
         self._quota_manager = QuotaManager(self.config.config_dir)
         self._shutdown_handler = ShutdownHandler()
         self._session_manager = SessionManager(self.config.config_dir)
-        
+
         # Load platform uploaders
         await self._load_platforms()
-        
+
         # Load video sources
         await self._load_sources()
-        
+
         # Create use-case factory
         self._usecase_factory = UseCaseFactory(self._build_dependencies())
-        
+
         # Register signal handlers
         self._register_signals()
-        
+
         self._initialized = True
         logger.info("CrossPostEngine v2 initialized")
 
     async def _load_platforms(self) -> None:
         """Load and initialize platform uploaders."""
-        from xpst.platforms.youtube import YouTubeUploader
         from xpst.platforms.instagram import InstagramUploader
         from xpst.platforms.x import XUploader
-        
-        platform_classes = {
+        from xpst.platforms.youtube import YouTubeUploader
+
+        platform_classes: dict[str, PlatformUploaderClass] = {
             "youtube": YouTubeUploader,
             "instagram": InstagramUploader,
             "x": XUploader,
         }
-        
+
         for name, cls in platform_classes.items():
             # Check if platform is enabled in config
             platform_config = getattr(self.config, name, None)
@@ -148,20 +149,20 @@ class CrossPostEngine:
 
     async def _load_sources(self) -> None:
         """Load and initialize video sources."""
-        from xpst.sources.tiktok import TikTokSource
-        from xpst.sources.youtube import YouTubeSource
-        from xpst.sources.x import XSource
         from xpst.sources.instagram import InstagramSource
         from xpst.sources.local import LocalSource
-        
-        source_classes = {
+        from xpst.sources.tiktok import TikTokSource
+        from xpst.sources.x import XSource
+        from xpst.sources.youtube import YouTubeSource
+
+        source_classes: dict[str, VideoSourceClass] = {
             "tiktok": TikTokSource,
             "youtube": YouTubeSource,
             "x": XSource,
             "instagram": InstagramSource,
             "local": LocalSource,
         }
-        
+
         for name, cls in source_classes.items():
             try:
                 source = cls(self.config)
@@ -176,7 +177,7 @@ class CrossPostEngine:
         def signal_handler(sig, frame):
             logger.info(f"Received signal {sig}, initiating shutdown...")
             self._shutdown_handler.shutdown()
-        
+
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, signal_handler)
 
@@ -210,7 +211,7 @@ class CrossPostEngine:
 
             # Cross-post each video
             cross_post_uc = self.usecase_factory.create_cross_post()
-            
+
             for video in fetch_result.videos:
                 # Check shutdown
                 if self._shutdown_handler.is_shutting_down():
@@ -219,7 +220,7 @@ class CrossPostEngine:
 
                 # Generate caption
                 caption = self._generate_caption(video)
-                
+
                 # Cross-post
                 result = await cross_post_uc.execute(
                     video_id=video.video_id,
@@ -258,15 +259,15 @@ class CrossPostEngine:
     def _generate_caption(self, video) -> str:
         """Generate platform-adaptive caption from video metadata."""
         caption = video.caption or ""
-        
+
         # Add source credit
         if video.source_platform:
             caption += f"\n\nvia @{video.author} on {video.source_platform.capitalize()}"
-        
+
         # Add hashtags
         if video.hashtags:
             caption += " " + " ".join(f"#{tag}" for tag in video.hashtags[:10])
-        
+
         return caption[:2200]  # Instagram limit
 
     # --- Source service methods (for use-case layer) ---
@@ -277,7 +278,7 @@ class CrossPostEngine:
         if not source:
             logger.warning(f"Source {source_name} not found")
             return []
-        
+
         try:
             return await source.list_videos(max_count)
         except Exception as e:
@@ -295,15 +296,15 @@ class CrossPostEngine:
         """Graceful shutdown."""
         logger.info("Shutting down engine...")
         self._shutdown_handler.shutdown()
-        
+
         # Save state
         if self._state:
             self._state.save()
-        
+
         # Save circuit breakers
         if self._circuit_breakers:
             self._circuit_breakers.save_all()
-        
+
         # Cancel background task
         if self._background_task:
             self._background_task.cancel()
@@ -311,7 +312,7 @@ class CrossPostEngine:
                 await self._background_task
             except asyncio.CancelledError:
                 pass
-        
+
         logger.info("Engine shutdown complete")
 
     @asynccontextmanager
@@ -329,7 +330,7 @@ class CrossPostEngine:
         """Run full health check."""
         if not self._initialized:
             await self.initialize()
-        
+
         health_uc = self.usecase_factory.create_health_check()
         result = await health_uc.execute()
         return {
@@ -344,7 +345,7 @@ class CrossPostEngine:
         """Post a local video file."""
         if not self._initialized:
             await self.initialize()
-        
+
         manual_uc = self.usecase_factory.create_manual_post()
         result = await manual_uc.execute(video_path, caption, platforms)
         return {
@@ -358,7 +359,7 @@ class CrossPostEngine:
         """Backfill historical content."""
         if not self._initialized:
             await self.initialize()
-        
+
         backfill_uc = self.usecase_factory.create_backfill()
         result = await backfill_uc.execute(source, max_count, platforms)
         return {

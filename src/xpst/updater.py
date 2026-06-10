@@ -6,9 +6,11 @@ xPST package itself.
 """
 
 import importlib
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from typing import Literal
 
 from rich.console import Console
 from rich.table import Table
@@ -42,6 +44,87 @@ class PackageInfo:
     installed: bool = False
     updatable: bool = False
     error: str | None = None
+
+
+@dataclass
+class UpdateComponent:
+    """Update status for an app, package, helper, or provider metadata source."""
+
+    name: str
+    component_type: Literal["app", "package", "helper", "provider_metadata"]
+    current_version: str | None = None
+    latest_version: str | None = None
+    installed: bool = False
+    update_mode: Literal["pip", "external", "bundled", "manual"] = "manual"
+    required: bool = False
+    updatable: bool = False
+    status: Literal["current", "update_available", "missing", "manual", "unknown"] = "unknown"
+    action: str = "No action available."
+    update_command: str | None = None
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        """Return a JSON-serializable status object."""
+        return {
+            "name": self.name,
+            "component_type": self.component_type,
+            "current_version": self.current_version,
+            "latest_version": self.latest_version,
+            "installed": self.installed,
+            "update_mode": self.update_mode,
+            "required": self.required,
+            "updatable": self.updatable,
+            "status": self.status,
+            "action": self.action,
+            "update_command": self.update_command,
+            "error": self.error,
+        }
+
+
+def _annotate_component(component: UpdateComponent) -> UpdateComponent:
+    """Attach a user-facing status and next action to an update component."""
+    if not component.installed:
+        component.status = "missing"
+        if component.update_mode == "external":
+            component.action = f"Install {component.name} with your operating system package manager."
+        elif component.update_mode == "pip":
+            component.action = f"Install {component.name} with xPST's updater."
+            component.update_command = "xpst update"
+        else:
+            component.action = f"Install or configure {component.name}."
+        return component
+
+    if component.updatable:
+        component.status = "update_available"
+        if component.update_mode == "pip":
+            component.action = f"Update {component.name} with xPST's updater."
+            component.update_command = "xpst update"
+        elif component.update_mode == "external":
+            component.action = f"Update {component.name} with your operating system package manager."
+        else:
+            component.action = f"Update {component.name} manually."
+        return component
+
+    if component.update_mode == "external" and component.latest_version is None:
+        component.status = "manual"
+        component.action = f"{component.name} is installed; update it with your operating system package manager when needed."
+        return component
+
+    if component.update_mode == "bundled":
+        component.status = "current"
+        component.action = "Provider metadata is bundled; update xPST to refresh it."
+        component.update_command = "xpst update --check"
+        return component
+
+    if component.latest_version is None and component.update_mode == "pip":
+        component.status = "unknown"
+        component.action = "Run xpst update --components --check to check latest versions."
+        component.update_command = "xpst update --components --check"
+        return component
+
+    component.status = "current"
+    component.action = "No action needed."
+    return component
 
 
 def get_installed_version(package_name: str) -> str | None:
@@ -162,6 +245,126 @@ def check_updates() -> list[PackageInfo]:
         packages.append(info)
 
     return packages
+
+
+def check_helper_tools() -> list[UpdateComponent]:
+    """Check local helper tools without installing or reaching the network."""
+    from xpst.utils.platform import get_ffmpeg_name
+
+    helpers: list[UpdateComponent] = []
+
+    ytdlp_version = get_installed_version("yt-dlp")
+    helpers.append(
+        _annotate_component(
+            UpdateComponent(
+                name="yt-dlp",
+                component_type="helper",
+                current_version=ytdlp_version,
+                installed=ytdlp_version is not None,
+                update_mode="pip",
+                required=True,
+            )
+        )
+    )
+
+    ffmpeg_name = get_ffmpeg_name()
+    ffmpeg_path = shutil.which(ffmpeg_name)
+    ffmpeg = UpdateComponent(
+        name="FFmpeg",
+        component_type="helper",
+        installed=ffmpeg_path is not None,
+        update_mode="external",
+        required=True,
+    )
+    if ffmpeg_path:
+        try:
+            result = subprocess.run(
+                [ffmpeg_name, "-version"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            first_line = result.stdout.splitlines()[0] if result.stdout else ""
+            if "version" in first_line.lower():
+                ffmpeg.current_version = first_line.split("version", 1)[1].strip().split(" ")[0]
+            else:
+                ffmpeg.current_version = "installed"
+        except Exception as e:
+            ffmpeg.current_version = "installed"
+            ffmpeg.error = str(e)[:200]
+    helpers.append(_annotate_component(ffmpeg))
+
+    return helpers
+
+
+def check_provider_metadata() -> list[UpdateComponent]:
+    """Report provider metadata status.
+
+    Provider metadata is currently bundled with the app. Keeping it explicit
+    lets the updater and UI grow toward remote, signed provider-rule updates
+    without changing the status contract later.
+    """
+    return [
+        _annotate_component(
+            UpdateComponent(
+                name="provider-manifests",
+                component_type="provider_metadata",
+                current_version=get_xpst_version(),
+                installed=True,
+                update_mode="bundled",
+                required=True,
+            )
+        )
+    ]
+
+
+def check_update_components(include_network: bool = False) -> dict[str, list[dict[str, object]]]:
+    """Return a structured update view for app, packages, helpers, and providers.
+
+    Args:
+        include_network: When True, include PyPI latest-version checks. When
+            False, only local/offline-safe checks are performed.
+    """
+    current_app_version = get_xpst_version()
+    latest_app_version = get_latest_version("xpst") if include_network else None
+    app = _annotate_component(
+        UpdateComponent(
+            name="xpst",
+            component_type="app",
+            current_version=current_app_version,
+            latest_version=latest_app_version,
+            installed=True,
+            update_mode="pip",
+            required=True,
+            updatable=_version_is_newer(current_app_version, latest_app_version),
+        )
+    )
+
+    packages: list[UpdateComponent] = []
+    for name in TRACKED_PACKAGES:
+        current = get_installed_version(name)
+        latest = get_latest_version(name) if include_network else None
+        packages.append(
+            _annotate_component(
+                UpdateComponent(
+                    name=name,
+                    component_type="package",
+                    current_version=current,
+                    latest_version=latest,
+                    installed=current is not None,
+                    update_mode="pip",
+                    required=True,
+                    updatable=_version_is_newer(current, latest),
+                )
+            )
+        )
+
+    return {
+        "app": [app.to_dict()],
+        "packages": [pkg.to_dict() for pkg in packages],
+        "helpers": [helper.to_dict() for helper in check_helper_tools()],
+        "provider_metadata": [metadata.to_dict() for metadata in check_provider_metadata()],
+    }
 
 
 def update_all(check_only: bool = False) -> list[PackageInfo]:

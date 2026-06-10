@@ -12,6 +12,10 @@ Page {
     property string activeFilter: "All"
     property bool listViewMode: false
     property var selectedItems: []
+    property var pendingPost: ({ videoPath: "", caption: "" })
+    property var pendingPostPreview: ({ ready: false, blocking: [], warnings: [], platforms: [], video: {} })
+    property var pendingBatchPosts: []
+    property var pendingBatchPreview: ({ ready: false, items: [], blocking: [], warnings: [] })
 
     // Sort & Pagination properties (#7, #24)
     property int sortOption: 0  // 0=Newest, 1=Oldest, 2=Platform, 3=Status
@@ -170,21 +174,111 @@ Page {
     function postSelected() {
         if (selectedItems.length === 0) return
         if (selectedItems.length === 1) {
-            // Single item: post directly
             for (var i = 0; i < filteredPosts.length; i++) {
                 if (filteredPosts[i].postId === selectedItems[0]) {
-                    if (typeof controller !== "undefined") {
-                        controller.postVideo(filteredPosts[i].thumbnail || "", filteredPosts[i].caption || "")
-                    }
+                    preparePostPreview(filteredPosts[i])
                     break
                 }
             }
-            clearSelection()
-            showToast("Posting 1 video...", false)
         } else {
             // Multiple items: open batch caption dialog
             batchCaptionDialog.open()
         }
+    }
+
+    function preparePostPreview(post) {
+        var videoPath = post.thumbnail || ""
+        var caption = post.caption || ""
+        pendingPost = { videoPath: videoPath, caption: caption }
+        if (typeof controller !== "undefined" && controller.previewPost) {
+            try {
+                var raw = controller.previewPost(videoPath, caption, "")
+                var parsed = JSON.parse(raw)
+                pendingPostPreview = parsed.ok ? parsed : { ready: false, blocking: [parsed.error || "Preview failed"], warnings: [], platforms: [], video: {} }
+            } catch(e) {
+                pendingPostPreview = { ready: false, blocking: ["Preview failed"], warnings: [], platforms: [], video: {} }
+            }
+        } else {
+            pendingPostPreview = { ready: false, blocking: ["Posting preview is unavailable"], warnings: [], platforms: [], video: {} }
+        }
+        postPreviewDialog.open()
+    }
+
+    function confirmPendingPost() {
+        if (!pendingPostPreview.ready || typeof controller === "undefined")
+            return
+        controller.postVideo(pendingPost.videoPath, pendingPost.caption)
+        clearSelection()
+        postPreviewDialog.close()
+        showToast("Posting video...", false)
+    }
+
+    function selectedPostObjects() {
+        var posts = []
+        for (var i = 0; i < selectedItems.length; i++) {
+            for (var j = 0; j < filteredPosts.length; j++) {
+                if (filteredPosts[j].postId === selectedItems[i]) {
+                    posts.push(filteredPosts[j])
+                    break
+                }
+            }
+        }
+        return posts
+    }
+
+    function prepareBatchPreview() {
+        var posts = selectedPostObjects()
+        var items = []
+        var blocking = []
+        var warnings = []
+        for (var i = 0; i < posts.length; i++) {
+            var post = posts[i]
+            var videoPath = post.thumbnail || ""
+            var caption = post.caption || ""
+            var preview = { ready: false, blocking: ["Posting preview is unavailable"], warnings: [], platforms: [], video: {} }
+            if (typeof controller !== "undefined" && controller.previewPost) {
+                try {
+                    var raw = controller.previewPost(videoPath, caption, "")
+                    var parsed = JSON.parse(raw)
+                    preview = parsed.ok ? parsed : { ready: false, blocking: [parsed.error || "Preview failed"], warnings: [], platforms: [], video: {} }
+                } catch(e) {
+                    preview = { ready: false, blocking: ["Preview failed"], warnings: [], platforms: [], video: {} }
+                }
+            }
+            items.push({
+                title: post.title || preview.video.filename || "Untitled",
+                videoPath: videoPath,
+                caption: caption,
+                preview: preview,
+                ready: preview.ready
+            })
+            if (!preview.ready)
+                blocking.push((post.title || "Selected item") + ": " + ((preview.blocking || ["Not ready"])[0]))
+            for (var w = 0; w < (preview.warnings || []).length; w++)
+                warnings.push((post.title || "Selected item") + ": " + preview.warnings[w])
+        }
+        pendingBatchPosts = items
+        pendingBatchPreview = {
+            ready: items.length > 0 && blocking.length === 0,
+            items: items,
+            blocking: blocking,
+            warnings: warnings
+        }
+        batchCaptionDialog.close()
+        batchPreviewDialog.open()
+    }
+
+    function confirmBatchPost() {
+        if (!pendingBatchPreview.ready || typeof controller === "undefined")
+            return
+        for (var i = 0; i < pendingBatchPosts.length; i++) {
+            var item = pendingBatchPosts[i]
+            controller.postVideo(item.videoPath, item.caption)
+        }
+        var count = pendingBatchPosts.length
+        clearSelection()
+        batchPreviewDialog.close()
+        showToast("Posting " + count + " video(s)...", false)
     }
 
     // Batch delete selected items (#10)
@@ -224,7 +318,177 @@ Page {
         if (videoPreviewDialog.visible) videoPreviewDialog.close()
         if (captionEditorDialog.visible) captionEditorDialog.close()
         if (batchCaptionDialog.visible) batchCaptionDialog.close()
+        if (batchPreviewDialog.visible) batchPreviewDialog.close()
         if (deleteConfirmDialog.visible) deleteConfirmDialog.close()
+        if (postPreviewDialog.visible) postPreviewDialog.close()
+    }
+
+    // ── Post Preview / Preflight Dialog ───────────────────────────
+    Dialog {
+        id: postPreviewDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(520, parent.width - 60)
+        height: Math.min(520, parent.height - 60)
+        title: "Review post"
+        background: Rectangle {
+            color: theme.surfaceCard
+            radius: theme.radiusXl
+        }
+        header: Rectangle {
+            color: theme.surfaceAlt
+            height: 48
+            radius: theme.radiusXl
+            Text {
+                anchors.centerIn: parent
+                text: contentPage.pendingPostPreview.ready ? "Ready to post" : "Post needs attention"
+                font.pixelSize: 14
+                font.weight: Font.DemiBold
+                color: theme.textPrimary
+            }
+        }
+        contentItem: Flickable {
+            clip: true
+            contentHeight: postPreviewCol.implicitHeight
+
+            ColumnLayout {
+                id: postPreviewCol
+                width: parent.width
+                spacing: theme.spacingMd
+
+                Text {
+                    text: (contentPage.pendingPostPreview.video && contentPage.pendingPostPreview.video.filename)
+                          ? contentPage.pendingPostPreview.video.filename : "No file selected"
+                    font.pixelSize: 14
+                    font.weight: Font.DemiBold
+                    color: theme.textPrimary
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+
+                Text {
+                    text: "Caption length: " + (contentPage.pendingPostPreview.caption_length || 0)
+                    font.pixelSize: 12
+                    color: theme.textSecondary
+                    Layout.fillWidth: true
+                }
+
+                Repeater {
+                    model: (contentPage.pendingPostPreview.blocking || []).concat(contentPage.pendingPostPreview.warnings || [])
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: theme.spacingSm
+
+                        Rectangle {
+                            width: 8; height: 8; radius: 4
+                            color: index < (contentPage.pendingPostPreview.blocking || []).length ? theme.error : theme.warning
+                        }
+                        Text {
+                            text: modelData
+                            font.pixelSize: 12
+                            color: theme.textSecondary
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+
+                Text {
+                    text: "Destinations"
+                    font.pixelSize: 13
+                    font.weight: Font.DemiBold
+                    color: theme.textPrimary
+                    Layout.fillWidth: true
+                }
+
+                Repeater {
+                    model: contentPage.pendingPostPreview.platforms || []
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: platformPreviewCol.implicitHeight + theme.spacingMd
+                        radius: theme.radiusMd
+                        color: theme.surfaceAlt
+
+                        ColumnLayout {
+                            id: platformPreviewCol
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.margins: theme.spacingSm
+                            spacing: 2
+
+                            Text {
+                                text: (modelData.ready ? "Ready: " : "Needs attention: ") + (modelData.display_name || modelData.name)
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: modelData.ready ? theme.success : theme.warning
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: "Auth: " + (modelData.auth_mode || "unknown") + " / caption " + (modelData.caption_length || 0) + (modelData.max_caption_length ? " of " + modelData.max_caption_length : "")
+                                font.pixelSize: 11
+                                color: theme.textSecondary
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: theme.spacingMd
+
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        width: cancelPreviewLabel.implicitWidth + 32
+                        height: 36
+                        radius: theme.radiusMd
+                        color: theme.surfaceAlt
+                        Text {
+                            id: cancelPreviewLabel
+                            anchors.centerIn: parent
+                            text: "Cancel"
+                            font.pixelSize: 13
+                            color: theme.textSecondary
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: postPreviewDialog.close()
+                        }
+                    }
+
+                    Rectangle {
+                        width: confirmPreviewLabel.implicitWidth + 32
+                        height: 36
+                        radius: theme.radiusMd
+                        color: contentPage.pendingPostPreview.ready ? theme.accent : theme.surfaceAlt
+                        opacity: contentPage.pendingPostPreview.ready ? 1.0 : 0.6
+                        Text {
+                            id: confirmPreviewLabel
+                            anchors.centerIn: parent
+                            text: "Post now"
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                            color: contentPage.pendingPostPreview.ready ? "#ffffff" : theme.textMuted
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: contentPage.pendingPostPreview.ready
+                            cursorShape: contentPage.pendingPostPreview.ready ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: contentPage.confirmPendingPost()
+                            Accessible.name: "Post after preview"
+                            Accessible.role: Accessible.Button
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ── Bulk Delete Confirmation Dialog (#22) ─────────────────────
@@ -436,7 +700,7 @@ Page {
                     color: theme.accent
                     Text {
                         anchors.centerIn: parent
-                        text: "Post to all platforms"
+                        text: "Review batch"
                         font.pixelSize: 12
                         font.weight: Font.DemiBold
                         color: "#ffffff"
@@ -444,28 +708,157 @@ Page {
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            // Collect captions from the TextEdit fields
-                            var captions = {}
-                            for (var c = 0; c < batchCaptionCol.children.length; c++) {
-                                var repeaterItem = batchCaptionCol.children[c]
-                                // Walk the repeater delegates
+                        onClicked: contentPage.prepareBatchPreview()
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Batch Post Preview Dialog ─────────────────────────────────
+    Dialog {
+        id: batchPreviewDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(560, parent.width - 60)
+        height: Math.min(560, parent.height - 60)
+        title: "Review batch"
+        background: Rectangle {
+            color: theme.surfaceCard
+            radius: theme.radiusXl
+        }
+        header: Rectangle {
+            color: theme.surfaceAlt
+            height: 48
+            radius: theme.radiusXl
+            Text {
+                anchors.centerIn: parent
+                text: contentPage.pendingBatchPreview.ready ? "Batch ready" : "Batch needs attention"
+                font.pixelSize: 14
+                font.weight: Font.DemiBold
+                color: theme.textPrimary
+            }
+        }
+        contentItem: Flickable {
+            clip: true
+            contentHeight: batchPreviewCol.implicitHeight
+
+            ColumnLayout {
+                id: batchPreviewCol
+                width: parent.width
+                spacing: theme.spacingMd
+
+                Text {
+                    text: (contentPage.pendingBatchPreview.items || []).length + " selected item(s)"
+                    font.pixelSize: 14
+                    font.weight: Font.DemiBold
+                    color: theme.textPrimary
+                    Layout.fillWidth: true
+                }
+
+                Repeater {
+                    model: (contentPage.pendingBatchPreview.blocking || []).concat(contentPage.pendingBatchPreview.warnings || [])
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: theme.spacingSm
+
+                        Rectangle {
+                            width: 8; height: 8; radius: 4
+                            color: index < (contentPage.pendingBatchPreview.blocking || []).length ? theme.error : theme.warning
+                        }
+                        Text {
+                            text: modelData
+                            font.pixelSize: 12
+                            color: theme.textSecondary
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+
+                Repeater {
+                    model: contentPage.pendingBatchPreview.items || []
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: itemPreviewCol.implicitHeight + theme.spacingMd
+                        radius: theme.radiusMd
+                        color: theme.surfaceAlt
+
+                        ColumnLayout {
+                            id: itemPreviewCol
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.margins: theme.spacingSm
+                            spacing: 2
+
+                            Text {
+                                text: (modelData.ready ? "Ready: " : "Needs attention: ") + (modelData.title || "Untitled")
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: modelData.ready ? theme.success : theme.warning
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
                             }
-                            // Post each selected item with default caption
-                            for (var i = 0; i < selectedItems.length; i++) {
-                                for (var j = 0; j < filteredPosts.length; j++) {
-                                    if (filteredPosts[j].postId === selectedItems[i]) {
-                                        if (typeof controller !== "undefined") {
-                                            controller.postVideo(filteredPosts[j].thumbnail || "", filteredPosts[j].caption || "")
-                                        }
-                                        break
-                                    }
-                                }
+                            Text {
+                                text: "Caption length: " + ((modelData.preview && modelData.preview.caption_length) || 0)
+                                font.pixelSize: 11
+                                color: theme.textSecondary
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
                             }
-                            var count = selectedItems.length
-                            clearSelection()
-                            batchCaptionDialog.close()
-                            showToast("Batch posting " + count + " video(s)...", false)
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: theme.spacingMd
+
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        width: cancelBatchPreviewLabel.implicitWidth + 32
+                        height: 36
+                        radius: theme.radiusMd
+                        color: theme.surfaceAlt
+                        Text {
+                            id: cancelBatchPreviewLabel
+                            anchors.centerIn: parent
+                            text: "Cancel"
+                            font.pixelSize: 13
+                            color: theme.textSecondary
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: batchPreviewDialog.close()
+                        }
+                    }
+
+                    Rectangle {
+                        width: confirmBatchPreviewLabel.implicitWidth + 32
+                        height: 36
+                        radius: theme.radiusMd
+                        color: contentPage.pendingBatchPreview.ready ? theme.accent : theme.surfaceAlt
+                        opacity: contentPage.pendingBatchPreview.ready ? 1.0 : 0.6
+                        Text {
+                            id: confirmBatchPreviewLabel
+                            anchors.centerIn: parent
+                            text: "Post batch"
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                            color: contentPage.pendingBatchPreview.ready ? "#ffffff" : theme.textMuted
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: contentPage.pendingBatchPreview.ready
+                            cursorShape: contentPage.pendingBatchPreview.ready ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: contentPage.confirmBatchPost()
+                            Accessible.name: "Post batch after preview"
+                            Accessible.role: Accessible.Button
                         }
                     }
                 }

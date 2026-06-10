@@ -1,291 +1,132 @@
 # Contributing to xPST
 
-Thank you for your interest in contributing to xPST! This document provides guidelines and information for contributors.
+Thank you for helping make xPST better. The project goal is a free, open-source,
+local-first cross-posting studio that creators can trust without subscribing to
+a hosted service.
 
-## 🚀 Quick Start
+## Quick Start
 
-### Prerequisites
+Requirements:
 
-- Python 3.10+
+- Python 3.10 or newer
 - FFmpeg
 - Git
 
-### Setup Development Environment
+```bash
+git clone https://github.com/TysAIs/xPST.git
+cd xPST
+python -m venv .venv
+.venv\Scripts\activate  # Windows
+# source .venv/bin/activate  # macOS/Linux
+pip install -e ".[dev,mcp]"
+xpst readiness --json
+```
+
+## Before Opening an Issue
+
+- Search existing issues first.
+- Never paste tokens, cookies, session files, OAuth secrets, or raw credential
+  files.
+- For setup problems, run `xpst diagnostics --json` and review the generated
+  bundle before attaching it.
+- Use the platform breakage, install failure, or provider request templates when
+  they match your report.
+
+Security vulnerabilities should follow [SECURITY.md](SECURITY.md), not public
+issues.
+
+## Pull Requests
+
+1. Fork the repository.
+2. Create a focused branch.
+3. Keep unrelated refactors out of the PR.
+4. Add or update tests for behavior changes.
+5. Update docs when user-facing commands, configuration, provider behavior, or
+   release steps change.
+6. Run the relevant checks before opening the PR.
+
+Recommended local checks:
 
 ```bash
-# Clone the repo
-git clone https://github.com/xPSTOwner/xPST.git
-cd ~/XPST
-
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-
-# Install in development mode
-pip install -e ".[dev]"
-
-# Run the setup wizard
-xpst setup
-
-# Run tests
 pytest
-
-# Run linter
-ruff check src/ tests/
-
-# Run formatter
-ruff format src/ tests/
-```
-
-## 📋 How to Contribute
-
-### Reporting Bugs
-
-1. Check existing [issues](https://github.com/xPSTOwner/xPST/issues) first
-2. Create a new issue with:
-   - Clear title and description
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Environment details (OS, Python version, etc.)
-   - Logs if applicable
-
-### Suggesting Features
-
-1. Check existing [discussions](https://github.com/xPSTOwner/xPST/discussions)
-2. Open a new discussion with:
-   - Use case description
-   - Proposed solution
-   - Alternatives considered
-
-### Submitting Code
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Make your changes
-4. Add tests for new functionality
-5. Run tests: `pytest`
-6. Run linter: `ruff check src/ tests/`
-7. Run type checker: `mypy src/xpst/ --ignore-missing-imports`
-8. Commit with clear message: `git commit -m "Add feature: description"`
-9. Push to your fork: `git push origin feature/my-feature`
-10. Open a Pull Request
-
-## 🏗️ Architecture
-
-### Project Structure
-
-```
-xPST/
-├── src/xpst/          # Main package
-│   ├── cli.py              # CLI commands (Click)
-│   ├── engine.py           # Core cross-posting logic
-│   ├── config.py           # Configuration management
-│   ├── state.py            # State persistence
-│   ├── scheduler.py        # Watch mode logic
-│   ├── setup.py            # Interactive setup wizard
-│   ├── updater.py          # Auto-update system
-│   ├── crash_recovery.py   # Crash recovery & checkpoints
-│   ├── platforms/          # Platform uploaders
-│   │   ├── base.py         # Abstract base class
-│   │   ├── youtube.py      # YouTube Shorts
-│   │   ├── x.py            # X/Twitter
-│   │   └── instagram.py    # Instagram Reels
-│   ├── sources/            # Video sources
-│   │   ├── base.py         # Abstract base class
-│   │   └── tiktok.py       # TikTok downloader
-│   └── utils/              # Shared utilities
-│       ├── logger.py       # Structured logging
-│       ├── circuit_breaker.py
-│       ├── retry.py        # Retry logic
-│       └── video.py        # FFmpeg processing
-├── tests/                  # Test suite
-├── docs/                   # Documentation
-└── configs/                # Example configs
-```
-
-### Adding a New Platform
-
-1. Create `src/xpst/platforms/newplatform.py`
-2. Inherit from `PlatformUploader`
-3. Implement required methods:
-   - `upload(video_path, caption) -> UploadResult`
-   - `check_health() -> PlatformHealth`
-4. Add config to `config.py`
-5. Add tests in `tests/test_platforms.py`
-6. Update README
-
-### Adding a New Source
-
-1. Create `src/xpst/sources/newsource.py`
-2. Inherit from `VideoSource`
-3. Implement required methods:
-   - `list_videos(max_count) -> list[VideoMetadata]`
-   - `download(video_id, output_dir) -> DownloadResult`
-   - `check_health() -> dict`
-4. Add config to `config.py`
-5. Add tests
-
-## 🧪 Testing
-
-### Running Tests
-
-```bash
-# All tests
-pytest
-
-# With coverage
-pytest --cov=xpst --cov-report=html
-
-# Specific test file
-pytest tests/test_config.py -v
-
-# Specific test
-pytest tests/test_config.py::TestXPSTConfig::test_default_config -v
-```
-
-### Writing Tests
-
-- Use `pytest` fixtures for common setup
-- Test both success and failure cases
-- Mock external dependencies (APIs, file system)
-- Use descriptive test names
-
-Example:
-
-```python
-def test_load_config_from_file(tmp_path):
-    """Test that config loads correctly from YAML file"""
-    config_data = {"accounts": {"tiktok": {"username": "test"}}}
-    config_file = tmp_path / "config.yaml"
-    with open(config_file, "w") as f:
-        yaml.dump(config_data, f)
-
-    config = XPSTConfig.load(str(config_file))
-    assert config.tiktok.username == "test"
-```
-
-## 📝 Code Style
-
-### Python Version
-
-- Target: Python 3.10+
-- Use type hints (PEP 484)
-- Use dataclasses for data structures
-
-### Formatting
-
-We use `ruff` for formatting and linting:
-
-```bash
-# Check formatting
-ruff format --check src/ tests/
-
-# Auto-format
-ruff format src/ tests/
-
-# Check linting
-ruff check src/ tests/
-
-# Fix auto-fixable issues
-ruff check --fix src/ tests/
-```
-
-### Naming Conventions
-
-- **Files**: `snake_case.py`
-- **Classes**: `PascalCase`
-- **Functions**: `snake_case()`
-- **Constants**: `UPPER_SNAKE_CASE`
-- **Private**: `_leading_underscore`
-
-### Docstrings
-
-Use Google-style docstrings:
-
-```python
-def upload_video(video_path: Path, caption: str) -> UploadResult:
-    """
-    Upload a video to the platform.
-
-    Args:
-        video_path: Path to the video file
-        caption: Caption for the video
-
-    Returns:
-        UploadResult with success status and metadata
-
-    Raises:
-        FileNotFoundError: If video file doesn't exist
-        ValueError: If video format is invalid
-    """
-```
-
-## 🔒 Security
-
-### Credential Handling
-
-- **Never** commit credentials to the repository
-- Use `~/.xpst/credentials/` for local storage
-- Add credential files to `.gitignore`
-- Document credential requirements clearly
-
-### API Keys
-
-- Use environment variables for API keys
-- Never hardcode keys in source code
-- Provide clear setup instructions
-
-## 🐳 Docker Development
-
-```bash
-# Build the Docker image
-docker build -t xpst .
-
-# Run with docker compose
-docker compose up -d
-
-# Check logs
-docker compose logs -f
-
-# Run a one-time command
-docker compose run --rm xpst run
-```
-
-## 📦 Release Process
-
-### Version Bumping
-
-1. Update `version` in `pyproject.toml`
-2. Update `__version__` in `src/xpst/__init__.py`
-3. Update `CHANGELOG.md`
-4. Commit: `git commit -m "Bump version to X.Y.Z"`
-5. Tag: `git tag vX.Y.Z`
-6. Push: `git push && git push --tags`
-
-### Publishing to PyPI
-
-```bash
-# Build
+ruff check src tests scripts/verify_qml_pages.py scripts/release_artifacts.py scripts/clean_install_smoke.py
+mypy src/xpst scripts/release_artifacts.py scripts/clean_install_smoke.py
+python scripts/verify_qml_pages.py
 python -m build
-
-# Upload
-twine upload dist/*
+python scripts/clean_install_smoke.py --dist dist --artifact both
+python scripts/release_artifacts.py --dist dist --output-dir release --skip-checks
 ```
 
-## 🤝 Community
+## Provider Contributions
 
-### Code of Conduct
+xPST is provider-agnostic. New sources and destinations should expose a
+machine-readable provider manifest so CLI, desktop, MCP, diagnostics, and
+release tooling can reason about capabilities consistently.
 
-- Be respectful and inclusive
-- Focus on constructive feedback
-- Help others learn and grow
+For a new destination provider:
 
-### Communication
+1. Add a module under `src/xpst/platforms/`.
+2. Inherit from the existing platform base class.
+3. Implement upload, health, and any supported delete/analytics behavior.
+4. Add a `ProviderManifest` with roles, capabilities, auth mode, docs URL, and
+   risk notes.
+5. Add tests for the provider contract and failure isolation.
 
-- [GitHub Issues](https://github.com/xPSTOwner/xPST/issues): Bug reports
-- [GitHub Discussions](https://github.com/xPSTOwner/xPST/discussions): Questions, ideas
-- [Pull Requests](https://github.com/xPSTOwner/xPST/pulls): Code contributions
+For a new source provider:
 
-## 🙏 Thank You!
+1. Add a module under `src/xpst/sources/`.
+2. Inherit from the existing source base class.
+3. Implement listing, download, health, and capability metadata.
+4. Add fake-provider or mocked tests for auth, rate limits, network failures,
+   and malformed API responses.
 
-Every contribution helps make xPST better for everyone. We appreciate your time and effort!
+Provider integrations must be honest about official API status and platform
+Terms risk.
+
+## Coding Guidelines
+
+- Prefer existing project patterns over new abstractions.
+- Keep user data local by default.
+- Avoid logging captions, credentials, cookies, tokens, or raw local paths.
+- Use structured JSON outputs for commands that may be consumed by agents or
+  scripts.
+- Keep platform-specific behavior inside provider/source adapters rather than
+  the engine, desktop UI, updater, or state layer.
+
+## Testing Expectations
+
+Tests should cover:
+
+- Success and failure paths.
+- Provider failure isolation.
+- JSON command output contracts.
+- Config migration and corrupted-file behavior when relevant.
+- State persistence, retries, and recovery for workflow changes.
+- Redaction for diagnostics or logs that include user-controlled text.
+
+Use fake providers where possible instead of relying on live platform accounts.
+
+## Documentation
+
+Update the relevant docs when behavior changes:
+
+- `README.md` for user-facing commands and feature claims.
+- `docs/AGENT_GUIDE.md` for JSON/automation workflows.
+- `docs/MCP_TOOLS.md` for MCP tools and resources.
+- `docs/LAUNCH_CHECKLIST.md` and `docs/ENTERPRISE_READINESS.md` for release
+  gates.
+- Provider-specific docs for auth, rate limits, and platform caveats.
+
+## Release Notes
+
+User-visible changes should be reflected in `CHANGELOG.md`. Release artifacts
+must include checksums, SBOM, notices, license information, and release notes.
+
+## Community
+
+- Issues: https://github.com/TysAIs/xPST/issues
+- Discussions: https://github.com/TysAIs/xPST/discussions
+- Pull requests: https://github.com/TysAIs/xPST/pulls
+
+Be respectful, specific, and practical. Small focused improvements are very
+welcome.

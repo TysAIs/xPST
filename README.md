@@ -10,7 +10,7 @@
 
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green)
-![Tests](https://img.shields.io/badge/tests-787%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-866%20passing-brightgreen)
 ![Coverage](https://img.shields.io/codecov/c/github/TysAIs/xPST?label=coverage)
 ![Stars](https://img.shields.io/github/stars/TysAIs/xPST?style=social)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
@@ -21,7 +21,7 @@
 
 ---
 
-xPST is a local-first, open-source tool that automatically distributes short-form video across YouTube Shorts, Instagram Reels, X/Twitter, and TikTok. It downloads from any source, encodes with platform-specific optimizations, uploads with anti-bot protection, and tracks everything — all without your content ever leaving your machine. No subscriptions, no cloud servers, no vendor lock-in. Just run `xpst watch` and let it handle the rest.
+xPST is a local-first, open-source tool that automatically distributes short-form video across connected providers. It currently ships with YouTube Shorts, Instagram Reels, X, TikTok, YouTube source, Instagram source, X source, and local-file adapters, all described through one provider catalog used by the CLI, desktop app, and MCP server. It downloads from configured sources, encodes with destination-specific optimizations, uploads with conservative safety controls, and tracks everything without your content ever leaving your machine. No subscriptions, no cloud servers, no vendor lock-in.
 
 ---
 
@@ -29,6 +29,7 @@ xPST is a local-first, open-source tool that automatically distributes short-for
 
 - **Free forever** — no subscriptions, no per-channel fees, no premium tiers
 - **100% local** — your content and credentials never leave your machine
+- **Provider-agnostic core** — sources and destinations publish machine-readable capabilities for CLI, desktop, MCP, and future plugins
 - **Platform-specific encoding** — optimized FFmpeg profiles per target (1080p for YouTube/X, 720p for Instagram, VP9 tier upscaling)
 - **Bidirectional cross-posting** — monitor ALL platforms, not just one source
 - **Anti-bot protection** — random delays, time-of-day awareness, caption variation, User-Agent rotation
@@ -46,12 +47,23 @@ xPST is a local-first, open-source tool that automatically distributes short-for
 
 ---
 
-## Supported Platforms
+## Supported Providers
 
-- **YouTube Shorts** — via official YouTube Data API v3 (OAuth 2.0)
-- **Instagram Reels** — via instagrapi (browser session cookies)
-- **X/Twitter** — via twikit (browser cookies)
-- **TikTok** — via yt-dlp (browser cookies, optional)
+Run `xpst providers --json` or call the MCP `xpst_providers` tool to inspect the installed provider catalog.
+
+### Destinations
+
+- **YouTube Shorts** — official YouTube Data API v3 with OAuth 2.0
+- **Instagram Reels** — instagrapi session-based uploads and carousel posts
+- **X** — twikit cookie-based uploads and carousel-as-thread posts
+
+### Sources
+
+- **TikTok** — yt-dlp downloads with optional browser cookies
+- **YouTube** — yt-dlp channel/video downloads with optional browser cookies
+- **Instagram** — instagrapi session-based listing and downloads
+- **X** — yt-dlp downloads with optional twikit metadata
+- **Local Files** — local folders, videos, images, and carousel groups
 
 ---
 
@@ -95,7 +107,7 @@ xpst watch
 
 ## CLI Commands
 
-xPST provides 21 commands for complete control over your cross-posting workflow.
+xPST provides 24 commands for complete control over your cross-posting workflow.
 
 ### Setup and Maintenance
 
@@ -111,9 +123,14 @@ xpst connect instagram --test
 # Update all dependencies to latest versions
 xpst update
 xpst update --check
+xpst update --components --json
 
 # Show version and all dependency versions
 xpst version
+
+# Show installed source/destination provider capabilities
+xpst providers
+xpst providers --json
 ```
 
 ### Core Operations
@@ -155,6 +172,10 @@ xpst status
 
 # View recent log output
 xpst logs
+
+# Export a redacted support bundle with readiness, providers, versions, and logs
+xpst diagnostics
+xpst diagnostics --output ./xpst-diagnostics.zip
 
 # Show cross-platform analytics summary
 xpst analytics
@@ -224,9 +245,9 @@ xpst-mcp
 xpst mcp
 ```
 
-**8 tools available:** `post_video`, `crosspost_new`, `check_status`, `list_platforms`, `get_analytics`, `delete_post`, `health_check`, `get_logs`
+**9 tools available:** `xpst_providers`, `xpst_config_show`, `xpst_auth_status`, `xpst_status`, `xpst_health`, `xpst_run`, `xpst_post`, `xpst_backfill`, `xpst_delete`
 
-**3 resources:** `xpst://config`, `xpst://state`, `xpst://health`
+The metadata tools are lightweight and do not start the posting engine.
 
 See the full [MCP Tools Reference](docs/MCP_TOOLS.md) for schemas, parameters, and examples.
 
@@ -240,6 +261,7 @@ xpst run --json           # Cross-posting results as JSON
 xpst health --json        # Platform connectivity as JSON
 xpst analytics --json     # Analytics summary as JSON
 xpst version --json       # Version info as JSON
+xpst diagnostics --json   # Redacted support bundle path as JSON
 ```
 
 JSON mode is also auto-enabled when stdout is not a TTY (e.g., piped to another program).
@@ -450,7 +472,7 @@ export XPST_RATE_LIMITS_YOUTUBE="10"
 
 xPST takes a **local-first, zero-trust** approach to security:
 
-- **OS keychain storage** — credentials are stored in your operating system's secure keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager). If the keychain is unavailable, xPST falls back to local JSON files protected by OS filesystem permissions.
+- **OS keychain storage** — credentials are stored in your operating system's secure keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager). If the keychain is unavailable, xPST falls back to local encrypted `.enc` files when `cryptography` is available.
 - **No passwords in config** — the config file references credential paths, never stores secrets directly.
 - **No cloud servers** — your content, credentials, and state never leave your machine. There is no xPST cloud service.
 - **No third-party OAuth sharing** — Instagram and X use your own browser cookies. Only YouTube uses a standard OAuth 2.0 flow (your own Google Cloud project).
@@ -554,7 +576,7 @@ pytest --cov=xpst --cov-report=term-missing
 
 ### Guidelines
 
-- **Tests required** — all new features must include tests. The suite has 760+ tests; keep it green.
+- **Tests required** — all new features must include tests. The suite has 800+ tests; keep it green.
 - **Type hints** — use Python 3.10+ type hints throughout.
 - **Docstrings** — Google-style docstrings for all public functions and classes.
 - **No new dependencies** — discuss in an issue before adding dependencies.
@@ -572,12 +594,13 @@ xPST/
     scheduler.py        # Watch mode scheduling
     anti_bot.py         # Anti-bot protection
     crash_recovery.py   # Checkpoint-based crash recovery
-    platforms/          # Platform uploaders (youtube, instagram, x)
-    sources/            # Content sources (tiktok, local)
+    providers.py        # Shared provider metadata contract
+    platforms/          # Destination uploaders (youtube, instagram, x)
+    sources/            # Content sources (tiktok, youtube, instagram, x, local)
     services/           # Upload and source services
     utils/              # Credentials, logging, quotas, video processing
     dashboard/          # Web dashboard (NiceGUI)
-  tests/                # Test suite (760+ tests)
+  tests/                # Test suite (800+ tests)
   docs/                 # Documentation
 ```
 

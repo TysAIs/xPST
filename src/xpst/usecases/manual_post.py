@@ -1,7 +1,7 @@
 """Use-case for manual posting."""
 
 from xpst.platforms.base import UploadResult
-from xpst.usecases.base import BaseUseCase, ManualPostResult, UseCaseDependencies
+from xpst.usecases.base import BaseUseCase, ManualPostResult
 
 
 class ManualPostUseCase(BaseUseCase):
@@ -25,13 +25,13 @@ class ManualPostUseCase(BaseUseCase):
         """
         if platforms is None:
             platforms = list(self.deps.platforms.keys())
-        
+
         target_platforms = [p for p in platforms if p in self.deps.platforms]
-        
+
         results = {}
         all_success = True
         any_success = False
-        
+
         for platform_name in target_platforms:
             uploader = self.deps.platforms[platform_name]
             try:
@@ -51,12 +51,12 @@ class ManualPostUseCase(BaseUseCase):
                     error=str(e)
                 )
                 all_success = False
-        
+
         # Generate a video_id for tracking (hash of path + timestamp)
         import hashlib
         import time
         video_id = hashlib.md5(f"{video_path}{time.time()}".encode()).hexdigest()[:12]
-        
+
         return ManualPostResult(
             video_id=video_id,
             caption=caption,

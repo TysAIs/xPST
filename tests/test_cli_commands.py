@@ -6,6 +6,7 @@ Uses Click's CliRunner to invoke commands and verify JSON output.
 import json
 import logging
 import os
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -266,3 +267,76 @@ class TestStatusJson:
         assert isinstance(data, dict)
         # Status should contain statistics keys
         assert "total_videos_tracked" in data or "total_processed" in data or len(data) > 0
+
+
+class TestDiagnosticsJson:
+    """test_diagnostics_json: invoke `diagnostics --json`, verify bundle output."""
+
+    def test_diagnostics_json_creates_redacted_bundle(self, runner, config_file, tmp_path):
+        """diagnostics --json writes a redacted zip bundle."""
+        output = tmp_path / "diagnostics.zip"
+        log_file = tmp_path / "logs" / "xpst.log"
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        log_file.write_text("failed token=very-secret-token\n", encoding="utf-8")
+
+        result = runner.invoke(main, ["--config", config_file, "diagnostics", "--output", str(output), "--json"])
+
+        assert result.exit_code == 0
+        data = extract_json(result.output)
+        assert data == {"ok": True, "output": str(output), "redacted": True}
+        with zipfile.ZipFile(output) as archive:
+            payload = archive.read("diagnostics.json").decode("utf-8")
+        assert "very-secret-token" not in payload
+        assert '"readiness"' in payload
+        assert '"providers"' in payload
+
+
+class TestUpdateComponentsJson:
+    """test_update_components_json: invoke `update --components --json`."""
+
+    def test_update_components_json(self, runner):
+        """update --components --json outputs structured update status."""
+        result = runner.invoke(main, ["update", "--components", "--json"])
+        assert result.exit_code == 0
+        data = extract_json(result.output)
+        assert set(data) == {"app", "packages", "helpers", "provider_metadata"}
+        assert data["app"][0]["name"] == "xpst"
+        assert data["app"][0]["status"]
+        assert data["app"][0]["action"]
+        assert any(item["name"] == "yt-dlp" for item in data["helpers"])
+        assert all("update_command" in item for section in data.values() for item in section)
+
+
+class TestProvidersJson:
+    """test_providers_json: invoke `providers --json`."""
+
+    def test_providers_json(self, runner, config_file):
+        """providers --json outputs source and destination manifests."""
+        result = runner.invoke(main, ["--config", config_file, "providers", "--json"])
+        assert result.exit_code == 0
+        data = extract_json(result.output)
+        source_names = {item["name"] for item in data["sources"]}
+        destination_names = {item["name"] for item in data["destinations"]}
+
+        assert source_names >= {"tiktok", "youtube", "instagram", "x", "local"}
+        assert destination_names >= {"youtube", "instagram", "x"}
+        youtube = next(item for item in data["destinations"] if item["name"] == "youtube")
+        assert youtube["auth_mode"] == "oauth"
+        assert youtube["is_official_api"] is True
+
+
+class TestMcpCommand:
+    """test_mcp_command: invoke `mcp` without starting a real stdio server."""
+
+    def test_mcp_command_uses_packaged_entrypoint(self, runner, monkeypatch):
+        """mcp command delegates to xpst.mcp.cli_main."""
+        called = {}
+
+        def fake_cli_main():
+            called["ok"] = True
+
+        monkeypatch.setattr("xpst.mcp.cli_main", fake_cli_main)
+        result = runner.invoke(main, ["mcp"])
+
+        assert result.exit_code == 0
+        assert called["ok"] is True

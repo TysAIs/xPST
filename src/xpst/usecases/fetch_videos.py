@@ -1,7 +1,6 @@
 """Use-case for fetching new videos from sources."""
 
-from xpst.sources.base import VideoMetadata
-from xpst.usecases.base import BaseUseCase, FetchVideosResult, UseCaseDependencies
+from xpst.usecases.base import BaseUseCase, FetchVideosResult
 
 
 class FetchNewVideosUseCase(BaseUseCase):

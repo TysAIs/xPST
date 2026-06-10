@@ -6,11 +6,14 @@ xPST is designed to remain free, open source, local-first, and user-controlled w
 
 | Area | Status | Notes |
 |---|---:|---|
-| Core tests | Passing | 787 passing, 6 skipped on Windows after the Windows compatibility pass. |
+| Core tests | Passing | 866 passing, 6 skipped on Windows after the provider/MCP/diagnostics/clean-install/repo-assets/release-evidence/security-doc/license/readiness UX/post-preview/clean-profile/macOS public-gate pass. |
 | Lint | Passing | `ruff check src tests` passes. Qt/QML bridge names are explicitly ignored where camelCase is required by QML. |
-| Vulnerability audit | Passing | `pip-audit` reports no known vulnerabilities in the local environment. |
+| Vulnerability audit | Required for release | Run `pip-audit` in CI and before public release; do not rely on stale local results. |
 | Python package | Passing | Source distribution and wheel build successfully. |
-| Windows executable | Mostly passing | Direct PyInstaller build produced `dist/xPST.exe`; the `xpst build --json` wrapper can run longer than the current tool timeout and should be exercised in CI with a larger timeout. |
+| Clean install smoke | Passing | Built wheel and source distribution install into fresh virtual environments and run version, providers, update metadata, readiness, and diagnostics commands. |
+| Release metadata | Passing | Checksums, PyPI metadata, release notes, SBOM, release evidence, artifact attestations, and release legal documents are generated. |
+| Docker build smoke | CI-gated | CI builds `xpst:ci` and runs `xpst version --json` in the container. Local Docker was not available on this Windows workstation. |
+| Windows executable | Mostly passing | Direct PyInstaller build produced `dist/xPST.exe`; packaged launch smoke stayed alive locally with an isolated clean profile; public release still needs signing. |
 | Desktop QML smoke test | Passing | QML loads with `QT_QPA_PLATFORM=offscreen`. |
 | Type checking | Passing | `mypy src/xpst` passes with a pragmatic baseline for dynamic third-party/Qt integrations. |
 | Platform compliance | Mixed | YouTube uses the official API. Instagram, X, and TikTok rely on user-owned cookies/private or downloader flows and must be documented as user-risk integrations. |
@@ -22,10 +25,17 @@ Every public release should pass these checks:
 ```bash
 python -m pytest
 ruff check src tests
+mypy src/xpst
+python scripts/verify_qml_pages.py
 pip-audit
-python -m build
+python scripts/build_package.py
+python scripts/clean_install_smoke.py --dist dist --artifact both
+python scripts/release_artifacts.py --dist dist --output-dir release --skip-checks
 xpst version --json
+xpst diagnostics --json
 xpst health --json
+docker build -t xpst:ci .
+docker run --rm xpst:ci version --json
 ```
 
 Platform-specific artifacts should also be built and smoke-tested:
@@ -37,10 +47,13 @@ xpst build --json
 ## Security And Supply Chain
 
 - Use PyPI Trusted Publishing from GitHub Actions instead of long-lived PyPI API tokens.
+- Generate GitHub artifact attestations for every Python, Windows, and macOS release bundle.
 - Generate and attach a CycloneDX SBOM for every GitHub Release.
+- Generate and attach `RELEASE_EVIDENCE.json` for every release candidate.
 - Attach SHA-256 checksums for wheels, source distributions, and desktop installers/executables.
+- Generate release metadata with `python scripts/release_artifacts.py --dist dist --output-dir release`; it supports Python packages and desktop-only artifact folders.
 - Run `pip-audit` in CI and fail releases on known fixable vulnerabilities.
-- Keep credentials local: OS keychain first, local file fallback only when keychain is unavailable.
+- Keep credentials local: OS keychain first, encrypted `.enc` file fallback only when keychain is unavailable.
 - Never bundle user cookies, OAuth tokens, `client_secrets.json`, session files, or `~/.xpst` state into release artifacts.
 
 ## Licensing
@@ -53,7 +66,7 @@ The repository should keep:
 - `NOTICES.md`
 - `LICENSING_REPORT.md`
 - `docs/CODESIGNING.md`
-- Dependency license inventory for direct runtime dependencies
+- Dependency license inventory for direct runtime dependencies, plus a generated transitive report for each release environment
 - Release artifact notices for PyInstaller desktop bundles
 
 ## Platform Risk Posture
@@ -86,8 +99,7 @@ After the Windows pass and release-readiness cleanup, xPST is a strong beta-to-r
 
 The main remaining gaps are operational rather than code-breaking:
 
-- CI release workflow with Trusted Publishing and artifact attestations
-- SBOM/checksum generation in release scripts
+- Successful tag-run proof of the CI release workflow with Trusted Publishing and artifact attestations
 - Windows/macOS code signing
 - Fresh external platform credential tests by the account owner
 - Gradually tightening the mypy baseline

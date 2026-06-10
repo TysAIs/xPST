@@ -209,11 +209,10 @@ class TestAuthEdgeCases:
     @pytest.mark.asyncio
     async def test_youtube_refresh_token_expired(self, tmp_path):
         """If YouTube refresh token is expired, should raise ValueError.
-        
+
         Now uses SessionManager.get_youtube_service which handles token refresh.
         """
         from xpst.platforms.youtube import YouTubeUploader
-        from xpst.utils.sessions import SessionManager
 
         config = XPSTConfig()
         config.youtube.client_secrets = str(tmp_path / "secrets.json")

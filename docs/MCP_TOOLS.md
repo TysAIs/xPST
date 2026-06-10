@@ -1,14 +1,8 @@
-# xPST MCP Server — Tools & Resources Reference
+# xPST MCP Server Tools
 
-> **Protocol:** [Model Context Protocol (MCP)](https://modelcontextprotocol.io)
-> **Transport:** stdio
-> **Server name:** `xPST`
+The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, and run posting workflows without scraping CLI text.
 
-The xPST MCP server exposes all cross-posting capabilities as MCP tools and resources, enabling AI assistants to manage video distribution across platforms.
-
----
-
-## Quick Setup
+## Setup
 
 ```json
 {
@@ -21,521 +15,186 @@ The xPST MCP server exposes all cross-posting capabilities as MCP tools and reso
 }
 ```
 
-Or via the CLI:
+You can also start the server with:
 
 ```bash
-xpst mcp
+xpst-mcp
 ```
 
----
+## Tools
 
-## Tools (8)
+Current tools exposed by `src/xpst/mcp/server.py`:
 
-### 1. `post_video`
+| Tool | Purpose | Engine required |
+|------|---------|-----------------|
+| `xpst_providers` | List supported source and destination providers with auth modes and capabilities. | No |
+| `xpst_config_show` | Show sanitized configuration. | No |
+| `xpst_auth_status` | Show credential storage status, stored credential keys, and quota remaining. | No |
+| `xpst_status` | Show state statistics and health status. | Yes |
+| `xpst_health` | Run live source/platform health checks. | Yes |
+| `xpst_run` | Fetch new content and cross-post it. | Yes |
+| `xpst_post` | Manually post a local video or carousel. | Yes |
+| `xpst_backfill` | Retry failed or incomplete posts. | Yes |
+| `xpst_delete` | Remove a post record from local state. | Yes |
 
-Post a video file to one or more social media platforms.
+Metadata-only tools do not initialize the posting engine, which keeps support and discovery calls fast and low-risk.
 
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `video_path` | `string` | **yes** | — | Path to the video file on disk |
-| `caption` | `string` | **yes** | — | Caption/title for the post |
-| `platforms` | `string[]` | no | `null` (all enabled) | Target platform names, e.g. `["youtube", "x"]` |
+## `xpst_providers`
 
-**Returns:**
+Lists all discovered content sources and posting destinations. Use this before calling posting tools so an assistant can adapt to the installed provider set instead of assuming a fixed platform list.
+
+Input:
+
+```json
+{}
+```
+
+Example output:
 
 ```json
 {
-  "video_id": "abc123",
-  "caption": "My awesome video...",
-  "all_success": true,
-  "partial_success": false,
-  "platforms": {
-    "youtube": {
-      "success": true,
-      "post_url": "https://youtube.com/shorts/xyz",
-      "post_id": "xyz",
-      "error": null,
-      "platform": "youtube"
+  "sources": [
+    {
+      "name": "local",
+      "display_name": "Local Files",
+      "roles": ["source"],
+      "capabilities": ["list", "download", "carousel", "health", "local_only"],
+      "auth_mode": "local",
+      "is_official_api": false,
+      "is_local_first": true
     },
-    "x": {
-      "success": true,
-      "post_url": "https://x.com/user/status/123",
-      "post_id": "123",
-      "error": null,
-      "platform": "x"
+    {
+      "name": "tiktok",
+      "display_name": "TikTok",
+      "roles": ["source"],
+      "capabilities": ["list", "download", "carousel", "health", "cookie_auth", "rate_limits"],
+      "auth_mode": "cookies",
+      "is_official_api": false,
+      "is_local_first": true
     }
-  }
-}
-```
-
-**Example (from an AI assistant):**
-
-> "Post the video at ~/Videos/test.mp4 with caption 'Summer vibes ☀️' to YouTube and Instagram."
-
-The assistant calls:
-```json
-{
-  "tool": "post_video",
-  "arguments": {
-    "video_path": "~/Videos/test.mp4",
-    "caption": "Summer vibes ☀️",
-    "platforms": ["youtube", "instagram"]
-  }
-}
-```
-
----
-
-### 2. `crosspost_new`
-
-Check for new videos and cross-post them to all platforms.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `bidirectional` | `boolean` | no | `false` | Check ALL sources for bidirectional cross-posting |
-| `limit` | `integer` | no | `10` | Maximum number of videos to process |
-
-**Returns:**
-
-```json
-[
-  {
-    "video_id": "tiktok_abc123",
-    "caption": "Original caption...",
-    "all_success": true,
-    "partial_success": false,
-    "platforms": {
-      "youtube": { "success": true, "post_url": "...", "post_id": "...", "error": null, "platform": "youtube" },
-      "instagram": { "success": true, "post_url": "...", "post_id": "...", "error": null, "platform": "instagram" },
-      "x": { "success": false, "post_url": null, "post_id": null, "error": "Rate limited", "platform": "x" }
-    }
-  }
-]
-```
-
-**Example:**
-
-> "Check for new videos and cross-post them."
-
-```json
-{
-  "tool": "crosspost_new",
-  "arguments": {
-    "bidirectional": false,
-    "limit": 5
-  }
-}
-```
-
----
-
-### 3. `check_status`
-
-Check xPST health status including quotas and circuit breakers.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| *(none)* | — | — | — | — |
-
-**Returns:**
-
-```json
-{
-  "health": {
-    "sources": { "tiktok": { "status": "ok", "username": "..." } },
-    "platforms": {
-      "youtube": { "authenticated": true, "session_valid": true },
-      "instagram": { "authenticated": true, "session_valid": false },
-      "x": { "authenticated": true, "session_valid": true }
-    },
-    "circuit_breakers": { "youtube": { "state": "closed", "failure_count": 0 } }
-  },
-  "statistics": {
-    "total_videos_tracked": 42,
-    "total_processed": 38,
-    "last_check": "2025-06-01T12:00:00",
-    "by_platform": { "youtube": 15, "instagram": 12, "x": 11 }
-  },
-  "quotas": {
-    "youtube": { "used_today": 2, "daily_limit": 5, "remaining": 3 },
-    "instagram": { "used_today": 1, "daily_limit": 5, "remaining": 4 }
-  },
-  "circuit_breakers": { "youtube": { "state": "closed", "failure_count": 0 } },
-  "dead_letter_queue_count": 0
-}
-```
-
-**Example:**
-
-> "What's the current status of xPST?"
-
-```json
-{
-  "tool": "check_status",
-  "arguments": {}
-}
-```
-
----
-
-### 4. `list_platforms`
-
-List all configured platforms with auth status and capabilities.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| *(none)* | — | — | — | — |
-
-**Returns:**
-
-```json
-{
-  "youtube": {
-    "enabled": true,
-    "class": "YouTubeUploader",
-    "supports_delete": true,
-    "supports_carousel": false
-  },
-  "instagram": {
-    "enabled": true,
-    "class": "InstagramUploader",
-    "supports_delete": true,
-    "supports_carousel": true
-  },
-  "x": {
-    "enabled": true,
-    "class": "XUploader",
-    "supports_delete": true,
-    "supports_carousel": false
-  }
-}
-```
-
-**Example:**
-
-> "Which platforms are configured and what can they do?"
-
-```json
-{
-  "tool": "list_platforms",
-  "arguments": {}
-}
-```
-
----
-
-### 5. `get_analytics`
-
-Get engagement analytics across platforms.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `platforms` | `string[]` | no | `null` (all) | Filter to specific platforms |
-| `top_n` | `integer` | no | `10` | Number of top posts to return |
-
-**Returns:**
-
-```json
-{
-  "totals": { "posts": 30, "views": 150000, "likes": 8500, "comments": 320, "shares": 180 },
-  "platform_totals": {
-    "youtube": { "posts": 10, "views": 80000, "likes": 5000 },
-    "instagram": { "posts": 10, "views": 45000, "likes": 2500 },
-    "x": { "posts": 10, "views": 25000, "likes": 1000 }
-  },
-  "top_posts": [
-    { "platform": "youtube", "post_id": "abc", "views": 50000, "likes": 3000, "comments": 150 }
   ],
-  "post_count": 30
-}
-```
-
-**Example:**
-
-> "Show me analytics for YouTube and Instagram, top 5 posts."
-
-```json
-{
-  "tool": "get_analytics",
-  "arguments": {
-    "platforms": ["youtube", "instagram"],
-    "top_n": 5
-  }
-}
-```
-
----
-
-### 6. `delete_post`
-
-Delete a previously posted video from a specific platform.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `post_id` | `string` | **yes** | — | The video/post identifier |
-| `platform` | `string` | **yes** | — | Platform name (`"youtube"`, `"x"`, `"instagram"`) |
-
-**Returns:**
-
-```json
-{
-  "success": true,
-  "post_id": "abc123",
-  "platform": "youtube"
-}
-```
-
-**Example:**
-
-> "Delete the YouTube video with ID abc123."
-
-```json
-{
-  "tool": "delete_post",
-  "arguments": {
-    "post_id": "abc123",
-    "platform": "youtube"
-  }
-}
-```
-
----
-
-### 7. `health_check`
-
-Perform a connectivity health check on all sources and platforms. Tests authentication without performing uploads.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| *(none)* | — | — | — | — |
-
-**Returns:**
-
-```json
-{
-  "sources": {
-    "tiktok": { "status": "ok", "yt_dlp_version": "2025.1.1", "username": "creator", "cookies_available": true }
-  },
-  "platforms": {
-    "youtube": { "authenticated": true, "session_valid": true, "details": { "channel_name": "My Channel" } },
-    "instagram": { "authenticated": true, "session_valid": true, "details": { "username": "myuser" } },
-    "x": { "authenticated": true, "session_valid": true, "details": { "username": "myuser" } }
-  },
-  "circuit_breakers": {
-    "youtube": { "state": "closed", "failure_count": 0 },
-    "instagram": { "state": "closed", "failure_count": 0 }
-  },
-  "quotas": {
-    "youtube": { "remaining": 3, "daily_limit": 5 },
-    "instagram": { "remaining": 4, "daily_limit": 5 }
-  }
-}
-```
-
-**Example:**
-
-> "Can you check if all my social media connections are working?"
-
-```json
-{
-  "tool": "health_check",
-  "arguments": {}
-}
-```
-
----
-
-### 8. `get_logs`
-
-Retrieve recent log entries.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `lines` | `integer` | no | `50` | Number of log lines to return |
-| `level` | `string` | no | `"INFO"` | Minimum log level filter: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-
-**Returns:**
-
-```json
-[
-  "2025-06-01 12:00:00 [INFO] Checking for new videos...",
-  "2025-06-01 12:00:05 [INFO] Found 2 new videos",
-  "2025-06-01 12:00:10 [WARNING] Instagram rate limit approaching (4/5)",
-  "2025-06-01 12:01:00 [INFO] Successfully posted to YouTube"
-]
-```
-
-**Example:**
-
-> "Show me the last 20 error-level log entries."
-
-```json
-{
-  "tool": "get_logs",
-  "arguments": {
-    "lines": 20,
-    "level": "ERROR"
-  }
-}
-```
-
----
-
-## Resources (3)
-
-### 1. `xpst://config`
-
-Returns the current xPST configuration (sanitized — no secrets).
-
-**URI:** `xpst://config`
-
-**Returns (JSON string):**
-
-```json
-{
-  "config_dir": "~/.xpst",
-  "youtube_enabled": true,
-  "x_enabled": true,
-  "instagram_enabled": true,
-  "download_dir": "~/.xpst/downloads",
-  "check_interval": 900,
-  "notifications_enabled": false,
-  "rate_limits": {
-    "youtube": 5,
-    "instagram": 5,
-    "x": 5,
-    "tiktok": 5
-  }
-}
-```
-
-> **Note:** Sensitive values (tokens, cookies, passwords) are never exposed through this resource.
-
----
-
-### 2. `xpst://state`
-
-Returns the current cross-posting state summary.
-
-**URI:** `xpst://state`
-
-**Returns (JSON string):**
-
-```json
-{
-  "total_videos_tracked": 42,
-  "total_processed": 38,
-  "last_check": "2025-06-01T12:00:00",
-  "by_platform": {
-    "youtube": 15,
-    "instagram": 12,
-    "x": 11
-  },
-  "platform_health": {
-    "youtube": { "status": "ok", "failures": 0, "last_success": "2025-06-01T12:00:00" },
-    "instagram": { "status": "ok", "failures": 0, "last_success": "2025-06-01T11:45:00" }
-  }
-}
-```
-
----
-
-### 3. `xpst://health`
-
-Returns current system health status.
-
-**URI:** `xpst://health`
-
-**Returns (JSON string):**
-
-```json
-{
-  "statistics": {
-    "total_videos_tracked": 42,
-    "total_processed": 38,
-    "last_check": "2025-06-01T12:00:00"
-  },
-  "quotas": {
-    "youtube": { "used_today": 2, "daily_limit": 5, "remaining": 3 },
-    "instagram": { "used_today": 1, "daily_limit": 5, "remaining": 4 },
-    "x": { "used_today": 0, "daily_limit": 5, "remaining": 5 }
-  }
-}
-```
-
----
-
-## AI Assistant Integration Patterns
-
-### Claude Desktop
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "xpst": {
-      "command": "xpst-mcp"
+  "destinations": [
+    {
+      "name": "youtube",
+      "display_name": "YouTube Shorts",
+      "roles": ["destination"],
+      "capabilities": ["upload", "delete", "health", "official_api", "oauth", "rate_limits"],
+      "auth_mode": "oauth",
+      "is_official_api": true,
+      "is_local_first": true
     }
-  }
+  ]
 }
 ```
 
-### Cursor / Windsurf
+## `xpst_run`
 
-Add to your MCP settings:
+Checks a source for new videos and cross-posts them.
+
+Parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `max_posts` | integer | `5` | Maximum posts to process. |
+| `source` | string | `tiktok` | Source provider name. |
+| `catch_up` | boolean | `false` | Fetch extra videos for catch-up mode. |
+| `dry_run` | boolean | `false` | Preview without uploading. |
+
+Dry-run output includes the videos that would be fetched and the current destination targets.
+
+## `xpst_post`
+
+Posts a local video file or carousel.
+
+Parameters:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `video_path` | string | yes | Local path to the video or first carousel item. |
+| `caption` | string | yes | Caption/title for the post. |
+| `platforms` | string array | no | Destination provider names. Defaults to all configured destinations. |
+| `carousel_paths` | string array | no | Additional image/video paths for carousel posts. |
+| `dry_run` | boolean | no | Preview without uploading. |
+
+## `xpst_health`
+
+Runs live source and platform health checks. This may touch provider clients and credentials.
+
+Input:
 
 ```json
-{
-  "xpst": {
-    "command": "xpst-mcp",
-    "transport": "stdio"
-  }
-}
+{}
 ```
 
-### Common AI Workflows
+## `xpst_status`
 
-| Intent | Tool(s) to Call |
-|--------|-----------------|
-| "Post this video to all platforms" | `post_video` |
-| "Check for new content and cross-post" | `crosspost_new` |
-| "Is everything working?" | `health_check` or `check_status` |
-| "What platforms can I post to?" | `list_platforms` |
-| "Show me my video performance" | `get_analytics` |
-| "Delete that Instagram post" | `delete_post` |
-| "Check recent errors" | `get_logs` with `level=ERROR` |
-| "What's my config?" | Resource: `xpst://config` |
-| "How many videos have I posted?" | Resource: `xpst://state` |
+Returns local state statistics, including tracked videos, processed counts, platform health, and dead-letter state.
 
----
+Input:
+
+```json
+{}
+```
+
+## `xpst_backfill`
+
+Retries incomplete or failed posts.
+
+Parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `max_count` | integer | `10` | Maximum videos to backfill. |
+| `source` | string | `tiktok` | Source provider name. |
+| `platforms` | string array | all | Destination provider names. |
+| `dry_run` | boolean | `false` | Preview without uploading. |
+
+## `xpst_config_show`
+
+Returns sanitized configuration. Token, cookie, session, and password-like values are masked.
+
+Input:
+
+```json
+{}
+```
+
+## `xpst_auth_status`
+
+Returns credential storage mode, stored credential keys, and daily quota remaining for known destinations.
+
+Input:
+
+```json
+{}
+```
+
+## `xpst_delete`
+
+Deletes a post record from local state. It does not delete from the remote platform in the current MCP handler.
+
+Parameters:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `video_id` | string | yes | Source video ID to remove from state. |
+| `platform` | string | no | `youtube`, `x`, `instagram`, or `all`. Defaults to `all`. |
+
+## Recommended Assistant Flow
+
+1. Call `xpst_providers` to discover available sources and destinations.
+2. Call `xpst_config_show` or `xpst_auth_status` to check setup without starting the posting engine.
+3. Call `xpst_health` before real uploads when the user asks for a safety check.
+4. Use `xpst_post` with `dry_run: true` for previews.
+5. Use `xpst_post` or `xpst_run` only after the user confirms the intended action.
 
 ## Error Handling
 
-All tools return structured error information when something fails:
-
-```json
-{
-  "success": false,
-  "error": "Video file not found: ~/missing.mp4"
-}
-```
-
-Platform upload results include per-platform errors:
-
-```json
-{
-  "platforms": {
-    "youtube": { "success": true, "post_url": "..." },
-    "x": { "success": false, "error": "Session expired — run: xpst auth x" }
-  }
-}
-```
-
----
+Tools return JSON text when successful. On MCP-level failures, `isError` is set and the text content contains the error message. Platform-level failures are returned inside the JSON payload so one destination can fail without hiding the others.
 
 ## See Also
 
-- [Agent Guide](AGENT_GUIDE.md) — CLI `--json` usage and Python API
-- [Install Guide](INSTALL.md) — Setup instructions
-- [X Auth Guide](X_AUTH_GUIDE.md) — Cookie-based authentication
+- [Agent Guide](AGENT_GUIDE.md)
+- [Install Guide](INSTALL.md)
+- [Open Source Integrations](OPEN_SOURCE_INTEGRATIONS.md)
+- [Ship Readiness Plan](SHIP_READINESS_PLAN.md)

@@ -60,6 +60,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 PLATFORMS = ("youtube", "instagram", "x", "tiktok")
+ACCOUNT_SECTIONS = (*PLATFORMS, "local")
 
 
 class AppController(QObject):
@@ -470,6 +471,147 @@ class AppController(QObject):
 
     # ── Q_INVOKABLE slots ────────────────────────────────────────────
 
+    @Slot(str, str, str, result=str)
+    def previewPost(self, video_path: str, caption: str, platforms_json: str = "") -> str:
+        """Return a no-network preflight preview for a manual post."""
+        try:
+            config = self._config or (XPSTConfig.load() if XPSTConfig is not None else None)
+            if config is None:
+                return json.dumps({"ok": False, "ready": False, "blocking": ["Config not loaded"], "warnings": []})
+
+            from xpst.platforms.base import PlatformRegistry
+
+            requested_platforms: list[str] = []
+            if platforms_json:
+                try:
+                    parsed = json.loads(platforms_json)
+                    if isinstance(parsed, list):
+                        requested_platforms = [str(item).lower() for item in parsed if str(item).strip()]
+                except json.JSONDecodeError:
+                    requested_platforms = [
+                        item.strip().lower()
+                        for item in platforms_json.split(",")
+                        if item.strip()
+                    ]
+
+            PlatformRegistry.auto_discover()
+            manifests = {
+                manifest.name: manifest
+                for manifest in PlatformRegistry.list_manifests(config)
+            }
+            enabled_platforms = [
+                name
+                for name in ("youtube", "instagram", "x")
+                if getattr(getattr(config, name), "enabled", False)
+            ]
+            targets = requested_platforms or enabled_platforms
+
+            path = Path(video_path).expanduser()
+            blocking: list[str] = []
+            warnings: list[str] = []
+            if not video_path.strip():
+                blocking.append("Choose a video file before posting.")
+            elif not path.exists():
+                blocking.append(f"Video file not found: {video_path}")
+            elif not path.is_file():
+                blocking.append(f"Video path is not a file: {video_path}")
+
+            supported_suffixes = {".mp4", ".mov", ".m4v", ".webm"}
+            if path.suffix.lower() and path.suffix.lower() not in supported_suffixes:
+                warnings.append(f"{path.suffix.lower()} may need conversion before upload.")
+
+            if not caption.strip():
+                warnings.append("Caption is empty.")
+
+            if not targets:
+                blocking.append("Enable at least one destination platform.")
+
+            platform_previews: list[dict[str, Any]] = []
+            for platform_name in targets:
+                if platform_name not in manifests:
+                    blocking.append(f"{platform_name} is not an installed destination provider.")
+                    continue
+
+                account = getattr(config, platform_name, None)
+                enabled = bool(getattr(account, "enabled", False))
+                manifest = manifests[platform_name]
+                extra = manifest.extra
+                platform_warnings: list[str] = []
+                platform_blocking: list[str] = []
+
+                if not enabled:
+                    platform_blocking.append(f"{manifest.display_name} is disabled.")
+
+                credential_path = AppController._credential_path_for_platform(config, platform_name)
+                if credential_path and not Path(credential_path).expanduser().exists():
+                    platform_blocking.append(f"{manifest.display_name} is not connected.")
+
+                max_caption = extra.get("max_caption_length")
+                if isinstance(max_caption, int) and len(caption) > max_caption:
+                    platform_blocking.append(
+                        f"{manifest.display_name} caption is {len(caption) - max_caption} character(s) too long."
+                    )
+
+                quota = getattr(self, "_quota", None)
+                if quota is not None:
+                    try:
+                        if not quota.can_upload(platform_name):
+                            platform_blocking.append(f"{manifest.display_name} daily quota is exhausted.")
+                    except Exception:
+                        platform_warnings.append(f"{manifest.display_name} quota could not be checked.")
+
+                platform_previews.append(
+                    {
+                        "name": platform_name,
+                        "display_name": manifest.display_name,
+                        "auth_mode": manifest.auth_mode.value,
+                        "official": manifest.is_official_api,
+                        "max_caption_length": max_caption,
+                        "caption_length": len(caption),
+                        "blocking": platform_blocking,
+                        "warnings": platform_warnings,
+                        "ready": not platform_blocking,
+                    }
+                )
+                blocking.extend(platform_blocking)
+                warnings.extend(platform_warnings)
+
+            file_size = path.stat().st_size if path.exists() and path.is_file() else 0
+            return json.dumps(
+                {
+                    "ok": True,
+                    "ready": not blocking,
+                    "video": {
+                        "path": str(path),
+                        "filename": path.name,
+                        "size_bytes": file_size,
+                        "size_mb": round(file_size / (1024 * 1024), 2) if file_size else 0,
+                    },
+                    "caption": caption,
+                    "caption_length": len(caption),
+                    "platforms": platform_previews,
+                    "blocking": blocking,
+                    "warnings": warnings,
+                },
+                default=str,
+            )
+        except Exception as exc:
+            logger.error("previewPost error: %s", exc)
+            return json.dumps({"ok": False, "ready": False, "blocking": [str(exc)], "warnings": []})
+
+    @staticmethod
+    def _credential_path_for_platform(config: Any, platform_name: str) -> str:
+        account = getattr(config, platform_name, None)
+        if account is None:
+            return ""
+        if platform_name == "youtube":
+            return str(getattr(account, "client_secrets", "") or "")
+        if platform_name == "x":
+            return str(getattr(account, "cookies_file", "") or "")
+        if platform_name == "instagram":
+            return str(getattr(account, "session_file", "") or "")
+        return ""
+
     @Slot(str, str)
     def postVideo(self, video_path: str, caption: str) -> None:
         """Post a video file to all enabled platforms.
@@ -482,14 +624,17 @@ class AppController(QObject):
             video_path: Absolute path to the video file.
             caption: Caption/title text for the post.
         """
+        preview = json.loads(self.previewPost(video_path, caption, ""))
+        if not preview.get("ready"):
+            blocking = preview.get("blocking") or ["Post is not ready."]
+            self.error.emit(str(blocking[0]))
+            return
+
         if not self._ensure_engine():
             self.error.emit("CrossPostEngine not available")
             return
 
         path = Path(video_path).expanduser()
-        if not path.exists():
-            self.error.emit(f"Video file not found: {video_path}")
-            return
 
         def _run() -> None:
             try:
@@ -634,7 +779,7 @@ class AppController(QObject):
 
             import yaml
 
-            config_path = Path("~/.xpst/config.yaml").expanduser()
+            config_path = Path(getattr(self._config, "config_dir", "~/.xpst")).expanduser() / "config.yaml"
             config_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Load existing YAML config
@@ -647,7 +792,7 @@ class AppController(QObject):
             if "accounts" not in existing:
                 existing["accounts"] = {}
 
-            for plat in PLATFORMS:
+            for plat in ACCOUNT_SECTIONS:
                 if plat in settings:
                     if plat not in existing["accounts"]:
                         existing["accounts"][plat] = {}
@@ -679,16 +824,72 @@ class AppController(QObject):
                 yaml.dump(existing, f, default_flow_style=False, sort_keys=False)
 
             # Reload config
-            self._config = XPSTConfig.load()
+            self._config = XPSTConfig.load(str(config_path))
             # Reset engine so it picks up new config on next use
             self._engine = None
             self.refreshData()
 
-            self.settingsSaved.emit(True, "Settings saved successfully")
+            if hasattr(self, "settingsSaved"):
+                self.settingsSaved.emit(True, "Settings saved successfully")
             return json.dumps({"ok": True})
         except Exception as exc:
             logger.error("saveSettings error: %s", exc)
-            self.settingsSaved.emit(False, str(exc))
+            if hasattr(self, "settingsSaved"):
+                self.settingsSaved.emit(False, str(exc))
+            return json.dumps({"ok": False, "error": str(exc)})
+
+    @Slot(str, result=str)
+    def saveOnboarding(self, onboarding_json: str) -> str:
+        """Persist first-run source/destination choices and return readiness."""
+        try:
+            data = json.loads(onboarding_json)
+        except json.JSONDecodeError as exc:
+            return json.dumps({"ok": False, "error": f"Invalid JSON: {exc}"})
+
+        if self._config is None:
+            return json.dumps({"ok": False, "error": "Config not loaded"})
+
+        try:
+            if isinstance(data.get("source"), dict):
+                source = data["source"]
+                source_type = str(source.get("type", "")).lower()
+                if source_type == "local":
+                    self._config.local.path = str(source.get("path", "")).strip()
+                elif source_type == "tiktok":
+                    self._config.tiktok.username = str(source.get("username", "")).strip()
+
+            if isinstance(data.get("local"), dict):
+                self._config.local.path = str(data["local"].get("path", self._config.local.path)).strip()
+
+            if isinstance(data.get("tiktok"), dict):
+                self._config.tiktok.username = str(data["tiktok"].get("username", self._config.tiktok.username)).strip()
+
+            if isinstance(data.get("destinations"), dict):
+                for name in ("youtube", "instagram", "x"):
+                    if name in data["destinations"]:
+                        getattr(self._config, name).enabled = bool(data["destinations"][name])
+
+            from xpst.readiness import repair_local_setup
+
+            repair_result = repair_local_setup(self._config)
+            self._config = XPSTConfig.load(str(Path(self._config.config_dir).expanduser() / "config.yaml"))
+            self._engine = None
+            self.refreshData()
+
+            if hasattr(self, "settingsSaved"):
+                self.settingsSaved.emit(True, "Onboarding saved")
+            return json.dumps(
+                {
+                    "ok": True,
+                    "actions": repair_result.get("actions", []),
+                    "readiness": repair_result["readiness"],
+                },
+                default=str,
+            )
+        except Exception as exc:
+            logger.error("saveOnboarding error: %s", exc)
+            if hasattr(self, "settingsSaved"):
+                self.settingsSaved.emit(False, str(exc))
             return json.dumps({"ok": False, "error": str(exc)})
 
     @Slot(str)
@@ -926,32 +1127,20 @@ class AppController(QObject):
 
     @Slot(result=str)
     def checkForUpdates(self) -> str:
-        """Check for available package updates.
-
-        Calls xpst.updater.check_updates() and returns a JSON summary
-        of installed versions, latest versions, and which packages
-        can be updated.
-
-        Returns:
-            JSON string with update status for each tracked package.
-        """
+        """Check app, package, helper, and provider metadata update status."""
         try:
-            from xpst.updater import check_updates as _check_updates
-            packages = _check_updates()
-            result: list[dict[str, Any]] = []
-            for pkg in packages:
-                result.append({
-                    "name": pkg.name,
-                    "current": pkg.current_version,
-                    "latest": pkg.latest_version,
-                    "installed": pkg.installed,
-                    "updatable": pkg.updatable,
-                    "error": pkg.error,
-                })
-            updatable_count = sum(1 for p in packages if p.updatable)
+            from xpst.updater import check_update_components
+
+            status = check_update_components(include_network=False)
+            updatable_count = sum(
+                1
+                for items in status.values()
+                for item in items
+                if item.get("updatable")
+            )
             return json.dumps({
                 "ok": True,
-                "packages": result,
+                "status": status,
                 "updatable_count": updatable_count,
             }, default=str)
         except Exception as exc:
@@ -960,6 +1149,68 @@ class AppController(QObject):
                 "ok": False,
                 "error": str(exc),
             })
+
+    @Slot(result=str)
+    def getProviders(self) -> str:
+        """Return supported source and destination providers as JSON."""
+        try:
+            from xpst.platforms.base import PlatformRegistry
+            from xpst.sources.base import SourceRegistry
+
+            config = self._config or (XPSTConfig.load() if XPSTConfig is not None else None)
+            if config is None:
+                return json.dumps({"ok": False, "error": "Config not loaded"})
+
+            SourceRegistry.auto_discover()
+            PlatformRegistry.auto_discover()
+            sources = SourceRegistry.list_manifests(config)
+            destinations = PlatformRegistry.list_manifests(config)
+            return json.dumps(
+                {
+                    "ok": True,
+                    "sources": [
+                        manifest.to_dict()
+                        for manifest in sorted(sources, key=lambda item: item.name)
+                    ],
+                    "destinations": [
+                        manifest.to_dict()
+                        for manifest in sorted(destinations, key=lambda item: item.name)
+                    ],
+                },
+                default=str,
+            )
+        except Exception as exc:
+            logger.error("getProviders error: %s", exc)
+            return json.dumps({"ok": False, "error": str(exc)})
+
+    @Slot(result=str)
+    def getReadiness(self) -> str:
+        """Return first-run readiness and next actions as JSON."""
+        try:
+            from xpst.readiness import build_readiness_report
+
+            report = build_readiness_report(self._config)
+            return json.dumps({"ok": True, "readiness": report.to_dict()}, default=str)
+        except Exception as exc:
+            logger.error("getReadiness error: %s", exc)
+            return json.dumps({"ok": False, "error": str(exc)})
+
+    @Slot(result=str)
+    def repairReadiness(self) -> str:
+        """Repair local setup folders and return updated readiness."""
+        try:
+            from xpst.readiness import repair_local_setup
+
+            if self._config is None:
+                return json.dumps({"ok": False, "error": "Config not loaded"})
+            result = repair_local_setup(self._config)
+            self._config = XPSTConfig.load()
+            self._engine = None
+            self.refreshData()
+            return json.dumps(result, default=str)
+        except Exception as exc:
+            logger.error("repairReadiness error: %s", exc)
+            return json.dumps({"ok": False, "error": str(exc)})
 
     @Slot(str, result=str)
     def getThumbnail(self, video_path: str) -> str:

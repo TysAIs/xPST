@@ -111,7 +111,7 @@ jobs:
 
       - name: Build package
         run: |
-          python -m build
+          python scripts/build_package.py
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

@@ -41,7 +41,27 @@ export APPLE_APP_PASSWORD="app-specific-password"
 bash scripts/sign_macos.sh dist/xPST.app
 ```
 
+Public macOS release validation must require Developer ID signing and notarization:
+
+```bash
+bash scripts/verify_macos.sh --public
+```
+
 ## Release Rule
 
 Unsigned artifacts are acceptable for development and CI smoke tests. Public GitHub Releases should include signed Windows/macOS artifacts, checksums, and SBOM files.
 
+Windows public-release smoke tests must require a valid Authenticode signature:
+
+```powershell
+python scripts/verify_windows_exe.py --path dist/xPST.exe --seconds 12 --json --clean-profile --require-signed
+```
+
+Run the release preflight before publishing:
+
+```bash
+python scripts/release_preflight.py --json
+python scripts/public_release_check.py --json
+```
+
+The default command reports local package readiness and warns about desktop/signing gaps. The public release check writes `release/live-platforms.json` and `release/public-preflight.json`, then fails until the desktop artifacts, signing/notarization prerequisites, and owner-run live platform evidence are present.

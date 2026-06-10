@@ -12,17 +12,15 @@ import sys
 import time
 from pathlib import Path
 
-from xpst.config import XPSTConfig
-
 
 class ConfigMigration:
     """Manages configuration file migrations."""
 
     CURRENT_VERSION = 4
-    
+
     MIGRATIONS = {
         1: "_migrate_v1_to_v2",
-        2: "_migrate_v2_to_v3", 
+        2: "_migrate_v2_to_v3",
         3: "_migrate_v3_to_v4",
     }
 
@@ -35,13 +33,10 @@ class ConfigMigration:
         if config_dir is None:
             if sys.platform == "win32":
                 appdata = os.environ.get("APPDATA")
-                if appdata:
-                    config_dir = Path(appdata) / "xPST"
-                else:
-                    config_dir = Path.home() / ".xpst"
+                config_dir = Path(appdata) / "xPST" if appdata else Path.home() / ".xpst"
             else:
                 config_dir = Path.home() / ".xpst"
-        
+
         self.config_dir = Path(config_dir)
         self.config_file = self.config_dir / "config.yaml"
         self.backup_dir = self.config_dir / "backups"
@@ -50,7 +45,7 @@ class ConfigMigration:
         """Check if config needs migration."""
         if not self.config_file.exists():
             return False
-        
+
         try:
             import yaml
             with open(self.config_file) as f:
@@ -83,7 +78,7 @@ class ConfigMigration:
             return False, f"Failed to read config: {e}"
 
         version = data.get("version", 1)
-        
+
         if version >= self.CURRENT_VERSION:
             return True, f"Config already at version {self.CURRENT_VERSION}"
 
@@ -91,11 +86,11 @@ class ConfigMigration:
             method_name = self.MIGRATIONS.get(v)
             if not method_name:
                 return False, f"No migration defined for version {v}"
-            
+
             method = getattr(self, method_name)
             data = method(data)
             data["version"] = v + 1
-            
+
             # Write intermediate state
             self._write_config(data)
 
@@ -107,12 +102,12 @@ class ConfigMigration:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         backup_path = self.backup_dir / f"config.yaml.backup_{timestamp}"
         shutil.copy2(self.config_file, backup_path)
-        
+
         # Keep only last 10 backups
         backups = sorted(self.backup_dir.glob("config.yaml.backup_*"))
         for old in backups[:-10]:
             old.unlink()
-        
+
         return backup_path
 
     def _write_config(self, data: dict) -> None:
@@ -135,7 +130,7 @@ class ConfigMigration:
             if platform in data:
                 accounts = data.setdefault("accounts", {})
                 accounts[platform] = data.pop(platform)
-        
+
         # Add monitoring with defaults
         if "monitoring" not in data:
             data["monitoring"] = {
@@ -145,7 +140,7 @@ class ConfigMigration:
                 "healthcheck_port": 8080,
                 "enable_metrics": True,
             }
-        
+
         # Add schedule with defaults
         if "schedule" not in data:
             data["schedule"] = {
@@ -153,14 +148,14 @@ class ConfigMigration:
                 "enabled": True,
                 "catch_up_max_hours": 24,
             }
-        
+
         return data
 
     def _migrate_v2_to_v3(self, data: dict) -> dict:
         """v2 -> v3: Add dashboard_password_hash, fix monitoring structure."""
         # Migration for dashboard password hashing
         monitoring = data.setdefault("monitoring", {})
-        
+
         # Migrate old plaintext dashboard_password to hash
         if "dashboard_password" in monitoring and "dashboard_password_hash" not in monitoring:
             old_pwd = monitoring.pop("dashboard_password")
@@ -169,14 +164,14 @@ class ConfigMigration:
                 monitoring["dashboard_password_hash"] = bcrypt.hashpw(
                     old_pwd.encode(), bcrypt.gensalt()
                 ).decode()
-        
+
         # Ensure all monitoring fields exist with correct structure
         monitoring.setdefault("log_level", "INFO")
         monitoring.setdefault("log_file", "~/.xpst/logs/xpst.log")
         monitoring.setdefault("log_rotation", "10 MB")
         monitoring.setdefault("healthcheck_port", 8080)
         monitoring.setdefault("enable_metrics", True)
-        
+
         # Add notifications section if missing
         if "notifications" not in data:
             data["notifications"] = {
@@ -187,7 +182,7 @@ class ConfigMigration:
                 "notify_on_error": True,
                 "notify_on_post": False,
             }
-        
+
         # Add video_processing section
         if "video_processing" not in data:
             data["video_processing"] = {
@@ -196,20 +191,23 @@ class ConfigMigration:
                 "ffmpeg_preset": "medium",
                 "auto_convert": True,
             }
-        
+
         return data
 
     def _migrate_v3_to_v4(self, data: dict) -> dict:
         """v3 -> v4: Add source-specific configs and cleaner accounts."""
         # Ensure all platforms have proper accounts structure
         accounts = data.setdefault("accounts", {})
-        
+        if not isinstance(accounts, dict):
+            accounts = {}
+            data["accounts"] = accounts
+
         for platform in ["youtube", "instagram", "x", "tiktok"]:
-            if platform not in accounts:
+            if platform not in accounts or not isinstance(accounts[platform], dict):
                 accounts[platform] = {}
             # Ensure each has required fields
             accounts[platform].setdefault("enabled", True)
-        
+
         # Add sources section
         if "sources" not in data:
             data["sources"] = {
@@ -218,7 +216,7 @@ class ConfigMigration:
                 "x": {"user_id": ""},
                 "instagram": {"username": ""},
             }
-        
+
         # Add anti_bot section
         if "anti_bot" not in data:
             data["anti_bot"] = {
@@ -227,7 +225,7 @@ class ConfigMigration:
                 "max_delay": 10.0,
                 "jitter": 0.3,
             }
-        
+
         # Add circuit_breaker section
         if "circuit_breaker" not in data:
             data["circuit_breaker"] = {
@@ -235,7 +233,7 @@ class ConfigMigration:
                 "recovery_timeout": 300,
                 "half_open_max_calls": 3,
             }
-        
+
         return data
 
 

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.config import XPSTConfig
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.sources.base import (
     ContentType,
     DownloadResult,
@@ -44,6 +45,32 @@ class InstagramSource(VideoSource):
     def source_name(self) -> str:
         """Return the source platform identifier."""
         return "instagram"
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return Instagram source capabilities."""
+        return ProviderManifest(
+            name="instagram",
+            display_name="Instagram",
+            roles=(ProviderRole.SOURCE,),
+            capabilities=(
+                ProviderCapability.LIST,
+                ProviderCapability.DOWNLOAD,
+                ProviderCapability.CAROUSEL,
+                ProviderCapability.HEALTH,
+                ProviderCapability.COOKIE_AUTH,
+                ProviderCapability.RATE_LIMITS,
+            ),
+            auth_mode=AuthMode.SESSION,
+            is_official_api=False,
+            docs_url="https://github.com/subzeroid/instagrapi",
+            notes="Uses persisted Instagram sessions through instagrapi for listing and downloading posts.",
+            extra={
+                "content": ("video", "image", "carousel"),
+                "helper": "instagrapi",
+                "auth_required": True,
+            },
+        )
 
     async def _get_client(self):
         """Get an authenticated Instagram client via SessionManager.

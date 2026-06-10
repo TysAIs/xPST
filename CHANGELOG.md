@@ -121,7 +121,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CHANGELOG.md — this file
 
 ### Testing
-- 793 tests (unit + integration + E2E)
+- 866 tests (unit + integration + E2E)
 - Integration tests: full pipeline, duplicate prevention, circuit breaker, rate limits, health check
 - CLI E2E tests: version, config, schedule, plugins via CliRunner
 - Cross-platform tests: Windows/macOS/Linux path handling

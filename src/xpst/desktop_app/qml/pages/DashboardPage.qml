@@ -21,10 +21,13 @@ Page {
         } catch(e) {}
         return ([])
     }
+    property var readinessData: ({ ready: true, summary: "", blocking: [], warnings: [] })
 
     Component.onCompleted: {
-        if (typeof controller !== "undefined")
+        if (typeof controller !== "undefined") {
             controller.refreshData()
+            dashboardPage.loadReadiness()
+        }
     }
 
     Connections {
@@ -33,8 +36,48 @@ Page {
             try {
                 dashboardPage.platformHealthData = JSON.parse(controller.platformHealth)
                 dashboardPage.recentPostsData = JSON.parse(controller.recentPosts)
+                dashboardPage.loadReadiness()
             } catch(e) {}
         }
+    }
+
+    function loadReadiness() {
+        if (typeof controller === "undefined" || !controller.getReadiness)
+            return
+        try {
+            var raw = controller.getReadiness()
+            var result = JSON.parse(raw)
+            if (result.ok && result.readiness)
+                dashboardPage.readinessData = result.readiness
+        } catch(e) {}
+    }
+
+    function canRepairLocalSetup() {
+        var blocking = dashboardPage.readinessData.blocking || []
+        for (var i = 0; i < blocking.length; i++) {
+            if (blocking[i].id === "directories")
+                return true
+        }
+        return false
+    }
+
+    function repairOrOpenConnections() {
+        if (typeof controller === "undefined")
+            return
+        if (dashboardPage.canRepairLocalSetup() && controller.repairReadiness) {
+            try {
+                var raw = controller.repairReadiness()
+                var result = JSON.parse(raw)
+                if (result.ok && result.readiness) {
+                    dashboardPage.readinessData = result.readiness
+                    if (typeof showToast !== "undefined")
+                        showToast("Local setup repaired", false)
+                    return
+                }
+            } catch(e) {}
+        }
+        if (typeof root !== "undefined" && root.navigateTo)
+            root.navigateTo("connect")
     }
 
     function platformColor(name) {
@@ -75,6 +118,124 @@ Page {
                     text: "Overview of your cross-posting performance"
                     font.pixelSize: 13
                     color: theme.textSecondary
+                }
+            }
+
+            // First-run readiness band
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: readinessContent.implicitHeight + theme.spacingXl
+                radius: theme.radiusLg
+                color: dashboardPage.readinessData.ready ? Qt.rgba(0.20, 0.72, 0.48, 0.10) : Qt.rgba(0.95, 0.55, 0.18, 0.12)
+                border.color: dashboardPage.readinessData.ready ? theme.success : theme.warning
+                border.width: 1
+                visible: dashboardPage.readinessData.summary && dashboardPage.readinessData.summary.length > 0
+
+                ColumnLayout {
+                    id: readinessContent
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.margins: theme.pageMargin
+                    spacing: theme.spacingMd
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: theme.spacingMd
+
+                        Rectangle {
+                            width: 10
+                            height: 10
+                            radius: 5
+                            color: dashboardPage.readinessData.ready ? theme.success : theme.warning
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: theme.spacingXs
+
+                            Text {
+                                text: dashboardPage.readinessData.ready ? "Ready to post" : "Setup needs attention"
+                                font.pixelSize: 15
+                                font.weight: Font.DemiBold
+                                color: theme.textPrimary
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                text: dashboardPage.readinessData.summary || ""
+                                font.pixelSize: 12
+                                color: theme.textSecondary
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        Rectangle {
+                            width: readinessButtonLabel.implicitWidth + 28
+                            height: 34
+                            radius: theme.radiusMd
+                            color: theme.accent
+                            visible: !dashboardPage.readinessData.ready
+
+                            Text {
+                                id: readinessButtonLabel
+                                anchors.centerIn: parent
+                                text: dashboardPage.canRepairLocalSetup() ? "Repair setup" : "Open connections"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#ffffff"
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: dashboardPage.repairOrOpenConnections()
+                                Accessible.name: dashboardPage.canRepairLocalSetup() ? "Repair local setup" : "Open connection setup"
+                                Accessible.role: Accessible.Button
+                            }
+                        }
+                    }
+
+                    Repeater {
+                        model: {
+                            var items = []
+                            var blocking = dashboardPage.readinessData.blocking || []
+                            var warnings = dashboardPage.readinessData.warnings || []
+                            for (var i = 0; i < Math.min(blocking.length, 3); i++)
+                                items.push(blocking[i])
+                            for (var j = 0; j < Math.min(warnings.length, 2); j++)
+                                items.push(warnings[j])
+                            return items
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: theme.spacingSm
+
+                            Text {
+                                text: modelData.severity === "error" ? "Required" : "Check"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                                color: modelData.severity === "error" ? theme.error : theme.warning
+                                Layout.preferredWidth: 68
+                            }
+                            Text {
+                                text: modelData.message || modelData.label || ""
+                                font.pixelSize: 12
+                                color: theme.textPrimary
+                                wrapMode: Text.WordWrap
+                                Layout.fillWidth: true
+                            }
+                            Text {
+                                text: modelData.action || ""
+                                font.pixelSize: 11
+                                color: theme.textMuted
+                                wrapMode: Text.WordWrap
+                                Layout.maximumWidth: 320
+                                visible: modelData.action && modelData.action.length > 0
+                            }
+                        }
+                    }
                 }
             }
 

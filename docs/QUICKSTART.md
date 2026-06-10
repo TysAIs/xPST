@@ -327,6 +327,6 @@ sudo systemctl start xpst
 
 ## Next Steps
 
-- Read the [Architecture Guide](docs/ARCHITECTURE.md) for technical details
-- Check [Contributing Guide](CONTRIBUTING.md) to contribute
-- Review [Configuration Reference](configs/example.yaml) for advanced options
+- Read the [Architecture Guide](ARCHITECTURE.md) for technical details
+- Check [Contributing Guide](../CONTRIBUTING.md) to contribute
+- Review [Configuration Reference](../configs/example.yaml) for advanced options

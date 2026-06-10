@@ -115,6 +115,98 @@ class SmokeController(QObject):
     def getGitLog(self) -> str:
         return json.dumps({"ok": False, "commits": []})
 
+    @Slot(result=str)
+    def getReadiness(self) -> str:
+        return json.dumps(
+            {
+                "ok": True,
+                "readiness": {
+                    "ready": False,
+                    "summary": "1 setup item must be fixed before posting.",
+                    "blocking": [
+                        {
+                            "severity": "error",
+                            "label": "Content source",
+                            "message": "No content source is configured.",
+                            "action": "Choose a source folder.",
+                        }
+                    ],
+                    "warnings": [],
+                },
+            }
+        )
+
+    @Slot(result=str)
+    def repairReadiness(self) -> str:
+        return json.dumps(
+            {
+                "ok": True,
+                "actions": ["created smoke folder"],
+                "readiness": {
+                    "ready": False,
+                    "summary": "1 setup item must be fixed before posting.",
+                    "blocking": [],
+                    "warnings": [],
+                },
+            }
+        )
+
+    @Slot(str, result=str)
+    def saveOnboarding(self, _payload: str) -> str:
+        return json.dumps(
+            {
+                "ok": True,
+                "readiness": {
+                    "ready": False,
+                    "summary": "1 setup item must be fixed before posting.",
+                    "blocking": [],
+                    "warnings": [],
+                },
+            }
+        )
+
+    @Slot(result=str)
+    def getProviders(self) -> str:
+        return json.dumps(
+            {
+                "ok": True,
+                "sources": [
+                    {
+                        "name": "tiktok",
+                        "display_name": "TikTok",
+                        "auth_mode": "cookies",
+                        "capabilities": ["list", "download", "carousel", "health"],
+                    },
+                    {
+                        "name": "local",
+                        "display_name": "Local Files",
+                        "auth_mode": "local",
+                        "capabilities": ["list", "download", "local_only"],
+                    },
+                ],
+                "destinations": [
+                    {
+                        "name": "youtube",
+                        "display_name": "YouTube Shorts",
+                        "auth_mode": "oauth",
+                        "capabilities": ["upload", "delete", "health"],
+                    },
+                    {
+                        "name": "instagram",
+                        "display_name": "Instagram Reels",
+                        "auth_mode": "session",
+                        "capabilities": ["upload", "delete", "carousel", "health"],
+                    },
+                    {
+                        "name": "x",
+                        "display_name": "X",
+                        "auth_mode": "cookies",
+                        "capabilities": ["upload", "delete", "carousel", "health"],
+                    },
+                ],
+            }
+        )
+
 
 def _make_engine(qml_dir: Path) -> tuple[QQmlApplicationEngine, ThemeProvider, SmokeController]:
     engine = QQmlApplicationEngine()

@@ -16,7 +16,6 @@ Example config file:
         client_secrets: "~/.xpst/credentials/youtube_client_secrets.json"
 """
 
-import hashlib
 import logging
 import os
 from dataclasses import dataclass, field
@@ -358,6 +357,7 @@ class XPSTConfig:
             with open(config_path, encoding="utf-8-sig") as f:
                 file_config = yaml.safe_load(f) or {}
             config = cls._merge_config(config, file_config)
+            config.config_dir = str(config_path.parent)
 
         # Auto-migrate config from older versions
         from xpst.config_migration import auto_migrate
@@ -682,14 +682,21 @@ class XPSTConfig:
                     "enabled": self.youtube.enabled,
                     "client_secrets": self.youtube.client_secrets,
                     "token_file": self.youtube.token_file,
+                    "channel_id": self.youtube.channel_id,
+                    "username": self.youtube.username,
                 },
                 "x": {
                     "enabled": self.x.enabled,
                     "cookies_file": self.x.cookies_file,
+                    "username": self.x.username,
                 },
                 "instagram": {
                     "enabled": self.instagram.enabled,
                     "session_file": self.instagram.session_file,
+                    "username": self.instagram.username,
+                },
+                "local": {
+                    "path": self.local.path,
                 },
             },
             "video": {

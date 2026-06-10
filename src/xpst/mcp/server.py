@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 from typing import Any
 
 from mcp.server import Server
@@ -25,8 +24,6 @@ from mcp.types import (
 
 from xpst.config import XPSTConfig
 from xpst.engine_v2 import CrossPostEngine
-from xpst.usecases import UseCaseFactory
-from xpst.state import StateManager
 from xpst.utils.logger import get_logger, setup_logging
 
 logger = get_logger(__name__)
@@ -61,11 +58,16 @@ class XPSTMCPServer:
 _server: XPSTMCPServer | None = None
 
 
-async def get_server(config: XPSTConfig | None = None) -> XPSTMCPServer:
+async def get_server(
+    config: XPSTConfig | None = None,
+    *,
+    initialize: bool = True,
+) -> XPSTMCPServer:
     """Get or create the global server instance."""
     global _server
     if _server is None:
         _server = XPSTMCPServer(config)
+    if initialize:
         await _server.initialize()
     return _server
 
@@ -207,6 +209,15 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="xpst_providers",
+        description="List supported content sources and posting destinations with capabilities",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_delete",
         description="Delete a post record from state",
         inputSchema={
@@ -232,25 +243,33 @@ TOOLS: list[Tool] = [
 
 async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
     """Handle a tool call."""
-    server = await get_server()
-    engine = server.get_engine()
+    engine_tools = {"xpst_run", "xpst_post", "xpst_health", "xpst_status", "xpst_backfill", "xpst_delete"}
+    server = await get_server(initialize=name in engine_tools)
 
     try:
         if name == "xpst_run":
+            engine = server.get_engine()
             return await _handle_run(engine, arguments)
         elif name == "xpst_post":
+            engine = server.get_engine()
             return await _handle_post(engine, arguments)
         elif name == "xpst_health":
+            engine = server.get_engine()
             return await _handle_health(engine)
         elif name == "xpst_status":
+            engine = server.get_engine()
             return await _handle_status(engine)
         elif name == "xpst_backfill":
+            engine = server.get_engine()
             return await _handle_backfill(engine, arguments)
         elif name == "xpst_config_show":
             return await _handle_config_show(server.config)
         elif name == "xpst_auth_status":
             return await _handle_auth_status(server.config)
+        elif name == "xpst_providers":
+            return await _handle_providers(server.config)
         elif name == "xpst_delete":
+            engine = server.get_engine()
             return await _handle_delete(engine, arguments)
         else:
             return CallToolResult(
@@ -410,7 +429,7 @@ async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
     stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (encrypted fallback)"
 
-    result = {
+    result: dict[str, Any] = {
         "credential_storage": storage_type,
         "stored_credentials": stored_keys,
         "platforms": {},
@@ -434,6 +453,36 @@ async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
     )
+
+
+async def _handle_providers(config: XPSTConfig) -> CallToolResult:
+    """Handle xpst_providers tool."""
+    data = build_provider_catalog(config)
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(data, indent=2, default=str))],
+    )
+
+
+def build_provider_catalog(config: XPSTConfig) -> dict[str, Any]:
+    """Return provider metadata for MCP clients and support tooling."""
+    from xpst.platforms.base import PlatformRegistry
+    from xpst.sources.base import SourceRegistry
+
+    SourceRegistry.auto_discover()
+    PlatformRegistry.auto_discover()
+    sources = SourceRegistry.list_manifests(config)
+    destinations = PlatformRegistry.list_manifests(config)
+
+    return {
+        "sources": [
+            manifest.to_dict()
+            for manifest in sorted(sources, key=lambda item: item.name)
+        ],
+        "destinations": [
+            manifest.to_dict()
+            for manifest in sorted(destinations, key=lambda item: item.name)
+        ],
+    }
 
 
 async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallToolResult:
@@ -469,7 +518,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
 
 async def main(config: XPSTConfig | None = None) -> None:
     """Run the MCP server over stdio."""
-    server = await get_server(config)
+    await get_server(config)
 
     # Run the MCP server
     async with stdio_server() as (read_stream, write_stream):

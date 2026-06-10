@@ -1,8 +1,8 @@
 # xPST Documentation
 
-**Enterprise-grade cross-posting for short-form video**
+**Free, local-first, provider-agnostic cross-posting for short-form video**
 
-Automatically distribute TikTok videos to YouTube Shorts, X/Twitter, and Instagram Reels.
+Automatically distribute short-form video from configured sources to connected destinations. xPST currently includes local files, TikTok, YouTube, Instagram, and X source adapters plus YouTube Shorts, Instagram Reels, and X destination adapters.
 
 ---
 
@@ -52,14 +52,14 @@ pip install xpst
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/xpst
-cd xpst
+git clone https://github.com/TysAIs/xPST.git
+cd xPST
 pip install -e .
 ```
 
 ### System requirements
 
-- Python 3.11+
+- Python 3.10+
 - FFmpeg (for video encoding)
 - yt-dlp (installed automatically)
 
@@ -339,6 +339,7 @@ xpst config import < backup.yaml
 | `config` | Configuration management |
 | `schedule` | Scheduled posts |
 | `logs` | View logs |
+| `diagnostics` | Export a redacted support bundle |
 | `dashboard` | Launch web API dashboard |
 | `mcp` | Start MCP server |
 | `setup` | Interactive setup wizard |
@@ -612,8 +613,8 @@ xpst health --json
 ### Development Setup
 
 ```bash
-git clone https://github.com/yourusername/xpst
-cd xpst
+git clone https://github.com/TysAIs/xPST.git
+cd xPST
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -623,7 +624,7 @@ pre-commit install
 ### Running Tests
 
 ```bash
-# All tests (793 tests)
+# All tests (800+ tests)
 pytest
 
 # Specific test file
@@ -658,11 +659,11 @@ mypy src/xpst
 
 ## License
 
-MIT License - see LICENSE file for details.
+Dual licensed as MIT OR Apache-2.0. See [LICENSE](../LICENSE) for details.
 
 ---
 
 ## Support
 
-- Issues: https://github.com/yourusername/xpst/issues
-- Discussions: https://github.com/yourusername/xpst/discussions
+- Issues: https://github.com/TysAIs/xPST/issues
+- Discussions: https://github.com/TysAIs/xPST/discussions

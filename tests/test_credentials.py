@@ -1,6 +1,5 @@
 """Tests for xPST credential storage"""
 
-import json
 
 from xpst.utils.credentials import CredentialStore
 

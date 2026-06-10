@@ -12,7 +12,7 @@ Configuration in config.yaml:
       discord:
         webhook_url: "https://discord.com/api/webhooks/..."
       telegram:
-        bot_token: "123456:ABC-DEF..."
+        bot_token: null
         chat_id: "-1001234567890"
 
 All notifications are sent asynchronously in the background to avoid

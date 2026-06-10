@@ -23,7 +23,12 @@ Data leaves the machine only when xPST talks to a platform or service that the u
 
 ## Credential Storage
 
-xPST stores credentials in the OS keychain when available. If the keychain is unavailable, xPST falls back to local JSON files in the user configuration directory. Those fallback files are not encrypted by xPST and rely on operating-system filesystem permissions.
+xPST stores credentials in the OS keychain when available. If the keychain is
+unavailable, xPST falls back to local `.enc` files in the user configuration
+directory and encrypts them with Fernet when the bundled `cryptography`
+dependency is available. If `cryptography` is deliberately removed or
+unavailable, fallback storage relies on operating-system filesystem permissions
+and xPST logs a warning.
 
 ## User Responsibility
 
@@ -33,4 +38,3 @@ Users are responsible for:
 - Reviewing platform Terms of Service before enabling integrations
 - Avoiding spam, platform manipulation, and unauthorized scraping
 - Removing credentials with `xpst auth logout` or by deleting local xPST credential files when needed
-

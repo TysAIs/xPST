@@ -18,17 +18,22 @@ This provides:
 - No plain-text secrets on disk
 - Integration with system security policies
 
-### Fallback: Local File Storage
+### Fallback: Local Encrypted File Storage
 
-If the OS keychain is unavailable (e.g., headless server, Docker container), xPST falls back to file-based storage in `~/.xpst/credentials/`. These files are JSON-encoded but **not encrypted** — the OS filesystem permissions provide the security layer.
+If the OS keychain is unavailable (for example in a headless server or Docker
+container), xPST falls back to file-based storage in `~/.xpst/credentials/`.
+Fallback credentials are written as `.enc` files and encrypted with Fernet when
+the `cryptography` dependency is available, which is part of the normal xPST
+install. If `cryptography` is deliberately removed or unavailable, xPST can only
+fall back to filesystem permissions and logs a warning.
 
 ### What Is Stored
 
 | Credential | Key | Storage |
 |---|---|---|
-| YouTube OAuth Token | `youtube_token` | Keychain / file |
-| X/Twitter Cookies | `x_cookies` | Keychain / file |
-| Instagram Session | `instagram_session` | Keychain / file |
+| YouTube OAuth Token | `youtube_token` | Keychain / encrypted file fallback |
+| X/Twitter Cookies | `x_cookies` | Keychain / encrypted file fallback |
+| Instagram Session | `instagram_session` | Keychain / encrypted file fallback |
 
 ### What Is NOT Stored
 

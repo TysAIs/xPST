@@ -38,12 +38,13 @@ Expected result:
 - `ruff check src tests` passes
 - `mypy src/xpst` passes
 - `pip-audit` reports no known vulnerabilities
-- `python -m build` creates wheel and sdist
+- `python scripts/build_package.py` creates wheel and sdist
 - `xpst version --json` emits valid JSON
 - `xpst health --json` emits valid JSON and clearly reports missing credentials instead of crashing
 - QML smoke test prints `root_objects 1`
 - PyInstaller creates `dist/xPST.app`
-- `dist/SHA256SUMS` and `dist/xpst-sbom.cdx.json` exist
+- `python scripts/verify_macos_artifact.py --app dist/xPST.app --json` passes
+- `release/SHA256SUMS` and `release/xpst-sbom.cdx.json` exist
 
 ## Manual Desktop Smoke
 
@@ -85,6 +86,7 @@ Expected result:
 - `.app` verifies with `codesign`
 - `.dmg` is created
 - If Apple credentials are set, the DMG is notarized and stapled
+- `python scripts/verify_macos_artifact.py --app dist/xPST.app --dmg dist/xPST.dmg --json` reports the signed/notarized status
 
 ## Account-Owner Auth Tests
 
@@ -95,6 +97,7 @@ xpst auth youtube
 xpst auth instagram
 xpst auth x
 xpst health --json
+python scripts/verify_live_platforms.py --require --json
 ```
 
 Expected result:
@@ -103,6 +106,7 @@ Expected result:
 - Instagram reports session valid after login.
 - X reports cookies/session valid after auth.
 - TikTok/source health reports available when username/cookies are configured.
+- `verify_live_platforms.py` reports `passed` for credential-ready destinations.
 
 ## Return To Windows Agent
 
@@ -115,4 +119,3 @@ Send back:
 - `dist` artifact list
 - Whether the app opened manually
 - Whether signing/notarization was ad-hoc or Developer ID
-

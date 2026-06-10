@@ -1,7 +1,7 @@
 """Use-case for cross-posting videos to platforms."""
 
 from xpst.platforms.base import UploadResult
-from xpst.usecases.base import BaseUseCase, CrossPostResult, UseCaseDependencies
+from xpst.usecases.base import BaseUseCase, CrossPostResult
 
 
 class CrossPostVideoUseCase(BaseUseCase):
@@ -26,14 +26,14 @@ class CrossPostVideoUseCase(BaseUseCase):
         # Determine target platforms
         if platforms is None:
             platforms = list(self.deps.platforms.keys())
-        
+
         # Filter to only configured platforms
         target_platforms = [p for p in platforms if p in self.deps.platforms]
-        
+
         results = {}
         all_success = True
         any_success = False
-        
+
         for platform_name in target_platforms:
             uploader = self.deps.platforms[platform_name]
             try:
@@ -53,7 +53,7 @@ class CrossPostVideoUseCase(BaseUseCase):
                     error=str(e)
                 )
                 all_success = False
-        
+
         return CrossPostResult(
             video_id=video_id,
             caption=caption,

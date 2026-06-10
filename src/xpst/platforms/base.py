@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.config import XPSTConfig
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -72,6 +73,21 @@ class PlatformUploader(ABC):
     def platform_name(self) -> str:
         """Get the platform name"""
         return self._platform_name
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return provider metadata for UI, CLI, MCP, and updater use."""
+        return ProviderManifest(
+            name=self.platform_name,
+            display_name=self.platform_name.title(),
+            roles=(ProviderRole.DESTINATION,),
+            capabilities=(
+                ProviderCapability.UPLOAD,
+                ProviderCapability.HEALTH,
+                ProviderCapability.RATE_LIMITS,
+            ),
+            auth_mode=AuthMode.UNKNOWN,
+        )
 
     @abstractmethod
     async def upload(self, video_path: Path, caption: str) -> UploadResult:
@@ -224,3 +240,41 @@ class PlatformRegistry:
     def list_platforms(cls) -> list[str]:
         """List all registered platforms"""
         return list(cls._registry.keys())
+
+    @classmethod
+    def list_manifests(cls, config: XPSTConfig) -> list[ProviderManifest]:
+        """Return manifests for all registered destination providers."""
+        manifests: list[ProviderManifest] = []
+        for name in cls.list_platforms():
+            try:
+                manifests.append(cls.get(name, config).manifest)
+            except Exception as e:
+                logger.debug(f"Could not load platform manifest for {name}: {e}")
+        return manifests
+
+    @classmethod
+    def auto_discover(cls) -> None:
+        """Auto-discover and register all platform modules in this package."""
+
+        import importlib
+        import pkgutil
+
+        import xpst.platforms as platforms_pkg
+
+        for _importer, modname, _ispkg in pkgutil.iter_modules(platforms_pkg.__path__):
+            if modname.startswith("_") or modname == "base":
+                continue
+            try:
+                module = importlib.import_module(f"xpst.platforms.{modname}")
+            except ImportError as e:
+                logger.debug(f"Could not import platform module {modname}: {e}")
+                continue
+
+            for value in vars(module).values():
+                if (
+                    isinstance(value, type)
+                    and issubclass(value, PlatformUploader)
+                    and value is not PlatformUploader
+                ):
+                    name = value.__name__.lower().replace("uploader", "")
+                    cls.register(name, value)

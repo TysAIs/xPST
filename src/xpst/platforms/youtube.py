@@ -14,10 +14,10 @@ Upload specs:
 """
 
 from pathlib import Path
-import asyncio
 
 from xpst.config import XPSTConfig
-from xpst.platforms.base import PlatformHealth, PlatformUploader, UploadResult
+from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -41,6 +41,32 @@ class YouTubeUploader(PlatformUploader):
         """Initialize YouTube uploader with lazy service caching."""
         super().__init__(config)
         self._service = None  # Cached YouTube API service
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return YouTube destination capabilities."""
+        return ProviderManifest(
+            name="youtube",
+            display_name="YouTube Shorts",
+            roles=(ProviderRole.DESTINATION,),
+            capabilities=(
+                ProviderCapability.UPLOAD,
+                ProviderCapability.DELETE,
+                ProviderCapability.HEALTH,
+                ProviderCapability.OFFICIAL_API,
+                ProviderCapability.OAUTH,
+                ProviderCapability.RATE_LIMITS,
+            ),
+            auth_mode=AuthMode.OAUTH,
+            is_official_api=True,
+            docs_url="https://developers.google.com/youtube/v3",
+            notes="Uploads and deletes Shorts through the YouTube Data API v3.",
+            extra={
+                "content": ("video",),
+                "max_duration_seconds": 60,
+                "auth_scopes": self.SCOPES,
+            },
+        )
 
     async def _get_service(self):
         """Get or create a YouTube Data API v3 service object via SessionManager.
@@ -292,3 +318,6 @@ class YouTubeUploader(PlatformUploader):
         except Exception as e:
             logger.error(f"Failed to delete YouTube video {post_id}: {e}")
             return False
+
+
+PlatformRegistry.register("youtube", YouTubeUploader)

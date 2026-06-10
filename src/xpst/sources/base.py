@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.config import XPSTConfig
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 
 
 class ContentType(str, Enum):
@@ -115,6 +116,21 @@ class VideoSource(ABC):
         """Get the source platform name"""
         pass
 
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return provider metadata for UI, CLI, MCP, and updater use."""
+        return ProviderManifest(
+            name=self.source_name,
+            display_name=self.source_name.title(),
+            roles=(ProviderRole.SOURCE,),
+            capabilities=(
+                ProviderCapability.LIST,
+                ProviderCapability.DOWNLOAD,
+                ProviderCapability.HEALTH,
+            ),
+            auth_mode=AuthMode.UNKNOWN,
+        )
+
     @abstractmethod
     async def list_videos(self, max_count: int = 10) -> list[VideoMetadata]:
         """
@@ -199,6 +215,19 @@ class SourceRegistry:
         return list(cls._registry.keys())
 
     @classmethod
+    def list_manifests(cls, config: XPSTConfig) -> list[ProviderManifest]:
+        """Return manifests for all registered source providers."""
+        manifests: list[ProviderManifest] = []
+        for name in cls.list_sources():
+            try:
+                manifests.append(cls.get(name, config).manifest)
+            except Exception as e:
+                import logging
+
+                logging.getLogger(__name__).debug(f"Could not load source manifest for {name}: {e}")
+        return manifests
+
+    @classmethod
     def auto_discover(cls) -> None:
         """Auto-discover and register all source modules in this package.
 
@@ -214,13 +243,23 @@ class SourceRegistry:
         import xpst.sources as sources_pkg
 
         for _importer, modname, _ispkg in pkgutil.iter_modules(sources_pkg.__path__):
-            if modname.startswith("_"):
+            if modname.startswith("_") or modname == "base":
                 continue
             try:
-                importlib.import_module(f"xpst.sources.{modname}")
+                module = importlib.import_module(f"xpst.sources.{modname}")
             except ImportError as e:
                 # Log but don't fail - some sources may have optional deps
                 import logging
                 logging.getLogger(__name__).debug(
                     f"Could not import source module {modname}: {e}"
                 )
+                continue
+
+            for value in vars(module).values():
+                if (
+                    isinstance(value, type)
+                    and issubclass(value, VideoSource)
+                    and value is not VideoSource
+                ):
+                    name = value.__name__.lower().replace("source", "")
+                    cls.register(name, value)

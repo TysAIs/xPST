@@ -7,7 +7,6 @@ dead letter queue, circuit breaker state, and health metrics.
 from __future__ import annotations
 
 import hashlib
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -37,11 +36,8 @@ class StateManager:
         Args:
             config: XPSTConfig instance or config directory path
         """
-        if isinstance(config, XPSTConfig):
-            config_dir = config.config_dir
-        else:
-            config_dir = config
-        
+        config_dir = config.config_dir if isinstance(config, XPSTConfig) else config
+
         self._state_dir = Path(config_dir).expanduser().resolve()
         self._store = StateStore(self._state_dir)
         self._save_lock = self._store._thread_lock  # Use store's lock
@@ -103,7 +99,7 @@ class StateManager:
         content_hash: str | None,
     ) -> dict[str, Any]:
         now = datetime.utcnow().isoformat()
-        
+
         if video_id not in state["posted_videos"]:
             state["posted_videos"][video_id] = {
                 "source_url": source_url,
@@ -114,10 +110,10 @@ class StateManager:
                 "last_attempt": now,
                 "content_hash": content_hash,
             }
-        
+
         video = state["posted_videos"][video_id]
         video["last_attempt"] = now
-        
+
         if posted_to:
             for platform, info in posted_to.items():
                 video["posted_to"][platform] = {
@@ -125,15 +121,15 @@ class StateManager:
                     "url": info.get("url", ""),
                     "timestamp": info.get("timestamp", now),
                 }
-        
+
         # Track content hash for deduplication
         if content_hash:
             state["content_hashes"][content_hash] = video_id
-        
+
         # Update health stats
         state["health"]["total_processed"] = state["health"].get("total_processed", 0) + 1
         state["health"]["last_check"] = now
-        
+
         for platform, info in (posted_to or {}).items():
             if platform in state["health"]["platforms"]:
                 state["health"]["platforms"][platform].update({
@@ -141,7 +137,7 @@ class StateManager:
                     "last_success": info.get("timestamp", now),
                     "failures": 0,
                 })
-        
+
         return state
 
     def record_failure(
@@ -161,7 +157,7 @@ class StateManager:
         error: str,
     ) -> dict[str, Any]:
         now = datetime.utcnow().isoformat()
-        
+
         if video_id not in state["posted_videos"]:
             state["posted_videos"][video_id] = {
                 "source_url": "",
@@ -173,10 +169,10 @@ class StateManager:
                 "content_hash": None,
                 "errors": {},
             }
-        
+
         video = state["posted_videos"][video_id]
         video["last_attempt"] = now
-        
+
         if "errors" not in video:
             video["errors"] = {}
         video["errors"][platform] = {
@@ -184,7 +180,7 @@ class StateManager:
             "timestamp": now,
             "count": video["errors"].get(platform, {}).get("count", 0) + 1,
         }
-        
+
         # Update platform health
         if platform in state["health"]["platforms"]:
             state["health"]["platforms"][platform]["failures"] = (
@@ -192,7 +188,7 @@ class StateManager:
             )
             state["health"]["platforms"][platform]["status"] = "error"
             state["health"]["platforms"][platform]["last_error"] = error
-        
+
         # Record failure in failed_attempts for tracking (not in posted_to - that's for successful posts only)
         if "failed_attempts" not in video:
             video["failed_attempts"] = {}
@@ -201,7 +197,7 @@ class StateManager:
             "timestamp": now,
             "count": video["failed_attempts"].get(platform, {}).get("count", 0) + 1,
         }
-        
+
         return state
 
     def remove_post(self, video_id: str, platform: str) -> None:
@@ -262,11 +258,10 @@ class StateManager:
     def clear_dead_letter_queue(self) -> int:
         """Clear all dead letter queue entries."""
         cleared = 0
-        
+
         def clear_dlq(state: dict[str, Any]) -> dict[str, Any]:
             nonlocal cleared
-            to_remove = []
-            for video_id, video in state["posted_videos"].items():
+            for _video_id, video in state["posted_videos"].items():
                 if "errors" in video and video["errors"]:
                     for platform in list(video["errors"].keys()):
                         del video["errors"][platform]
@@ -274,7 +269,7 @@ class StateManager:
                     if not video["errors"]:
                         del video["errors"]
             return state
-        
+
         self._store.update(clear_dlq)
         return cleared
 
@@ -288,13 +283,10 @@ class StateManager:
     ) -> None:
         """Update platform health status."""
         now = last_success or datetime.utcnow().isoformat()
-        
+
         # Handle boolean status for backward compatibility
-        if isinstance(status, bool):
-            status_str = "ok" if status else "error"
-        else:
-            status_str = status
-        
+        status_str = ("ok" if status else "error") if isinstance(status, bool) else status
+
         def update_health(state: dict[str, Any]) -> dict[str, Any]:
             if platform in state["health"]["platforms"]:
                 state["health"]["platforms"][platform].update({
@@ -314,35 +306,33 @@ class StateManager:
                     state["health"]["platforms"][platform]["failures"] = 0
                     state["health"]["platforms"][platform]["last_error"] = None
             return state
-        
+
         self._store.update(update_health)
 
     def update_last_check_time(self) -> None:
         """Update the last check timestamp."""
         now = datetime.utcnow().isoformat()
-        
+
         def update_check(state: dict[str, Any]) -> dict[str, Any]:
             state["health"]["last_check"] = now
             return state
-        
+
         self._store.update(update_check)
 
     def update_last_wake_check(self) -> None:
         """Update the last wake check timestamp."""
         now = datetime.utcnow().isoformat()
-        
+
         def update_wake(state: dict[str, Any]) -> dict[str, Any]:
             state["health"]["last_wake_check"] = now
             return state
-        
+
         self._store.update(update_wake)
 
     # ── Circuit Breaker State ──
 
     def record_circuit_breaker_failure(self, platform: str) -> None:
         """Record a circuit breaker failure."""
-        now = datetime.utcnow().isoformat()
-        
         def update_cb(state: dict[str, Any]) -> dict[str, Any]:
             if platform not in state["health"]["platforms"]:
                 state["health"]["platforms"][platform] = {"status": "ok", "last_success": None, "failures": 0}
@@ -350,13 +340,13 @@ class StateManager:
                 state["health"]["platforms"][platform].get("failures", 0) + 1
             )
             return state
-        
+
         self._store.update(update_cb)
 
     def record_circuit_breaker_success(self, platform: str) -> None:
         """Record a circuit breaker success (reset failures)."""
         now = datetime.utcnow().isoformat()
-        
+
         def update_cb(state: dict[str, Any]) -> dict[str, Any]:
             if platform in state["health"]["platforms"]:
                 state["health"]["platforms"][platform].update({
@@ -365,7 +355,7 @@ class StateManager:
                     "failures": 0,
                 })
             return state
-        
+
         self._store.update(update_cb)
 
     def is_circuit_breaker_open(self, platform: str) -> bool:
@@ -380,22 +370,22 @@ class StateManager:
     def get_statistics(self) -> dict[str, Any]:
         """Get aggregate cross-posting statistics."""
         state = self._state
-        
+
         # Count by platform
         by_platform = {"youtube": 0, "x": 0, "instagram": 0, "tiktok": 0}
         total_videos = len(state["posted_videos"])
         total_processed = state["health"].get("total_processed", 0)
         cross_posted_count = 0
-        
+
         for video in state["posted_videos"].values():
             for platform in video.get("posted_to", {}):
                 if platform in by_platform:
                     by_platform[platform] += 1
                 cross_posted_count += 1
-        
+
         # Dead letter count
         dlq_count = len(self.get_dead_letter_queue())
-        
+
         # Platform health
         platform_health = {}
         for platform, health in state["health"]["platforms"].items():
@@ -404,7 +394,7 @@ class StateManager:
                 "last_success": health.get("last_success"),
                 "failures": health.get("failures", 0),
             }
-        
+
         return {
             "version": state.get("version", 1),
             "total_videos_tracked": total_videos,

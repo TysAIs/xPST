@@ -30,8 +30,8 @@ python -m pytest
 ruff check src tests
 mypy src/xpst
 pip-audit
-python -m build
-python scripts/release_artifacts.py --dist dist
+python scripts/build_package.py
+python scripts/release_artifacts.py --dist dist --output-dir release --skip-checks
 
 git add pyproject.toml src/xpst/__init__.py
 git commit -m "release: v${VERSION}"

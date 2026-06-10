@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.config import XPSTConfig
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.sources.base import (
     ContentType,
     DownloadResult,
@@ -49,6 +50,31 @@ class LocalSource(VideoSource):
     def source_name(self) -> str:
         """Return the source platform identifier."""
         return "local"
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return local source capabilities."""
+        return ProviderManifest(
+            name="local",
+            display_name="Local Files",
+            roles=(ProviderRole.SOURCE,),
+            capabilities=(
+                ProviderCapability.LIST,
+                ProviderCapability.DOWNLOAD,
+                ProviderCapability.CAROUSEL,
+                ProviderCapability.HEALTH,
+                ProviderCapability.LOCAL_ONLY,
+            ),
+            auth_mode=AuthMode.LOCAL,
+            is_official_api=False,
+            is_local_first=True,
+            notes="Scans local folders and files without any network service.",
+            extra={
+                "content": ("video", "image", "carousel"),
+                "video_extensions": tuple(sorted(VIDEO_EXTENSIONS)),
+                "image_extensions": tuple(sorted(IMAGE_EXTENSIONS)),
+            },
+        )
 
     def set_path(self, path: str | Path) -> None:
         """

@@ -17,10 +17,10 @@ Quality notes:
 
 import asyncio
 import json
-import subprocess
 from pathlib import Path
 
 from xpst.config import XPSTConfig
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.sources.base import (
     ContentType,
     DownloadResult,
@@ -61,6 +61,32 @@ class TikTokSource(VideoSource):
     def source_name(self) -> str:
         """Return the source platform identifier."""
         return "tiktok"
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return TikTok source capabilities."""
+        return ProviderManifest(
+            name="tiktok",
+            display_name="TikTok",
+            roles=(ProviderRole.SOURCE,),
+            capabilities=(
+                ProviderCapability.LIST,
+                ProviderCapability.DOWNLOAD,
+                ProviderCapability.CAROUSEL,
+                ProviderCapability.HEALTH,
+                ProviderCapability.COOKIE_AUTH,
+                ProviderCapability.RATE_LIMITS,
+            ),
+            auth_mode=AuthMode.COOKIES,
+            is_official_api=False,
+            docs_url="https://github.com/yt-dlp/yt-dlp",
+            notes="Uses yt-dlp extraction with optional browser cookies or cookies file for better access.",
+            extra={
+                "content": ("video", "image_carousel"),
+                "helper": "yt-dlp",
+                "auth_optional": True,
+            },
+        )
 
     def _find_yt_dlp(self) -> str:
         """Find the yt-dlp binary on the system.

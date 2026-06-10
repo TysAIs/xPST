@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.config import XPSTConfig
+from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.sources.base import (
     ContentType,
     DownloadResult,
@@ -47,6 +48,31 @@ class XSource(VideoSource):
     def source_name(self) -> str:
         """Return the source platform identifier."""
         return "x"
+
+    @property
+    def manifest(self) -> ProviderManifest:
+        """Return X source capabilities."""
+        return ProviderManifest(
+            name="x",
+            display_name="X",
+            roles=(ProviderRole.SOURCE,),
+            capabilities=(
+                ProviderCapability.LIST,
+                ProviderCapability.DOWNLOAD,
+                ProviderCapability.HEALTH,
+                ProviderCapability.COOKIE_AUTH,
+                ProviderCapability.RATE_LIMITS,
+            ),
+            auth_mode=AuthMode.COOKIES,
+            is_official_api=False,
+            docs_url="https://github.com/yt-dlp/yt-dlp",
+            notes="Uses yt-dlp for media downloads and twikit cookies for richer timeline metadata when available.",
+            extra={
+                "content": ("video",),
+                "helpers": ("yt-dlp", "twikit"),
+                "auth_optional": True,
+            },
+        )
 
     def _find_yt_dlp(self) -> str:
         """Find yt-dlp binary"""

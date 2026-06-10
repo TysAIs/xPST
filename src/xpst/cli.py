@@ -133,9 +133,38 @@ def setup():
 
 @main.command()
 @click.option("--check", "check_only", is_flag=True, help="Check for updates without installing")
-def update(check_only: bool):
+@click.option("--components", is_flag=True, help="Show app, helper, and provider metadata update status")
+@json_option
+def update(check_only: bool, components: bool, as_json: bool):
     """Update xPST dependencies to latest versions"""
-    from xpst.updater import check_updates, display_update_status, update_all
+    from xpst.updater import check_update_components, check_updates, display_update_status, update_all
+
+    if components:
+        status = check_update_components(include_network=check_only)
+        if as_json:
+            json_output(status, True)
+        else:
+            for section, items in status.items():
+                table = Table(title=section.replace("_", " ").title())
+                table.add_column("Name", style="cyan")
+                table.add_column("Type")
+                table.add_column("Installed")
+                table.add_column("Current")
+                table.add_column("Update Mode")
+                table.add_column("Status")
+                table.add_column("Action")
+                for item in items:
+                    table.add_row(
+                        str(item["name"]),
+                        str(item["component_type"]),
+                        "yes" if item["installed"] else "no",
+                        str(item["current_version"] or "unknown"),
+                        str(item["update_mode"]),
+                        str(item.get("status") or "unknown"),
+                        str(item.get("action") or ""),
+                    )
+                console.print(table)
+        return
 
     if check_only:
         console.print("[bold blue]Checking for updates...[/bold blue]\n")
@@ -486,6 +515,86 @@ def status(ctx: click.Context, as_json: bool):
             )
 
         console.print(quota_table)
+
+
+@main.command()
+@click.option("--fix", "fix_local", is_flag=True, help="Create missing local folders and save safe defaults")
+@json_option
+@click.pass_context
+def readiness(ctx: click.Context, fix_local: bool, as_json: bool):
+    """Show first-run readiness and next actions"""
+    from xpst.readiness import build_readiness_report, repair_local_setup
+
+    config = load_config(ctx.obj.get("config_path"))
+    if fix_local:
+        result = repair_local_setup(config, ctx.obj.get("config_path"))
+        if as_json:
+            json_output(result, True)
+        else:
+            console.print("[green]Local setup repaired[/green]")
+            for action in result["actions"]:
+                console.print(f"  {action}")
+            console.print(result["readiness"]["summary"])
+        return
+
+    report = build_readiness_report(config)
+
+    if as_json:
+        json_output(report.to_dict(), True)
+        return
+
+    console.print("[bold blue]xPST Readiness[/bold blue]\n")
+    console.print(report.summary)
+    table = Table(title="Setup Checks")
+    table.add_column("Status")
+    table.add_column("Check", style="cyan")
+    table.add_column("Message")
+    table.add_column("Next Action")
+    for check in report.checks:
+        icon = "OK" if check.ok else "FIX" if check.severity == "error" else "WARN"
+        table.add_row(icon, check.label, check.message, check.action or "-")
+    console.print(table)
+
+
+@main.command()
+@json_option
+@click.pass_context
+def providers(ctx: click.Context, as_json: bool):
+    """Show supported source and destination providers"""
+    from xpst.platforms.base import PlatformRegistry
+    from xpst.sources.base import SourceRegistry
+
+    config = load_config(ctx.obj.get("config_path"))
+    SourceRegistry.auto_discover()
+    PlatformRegistry.auto_discover()
+    sources = SourceRegistry.list_manifests(config)
+    destinations = PlatformRegistry.list_manifests(config)
+    data = {
+        "sources": [manifest.to_dict() for manifest in sorted(sources, key=lambda item: item.name)],
+        "destinations": [
+            manifest.to_dict()
+            for manifest in sorted(destinations, key=lambda item: item.name)
+        ],
+    }
+
+    if as_json:
+        json_output(data, True)
+        return
+
+    for title, manifests in (("Sources", data["sources"]), ("Destinations", data["destinations"])):
+        table = Table(title=title)
+        table.add_column("Provider", style="cyan")
+        table.add_column("Auth")
+        table.add_column("Official API")
+        table.add_column("Capabilities")
+        for manifest in manifests:
+            table.add_row(
+                str(manifest["display_name"]),
+                str(manifest["auth_mode"]),
+                "yes" if manifest["is_official_api"] else "no",
+                ", ".join(str(capability) for capability in manifest["capabilities"]),
+            )
+        console.print(table)
 
 
 @main.command()
@@ -899,6 +1008,32 @@ def logs(ctx: click.Context, as_json: bool):
 
 
 @main.command()
+@click.option("--output", "-o", default=None, type=click.Path(), help="Output zip path")
+@click.option("--log-lines", default=200, type=int, show_default=True, help="Recent log lines to include")
+@json_option
+@click.pass_context
+def diagnostics(ctx: click.Context, output: str | None, log_lines: int, as_json: bool):
+    """Export a redacted local diagnostics bundle."""
+    from xpst.diagnostics import build_diagnostics_bundle
+
+    config = load_config(ctx.obj.get("config_path"))
+    try:
+        path = build_diagnostics_bundle(config, output=output, log_lines=log_lines)
+    except OSError as e:
+        if as_json:
+            json_output({"ok": False, "error": str(e)}, True)
+        else:
+            console.print(f"[red]Failed to create diagnostics bundle:[/red] {e}")
+        sys.exit(EXIT_GENERAL)
+
+    if as_json:
+        json_output({"ok": True, "output": str(path), "redacted": True}, True)
+    else:
+        console.print(f"[green]Diagnostics bundle written:[/green] [bold]{path}[/bold]")
+        console.print("[dim]Review diagnostics.json before sharing if logs may contain private details.[/dim]")
+
+
+@main.command()
 @click.argument('video_id')
 @click.option('--platform', '-p', help='Platform to delete from (default: all)')
 @click.option('--yes', '-y', is_flag=True, help='Skip confirmation')
@@ -1008,8 +1143,8 @@ def app(ctx: click.Context, port: int | None, no_splash: bool):
 @main.command()
 def mcp():
     """Start MCP (Model Context Protocol) server over stdio"""
-    from xpst.mcp_server import main as mcp_main
-    mcp_main()
+    from xpst.mcp import cli_main
+    cli_main()
 
 
 # ──────────────────────────────────────────────

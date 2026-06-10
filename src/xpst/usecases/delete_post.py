@@ -1,6 +1,6 @@
 """Use-case for deleting posts from state and optionally platforms."""
 
-from xpst.usecases.base import BaseUseCase, DeletePostResult, UseCaseDependencies
+from xpst.usecases.base import BaseUseCase, DeletePostResult
 
 
 class DeletePostUseCase(BaseUseCase):
