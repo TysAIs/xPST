@@ -444,16 +444,18 @@ Page {
                                         width: platformLabel.implicitWidth + theme.spacingMd
                                         height: platformLabel.implicitHeight + theme.spacingXs
                                         radius: theme.radiusSm
-                                        color: dashboardPage.platformColor(modelData.platform)
-                                        opacity: 0.2
+                                        // Tint the chip with the platform color at low alpha so the
+                                        // label stays readable (was: blanket opacity 0.2 fading the text
+                                        // too, plus an invalid opacity: 5.0 on the Text).
+                                        readonly property color platformColor: dashboardPage.platformColor(modelData.platform)
+                                        color: Qt.rgba(platformColor.r, platformColor.g, platformColor.b, 0.2)
                                         Text {
                                             id: platformLabel
                                             anchors.centerIn: parent
                                             text: modelData.platform
                                             font.pixelSize: 11
                                             font.weight: Font.DemiBold
-                                            color: parent.color
-                                            opacity: 5.0
+                                            color: parent.platformColor
                                         }
                                     }
                                     Text {

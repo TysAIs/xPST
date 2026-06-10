@@ -1,5 +1,6 @@
 ﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
 
 
@@ -12,6 +13,11 @@ ApplicationWindow {
     minimumHeight: 600
     title: "xPST - Cross-Posting Suite"
     color: theme.canvas
+
+    // Bind the Material style to the live ThemeProvider so native Material
+    // controls follow the app theme instead of rendering default-purple (W4-6).
+    Material.theme: theme.darkMode ? Material.Dark : Material.Light
+    Material.accent: theme.accent
 
     property string currentPage: "dashboard"
     property var dialogStack: []
@@ -251,6 +257,7 @@ ApplicationWindow {
                     }
 
                     ProgressBar {
+                        id: uploadBar
                         from: 0
                         to: 100
                         value: root.uploadProgresses[modelData] || 0
@@ -267,7 +274,7 @@ ApplicationWindow {
                         contentItem: Item {
                             implicitHeight: 6
                             Rectangle {
-                                width: parent.width * (progressBarVisual.parent ? progressBarVisual.parent.parent.parent.value / 100 : 0)
+                                width: parent.width * uploadBar.position
                                 height: 6
                                 radius: 3
                                 color: theme.accent

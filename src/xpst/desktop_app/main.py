@@ -17,7 +17,7 @@ logger = logging.getLogger("xpst.desktop")
 
 # ── PySide6 imports ──────────────────────────────────────────────────
 from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication, QMenu, QSplashScreen, QSystemTrayIcon
 
@@ -36,7 +36,12 @@ except ImportError:
     QQuickStyle = None  # type: ignore[assignment,misc]
 
 # ── xPST desktop modules ────────────────────────────────────────────
-from xpst.desktop_app.backend import AppController, ThemeProvider
+from xpst.desktop_app import icon_glyphs
+from xpst.desktop_app.backend import (
+    AppController,
+    ThemeProvider,
+    _default_ui_font,
+)
 from xpst.desktop_app.models import PostListModel
 
 
@@ -234,6 +239,36 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
     return tray
 
 
+def _load_icon_font() -> bool:
+    """Register the bundled Lucide icon font with Qt's font database (W4-5).
+
+    Returns True if the font loaded and registered under the expected family.
+    The icon glyphs exposed by ThemeProvider only render if this family is
+    available, so a load failure is logged loudly. Non-fatal: the app still
+    runs (icons just fall back to whatever the family resolves to).
+    """
+    font_path = icon_glyphs.icon_font_path()
+    if not font_path.exists():
+        logger.warning(
+            "Icon font not found at %s; icon glyphs may render as boxes.",
+            font_path,
+        )
+        return False
+    font_id = QFontDatabase.addApplicationFont(str(font_path))
+    if font_id < 0:
+        logger.warning("Failed to register icon font %s with Qt.", font_path)
+        return False
+    families = QFontDatabase.applicationFontFamilies(font_id)
+    if icon_glyphs.ICON_FONT_FAMILY not in families:
+        logger.warning(
+            "Icon font registered as %s, expected %s; icon bindings may not "
+            "resolve.",
+            families,
+            icon_glyphs.ICON_FONT_FAMILY,
+        )
+    return True
+
+
 def main(no_splash: bool = False) -> int:
     """Launch the xPST desktop application."""
     # Must use QApplication (not QGuiApplication) for system tray support
@@ -249,6 +284,13 @@ def main(no_splash: bool = False) -> int:
     else:
         import os
         os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Material")
+
+    # Register the bundled icon font so theme.icon* glyphs render (W4-5).
+    _load_icon_font()
+
+    # Apply a platform-aware default UI font so text metrics don't drift on
+    # macOS/Linux (W4-7). QML elements that don't set font.family inherit this.
+    app.setFont(QFont(_default_ui_font()))
 
     # ── Splash Screen ────────────────────────────────────────────────
     no_splash = "--no-splash" in sys.argv

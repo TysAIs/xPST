@@ -109,6 +109,8 @@ def require_pyside6() -> None:
         ) from _PYSIDE6_IMPORT_ERROR
 
 
+from xpst.desktop_app import icon_glyphs
+
 # ── Optional xPST dependencies (graceful fallback) ───────────────────
 try:
     from xpst.config import XPSTConfig
@@ -1570,6 +1572,31 @@ class AppController(QObject):
             })
 
 
+def _default_ui_font() -> str:
+    """Return a sensible default UI font family for the current platform (W4-7).
+
+    The app previously hardcoded "Segoe UI", which only exists on Windows; on
+    macOS and Linux Qt silently substituted a different family, drifting the
+    text metrics the layout was tuned against. This returns the native UI font
+    per platform so each OS uses its intended family.
+    """
+    if sys.platform == "darwin":
+        return "SF Pro Text"
+    if sys.platform.startswith("win"):
+        return "Segoe UI"
+    # Linux / other: a widely-installed, metrically-sane sans family.
+    return "Noto Sans"
+
+
+def _default_mono_font() -> str:
+    """Return a sensible default monospace font family for the platform (W4-7)."""
+    if sys.platform == "darwin":
+        return "SF Mono"
+    if sys.platform.startswith("win"):
+        return "Cascadia Mono"
+    return "DejaVu Sans Mono"
+
+
 class ThemeProvider(QObject):
     """Theme colors and design tokens exposed to QML.
 
@@ -1691,21 +1718,69 @@ class ThemeProvider(QObject):
     @Property(int, constant=True)
     def pageMargin(self): return 28
 
-    # Radius (constant in both modes)
+    # Radius (constant in both modes). radiusLg and radiusXl were duplicate
+    # literal 8s; they now resolve to one shared base so future tweaks stay in
+    # one place (W4-8: de-dupe, not a re-skin — values are unchanged).
+    _RADIUS_LG = 8
+
     @Property(int, constant=True)
     def radiusSm(self): return 4
     @Property(int, constant=True)
     def radiusMd(self): return 6
     @Property(int, constant=True)
-    def radiusLg(self): return 8
+    def radiusLg(self): return self._RADIUS_LG
     @Property(int, constant=True)
-    def radiusXl(self): return 8
+    def radiusXl(self): return self._RADIUS_LG
+
+    # Control-height scale (W4-8). Before this, button/control heights were
+    # scattered raw literals (26/28/30/32/34/36/40). These three named steps
+    # cover the sensible existing sizes so usages can point at a token instead
+    # of a magic number. Values are chosen to match the heights already in use
+    # (sm≈small chips, md≈standard buttons, lg≈primary actions) — this is
+    # de-duplication, not a redesign.
+    @Property(int, constant=True)
+    def controlHeightSm(self): return 28
+    @Property(int, constant=True)
+    def controlHeightMd(self): return 36
+    @Property(int, constant=True)
+    def controlHeightLg(self): return 44
+
+    # Platform-aware default font (W4-7). The previous hardcoded "Segoe UI" /
+    # "Cascadia Mono" exist only on Windows, so mac/Linux fell back to an
+    # unintended family and drifted in metrics. Pick a sensible per-platform
+    # default while keeping Windows on its original families.
+    @Property(str, constant=True)
+    def fontFamily(self): return _default_ui_font()
 
     @Property(str, constant=True)
-    def fontFamily(self): return "Segoe UI"
+    def monoFontFamily(self): return _default_mono_font()
+
+    # Icon font (W4-4 / W4-5). The single source of truth for icon glyphs is
+    # icon_glyphs.py, routed through the bundled Lucide font. These properties
+    # make the existing `theme.icon*` QML references (previously resolving to
+    # the dead Theme.qml singleton) resolve on the live ThemeProvider instead.
+    @Property(str, constant=True)
+    def iconFontFamily(self): return icon_glyphs.ICON_FONT_FAMILY
 
     @Property(str, constant=True)
-    def monoFontFamily(self): return "Cascadia Mono"
+    def iconYouTube(self): return icon_glyphs.glyph("youtube")
+    @Property(str, constant=True)
+    def iconInstagram(self): return icon_glyphs.glyph("instagram")
+    @Property(str, constant=True)
+    def iconX(self): return icon_glyphs.glyph("x")
+    @Property(str, constant=True)
+    def iconTikTok(self): return icon_glyphs.glyph("tiktok")
+
+    @Property(str, constant=True)
+    def iconLogo(self): return icon_glyphs.glyph("logo")
+    @Property(str, constant=True)
+    def iconBell(self): return icon_glyphs.glyph("bell")
+    @Property(str, constant=True)
+    def iconMoon(self): return icon_glyphs.glyph("moon")
+    @Property(str, constant=True)
+    def iconSun(self): return icon_glyphs.glyph("sun")
+    @Property(str, constant=True)
+    def iconStats(self): return icon_glyphs.glyph("stats")
 
     # Dark mode toggle
     @Property(bool, notify=darkModeChanged)

@@ -1,6 +1,7 @@
 ﻿import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import xpst.desktop_app.qml 1.0
 
 
 Rectangle {
@@ -39,6 +40,7 @@ Rectangle {
 
                 Text {
                     text: theme.iconLogo
+                    font.family: theme.iconFontFamily
                     font.pixelSize: 20
                 }
                 Text {
@@ -57,14 +59,17 @@ Rectangle {
         Item { Layout.preferredHeight: theme.spacingXl }
 
         Repeater {
+            // Icons routed through the bundled Lucide icon font (W4-3/W4-5).
+            // The Analytics entry previously used a corrupted U+FFFD glyph; all
+            // nav icons now use real font glyphs so none render as tofu boxes.
             model: [
-                { label: "Dashboard", icon: "◈", page: "dashboard" },
-                { label: "Content",   icon: "▣", page: "content" },
-                { label: "Analytics", icon: "�", page: "analytics" },
-                { label: "Connect",   icon: "◐", page: "connect" },
-                { label: "Schedule",  icon: "⏰", page: "schedule" },
-                { label: "Settings",  icon: "⚙", page: "settings" },
-                { label: "About",     icon: "ℹ", page: "about" }
+                { label: "Dashboard", icon: Icons.dashboard, page: "dashboard" },
+                { label: "Content",   icon: Icons.content,   page: "content" },
+                { label: "Analytics", icon: Icons.analytics, page: "analytics" },
+                { label: "Connect",   icon: Icons.connect,   page: "connect" },
+                { label: "Schedule",  icon: Icons.schedule,  page: "schedule" },
+                { label: "Settings",  icon: Icons.settings,  page: "settings" },
+                { label: "About",     icon: Icons.about,     page: "about" }
             ]
 
             Rectangle {
@@ -84,6 +89,7 @@ Rectangle {
 
                     Text {
                         text: modelData.icon
+                        font.family: theme.iconFontFamily
                         font.pixelSize: 14
                         Layout.preferredWidth: 24
                         horizontalAlignment: Text.AlignHCenter
@@ -138,6 +144,7 @@ Rectangle {
 
                     Text {
                         text: theme.iconStats
+                        font.family: theme.iconFontFamily
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
                         color: theme.accent
@@ -207,6 +214,7 @@ Rectangle {
 
                     Text {
                         text: theme.iconBell
+                        font.family: theme.iconFontFamily
                         font.pixelSize: 14
                         color: theme.textSecondary
                         anchors.centerIn: parent
@@ -395,6 +403,7 @@ Rectangle {
 
                 Text {
                     text: theme.darkMode ? theme.iconMoon : theme.iconSun
+                    font.family: theme.iconFontFamily
                     font.pixelSize: 14
                     color: theme.textSecondary
                     Layout.preferredWidth: 24
