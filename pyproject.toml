@@ -83,8 +83,11 @@ dashboard = [
 pyside6 = [
     "PySide6>=6.5.0",
 ]
+knowledge = [
+    "faster-whisper>=1.0.0",
+]
 full = [
-    "xpst[mcp,desktop,pyside6,dashboard,windows]",
+    "xpst[mcp,desktop,pyside6,dashboard,windows,knowledge]",
 ]
 dev = [
     "pytest>=7.0.0",
