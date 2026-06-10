@@ -1,5 +1,6 @@
 """`xpst kb ...` command group. Heavy imports happen inside commands so the
-core CLI can attach this group without loading faster-whisper."""
+core CLI can attach this group without loading faster-whisper / fastembed /
+lancedb."""
 from __future__ import annotations
 
 import click
@@ -8,16 +9,33 @@ from rich.console import Console
 console = Console()
 
 
-def _build_transcriber():
+def _missing_extra(exc: Exception) -> click.ClickException:
+    return click.ClickException(
+        "Knowledge features need the extra: pip install 'xpst[knowledge]'"
+    )
+
+
+def _build_transcriber(config):
     """Isolated so tests can monkeypatch it. Raises a friendly error if the
     knowledge extra is not installed."""
     try:
         from xpst.knowledge.ingest.transcribe import FasterWhisperTranscriber
     except ImportError as exc:  # pragma: no cover - exercised manually
-        raise click.ClickException(
-            "Knowledge features need the extra: pip install 'xpst[knowledge]'"
-        ) from exc
-    return FasterWhisperTranscriber()
+        raise _missing_extra(exc) from exc
+    return FasterWhisperTranscriber(model_size=config.whisper_model)
+
+
+def _build_embedder(config):
+    """Isolated so tests can monkeypatch it."""
+    from xpst.knowledge.llm.embeddings import build_embedder
+    return build_embedder(config)
+
+
+def _build_llm_client(config):
+    """Isolated so tests can monkeypatch it."""
+    from xpst.knowledge.llm.client import LLMClient
+    return LLMClient(base_url=config.llm_base_url, model=config.llm_model,
+                     api_key=config.llm_api_key)
 
 
 @click.group()
@@ -30,14 +48,34 @@ def kb() -> None:
 @click.option("--workspace", "-w", default="default", help="Workspace name")
 def kb_add(source: str, workspace: str) -> None:
     """Ingest a local file or URL into the knowledge base."""
+    from xpst.knowledge.config import KnowledgeConfig
     from xpst.knowledge.ingest.pipeline import ingest
+    from xpst.knowledge.manifest import Manifest
     from xpst.knowledge.store.json_store import JsonKnowledgeStore
     from xpst.knowledge.workspace import Workspace
 
+    config = KnowledgeConfig.from_env()
     ws = Workspace.resolve(workspace)
     store = JsonKnowledgeStore(ws.nuggets_path)
-    nugget = ingest(source, store=store, transcriber=_build_transcriber())
-    console.print(f"[green]Ingested[/green] {source} -> nugget {nugget.id}")
+    manifest = Manifest(ws.manifest_path)
+    result = ingest(
+        source,
+        store=store,
+        transcriber=_build_transcriber(config),
+        manifest=manifest,
+        embedder=_build_embedder(config),
+        llm_client=_build_llm_client(config),
+    )
+    if result.skipped:
+        console.print(f"[yellow]Skipped[/yellow] {source} ({result.reason})")
+    elif result.reason:
+        console.print(f"[red]Failed[/red] {source}: {result.reason}")
+        raise SystemExit(1)
+    else:
+        console.print(
+            f"[green]Ingested[/green] {len(result.nuggets)} nuggets "
+            f"from {source}"
+        )
 
 
 @kb.command("query")

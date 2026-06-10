@@ -1,24 +1,86 @@
-"""Phase 1 ingestion pipeline: resolve -> transcribe -> one nugget -> store.
-Synchronous. The durable queue + worker arrive in Phase 5."""
+"""Phase 2 ingestion pipeline:
+
+  resolve -> (manifest dedup short-circuit) -> transcribe -> extract_nuggets
+          -> embed each -> store each -> IngestResult
+
+Synchronous. The durable queue + worker arrive in Phase 5.
+
+Reliability (spec §5): a failed transcription or extraction returns an
+``IngestResult`` with an empty nugget list and a reason, and NEVER writes a
+partial store — store writes and the manifest record happen only after every
+nugget is successfully built and embedded.
+"""
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+from xpst.knowledge.ingest.extract import extract_nuggets as _default_extract
 from xpst.knowledge.ingest.resolve import resolve_source, source_id
-from xpst.knowledge.ingest.transcribe import Transcriber
+from xpst.knowledge.ingest.transcribe import Transcriber, Transcript
+from xpst.knowledge.manifest import Manifest
 from xpst.knowledge.models import Nugget
 from xpst.knowledge.store.base import KnowledgeStore
 
 
-def ingest(source: str, *, store: KnowledgeStore,
-           transcriber: Transcriber) -> Nugget:
-    media_path = resolve_source(source)
-    transcript = transcriber.transcribe(media_path)
+@dataclass(frozen=True)
+class IngestResult:
+    nuggets: list[Nugget] = field(default_factory=list)
+    skipped: bool = False
+    reason: str | None = None
+
+
+# Extractor signature: (transcript, llm_client) -> list[nugget dict]
+Extractor = Callable[[Transcript, Any], list[dict[str, Any]]]
+
+
+class _Embedder:  # structural; matches llm.embeddings.Embedder
+    dim: int
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
+
+
+def ingest(source: str, *, store: KnowledgeStore, transcriber: Transcriber,
+           manifest: Manifest, embedder: _Embedder, llm_client: Any,
+           extractor: Extractor | None = None) -> IngestResult:
+    extractor = extractor or _default_extract
+    sid = source_id(source)
+
+    # Dedup short-circuit: a source recorded in the manifest is never re-ingested.
+    if manifest.has_source(sid):
+        return IngestResult(nuggets=[], skipped=True,
+                            reason=f"already ingested: {sid}")
+
     is_url = source.startswith(("http://", "https://"))
-    nugget = Nugget.create(
-        point=transcript.text,
-        source_video_id=source_id(source),
-        timestamp_start=transcript.start,
-        timestamp_end=transcript.end,
-        source_url=source if is_url else None,
-    )
-    store.add_nugget(nugget)
-    return nugget
+    source_url = source if is_url else None
+
+    # Build everything in memory first; only persist on full success so a bad
+    # video can never corrupt the store (spec §5: graceful degradation).
+    try:
+        media_path = resolve_source(source)
+        transcript = transcriber.transcribe(media_path)
+        raw_nuggets = extractor(transcript, llm_client)
+        points = [r["point"] for r in raw_nuggets]
+        vectors = embedder.embed(points) if points else []
+        embed_dim = embedder.dim if points else 0
+        built: list[Nugget] = []
+        for raw, vec in zip(raw_nuggets, vectors):
+            nugget = Nugget.create(
+                point=raw["point"],
+                source_video_id=sid,
+                timestamp_start=float(raw["timestamp_start"]),
+                timestamp_end=float(raw["timestamp_end"]),
+                source_url=source_url,
+            ).with_embedding(vec)
+            built.append(nugget)
+    except Exception as exc:  # noqa: BLE001 - one bad video must not corrupt the store
+        return IngestResult(nuggets=[], skipped=False, reason=str(exc))
+
+    # Success path: persist nuggets, then record the source in the manifest.
+    for nugget in built:
+        store.add_nugget(nugget)
+    manifest.record(sid, source=source_url,
+                    embed_model=getattr(embedder, "model_name", "unknown"),
+                    embed_dim=embed_dim)
+    return IngestResult(nuggets=built, skipped=False, reason=None)
