@@ -330,6 +330,7 @@ class TestMcpCommand:
 
     def test_mcp_command_uses_packaged_entrypoint(self, runner, monkeypatch):
         """mcp command delegates to xpst.mcp.cli_main."""
+        pytest.importorskip("mcp", reason="mcp extra not installed")
         called = {}
 
         def fake_cli_main():

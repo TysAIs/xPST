@@ -332,8 +332,13 @@ class TestMissingFiles:
         with pytest.raises(RuntimeError, match="FFmpeg not found"):
             VideoProcessor(ffmpeg_path="/nonexistent/ffmpeg")
 
-    def test_ffmpeg_empty_string_falls_back(self):
-        """VideoProcessor with empty string falls back to platform default."""
+    def test_ffmpeg_empty_string_falls_back(self, monkeypatch):
+        """VideoProcessor with empty string falls back to platform default.
+
+        The fallback logic is what's under test, not ffmpeg presence, so stub
+        verification to keep the test independent of a system ffmpeg binary.
+        """
+        monkeypatch.setattr(VideoProcessor, "_verify_ffmpeg", lambda self: None)
         vp = VideoProcessor(ffmpeg_path="")
         assert vp.ffmpeg_path  # resolved to platform default, not empty
 

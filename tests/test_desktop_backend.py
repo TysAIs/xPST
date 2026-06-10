@@ -4,6 +4,10 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
+pytest.importorskip("PySide6", reason="desktop extra not installed")
+
 from xpst.config import XPSTConfig
 from xpst.desktop_app.backend import AppController
 

@@ -21,6 +21,21 @@ def _no_real_keyring(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _stub_ffmpeg_verification(request, monkeypatch):
+    """Most tests construct VideoProcessor (directly or via the engine), but the
+    dev/CI box may not have ffmpeg on PATH. Stub the verification so tests don't
+    fail on a missing system binary. Tests that specifically exercise ffmpeg
+    detection live in a 'stress' or 'video' module and opt out.
+    """
+    basename = request.node.fspath.basename
+    if any(k in basename for k in ("stress", "video", "cross_platform")):
+        return
+    from xpst.utils.video import VideoProcessor
+
+    monkeypatch.setattr(VideoProcessor, "_verify_ffmpeg", lambda self: None)
+
+
+@pytest.fixture(autouse=True)
 def _disable_anti_bot_time_checks(request, monkeypatch):
     """Disable anti-bot time-of-day checks in all tests except anti_bot tests.
 

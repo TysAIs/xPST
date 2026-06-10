@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+pytest.importorskip("mcp", reason="mcp extra not installed")
+
 from xpst.config import XPSTConfig
 from xpst.mcp import server as mcp_server
 
