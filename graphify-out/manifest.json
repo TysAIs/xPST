@@ -30,9 +30,9 @@
     "semantic_hash": "d2d9450cce73fbb147ec3dd597c33fb4"
   },
   "~/xPST/scripts/release_artifacts.py": {
-    "mtime": 1781082646.9656956,
-    "ast_hash": "4e9df20bb0c86fb8dc58ba7626405072",
-    "semantic_hash": "4e9df20bb0c86fb8dc58ba7626405072"
+    "mtime": 1781117991.6680012,
+    "ast_hash": "fac58b35cc564d888f49c16dda01bf00",
+    "semantic_hash": "fac58b35cc564d888f49c16dda01bf00"
   },
   "~/xPST/scripts/release_preflight.py": {
     "mtime": 1781082646.9656956,
@@ -115,9 +115,9 @@
     "semantic_hash": "949417c030fe9fa5d9b7553066e12b38"
   },
   "~/xPST/src/xpst/cli.py": {
-    "mtime": 1781082646.9666,
-    "ast_hash": "f1f93fd388177970e963421a85c39dd9",
-    "semantic_hash": "f1f93fd388177970e963421a85c39dd9"
+    "mtime": 1781126596.3130195,
+    "ast_hash": "453aa06264b8d787594da5fc9f0fc620",
+    "semantic_hash": "453aa06264b8d787594da5fc9f0fc620"
   },
   "~/xPST/src/xpst/config.py": {
     "mtime": 1781082646.9666,
@@ -165,14 +165,14 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "~/xPST/src/xpst/desktop_app/backend.py": {
-    "mtime": 1781082646.9673147,
-    "ast_hash": "3cc5fd269f92e6a6ebf78bb67c1f8e71",
-    "semantic_hash": "3cc5fd269f92e6a6ebf78bb67c1f8e71"
+    "mtime": 1781130252.258022,
+    "ast_hash": "73a4adb1ddb6561e030e15c864707b9c",
+    "semantic_hash": "73a4adb1ddb6561e030e15c864707b9c"
   },
   "~/xPST/src/xpst/desktop_app/main.py": {
-    "mtime": 1781082646.9673147,
-    "ast_hash": "48efa78ddb8a3e6d959ae7cda27f77b5",
-    "semantic_hash": "48efa78ddb8a3e6d959ae7cda27f77b5"
+    "mtime": 1781130252.258022,
+    "ast_hash": "c0ceefdc93f573247c4474c290d4d0f9",
+    "semantic_hash": "c0ceefdc93f573247c4474c290d4d0f9"
   },
   "~/xPST/src/xpst/desktop_app/models.py": {
     "mtime": 1781082646.9673147,
@@ -210,9 +210,9 @@
     "semantic_hash": "6c00005cdba0b8afa6678628020db159"
   },
   "~/xPST/src/xpst/mcp/server.py": {
-    "mtime": 1781082646.96869,
-    "ast_hash": "6d6b0d9040921ac086c2a08833df5775",
-    "semantic_hash": "6d6b0d9040921ac086c2a08833df5775"
+    "mtime": 1781122165.7047913,
+    "ast_hash": "ff093449d2eedc1eb5fa2635ee637ab2",
+    "semantic_hash": "ff093449d2eedc1eb5fa2635ee637ab2"
   },
   "~/xPST/src/xpst/mcp_server.py": {
     "mtime": 1781082646.96869,
@@ -250,9 +250,9 @@
     "semantic_hash": "e4ae63d697a88436357e9ec6af095040"
   },
   "~/xPST/src/xpst/plugins/__init__.py": {
-    "mtime": 1781082646.9688458,
-    "ast_hash": "052f9ad6e68c6bc3ce9abe7e47e19c7f",
-    "semantic_hash": "052f9ad6e68c6bc3ce9abe7e47e19c7f"
+    "mtime": 1781122165.6897912,
+    "ast_hash": "ce296f38c98aa586a7fa48653fc52d77",
+    "semantic_hash": "ce296f38c98aa586a7fa48653fc52d77"
   },
   "~/xPST/src/xpst/providers.py": {
     "mtime": 1781082646.9688458,
@@ -330,14 +330,14 @@
     "semantic_hash": "e6fc9a70e5c08fdb71004eed1a5db873"
   },
   "~/xPST/src/xpst/state.py": {
-    "mtime": 1781082646.969386,
-    "ast_hash": "1f9042b9f30de9bd9b5cbc7e7cc8a0f1",
-    "semantic_hash": "1f9042b9f30de9bd9b5cbc7e7cc8a0f1"
+    "mtime": 1781122165.7023456,
+    "ast_hash": "34d82691d6694030745e93d888a443d9",
+    "semantic_hash": "34d82691d6694030745e93d888a443d9"
   },
   "~/xPST/src/xpst/state_manager.py": {
-    "mtime": 1781082646.969386,
-    "ast_hash": "363350d28ad7c9cfed51006256588cfa",
-    "semantic_hash": "363350d28ad7c9cfed51006256588cfa"
+    "mtime": 1781122165.7023456,
+    "ast_hash": "7ccd970f5790783655cfc9453f2485aa",
+    "semantic_hash": "7ccd970f5790783655cfc9453f2485aa"
   },
   "~/xPST/src/xpst/state_store.py": {
     "mtime": 1781082646.969386,
@@ -440,9 +440,9 @@
     "semantic_hash": "dc0c51f4b927ad55a63596a379e595e8"
   },
   "~/xPST/src/xpst/utils/platform.py": {
-    "mtime": 1781082646.9700942,
-    "ast_hash": "8db206e76372bc618ced0fb9e87624fe",
-    "semantic_hash": "8db206e76372bc618ced0fb9e87624fe"
+    "mtime": 1781126313.2573268,
+    "ast_hash": "0c2453dcce54f2525b7d89890acd6d63",
+    "semantic_hash": "0c2453dcce54f2525b7d89890acd6d63"
   },
   "~/xPST/src/xpst/utils/progress.py": {
     "mtime": 1781082646.9700942,
@@ -470,9 +470,9 @@
     "semantic_hash": "28fcae26fb54e23a38d5f582bd6006cc"
   },
   "~/xPST/src/xpst/utils/video.py": {
-    "mtime": 1781082646.9700942,
-    "ast_hash": "333786b08dde2b2e80a762699269c19f",
-    "semantic_hash": "333786b08dde2b2e80a762699269c19f"
+    "mtime": 1781127003.501287,
+    "ast_hash": "09d7def36f34218261fefa89d3ed5f20",
+    "semantic_hash": "09d7def36f34218261fefa89d3ed5f20"
   },
   "~/xPST/tests/__init__.py": {
     "mtime": 1781082646.9700942,
@@ -480,9 +480,9 @@
     "semantic_hash": "7c04a00936b8ce35061a7a86e3396015"
   },
   "~/xPST/tests/conftest.py": {
-    "mtime": 1781082646.970656,
-    "ast_hash": "005136bb4524fb196432c665b0b542db",
-    "semantic_hash": "005136bb4524fb196432c665b0b542db"
+    "mtime": 1781117765.485824,
+    "ast_hash": "ae31fd0101fa4290af01260c11f612b8",
+    "semantic_hash": "ae31fd0101fa4290af01260c11f612b8"
   },
   "~/xPST/tests/test_analytics.py": {
     "mtime": 1781082646.970656,
@@ -505,9 +505,9 @@
     "semantic_hash": "68b481232ce503e7d06aaceeeacd4d4b"
   },
   "~/xPST/tests/test_cli_commands.py": {
-    "mtime": 1781082646.970656,
-    "ast_hash": "9392702068d0ed7c422b7699f3a83bdb",
-    "semantic_hash": "9392702068d0ed7c422b7699f3a83bdb"
+    "mtime": 1781117817.744875,
+    "ast_hash": "eb798d34cd0ca0c3c3922823559708c4",
+    "semantic_hash": "eb798d34cd0ca0c3c3922823559708c4"
   },
   "~/xPST/tests/test_cli_e2e.py": {
     "mtime": 1781082646.970656,
@@ -530,9 +530,9 @@
     "semantic_hash": "9e2571c11c08097110b146efcd03c5a2"
   },
   "~/xPST/tests/test_desktop_backend.py": {
-    "mtime": 1781082646.970656,
-    "ast_hash": "d2625863e2d011744e43e06c331f2f57",
-    "semantic_hash": "d2625863e2d011744e43e06c331f2f57"
+    "mtime": 1781122197.310818,
+    "ast_hash": "d64ae69d2bd0122abb42c551109a8fa2",
+    "semantic_hash": "d64ae69d2bd0122abb42c551109a8fa2"
   },
   "~/xPST/tests/test_diagnostics.py": {
     "mtime": 1781082646.970656,
@@ -580,9 +580,9 @@
     "semantic_hash": "5af51f5d1795e1460efef73f6678b176"
   },
   "~/xPST/tests/test_mcp_server.py": {
-    "mtime": 1781082646.970656,
-    "ast_hash": "b37523cc71df6afc94ec7149bfe2dc8b",
-    "semantic_hash": "b37523cc71df6afc94ec7149bfe2dc8b"
+    "mtime": 1781122195.4068165,
+    "ast_hash": "58191f0b2949bf0a4f88ddedd2cad1ad",
+    "semantic_hash": "58191f0b2949bf0a4f88ddedd2cad1ad"
   },
   "~/xPST/tests/test_monitor.py": {
     "mtime": 1781082646.970656,
@@ -630,9 +630,9 @@
     "semantic_hash": "0ab3171a2472fa03182ddffe5fb43135"
   },
   "~/xPST/tests/test_repo_assets.py": {
-    "mtime": 1781082646.970656,
-    "ast_hash": "915e97f43bc91a0a0cf9e0c8cef63af6",
-    "semantic_hash": "915e97f43bc91a0a0cf9e0c8cef63af6"
+    "mtime": 1781127206.0416806,
+    "ast_hash": "5e0679cbf83c846eaad999803222fbf5",
+    "semantic_hash": "5e0679cbf83c846eaad999803222fbf5"
   },
   "~/xPST/tests/test_retry.py": {
     "mtime": 1781082646.970656,
@@ -665,9 +665,9 @@
     "semantic_hash": "d1c63574658f8811ecca2fe610256f62"
   },
   "~/xPST/tests/test_stress.py": {
-    "mtime": 1781082646.970656,
-    "ast_hash": "30dd48da1ad400f8a3808a490795e262",
-    "semantic_hash": "30dd48da1ad400f8a3808a490795e262"
+    "mtime": 1781117936.8109677,
+    "ast_hash": "868a0c3d627a7eb192f4f184fa341eaa",
+    "semantic_hash": "868a0c3d627a7eb192f4f184fa341eaa"
   },
   "~/xPST/tests/test_updater.py": {
     "mtime": 1781082646.970656,
@@ -700,9 +700,9 @@
     "semantic_hash": "ff6e6a7c259d163748683602bbc15f77"
   },
   "~/xPST/.github/workflows/release.yml": {
-    "mtime": 1781082646.9525917,
-    "ast_hash": "34f8a1a30f83abd6ba61f483f9d4cdec",
-    "semantic_hash": "34f8a1a30f83abd6ba61f483f9d4cdec"
+    "mtime": 1781127097.8985238,
+    "ast_hash": "8c629313e45f6e1f4fc067cc44dcc835",
+    "semantic_hash": "8c629313e45f6e1f4fc067cc44dcc835"
   },
   "~/xPST/.github/workflows/test.yml": {
     "mtime": 1781082646.9525917,
@@ -740,9 +740,9 @@
     "semantic_hash": "fb861dc13876c2a16ebbc50ae37ef363"
   },
   "~/xPST/NOTICES.md": {
-    "mtime": 1781082646.9525917,
-    "ast_hash": "af86ae195d1169e7d955d65d47eb73a5",
-    "semantic_hash": "af86ae195d1169e7d955d65d47eb73a5"
+    "mtime": 1781122151.4587786,
+    "ast_hash": "8af4cd60da5ee7ffa76b997f1702c36e",
+    "semantic_hash": "8af4cd60da5ee7ffa76b997f1702c36e"
   },
   "~/xPST/QA_REPORT.md": {
     "mtime": 1781082646.9525917,
@@ -755,9 +755,9 @@
     "semantic_hash": "b2da6328a9d3203373622ae475b3307f"
   },
   "~/xPST/SECURITY.md": {
-    "mtime": 1781082646.9525917,
-    "ast_hash": "eb8244486a7f25fbb62f217103d151a3",
-    "semantic_hash": "eb8244486a7f25fbb62f217103d151a3"
+    "mtime": 1781122165.684791,
+    "ast_hash": "e18011e94b806470d0be04b16f1a3277",
+    "semantic_hash": "e18011e94b806470d0be04b16f1a3277"
   },
   "~/xPST/configs/example.yaml": {
     "mtime": 1781082646.9532843,
@@ -1063,5 +1063,315 @@
     "mtime": 1781082646.966329,
     "ast_hash": "17c46e7886c7cff7ca3f41d2cb1af699",
     "semantic_hash": "17c46e7886c7cff7ca3f41d2cb1af699"
+  },
+  "~/xPST/scripts/verify_linux_binary.py": {
+    "mtime": 1781127067.818764,
+    "ast_hash": "2e1390a330db4672ad1d3d0147e350e0",
+    "semantic_hash": "2e1390a330db4672ad1d3d0147e350e0"
+  },
+  "~/xPST/src/xpst/desktop_app/icon_glyphs.py": {
+    "mtime": 1781130252.258022,
+    "ast_hash": "fe263560d9b4fa25a02d5a4898c38c47",
+    "semantic_hash": "fe263560d9b4fa25a02d5a4898c38c47"
+  },
+  "~/xPST/src/xpst/desktop_app/resource_path.py": {
+    "mtime": 1781126187.2201123,
+    "ast_hash": "ff13189dad6cf33f8d158a3542117be7",
+    "semantic_hash": "ff13189dad6cf33f8d158a3542117be7"
+  },
+  "~/xPST/src/xpst/desktop_app/splash_sizing.py": {
+    "mtime": 1781117411.0892425,
+    "ast_hash": "b66ae4e0da214d50a7d49ae6e9132489",
+    "semantic_hash": "b66ae4e0da214d50a7d49ae6e9132489"
+  },
+  "~/xPST/src/xpst/knowledge/__init__.py": {
+    "mtime": 1781115423.3589118,
+    "ast_hash": "87245fd1875a189e3541112be4ae2511",
+    "semantic_hash": "87245fd1875a189e3541112be4ae2511"
+  },
+  "~/xPST/src/xpst/knowledge/cli_kb.py": {
+    "mtime": 1781127809.6303504,
+    "ast_hash": "335126194068eba02fcc912d357ca08c",
+    "semantic_hash": "335126194068eba02fcc912d357ca08c"
+  },
+  "~/xPST/src/xpst/knowledge/config.py": {
+    "mtime": 1781125468.597408,
+    "ast_hash": "92acde8ddb0f1166a778a0adab27235a",
+    "semantic_hash": "92acde8ddb0f1166a778a0adab27235a"
+  },
+  "~/xPST/src/xpst/knowledge/ingest/__init__.py": {
+    "mtime": 1781115424.374911,
+    "ast_hash": "a8f644ec56f3f6303321f5250aa215ca",
+    "semantic_hash": "a8f644ec56f3f6303321f5250aa215ca"
+  },
+  "~/xPST/src/xpst/knowledge/ingest/extract.py": {
+    "mtime": 1781122151.4597788,
+    "ast_hash": "b79adae1b5b424f5dc126a3e18ef4cb9",
+    "semantic_hash": "b79adae1b5b424f5dc126a3e18ef4cb9"
+  },
+  "~/xPST/src/xpst/knowledge/ingest/pipeline.py": {
+    "mtime": 1781122151.4597788,
+    "ast_hash": "57a91dd0e099d03210e7e7f19dd8388f",
+    "semantic_hash": "57a91dd0e099d03210e7e7f19dd8388f"
+  },
+  "~/xPST/src/xpst/knowledge/ingest/resolve.py": {
+    "mtime": 1781115499.700862,
+    "ast_hash": "a685e0019549a36cb86587b37de77920",
+    "semantic_hash": "a685e0019549a36cb86587b37de77920"
+  },
+  "~/xPST/src/xpst/knowledge/ingest/transcribe.py": {
+    "mtime": 1781122151.4597788,
+    "ast_hash": "be2de6064b98764a99f5bdc00edb852a",
+    "semantic_hash": "be2de6064b98764a99f5bdc00edb852a"
+  },
+  "~/xPST/src/xpst/knowledge/llm/__init__.py": {
+    "mtime": 1781122151.4597788,
+    "ast_hash": "2757a40a00dc9edf1b8b2c2e5074022b",
+    "semantic_hash": "2757a40a00dc9edf1b8b2c2e5074022b"
+  },
+  "~/xPST/src/xpst/knowledge/llm/client.py": {
+    "mtime": 1781122151.4610255,
+    "ast_hash": "915d22d97b0b4a89e6b9dbf259e7f8ed",
+    "semantic_hash": "915d22d97b0b4a89e6b9dbf259e7f8ed"
+  },
+  "~/xPST/src/xpst/knowledge/llm/embeddings.py": {
+    "mtime": 1781125458.4128375,
+    "ast_hash": "6986e1f1ce4b48b982f435bf5cb97bd5",
+    "semantic_hash": "6986e1f1ce4b48b982f435bf5cb97bd5"
+  },
+  "~/xPST/src/xpst/knowledge/manifest.py": {
+    "mtime": 1781122151.4610255,
+    "ast_hash": "aef5e848b3540048cc33f06b38fccc84",
+    "semantic_hash": "aef5e848b3540048cc33f06b38fccc84"
+  },
+  "~/xPST/src/xpst/knowledge/models.py": {
+    "mtime": 1781122151.4610255,
+    "ast_hash": "45ead0b9fde9603693366013d9ba5473",
+    "semantic_hash": "45ead0b9fde9603693366013d9ba5473"
+  },
+  "~/xPST/src/xpst/knowledge/organize/__init__.py": {
+    "mtime": 1781127632.4205756,
+    "ast_hash": "6bfd571bd5323f4d2432c631d2f820cc",
+    "semantic_hash": "6bfd571bd5323f4d2432c631d2f820cc"
+  },
+  "~/xPST/src/xpst/knowledge/organize/_vectors.py": {
+    "mtime": 1781127642.1165078,
+    "ast_hash": "775c3fa5da33ed74b6794198102b3f8d",
+    "semantic_hash": "775c3fa5da33ed74b6794198102b3f8d"
+  },
+  "~/xPST/src/xpst/knowledge/organize/cluster.py": {
+    "mtime": 1781127713.781083,
+    "ast_hash": "9e700fd23427c82427a499e1afd7e489",
+    "semantic_hash": "9e700fd23427c82427a499e1afd7e489"
+  },
+  "~/xPST/src/xpst/knowledge/organize/difficulty.py": {
+    "mtime": 1781127680.2102425,
+    "ast_hash": "5bfe7091d0150e89ad08e23c1ad33def",
+    "semantic_hash": "5bfe7091d0150e89ad08e23c1ad33def"
+  },
+  "~/xPST/src/xpst/knowledge/organize/pipeline.py": {
+    "mtime": 1781128677.6555738,
+    "ast_hash": "720e8c4e2279d98f9b6950795185a9c1",
+    "semantic_hash": "720e8c4e2279d98f9b6950795185a9c1"
+  },
+  "~/xPST/src/xpst/knowledge/organize/router.py": {
+    "mtime": 1781127655.9534113,
+    "ast_hash": "1daa509b751355449ae3c58306fd749d",
+    "semantic_hash": "1daa509b751355449ae3c58306fd749d"
+  },
+  "~/xPST/src/xpst/knowledge/store/__init__.py": {
+    "mtime": 1781115425.2539105,
+    "ast_hash": "f2d47edac621efa3f97ba90319489c2b",
+    "semantic_hash": "f2d47edac621efa3f97ba90319489c2b"
+  },
+  "~/xPST/src/xpst/knowledge/store/base.py": {
+    "mtime": 1781127761.071868,
+    "ast_hash": "5c045c2d4352fca5dc9ab20386885fc6",
+    "semantic_hash": "5c045c2d4352fca5dc9ab20386885fc6"
+  },
+  "~/xPST/src/xpst/knowledge/store/json_store.py": {
+    "mtime": 1781127761.0720537,
+    "ast_hash": "754d9f15f0f9d2df85b7be96b99196a6",
+    "semantic_hash": "754d9f15f0f9d2df85b7be96b99196a6"
+  },
+  "~/xPST/src/xpst/knowledge/store/vector_lancedb.py": {
+    "mtime": 1781127761.072209,
+    "ast_hash": "75067f2c6d6696b8e9dbd64aea4d8d7a",
+    "semantic_hash": "75067f2c6d6696b8e9dbd64aea4d8d7a"
+  },
+  "~/xPST/src/xpst/knowledge/workspace.py": {
+    "mtime": 1781122151.4610255,
+    "ast_hash": "0f06d8043f2b8aec86f01693c539b0a0",
+    "semantic_hash": "0f06d8043f2b8aec86f01693c539b0a0"
+  },
+  "~/xPST/tests/test_desktop_icon_glyphs.py": {
+    "mtime": 1781130453.1922483,
+    "ast_hash": "6ec6062b8b9befffa6eb5ea881d31518",
+    "semantic_hash": "6ec6062b8b9befffa6eb5ea881d31518"
+  },
+  "~/xPST/tests/test_desktop_icon_loading.py": {
+    "mtime": 1781126210.7917597,
+    "ast_hash": "25f14e95021bebb58424309dacea6386",
+    "semantic_hash": "25f14e95021bebb58424309dacea6386"
+  },
+  "~/xPST/tests/test_desktop_resource_path.py": {
+    "mtime": 1781128066.0696154,
+    "ast_hash": "43449ac582f062999462d278fbef501c",
+    "semantic_hash": "43449ac582f062999462d278fbef501c"
+  },
+  "~/xPST/tests/test_desktop_splash_sizing.py": {
+    "mtime": 1781117436.5473018,
+    "ast_hash": "1156162467a0cdfa38575c7be8fc813c",
+    "semantic_hash": "1156162467a0cdfa38575c7be8fc813c"
+  },
+  "~/xPST/tests/test_knowledge_cli.py": {
+    "mtime": 1781127830.7112062,
+    "ast_hash": "8106674b87cf0aaba65e3bc5cc6deb65",
+    "semantic_hash": "8106674b87cf0aaba65e3bc5cc6deb65"
+  },
+  "~/xPST/tests/test_knowledge_cluster.py": {
+    "mtime": 1781127594.6182191,
+    "ast_hash": "0922211e812c3e948bd87d1dced414e8",
+    "semantic_hash": "0922211e812c3e948bd87d1dced414e8"
+  },
+  "~/xPST/tests/test_knowledge_config.py": {
+    "mtime": 1781125470.0253484,
+    "ast_hash": "c36958bd530868954c4e50e8fc2047e9",
+    "semantic_hash": "c36958bd530868954c4e50e8fc2047e9"
+  },
+  "~/xPST/tests/test_knowledge_difficulty.py": {
+    "mtime": 1781127563.764982,
+    "ast_hash": "bb150a5104c4668e214919b326ecbc7a",
+    "semantic_hash": "bb150a5104c4668e214919b326ecbc7a"
+  },
+  "~/xPST/tests/test_knowledge_embeddings.py": {
+    "mtime": 1781125488.5135887,
+    "ast_hash": "c52e9c5d9560a985fb29b7a2d4c76ffc",
+    "semantic_hash": "c52e9c5d9560a985fb29b7a2d4c76ffc"
+  },
+  "~/xPST/tests/test_knowledge_extract.py": {
+    "mtime": 1781122151.4610255,
+    "ast_hash": "0477859da06490792a299a2aa7264cb5",
+    "semantic_hash": "0477859da06490792a299a2aa7264cb5"
+  },
+  "~/xPST/tests/test_knowledge_llm_client.py": {
+    "mtime": 1781122151.4610255,
+    "ast_hash": "5bbe34f9c9531dcc572e72bc72d07ed3",
+    "semantic_hash": "5bbe34f9c9531dcc572e72bc72d07ed3"
+  },
+  "~/xPST/tests/test_knowledge_manifest.py": {
+    "mtime": 1781122151.4610255,
+    "ast_hash": "76ffba611486f351f3433e79634985f1",
+    "semantic_hash": "76ffba611486f351f3433e79634985f1"
+  },
+  "~/xPST/tests/test_knowledge_models.py": {
+    "mtime": 1781122151.4610255,
+    "ast_hash": "8c5b54e582142dd6bac125da87d566fd",
+    "semantic_hash": "8c5b54e582142dd6bac125da87d566fd"
+  },
+  "~/xPST/tests/test_knowledge_organize.py": {
+    "mtime": 1781127616.312133,
+    "ast_hash": "93ce7705d9464b2af654396d7d2ee221",
+    "semantic_hash": "93ce7705d9464b2af654396d7d2ee221"
+  },
+  "~/xPST/tests/test_knowledge_organize_wall.py": {
+    "mtime": 1781127830.7102528,
+    "ast_hash": "31a758fdc2df00c93440c8534a263751",
+    "semantic_hash": "31a758fdc2df00c93440c8534a263751"
+  },
+  "~/xPST/tests/test_knowledge_pipeline.py": {
+    "mtime": 1781122151.4610255,
+    "ast_hash": "49617059ebd1a6631f5d2266ff47f973",
+    "semantic_hash": "49617059ebd1a6631f5d2266ff47f973"
+  },
+  "~/xPST/tests/test_knowledge_resolve.py": {
+    "mtime": 1781115502.0828602,
+    "ast_hash": "c9baf3d04cd7048a0efc33755534d02f",
+    "semantic_hash": "c9baf3d04cd7048a0efc33755534d02f"
+  },
+  "~/xPST/tests/test_knowledge_router.py": {
+    "mtime": 1781127545.2032096,
+    "ast_hash": "6258538da450942816a637bbc99e8b45",
+    "semantic_hash": "6258538da450942816a637bbc99e8b45"
+  },
+  "~/xPST/tests/test_knowledge_smoke.py": {
+    "mtime": 1781122151.4617786,
+    "ast_hash": "733a0a7f4749ee6322de2e6ab58294df",
+    "semantic_hash": "733a0a7f4749ee6322de2e6ab58294df"
+  },
+  "~/xPST/tests/test_knowledge_store.py": {
+    "mtime": 1781115486.5528705,
+    "ast_hash": "229a542006e6083ccf2b9736ab8d9126",
+    "semantic_hash": "229a542006e6083ccf2b9736ab8d9126"
+  },
+  "~/xPST/tests/test_knowledge_store_contract.py": {
+    "mtime": 1781127795.5714467,
+    "ast_hash": "75ac5dea0a4c4da3685d320c547a36d9",
+    "semantic_hash": "75ac5dea0a4c4da3685d320c547a36d9"
+  },
+  "~/xPST/tests/test_knowledge_transcribe.py": {
+    "mtime": 1781122151.4617786,
+    "ast_hash": "60146c9da30bcba567fa27c5d4ddaa7d",
+    "semantic_hash": "60146c9da30bcba567fa27c5d4ddaa7d"
+  },
+  "~/xPST/tests/test_knowledge_wall.py": {
+    "mtime": 1781122151.4617786,
+    "ast_hash": "a9ec61c9dec59e3e316ead2cdf5e9e7a",
+    "semantic_hash": "a9ec61c9dec59e3e316ead2cdf5e9e7a"
+  },
+  "~/xPST/tests/test_knowledge_workspace.py": {
+    "mtime": 1781122151.4617786,
+    "ast_hash": "dd0591187c7f2f1881436bcfdbf6c632",
+    "semantic_hash": "dd0591187c7f2f1881436bcfdbf6c632"
+  },
+  "~/xPST/tests/test_platform_config_dir.py": {
+    "mtime": 1781128066.0696154,
+    "ast_hash": "60366e84d6919f291d820bac8fee52dc",
+    "semantic_hash": "60366e84d6919f291d820bac8fee52dc"
+  },
+  "~/xPST/tests/test_plugins_security.py": {
+    "mtime": 1781122165.6897912,
+    "ast_hash": "1eb43f8cd3282e7264eb92ea273cffce",
+    "semantic_hash": "1eb43f8cd3282e7264eb92ea273cffce"
+  },
+  "~/xPST/tests/test_schedule_install.py": {
+    "mtime": 1781126363.042683,
+    "ast_hash": "f5be9ad774db121b1d5de154f4370f6e",
+    "semantic_hash": "f5be9ad774db121b1d5de154f4370f6e"
+  },
+  "~/xPST/tests/test_verify_linux_binary.py": {
+    "mtime": 1781127106.8754525,
+    "ast_hash": "4b21d38af56f2843aa5fd33eca142694",
+    "semantic_hash": "4b21d38af56f2843aa5fd33eca142694"
+  },
+  "~/xPST/tests/test_video_ffmpeg_missing.py": {
+    "mtime": 1781127010.6262283,
+    "ast_hash": "c6af1bb3e7043161e13a44cfeda342ae",
+    "semantic_hash": "c6af1bb3e7043161e13a44cfeda342ae"
+  },
+  "~/xPST/assets/fonts/LICENSE-lucide.txt": {
+    "mtime": 1781130252.255022,
+    "ast_hash": "0ac379ab65904bcb1cf0c068528e82ce",
+    "semantic_hash": "0ac379ab65904bcb1cf0c068528e82ce"
+  },
+  "~/xPST/assets/fonts/README.md": {
+    "mtime": 1781130252.255419,
+    "ast_hash": "30191351b563b75bc99f82ab0f93d414",
+    "semantic_hash": "30191351b563b75bc99f82ab0f93d414"
+  },
+  "~/xPST/docs/KNOWLEDGE_BASE_SPEC.md": {
+    "mtime": 1781125504.556948,
+    "ast_hash": "d6ac38dfb450a740f79e7d88512512fc",
+    "semantic_hash": "d6ac38dfb450a740f79e7d88512512fc"
+  },
+  "~/xPST/docs/PRODUCTION_READINESS_MASTER_PLAN.md": {
+    "mtime": 1781117564.0475526,
+    "ast_hash": "85c7e6810eac7155591336cf01c5525c",
+    "semantic_hash": "85c7e6810eac7155591336cf01c5525c"
+  },
+  "~/xPST/docs/superpowers/plans/2026-06-10-kb-phase-1.md": {
+    "mtime": 1781115349.2979581,
+    "ast_hash": "4aadea13332b2904db55c9cffe209c2d",
+    "semantic_hash": "4aadea13332b2904db55c9cffe209c2d"
   }
 }
