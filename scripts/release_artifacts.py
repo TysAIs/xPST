@@ -255,6 +255,7 @@ def generate_release_evidence(dist_dir: Path, output_dir: Path, output: Path, ve
                 "python scripts/scan_public_safety.py --json",
                 "python scripts/build_package.py",
                 "python scripts/release_preflight.py --json",
+                "python scripts/release_preflight.py --public --live-evidence release/live-platforms.json --json",
                 "python scripts/public_release_check.py --json",
                 "python scripts/clean_install_smoke.py --dist dist --artifact both",
                 "python scripts/verify_desktop_package.py",
@@ -263,6 +264,7 @@ def generate_release_evidence(dist_dir: Path, output_dir: Path, output: Path, ve
                 "macOS release job: bash scripts/verify_macos.sh, plus --public for tag releases requiring Developer ID signing and notarization",
                 "GitHub release jobs: actions/attest@v4 for Python, Windows, and macOS artifact bundles",
                 "Release owner: python scripts/public_release_check.py --json",
+                "Release owner: python scripts/verify_live_platforms.py --require --json > release/live-platforms.json",
             ],
         },
         "artifacts": [
