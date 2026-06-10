@@ -2896,5 +2896,11 @@ def confirm(message: str) -> bool:
     return response.lower() in ("y", "yes")
 
 
+# Knowledge base commands (optional; safe to import — heavy deps load lazily).
+from xpst.knowledge.cli_kb import kb as _kb_group  # noqa: E402
+
+main.add_command(_kb_group)
+
+
 if __name__ == "__main__":
     main()
