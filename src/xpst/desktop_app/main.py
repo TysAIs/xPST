@@ -21,6 +21,8 @@ from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication, QMenu, QSplashScreen, QSystemTrayIcon
 
+from xpst.desktop_app.splash_sizing import scaled_splash_size
+
 # Attempt Material style import (QtQuick.Controls)
 try:
     from PySide6.QtQuickControls2 import QQuickStyle
@@ -101,6 +103,14 @@ def _create_splash() -> QSplashScreen:
         painter.drawText(pixmap.rect().adjusted(0, 110, 0, 0), Qt.AlignCenter, "Loading...")
 
         painter.end()
+
+    # Bound the splash to a sane size so a large brand image (e.g. the
+    # 1024x1024 app icon) never blits full-screen on launch.
+    target_w, target_h = scaled_splash_size(pixmap.width(), pixmap.height())
+    if (target_w, target_h) != (pixmap.width(), pixmap.height()):
+        pixmap = pixmap.scaled(
+            target_w, target_h, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
 
     splash = QSplashScreen(pixmap)
     splash.setWindowFlags(Qt.SplashScreen | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
@@ -305,9 +315,15 @@ def main(no_splash: bool = False) -> int:
         logger.error("Failed to load QML — check main.qml for errors")
         return 1
 
-    # Close splash once the window is visible
+    # Close splash as soon as the window is up. Use finish() so the splash
+    # hides exactly when the root window shows; keep a short fallback timer.
     if splash:
-        QTimer.singleShot(500, splash.close)
+        root = engine.rootObjects()[0]
+        try:
+            splash.finish(root)
+        except (TypeError, RuntimeError):
+            pass
+        QTimer.singleShot(120, splash.close)
 
     # System tray (after engine is ready)
     tray = _setup_tray(app, engine)
