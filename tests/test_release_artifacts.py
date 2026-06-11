@@ -115,6 +115,7 @@ def test_copy_project_documents_includes_open_source_notices(tmp_path, monkeypat
     project_root.mkdir()
     (project_root / "LICENSE").write_text("license text", encoding="utf-8")
     (project_root / "NOTICES.md").write_text("notice text", encoding="utf-8")
+    (project_root / "NOTICES_QT_LGPL.md").write_text("qt lgpl relink offer", encoding="utf-8")
     (project_root / "LICENSING_REPORT.md").write_text("license report", encoding="utf-8")
     (project_root / "CHANGELOG.md").write_text("changelog", encoding="utf-8")
     output = tmp_path / "release"
@@ -125,8 +126,27 @@ def test_copy_project_documents_includes_open_source_notices(tmp_path, monkeypat
 
     assert (output / "LICENSE").read_text(encoding="utf-8") == "license text"
     assert (output / "NOTICES.md").read_text(encoding="utf-8") == "notice text"
+    assert (output / "NOTICES_QT_LGPL.md").read_text(encoding="utf-8") == "qt lgpl relink offer"
     assert (output / "LICENSING_REPORT.md").read_text(encoding="utf-8") == "license report"
     assert (output / "CHANGELOG.md").read_text(encoding="utf-8") == "changelog"
+
+
+def test_copy_project_documents_requires_qt_lgpl_notice(tmp_path, monkeypatch):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "LICENSE").write_text("license text", encoding="utf-8")
+    output = tmp_path / "release"
+    output.mkdir()
+    monkeypatch.chdir(project_root)
+
+    try:
+        copy_project_documents(output)
+    except FileNotFoundError as exc:
+        assert "NOTICES_QT_LGPL.md" in str(exc)
+    else:  # pragma: no cover - guard against silent regression
+        raise AssertionError("copy_project_documents must require the Qt LGPL notice")
+
+    assert not (output / "NOTICES_QT_LGPL.md").exists()
 
 
 def test_generate_release_evidence_includes_artifacts_and_manual_gates(tmp_path):

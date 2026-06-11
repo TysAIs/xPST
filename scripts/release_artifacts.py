@@ -213,7 +213,7 @@ def generate_sbom(dist_dir: Path, output: Path, version: str) -> None:
 
 def copy_project_documents(output_dir: Path) -> None:
     """Copy open-source release documents into the artifact bundle."""
-    required = [Path("LICENSE")]
+    required = [Path("LICENSE"), Path("NOTICES_QT_LGPL.md")]
     optional = [Path("NOTICES.md"), Path("LICENSING_REPORT.md"), Path("CHANGELOG.md")]
 
     for source in required:
@@ -237,6 +237,7 @@ def generate_release_evidence(dist_dir: Path, output_dir: Path, output: Path, ve
         "RELEASE_NOTES.md",
         "LICENSE",
         "NOTICES.md",
+        "NOTICES_QT_LGPL.md",
         "LICENSING_REPORT.md",
         "CHANGELOG.md",
     ]

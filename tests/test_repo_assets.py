@@ -8,7 +8,7 @@ from urllib.parse import unquote
 
 import yaml
 
-from scripts.verify_desktop_package import verify_desktop_package
+from scripts.verify_desktop_package import _check_qt_lgpl_notice, verify_desktop_package
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\((?!https?://)([^)]+)\)")
@@ -188,6 +188,53 @@ def test_desktop_package_specs_include_runtime_assets_and_dynamic_imports():
 
     assert result["ok"] is True
     assert {"DashboardPage.qml", "ConnectPage.qml"} <= set(result["qml_pages"])
+
+
+def test_desktop_package_gate_includes_qt_lgpl_notice():
+    result = verify_desktop_package(ROOT)
+
+    lgpl_checks = [check for check in result["checks"] if check["path"] == "NOTICES_QT_LGPL.md"]
+    assert lgpl_checks, "verify gate must check the Qt/PySide6 LGPL notice"
+    assert lgpl_checks[0]["ok"] is True
+
+
+def test_qt_lgpl_notice_gate_fails_when_notice_missing(tmp_path):
+    check = _check_qt_lgpl_notice(tmp_path)
+
+    assert check["ok"] is False
+    assert any("missing" in issue for issue in check["issues"])
+
+
+def test_qt_lgpl_notice_gate_fails_without_relink_offer(tmp_path):
+    (tmp_path / "NOTICES_QT_LGPL.md").write_text(
+        "PySide6/Qt under the LGPL, but no offer here.", encoding="utf-8"
+    )
+
+    check = _check_qt_lgpl_notice(tmp_path)
+
+    assert check["ok"] is False
+    assert any("relink" in issue for issue in check["issues"])
+
+
+def test_qt_lgpl_notice_gate_passes_with_complete_notice(tmp_path):
+    (tmp_path / "NOTICES_QT_LGPL.md").write_text(
+        "PySide6 / Qt are distributed under the LGPL. Written offer to relink "
+        "against a modified Qt is provided.",
+        encoding="utf-8",
+    )
+
+    check = _check_qt_lgpl_notice(tmp_path)
+
+    assert check["ok"] is True
+    assert check["issues"] == []
+
+
+def test_qt_lgpl_notice_documents_lgpl_attribution_and_relink_offer():
+    text = (ROOT / "NOTICES_QT_LGPL.md").read_text(encoding="utf-8")
+
+    assert "LGPL" in text
+    assert "PySide6" in text and "Qt" in text
+    assert "relink" in text.lower()
 
 
 def test_content_page_requires_post_preview_before_upload():

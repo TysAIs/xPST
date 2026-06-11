@@ -86,10 +86,37 @@ def _check_spec(path: Path) -> dict[str, Any]:
     }
 
 
+def _check_qt_lgpl_notice(root: Path) -> dict[str, Any]:
+    """Verify the Qt/PySide6 LGPL notice and relink offer is present.
+
+    Desktop bundles dynamically link Qt through PySide6, so LICENSING_REPORT.md
+    requires the LGPL notice and a written relink offer to ship with the
+    desktop artifact. A desktop package missing this notice is non-compliant.
+    """
+    notice = root / "NOTICES_QT_LGPL.md"
+    issues: list[str] = []
+
+    if not notice.exists():
+        issues.append("Qt/PySide6 LGPL notice is missing: NOTICES_QT_LGPL.md")
+        return {"path": "NOTICES_QT_LGPL.md", "ok": False, "issues": issues}
+
+    text = notice.read_text(encoding="utf-8")
+    if "LGPL" not in text:
+        issues.append("Qt/PySide6 LGPL notice does not reference the LGPL")
+    if "relink" not in text.lower():
+        issues.append("Qt/PySide6 LGPL notice is missing a written relink offer")
+    if "PySide6" not in text and "Qt" not in text:
+        issues.append("Qt/PySide6 LGPL notice does not attribute Qt/PySide6")
+
+    return {"path": "NOTICES_QT_LGPL.md", "ok": not issues, "issues": issues}
+
+
 def verify_desktop_package(root: Path = ROOT) -> dict[str, Any]:
     """Return desktop package static verification results."""
     specs = [root / "build_windows.spec", root / "build_macos.spec"]
     results = [_check_spec(path) for path in specs]
+
+    results.append(_check_qt_lgpl_notice(root))
 
     qml_pages = sorted((root / "src" / "xpst" / "desktop_app" / "qml" / "pages").glob("*.qml"))
     qml_issue = None if qml_pages else "No QML pages found"
