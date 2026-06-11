@@ -1073,10 +1073,12 @@ def delete(ctx: click.Context, video_id: str, platform: str, yes: bool, as_json:
 
 @main.command()
 @click.option("--port", "-p", default=8080, type=int, help="Dashboard HTTP port")
+@click.option("--host", default="127.0.0.1",
+              help="Bind address (default: 127.0.0.1, loopback only)")
 @click.option("--api-only", is_flag=True, default=True, hidden=True,
               help="API-only mode (default, no NiceGUI required)")
 @click.pass_context
-def dashboard(ctx: click.Context, port: int, api_only: bool):
+def dashboard(ctx: click.Context, port: int, host: str, api_only: bool):
     """Launch the web API dashboard"""
     config_path = ctx.obj.get("config_path")
     config_dir = str(get_config_dir())
@@ -1089,12 +1091,12 @@ def dashboard(ctx: click.Context, port: int, api_only: bool):
         except Exception as e:
             logger.debug("Could not load config for dashboard: %s", e)
 
-    console.print(f"[bold blue]Starting xPST Dashboard on http://localhost:{port}[/bold blue]")
+    console.print(f"[bold blue]Starting xPST Dashboard on http://{host}:{port}[/bold blue]")
     console.print("[dim]Press Ctrl+C to stop[/dim]\n")
 
     from xpst.dashboard.server import start_dashboard
 
-    start_dashboard(port=port, config_dir=config_dir)
+    start_dashboard(port=port, host=host, config_dir=config_dir)
 
 
 # ──────────────────────────────────────────────

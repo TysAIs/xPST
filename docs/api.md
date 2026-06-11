@@ -354,15 +354,24 @@ text = metrics_text()  # Prometheus exposition format
 
 ## Dashboard API
 
-### `start_dashboard(port: int = 8080, host: str = "0.0.0.0", config_dir: str = "~/.xpst")`
+### `start_dashboard(port: int = 8080, host: str = "127.0.0.1", config_dir: str = "~/.xpst")`
 
 FastAPI server with endpoints:
 
 ```python
 from xpst.dashboard import start_dashboard
 
-start_dashboard()  # Runs on 0.0.0.0:8080
+start_dashboard()  # Runs on 127.0.0.1:8080 (loopback only)
+
+# Expose on the network (e.g. inside a container):
+start_dashboard(host="0.0.0.0")
 ```
+
+The default bind address is `127.0.0.1`, so the dashboard is reachable only
+from the local machine. Binding to a non-loopback address (such as `0.0.0.0`)
+without `dashboard_username`/`dashboard_password_hash` configured logs a
+warning, because the authenticated endpoints (`/state`, `/analytics`,
+`/history`) would otherwise be exposed to the network without credentials.
 
 ### Endpoints
 

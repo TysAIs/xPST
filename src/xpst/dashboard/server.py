@@ -176,9 +176,12 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
     return app
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
 def start_dashboard(
     port: int = 8080,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     config_dir: str = "~/.xpst",
 ) -> None:
     """Start the xPST dashboard API server.
@@ -191,10 +194,25 @@ def start_dashboard(
 
     Args:
         port: HTTP port to listen on. Defaults to 8080.
-        host: Bind address. Defaults to ``0.0.0.0`` (all interfaces).
+        host: Bind address. Defaults to ``127.0.0.1`` (loopback only).
+            Pass a non-loopback address (e.g. ``0.0.0.0``) to expose the
+            dashboard on the network; a warning is logged when doing so
+            without configured authentication.
         config_dir: Path to xPST config directory for reading state.
     """
     logger.info("Starting xPST API Dashboard on http://%s:%d", host, port)
+
+    if host not in _LOOPBACK_HOSTS:
+        username, password_hash = _load_dashboard_auth(config_dir)
+        if not (username and password_hash):
+            logger.warning(
+                "Dashboard is binding to a non-loopback address (%s) without "
+                "authentication configured. The state, analytics, and history "
+                "endpoints are exposed to the network without credentials. Set "
+                "dashboard_username and dashboard_password_hash in your config, "
+                "or bind to 127.0.0.1.",
+                host,
+            )
 
     app = _create_app(config_dir)
     uvicorn.run(app, host=host, port=port, log_level="info")
