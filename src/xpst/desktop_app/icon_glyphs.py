@@ -18,7 +18,10 @@ name (``ICON_FONT_FAMILY``) is the family the bundled TTF registers as, so
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 #: Family name the bundled Lucide TTF registers as. QML ``font.family`` bindings
 #: must use this exact string for the glyphs below to resolve.
