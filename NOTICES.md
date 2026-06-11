@@ -22,7 +22,6 @@ xPST is dual licensed as `MIT OR Apache-2.0`. This file lists direct runtime and
 | cryptography | `>=41.0.0` | Apache-2.0 OR BSD-3-Clause | Encrypted credential fallback |
 | fastapi | `>=0.100.0` | MIT | Dashboard/API server |
 | uvicorn | `>=0.23.0` | BSD-3-Clause | ASGI server |
-| authlib | `>=1.3.0` | BSD-3-Clause | OAuth support |
 | httpx | `>=0.24.0` | BSD-3-Clause | HTTP client |
 | pydantic-settings | `>=2.0.0` | MIT | Settings helpers |
 

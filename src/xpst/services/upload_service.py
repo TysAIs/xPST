@@ -119,6 +119,7 @@ class UploadService:
                 success=False,
                 error="Outside posting hours (8am-11pm), deferred",
                 platform=platform_name,
+                metadata={"deferred": True},
             )
 
         # ── Anti-bot: Conservative daily limit check ──
@@ -131,6 +132,7 @@ class UploadService:
                 success=False,
                 error="Anti-bot: daily upload limit reached",
                 platform=platform_name,
+                metadata={"deferred": True},
             )
 
         # ── Anti-bot: Wait between platform uploads ──
@@ -319,15 +321,24 @@ class UploadService:
                         pause_duration,
                     )
 
-                self.state.mark_video_failed(
-                    video_id,
-                    platform_name,
-                    upload_result.error or "Unknown error",
-                )
-                self.circuit_breakers.record_failure(
-                    platform_name,
-                    upload_result.error,
-                )
+                if upload_result.metadata.get("deferred"):
+                    # G11: an anti-bot deferral is scheduling, not failure —
+                    # recording it as failure polluted the DLQ and platform
+                    # health and masked real problems.
+                    logger.info(
+                        "Deferred %s upload for %s (not recorded as failure)",
+                        platform_name, video_id,
+                    )
+                else:
+                    self.state.mark_video_failed(
+                        video_id,
+                        platform_name,
+                        upload_result.error or "Unknown error",
+                    )
+                    self.circuit_breakers.record_failure(
+                        platform_name,
+                        upload_result.error,
+                    )
                 self.state.update_platform_health(platform_name, False)
                 # Notify if circuit breaker just opened
                 if self.circuit_breakers._breakers.get(platform_name, None):

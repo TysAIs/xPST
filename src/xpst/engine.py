@@ -951,7 +951,7 @@ class CrossPostEngine:
                     video_id=post.composite_key,
                     post_url=upload_result.post_url or "",
                 )
-            else:
+            elif not upload_result.metadata.get("deferred"):
                 self.state.mark_cross_post_failed(
                     post.composite_key, platform_name,
                     upload_result.error or "Unknown error",

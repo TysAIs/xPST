@@ -367,9 +367,39 @@ def check_update_components(include_network: bool = False) -> dict[str, list[dic
     }
 
 
+# Post-update smoke probes: the module each tracked dependency must still
+# import after an upgrade. A failed probe triggers an automatic rollback to
+# the previously installed version (G45).
+_SMOKE_MODULES = {
+    "yt-dlp": "yt_dlp",
+    "instagrapi": "instagrapi",
+    "twikit": "twikit",
+}
+
+
+def _smoke_check(pip_name: str) -> bool:
+    """Import-probe a freshly upgraded package in a clean interpreter."""
+    module = _SMOKE_MODULES.get(pip_name)
+    if module is None:
+        return True
+    try:
+        probe = subprocess.run(
+            [sys.executable, "-c", f"import {module}"],
+            capture_output=True, text=True, timeout=60,
+        )
+        return probe.returncode == 0
+    except Exception:
+        return False
+
+
 def update_all(check_only: bool = False) -> list[PackageInfo]:
     """
     Check and optionally install updates for all tracked packages.
+
+    Installs are guarded (G44/G45): frozen builds never attempt pip (inside
+    a PyInstaller bundle ``sys.executable -m pip`` re-invokes the bundled
+    app, not pip); each upgrade is smoke-checked and rolled back to the
+    previous version on failure.
 
     Args:
         check_only: If True, only check without installing
@@ -382,6 +412,21 @@ def update_all(check_only: bool = False) -> list[PackageInfo]:
     if check_only:
         return packages
 
+    # G44: in a frozen (PyInstaller) build there is no pip and
+    # sys.executable IS the bundled app — a pip invocation would recurse
+    # into xPST itself. Self-update for packaged builds means downloading
+    # a new release.
+    # sys.frozen is set by PyInstaller in packaged builds.
+    if getattr(sys, "frozen", False):
+        console.print(
+            "[yellow]Packaged build: dependency self-update is unavailable. "
+            "Download the latest release to update.[/yellow]"
+        )
+        for pkg in packages:
+            if pkg.updatable:
+                pkg.error = "self-update unavailable in packaged build"
+        return packages
+
     # Install updates
     to_update = [p for p in packages if p.updatable and p.name != "xpst"]
 
@@ -390,19 +435,45 @@ def update_all(check_only: bool = False) -> list[PackageInfo]:
 
     for pkg in to_update:
         pip_name = TRACKED_PACKAGES.get(pkg.name, pkg.name)
+        previous_version = pkg.current_version
         console.print(f"  Updating {pip_name}...")
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", "--upgrade", pip_name],
                 capture_output=True, text=True, timeout=120,
             )
-            if result.returncode == 0:
-                pkg.current_version = get_installed_version(pip_name) or pkg.latest_version
-                pkg.updatable = False
-                console.print(f"    ✅ Updated to {pkg.current_version}")
-            else:
+            if result.returncode != 0:
                 pkg.error = result.stderr.strip()[:200]
                 console.print(f"    ❌ Update failed: {pkg.error}")
+                continue
+
+            # G45: smoke-check, roll back on failure — an update must never
+            # leave the app broken.
+            if not _smoke_check(pip_name):
+                console.print(
+                    f"    ⚠️ {pip_name} failed its post-update smoke check"
+                )
+                if previous_version:
+                    rollback = subprocess.run(
+                        [sys.executable, "-m", "pip", "install",
+                         f"{pip_name}=={previous_version}"],
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    if rollback.returncode == 0:
+                        pkg.error = (
+                            f"update broke import; rolled back to {previous_version}"
+                        )
+                        console.print(f"    ↩️ Rolled back to {previous_version}")
+                    else:
+                        pkg.error = "update broke import; ROLLBACK FAILED"
+                        console.print("    ❌ Rollback failed — reinstall manually")
+                else:
+                    pkg.error = "update broke import; no previous version known"
+                continue
+
+            pkg.current_version = get_installed_version(pip_name) or pkg.latest_version
+            pkg.updatable = False
+            console.print(f"    ✅ Updated to {pkg.current_version}")
         except subprocess.TimeoutExpired:
             pkg.error = "Update timed out"
             console.print("    ❌ Update timed out")

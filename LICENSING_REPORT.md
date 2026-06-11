@@ -21,7 +21,7 @@ The direct dependencies declared in `pyproject.toml` are compatible with open-so
 | Apache-2.0 | google-api-python-client, google-auth-oauthlib, google-auth-httplib2, prometheus-client, bcrypt |
 | Apache-2.0 OR BSD-3-Clause | cryptography |
 | MIT OR Apache-2.0 | structlog |
-| BSD-3-Clause | click, uvicorn, authlib, httpx, pywebview |
+| BSD-3-Clause | click, uvicorn, httpx, pywebview |
 | PSF | pywin32 |
 | Unlicense | yt-dlp |
 | LGPL/GPL/commercial | PySide6 / Qt |

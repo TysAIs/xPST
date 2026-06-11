@@ -83,9 +83,11 @@ pyside6 = [
     "PySide6>=6.5.0",
 ]
 knowledge = [
-    "faster-whisper>=1.0.0",
-    "fastembed>=0.3",
-    "lancedb>=0.5",
+    # Upper bounds (G48): these are data-coupled deps — an uncapped major
+    # bump can break persisted index/embedding formats silently.
+    "faster-whisper>=1.0.0,<2.0",
+    "fastembed>=0.3,<1.0",
+    "lancedb>=0.5,<1.0",
 ]
 full = [
     "xpst[mcp,desktop,pyside6,dashboard,windows,knowledge]",

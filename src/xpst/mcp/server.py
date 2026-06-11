@@ -174,6 +174,7 @@ TOOLS: list[Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
                 "max_posts": {
                     "type": "integer",
                     "description": "Maximum number of posts per cycle",
@@ -207,6 +208,7 @@ TOOLS: list[Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
                 "video_path": {
                     "type": "string",
                     "description": "Path to video file (or first image for carousel)",
@@ -284,6 +286,7 @@ TOOLS: list[Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
                 "max_count": {
                     "type": "integer",
                     "description": "Maximum videos to backfill",
@@ -341,6 +344,7 @@ TOOLS: list[Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
                 "video_id": {
                     "type": "string",
                     "description": "Video ID to delete",
@@ -366,6 +370,7 @@ TOOLS: list[Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
                 "source": {
                     "type": "string",
                     "description": "Local file path or URL to ingest",
@@ -406,6 +411,7 @@ TOOLS: list[Tool] = [
         inputSchema={
             "type": "object",
             "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
                 "workspace": {
                     "type": "string",
                     "description": "Workspace name (isolated data dir)",
@@ -437,8 +443,51 @@ TOOLS: list[Tool] = [
 ]
 
 
+# Tools that mutate state or post to REAL accounts (G52). XPST_MCP_READONLY=1
+# blocks them entirely; XPST_MCP_REQUIRE_CONFIRM=1 requires confirm=true in
+# the arguments — a consent tier for an otherwise unauthenticated local
+# surface that any connected agent can drive.
+_MUTATING_TOOLS = {
+    "xpst_run", "xpst_post", "xpst_backfill", "xpst_delete",
+    "kb_add", "kb_organize",
+}
+
+
+def _guardrail_block(name: str, arguments: dict[str, Any]) -> CallToolResult | None:
+    import os
+
+    if name not in _MUTATING_TOOLS:
+        return None
+    if os.environ.get("XPST_MCP_READONLY", "").lower() in {"1", "true", "yes"}:
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(
+                type="text",
+                text=f"Blocked: {name} is disabled (XPST_MCP_READONLY is set). "
+                     "Unset it to allow posting/mutating tools.",
+            )],
+        )
+    if os.environ.get("XPST_MCP_REQUIRE_CONFIRM", "").lower() in {"1", "true", "yes"}:
+        if not arguments.get("confirm"):
+            return CallToolResult(
+                isError=True,
+                content=[TextContent(
+                    type="text",
+                    text=f"{name} posts to or mutates REAL accounts and "
+                         "XPST_MCP_REQUIRE_CONFIRM is set. Re-call with "
+                         '"confirm": true to proceed.',
+                )],
+            )
+        arguments.pop("confirm", None)
+    return None
+
+
 async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
     """Handle a tool call."""
+    blocked = _guardrail_block(name, arguments)
+    if blocked is not None:
+        return blocked
+
     engine_tools = {"xpst_run", "xpst_post", "xpst_health", "xpst_status", "xpst_backfill", "xpst_delete"}
     server = await get_server(initialize=name in engine_tools)
 

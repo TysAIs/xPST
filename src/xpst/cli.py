@@ -49,6 +49,31 @@ EXIT_CONFIG_ERROR = 4
 EXIT_PLATFORM_UNAVAILABLE = 10
 
 
+def _session_health(config) -> dict[str, dict]:
+    """Report stored-session presence/age per platform (G53). A stale or
+    challenged session otherwise fails silently at upload time."""
+    import time
+    from pathlib import Path as _Path
+
+    creds = _Path(config.config_dir).expanduser() / "credentials"
+    files = {
+        "instagram": "instagram_session.json",
+        "x": "x_cookies.json",
+        "youtube": "youtube_token.json",
+    }
+    sessions: dict[str, dict] = {}
+    for name, filename in files.items():
+        path = creds / filename
+        info: dict = {"present": path.exists(), "age_days": None}
+        if info["present"]:
+            try:
+                info["age_days"] = int((time.time() - path.stat().st_mtime) // 86400)
+            except OSError:
+                pass
+        sessions[name] = info
+    return sessions
+
+
 def json_output(data: object, as_json: bool) -> None:
     """Print *data* as JSON when ``--json`` is passed, otherwise Rich console.
 
@@ -616,10 +641,28 @@ def health(ctx: click.Context, as_json: bool):
 
     engine = CrossPostEngine(config)
     health_data = asyncio.run(engine.check_health())
+    health_data["sessions"] = _session_health(config)
 
     if as_json:
         json_output(health_data, True)
         return
+
+    # ── Stored sessions (G53: expired sessions fail silently otherwise) ──
+    console.print("[bold]Stored Sessions:[/bold]")
+    for name, info in health_data["sessions"].items():
+        if not info["present"]:
+            console.print(f"  ⚪ {name.title()}: no stored session")
+            continue
+        age = info["age_days"]
+        flag = "⚠️" if (age is not None and age > 30) else "✅"
+        age_text = f"{age}d old" if age is not None else "age unknown"
+        console.print(f"  {flag} {name.title()}: session file present ({age_text})")
+        if age is not None and age > 30:
+            console.print(
+                f"     [yellow]Session is {age} days old — platforms commonly "
+                f"expire or challenge these; re-auth with `xpst connect {name}`[/yellow]"
+            )
+    console.print()
 
     # ── TikTok Source ──
     console.print("[bold]TikTok Source:[/bold]")
@@ -1448,6 +1491,184 @@ def _mask_sensitive_values(data: dict | list | Any, _path: str = "") -> Any:
     elif isinstance(data, list):
         return [_mask_sensitive_values(item, _path) for item in data]
     return data
+
+
+@main.group()
+@click.pass_context
+def state(ctx: click.Context):
+    """Back up, export, and restore posting state (G51).
+
+    ~/.xpst/state.json is the single source of truth for what has been
+    posted — losing it means the next watch cycle re-posts the recent
+    catalog publicly. These commands make it durable.
+    """
+    pass
+
+
+@state.command("export")
+@click.argument("output", type=click.Path(dir_okay=False))
+@click.pass_context
+def state_export(ctx: click.Context, output: str) -> None:
+    """Export state.json to OUTPUT (validated copy)."""
+    import json as _json
+    import shutil
+    from pathlib import Path as _Path
+
+    config = load_config(ctx.obj.get("config_path"))
+    src = _Path(config.config_dir).expanduser() / "state.json"
+    if not src.exists():
+        console.print("[yellow]No state.json to export.[/yellow]")
+        raise SystemExit(1)
+    _json.loads(src.read_text(encoding="utf-8"))  # refuse to export corrupt state
+    dest = _Path(output).expanduser()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    console.print(f"[green]Exported[/green] {src} -> {dest}")
+
+
+@state.command("import")
+@click.argument("source", type=click.Path(exists=True, dir_okay=False))
+@click.option("--yes", is_flag=True, help="Skip confirmation")
+@click.pass_context
+def state_import(ctx: click.Context, source: str, yes: bool) -> None:
+    """Restore state.json from SOURCE (current state is backed up first)."""
+    import json as _json
+    import shutil
+    from datetime import datetime as _dt
+    from pathlib import Path as _Path
+
+    config = load_config(ctx.obj.get("config_path"))
+    dest = _Path(config.config_dir).expanduser() / "state.json"
+    incoming = _Path(source).expanduser()
+    data = _json.loads(incoming.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or "posted_videos" not in data:
+        console.print("[red]Not a valid xPST state file (no posted_videos).[/red]")
+        raise SystemExit(1)
+    if not yes and not click.confirm(f"Replace {dest} with {incoming}?"):
+        return
+    if dest.exists():
+        backup = dest.with_name(
+            f"state.json.pre-import-{_dt.now().strftime('%Y%m%d-%H%M%S')}"
+        )
+        shutil.copy2(dest, backup)
+        console.print(f"[dim]Current state backed up to {backup.name}[/dim]")
+    shutil.copy2(incoming, dest)
+    console.print(
+        f"[green]Imported[/green] {len(data.get('posted_videos', {}))} posted-video "
+        "records. Review with `xpst status` before the next run."
+    )
+
+
+@state.command("backup")
+@click.option("--keep", default=10, help="Backups to retain")
+@click.pass_context
+def state_backup(ctx: click.Context, keep: int) -> None:
+    """Snapshot state.json into ~/.xpst/backups/ with rotation."""
+    import shutil
+    from datetime import datetime as _dt
+    from pathlib import Path as _Path
+
+    config = load_config(ctx.obj.get("config_path"))
+    src = _Path(config.config_dir).expanduser() / "state.json"
+    if not src.exists():
+        console.print("[yellow]No state.json to back up.[/yellow]")
+        return
+    backups = _Path(config.config_dir).expanduser() / "backups"
+    backups.mkdir(parents=True, exist_ok=True)
+    dest = backups / f"state-{_dt.now().strftime('%Y%m%d-%H%M%S')}.json"
+    shutil.copy2(src, dest)
+    existing = sorted(backups.glob("state-*.json"))
+    for old in existing[:-keep] if keep > 0 else []:
+        old.unlink(missing_ok=True)
+    console.print(f"[green]Backed up[/green] to {dest} ({min(len(existing), keep)} retained)")
+
+
+@main.group()
+@click.pass_context
+def failures(ctx: click.Context):
+    """Inspect and retry failed uploads (G55).
+
+    The dead-letter queue was previously invisible outside logs.
+    """
+    pass
+
+
+@failures.command("list")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@click.pass_context
+def failures_list(ctx: click.Context, as_json: bool) -> None:
+    """List failed uploads recorded in the dead-letter queue."""
+    from xpst.state import StateManager
+
+    config = load_config(ctx.obj.get("config_path"))
+    sm = StateManager(config.config_dir)
+    dlq = sm.get_dead_letter_queue()
+    if as_json:
+        json_output({"failures": dlq}, True)
+        return
+    if not dlq:
+        console.print("[green]No failed uploads.[/green]")
+        return
+    table = Table(title="Failed Uploads (dead-letter queue)")
+    table.add_column("Video", style="cyan")
+    table.add_column("Platform", style="white")
+    table.add_column("Error", style="red", max_width=50)
+    table.add_column("Count", style="yellow")
+    for entry in dlq:
+        table.add_row(
+            entry["video_id"], entry["platform"],
+            (entry.get("error") or "")[:80], str(entry.get("count", 1)),
+        )
+    console.print(table)
+    console.print("[dim]Retry one with: xpst failures retry <video_id> --platform <name>[/dim]")
+
+
+@failures.command("retry")
+@click.argument("video_id")
+@click.option("--platform", "-p", required=True, help="Platform to retry")
+@click.pass_context
+def failures_retry(ctx: click.Context, video_id: str, platform: str) -> None:
+    """Retry one failed upload by re-posting its source file."""
+    import asyncio as _asyncio
+    from pathlib import Path as _Path
+
+    from xpst.engine import CrossPostEngine
+    from xpst.state import StateManager
+
+    config = load_config(ctx.obj.get("config_path"))
+    sm = StateManager(config.config_dir)
+    video = sm.get_video(video_id)
+    if video is None:
+        console.print(f"[red]Unknown video id: {video_id}[/red]")
+        raise SystemExit(1)
+    if not video.get("errors", {}).get(platform):
+        console.print(f"[yellow]{video_id} has no recorded failure on {platform}.[/yellow]")
+        raise SystemExit(1)
+
+    # Find a local file to re-post: the original download if it survives.
+    download_dir = _Path(config.video.download_dir).expanduser()
+    candidates = sorted(download_dir.glob(f"*{video_id.split(':')[-1]}*"))
+    candidates = [p for p in candidates if p.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}]
+    if not candidates:
+        console.print(
+            f"[red]No local file for {video_id} in {download_dir}.[/red] "
+            "Re-run the source cycle (`xpst run`) or post manually with `xpst post`."
+        )
+        raise SystemExit(1)
+
+    engine = CrossPostEngine(config)
+    console.print(f"Retrying {video_id} on {platform} from {candidates[0].name}...")
+    result = _asyncio.run(
+        engine.post_manual(candidates[0], video.get("caption") or "", [platform])
+    )
+    upload = result.results.get(platform)
+    if upload and upload.success:
+        sm.clear_dead_letter_queue(video_id)
+        sm.save()
+        console.print(f"[green]Retry succeeded[/green]: {upload.post_url or 'posted'}")
+    else:
+        console.print(f"[red]Retry failed[/red]: {upload.error if upload else 'no result'}")
+        raise SystemExit(1)
 
 
 @main.group()
