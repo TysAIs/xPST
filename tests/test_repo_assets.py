@@ -102,7 +102,10 @@ def test_readme_local_images_exist_and_pngs_are_valid():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     image_paths = [match.group(1).split("#", 1)[0] for match in LOCAL_MARKDOWN_IMAGE.finditer(readme)]
 
-    assert image_paths
+    # Zero local images is valid (screenshots removed pending demo-data set);
+    # when present, each must exist and be a real PNG.
+    if not image_paths:
+        return
     for image_path in image_paths:
         path = ROOT / image_path
         assert path.exists(), image_path
