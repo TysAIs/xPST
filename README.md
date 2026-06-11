@@ -270,8 +270,8 @@ Both read the same local state as the CLI and require no external services. They
 
 **Screenshots**
 
-![Overview](docs/screenshots/dashboard-overview.png)
-![Analytics](docs/screenshots/dashboard-analytics.png)
+> Screenshots with demo data are coming with the first release — run
+> `xpst desktop` or `xpst dashboard` to see the UI live.
 
 ---
 
