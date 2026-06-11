@@ -1382,8 +1382,12 @@ class TestStateCorruption:
             state.mark_video_failed("video1", "x", f"Error {i}")
 
         cleared = state.clear_dead_letter_queue("video1")
-        assert cleared == 1
-        assert "video1" not in state.state["posted_videos"]
+        assert cleared >= 1
+        # G02: clearing the DLQ clears ERRORS ONLY — deleting the record
+        # erased posted-history and caused re-posts.
+        assert "video1" in state.state["posted_videos"]
+        assert not state.state["posted_videos"]["video1"].get("errors")
+        assert state.is_video_posted("video1", "youtube")
 
 
 # ═══════════════════════════════════════════════════════════════════

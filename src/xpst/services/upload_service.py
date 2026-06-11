@@ -25,6 +25,7 @@ from typing import Any
 
 from xpst.platforms.base import PlatformUploader, UploadResult
 from xpst.utils.circuit_breaker import CircuitBreakerManager, CircuitBreakerOpenError
+from xpst.utils.content_hash import compute_content_hash
 from xpst.utils.disk import DiskSpaceError, check_disk_space
 from xpst.utils.logger import get_logger
 from xpst.utils.notifications import WebhookNotifier
@@ -97,6 +98,7 @@ class UploadService:
         caption: str,
         platform_name: str,
         video_id: str,
+        source_platform: str = "",
     ) -> UploadResult:
         """Single method that handles the full upload pipeline.
 
@@ -202,6 +204,31 @@ class UploadService:
                 platform=platform_name,
             )
 
+        # ── Durable-row idempotency guard (G03/G04/G09) ──
+        # The file fingerprint is the cross-flow identity: unidirectional,
+        # bidirectional, manual, and re-posted copies of the same bytes all
+        # resolve to one hash, and the recorded state row is the proof. This
+        # single chokepoint check closes the cross-flow double-post paths.
+        content_hash = compute_content_hash(file_path=video_path, filename=video_path.name)
+        try:
+            existing_id = self.state.get_by_hash(content_hash)
+        except AttributeError:
+            existing_id = None
+        if existing_id and self.state.is_video_posted(existing_id, platform_name):
+            logger.info(
+                "Skipping %s upload — identical content already posted as %s (hash %s)",
+                platform_name, existing_id, content_hash,
+            )
+            return UploadResult(
+                success=True,
+                platform=platform_name,
+                metadata={
+                    "already_posted": True,
+                    "dedup": "content_hash",
+                    "duplicate_of": existing_id,
+                },
+            )
+
         # Encode for platform
         encoded_path = video_path
         try:
@@ -240,6 +267,9 @@ class UploadService:
                 caption,
                 config=STANDARD_RETRY,
                 platform=platform_name,
+                # X maps duplicate posts to success server-side; IG/YT do
+                # not, so ambiguous errors there must not blind-retry (G07).
+                ambiguous_safe=platform_name == "x",
             )
 
             tracker.complete()
@@ -252,6 +282,8 @@ class UploadService:
                     post_id=upload_result.post_id,
                     post_url=upload_result.post_url,
                     caption=caption,
+                    content_hash=content_hash,
+                    source_platform=source_platform,
                 )
                 self.circuit_breakers.record_success(platform_name)
                 self.state.update_platform_health(platform_name, True)
@@ -399,6 +431,7 @@ class UploadService:
         caption: str,
         platform_name: str,
         video_id: str,
+        source_platform: str = "",
     ) -> UploadResult:
         """Upload a carousel/multi-media post to a single platform.
 
@@ -434,6 +467,27 @@ class UploadService:
                 platform=platform_name,
             )
 
+        # Carousel identity for the idempotency guard: fingerprint of the
+        # first media file plus the full ordered name list.
+        content_hash = compute_content_hash(
+            file_path=media_paths[0],
+            filename="|".join(p.name for p in media_paths),
+        )
+        try:
+            existing_id = self.state.get_by_hash(content_hash)
+        except AttributeError:
+            existing_id = None
+        if existing_id and self.state.is_video_posted(existing_id, platform_name):
+            logger.info(
+                "Skipping %s carousel — identical media set already posted as %s",
+                platform_name, existing_id,
+            )
+            return UploadResult(
+                success=True,
+                platform=platform_name,
+                metadata={"already_posted": True, "dedup": "content_hash"},
+            )
+
         # Upload carousel
         try:
             tracker = create_upload_tracker(
@@ -447,6 +501,7 @@ class UploadService:
                 caption,
                 config=STANDARD_RETRY,
                 platform=platform_name,
+                ambiguous_safe=platform_name == "x",
             )
 
             tracker.complete()
@@ -458,6 +513,8 @@ class UploadService:
                     post_id=upload_result.post_id,
                     post_url=upload_result.post_url,
                     caption=caption,
+                    content_hash=content_hash,
+                    source_platform=source_platform,
                 )
                 self.circuit_breakers.record_success(platform_name)
                 self.quota_manager.record_upload(platform_name)

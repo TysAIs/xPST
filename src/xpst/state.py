@@ -154,6 +154,7 @@ class StateManager:
         content_hash: str | None = None,
         caption: str | None = "",
         tiktok_url: str | None = None,
+        source_platform: str = "",
     ) -> None:
         """Legacy method for marking a video as posted."""
         from datetime import datetime, timezone
@@ -170,7 +171,7 @@ class StateManager:
                 self._state,
                 video_id=video_id,
                 source_url=tiktok_url or "",
-                source_platform="",
+                source_platform=source_platform,
                 posted_to=posted_to,
                 caption=caption,
                 content_hash=content_hash,
@@ -184,8 +185,10 @@ class StateManager:
         video = self._state.get("posted_videos", {}).get(video_id)
         if not video or not video.get("errors"):
             return 0
-        cleared = 1
-        del self._state["posted_videos"][video_id]
+        # G02: clearing the DLQ must only clear the ERRORS — deleting the
+        # whole record erased posted-history and re-posted the video.
+        cleared = len(video["errors"])
+        video["errors"] = {}
         self.save()
         return cleared
 
@@ -221,14 +224,18 @@ class StateManager:
         self._new_manager.add_posted_video(
             video_id=video_id,
             source_url="",
-            source_platform="",
+            # Composite keys carry their origin ("youtube:123") — record it
+            # so backfill's source filter has something to match (G03).
+            source_platform=video_id.split(":", 1)[0] if ":" in video_id else "",
             posted_to=posted_to,
             caption=caption,
             content_hash=content_hash,
         )
 
-        # Also maintain legacy cross_posted key for test compatibility
-        composite_key = f"tiktok:{video_id}"  # Use tiktok as default source
+        # Also maintain legacy cross_posted key for test compatibility.
+        # G05: video_id may already be a composite key ("instagram:123") —
+        # blindly prefixing produced junk keys like "tiktok:instagram:123".
+        composite_key = video_id if ":" in video_id else f"tiktok:{video_id}"
         if composite_key not in self._state.get("cross_posted", {}):
             self._state.setdefault("cross_posted", {})[composite_key] = {}
         self._state["cross_posted"][composite_key][platform] = {

@@ -232,6 +232,7 @@ async def retry_operation(
     config: RetryConfig | None = None,
     on_retry: Callable[[int, Exception], Any] | None = None,
     platform: str | None = None,
+    ambiguous_safe: bool = True,
     **kwargs: Any,
 ) -> Any:
     """
@@ -272,9 +273,14 @@ async def retry_operation(
                 and result.error
             ):
                 error_msg = str(result.error).lower()
+                # Ambiguous errors (timeout/connection) can mean the request
+                # SUCCEEDED server-side with the response lost. Re-invoking
+                # the operation then double-posts on platforms without
+                # server-side duplicate detection (G07). Callers pass
+                # ambiguous_safe=False for those platforms: the error is
+                # surfaced for deliberate recovery instead of blind retry.
+                ambiguous_keywords = ["timeout", "connection"]
                 retryable_keywords = [
-                    "timeout",
-                    "connection",
                     "503",
                     "rate_limit",
                     "rate limit",
@@ -285,6 +291,15 @@ async def retry_operation(
                     "temporarily",
                     "try again",
                 ]
+                if any(kw in error_msg for kw in ambiguous_keywords):
+                    if ambiguous_safe:
+                        raise Exception(result.error)
+                    logger.warning(
+                        "Ambiguous failure (possible server-side success) — "
+                        "not retrying to avoid a double-post: %s",
+                        result.error,
+                    )
+                    return result
                 if any(kw in error_msg for kw in retryable_keywords):
                     raise Exception(result.error)
 

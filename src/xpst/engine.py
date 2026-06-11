@@ -369,7 +369,7 @@ class CrossPostEngine:
                 break
 
             try:
-                result = await self._process_video(video)
+                result = await self._process_video(video, source)
                 results.append(result)
 
                 # Send per-platform notifications
@@ -413,6 +413,7 @@ class CrossPostEngine:
     async def _process_video(
         self,
         video: VideoMetadata,
+        source: str = "tiktok",
     ) -> CrossPostResult:
         """Process a single video through the full pipeline.
 
@@ -427,10 +428,11 @@ class CrossPostEngine:
 
         logger.info(f"Processing: {video.video_id} - {video.caption[:50]}")
 
-        # Track download in shutdown handler
-        source = self._sources.get("tiktok")
-        if not source:
-            logger.error("No source available for download")
+        # Track download in shutdown handler (G01: honor the requested
+        # source — this was hardcoded to "tiktok", breaking every other one)
+        source_obj = self._sources.get(source)
+        if not source_obj:
+            logger.error(f"No source available for download: {source}")
             return result
 
         self.shutdown_handler.start_tracking(video.video_id, "", "downloading")
@@ -445,7 +447,7 @@ class CrossPostEngine:
             return result
 
         # Download video
-        download_result = await source.download(video.video_id, download_dir)
+        download_result = await source_obj.download(video.video_id, download_dir)
 
         if not download_result.success or not download_result.video_path:
             logger.error(f"Download failed: {download_result.error}")
@@ -500,6 +502,7 @@ class CrossPostEngine:
                 caption=video.caption,
                 platform_name=platform_name,
                 video_id=video.video_id,
+                source_platform=source,
             )
 
             result.results[platform_name] = upload_result
@@ -549,7 +552,10 @@ class CrossPostEngine:
         if platforms is None:
             platforms = list(self._platforms.keys())
 
-        video_id = video_path.stem
+        # G09: stem alone collides across directories/re-exports; suffix the
+        # file fingerprint so the state key is content-stable.
+        from xpst.utils.content_hash import compute_content_hash
+        video_id = f"{video_path.stem}-{compute_content_hash(file_path=video_path, filename=video_path.name)[:8]}"
 
         result = CrossPostResult(
             video_id=video_id,
@@ -573,6 +579,7 @@ class CrossPostEngine:
                 caption=caption,
                 platform_name=platform_name,
                 video_id=video_id,
+                source_platform="local",
             )
 
             result.results[platform_name] = upload_result
@@ -925,6 +932,7 @@ class CrossPostEngine:
                 caption=post.caption,
                 platform_name=platform_name,
                 video_id=post.composite_key,
+                source_platform=post.source_platform,
             )
 
             result.results[platform_name] = upload_result
