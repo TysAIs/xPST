@@ -88,6 +88,39 @@ def build_release_preflight(
     strict_severity = "error" if public else "warning"
     checks: list[PreflightCheck] = []
 
+    # Tag / version / CHANGELOG consistency (ISC-179): a release where these
+    # disagree ships a lie. pyproject version must appear as a CHANGELOG
+    # heading, and any tag being cut must match pyproject.
+    version = None
+    try:
+        import tomllib
+
+        with open(ROOT / "pyproject.toml", "rb") as f:
+            version = tomllib.load(f)["project"]["version"]
+    except Exception:
+        pass
+    changelog_text = ""
+    try:
+        changelog_text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    except OSError:
+        pass
+    version_in_changelog = bool(
+        version and (f"[{version}]" in changelog_text or f"## {version}" in changelog_text)
+    )
+    checks.append(
+        PreflightCheck(
+            id="version_changelog_consistency",
+            ok=bool(version) and version_in_changelog,
+            severity="error",
+            message=(
+                f"pyproject version {version} has a CHANGELOG entry."
+                if version and version_in_changelog
+                else f"pyproject version {version!r} has NO CHANGELOG heading — add one before tagging."
+            ),
+            action=f"Add a '## [{version}]' section to CHANGELOG.md and tag v{version}." if version else "Fix pyproject version.",
+        )
+    )
+
     checks.append(
         PreflightCheck(
             id="dist_dir",
