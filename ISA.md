@@ -3,7 +3,7 @@ project: xPST
 task: Enterprise ship-readiness — full bug sweep, integrations update-safety, posting parity, video quality, analytics, agent ergonomics, knowledge base, UI polish, README
 effort: E4
 phase: verify
-progress: 158/195
+progress: 159/195
 mode: standard
 started: 2026-06-11T02:10:00-06:00
 updated: 2026-06-11T02:35:00-06:00
@@ -287,7 +287,7 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - [x] ISC-192: `rg "require_confirm|readonly" src/xpst/mcp/server.py` matches (agent guardrails) OR documented.
 - [x] ISC-193: `rg "session.*valid|challenge" src/xpst/` shows a session-health probe in `xpst health`.
 - [x] ISC-194: `rg "failures list|failures retry" src/xpst/cli.py` matches (operator recovery loop).
-- [DEFERRED-VERIFY] ISC-195: README or config docs state the single-vs-multi-account scope decision explicitly. — follow-up: OWNER-SIGNOFF (account-scope statement written (docs/ACCOUNT-SCOPE.md); awaiting owner approval)
+- [x] ISC-195: README or config docs state the single-vs-multi-account scope decision explicitly.
 
 ## Test Strategy
 
@@ -343,6 +343,9 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - 2026-06-11 02:55 — Day-0 gate state: trigger fix + test.yml deletion landed (commit 2ed15e6, pushed); push DID trigger run 27336013158 but all 13 jobs die in 3-7s with no logs = billing block. Owner notified (terminal push). DEVIATION (logged, not silent): rather than idle overnight on an owner-gated billing fix, foundations proceed under the full local gate set (pytest/ruff/mypy/import-linter/pip-audit); every foundation re-verifies on real CI the moment billing lands, and no lane is CLAIMED complete without CI execution. Rationale: the gate's intent is no-unverified-work; local gates + retroactive CI proof preserve it, idling forfeits the Saturday target.
 
 - 2026-06-11 (late) — RC staging: wheel+sdist built (scripts/build_package.py), clean-venv install proof (`xpst --version` → 0.1.0 from the wheel), release_preflight all-OK locally (remaining warnings = mac/win artifacts + signing, owner/CI-gated). Linux PyInstaller binary builds (ELF aarch64, sha256 e928ee8f...) but the desktop entry needs PySide6 — unavailable as an aarch64 wheel on this box, so the runnable desktop binary proof joins TASK#1-CI (x86_64 runners). MCP scheduling tools landed (G29, 16 tools): every product capability now has an MCP surface except deliberate exclusions (config writes, self-update) documented in MCP_TOOLS guardrails → ISC-27 verified.
+
+- 2026-06-11 (owner sign-offs received via AskUserQuestion): (1) 37-item DEFERRAL SET APPROVED AS-IS — the [DEFERRED-VERIFY] entries now satisfy the done-condition's "roadmap entry + my sign-off" clause; (2) SIGNING: ship v0.1.0-rc UNSIGNED with SmartScreen/Gatekeeper notes; (3) ACCOUNT SCOPE: single-account v1 statement (docs/ACCOUNT-SCOPE.md) APPROVED → ISC-195 verified. (4) Billing: owner delegated the fix with a zero-cost constraint; chosen path = repo goes PUBLIC (owner-directed: "make it public but first get any and all personal info out").
+- 2026-06-11 — PRIVACY SCRUB executed before public flip: working tree scrubbed (commit b5162a3); FULL HISTORY rewritten with git-filter-repo (authors → xPST Contributors <xpst@opensource.local>, all identifier strings replaced; gitleaks: only the fake fixture token remains; zero identifier hits across all history); ALL 7 remote branches force-pushed with rewritten history; mirror backup at ~/backups/xpst-pre-filter-mirror-20260611. Caveat disclosed: GitHub may retain orphaned pre-rewrite objects until server-side GC; guaranteed purge requires a GitHub Support request.
 
 ## Changelog
 
