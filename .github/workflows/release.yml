@@ -53,6 +53,10 @@ jobs:
 
       - name: Publish to PyPI
         if: github.event_name == 'push'
+        # Non-blocking until PyPI trusted publishing is configured for this
+        # repo (owner + PyPI side) — the GitHub release must not be held
+        # hostage by the registry step.
+        continue-on-error: true
         uses: pypa/gh-action-pypi-publish@release/v1
 
   build-windows:
