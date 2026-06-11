@@ -1,5 +1,8 @@
 # Enterprise Readiness
 
+> **SUPERSEDED — historical snapshot (2026-06-10).**
+> Canonical status lives in [ISA.md](../ISA.md) (criteria) and [docs/XPST-NORTH-STAR.md](XPST-NORTH-STAR.md) (current-vs-ideal). Numbers below are stale (e.g. the test count and the readiness score) and must not be cited. This file is kept for historical context only.
+
 xPST is designed to remain free, open source, local-first, and user-controlled while still being packaged like a professional desktop app, CLI, and MCP server. This document defines the release bar for that goal.
 
 ## Current Status

@@ -1,49 +1,69 @@
-﻿<p align="center">
+<p align="center">
   <img src="docs/assets/xpst-horizontal.png" alt="xPST — Cross-Platform Studio" width="400">
 </p>
 
 # xPST
 
-**Cross-Platform Studio — Enterprise-grade, free, local cross-posting for short-form video**
+**Post once, publish everywhere. Local-first cross-posting, unified analytics, and a personal content knowledge base for short-form video creators.**
 
 ---
 
-![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green)
-![Tests](https://img.shields.io/badge/tests-866%20passing-brightgreen)
-![Coverage](https://img.shields.io/codecov/c/github/TysAIs/xPST?label=coverage)
-![Stars](https://img.shields.io/github/stars/TysAIs/xPST?style=social)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
-![Python Versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)
+![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue)
+![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green)
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 ![MCP Server](https://img.shields.io/badge/MCP-server-orange)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![License: Apache](https://img.shields.io/badge/License-Apache_2.0-yellow.svg)
+
+Tests: 1198 passing, 3 skipped (local Linux run, `pytest`).
 
 ---
 
-xPST is a local-first, open-source tool that automatically distributes short-form video across connected providers. It currently ships with YouTube Shorts, Instagram Reels, X, TikTok, YouTube source, Instagram source, X source, and local-file adapters, all described through one provider catalog used by the CLI, desktop app, and MCP server. It downloads from configured sources, encodes with destination-specific optimizations, uploads with conservative safety controls, and tracks everything without your content ever leaving your machine. No subscriptions, no cloud servers, no vendor lock-in.
+## What is xPST
+
+xPST (Cross-Post Tool) is a local-first, open-source automation tool that takes a creator's short-form video from one source platform and republishes it, at full native fidelity, to every other platform they own (YouTube, Instagram, and X today). It tracks per-post performance across all of them in one place, and feeds the creator's own published content into a personal knowledge base that any connected AI agent can semantically query ("what did I say about X, and what performed?"). It runs three ways: a desktop GUI, a CLI, and an MCP server so AI agents can drive the entire product. It manages the unofficial third-party libraries it depends on with an update path designed never to silently break the app.
+
+No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
 
 ---
 
-## Features
+## The Four Pillars
 
-- **Free forever** — no subscriptions, no per-channel fees, no premium tiers
-- **100% local** — your content and credentials never leave your machine
-- **Provider-agnostic core** — sources and destinations publish machine-readable capabilities for CLI, desktop, MCP, and future plugins
-- **Platform-specific encoding** — optimized FFmpeg profiles per target (1080p for YouTube/X, 720p for Instagram, VP9 tier upscaling)
-- **Bidirectional cross-posting** — monitor ALL platforms, not just one source
-- **Anti-bot protection** — random delays, time-of-day awareness, caption variation, User-Agent rotation
-- **Circuit breaker pattern** — auto-disables failing platforms, recovers automatically
-- **Crash recovery** — checkpoints resume half-uploaded videos after interruptions
-- **Graceful degradation** — one platform failure never blocks the others
-- **Rate limiting** — configurable per-platform daily limits (default: 5/day)
-- **Carousel support** — Instagram albums, X threads, stitched video for YouTube/TikTok
-- **Web dashboard** — real-time analytics, upload history, platform health at a glance
-- **Webhook notifications** — Discord and Telegram alerts on success or failure
-- **Unified analytics** — views, likes, comments, and shares across all platforms
-- **Graceful shutdown** — handles SIGINT/SIGTERM cleanly, never corrupts state
-- **Atomic state writes** — crash-safe JSON state with atomic file operations
-- **Mac sleep/wake recovery** — catch-up logic compensates for laptop lid closures
+### 1. Full-fidelity fan-out
+
+One source video downloads once and uploads to every connected destination. The encoding pipeline is built to never degrade your video:
+
+- **Orientation-aware scaling** targets a 1920px long edge, so a 1080x1920 vertical and a 1920x1080 landscape video both keep their full resolution.
+- **Frame rate is a cap, never a force** (`-fpsmax 60`): 60fps sources stay 60fps, lower-fps sources are untouched.
+- **Modern per-platform profiles**: YouTube 8 Mbps High; Instagram Reels CRF 20 High@4.0 (10 Mbps maxrate); X 10 Mbps High@4.0.
+- **Smart passthrough**: a probe checks whether the source already satisfies the platform profile and skips the re-encode entirely, saving a generation loss.
+- **Full-quality downloads**: yt-dlp fetches split video+audio streams (`bv*+ba`) and merges them, instead of settling for pre-muxed lower-quality files.
+- One platform failing never blocks the others; a circuit breaker disables repeat offenders and recovers automatically.
+
+### 2. Unified per-post analytics with persistent history
+
+Views, likes, comments, shares, and platform-specific signals for every cross-posted video, in one normalized schema. Every collection run appends per-post snapshots to a local SQLite store (`~/.xpst/analytics.db`), keyed on `(platform, post_id, captured_at)`, so trends and "what performed well" come from real history. See the honest [capability matrix](#analytics-capability-matrix-honest) below for exactly what each platform exposes, and what it does not.
+
+### 3. A personal content knowledge base
+
+Every video you ingest is transcribed (faster-whisper), distilled into cited knowledge "nuggets," embedded (fastembed or a local embedding endpoint), and stored locally (JSON store, with a LanceDB vector store available). You can then organize nuggets into knowledge areas, order them by difficulty into a course outline, and query your own back catalog from the CLI or from any AI agent over MCP.
+
+```bash
+xpst kb add <url-or-file>     # transcribe, extract cited nuggets, embed, store
+xpst kb query "topic"          # search stored nuggets
+xpst kb organize               # cluster nuggets into areas, tag difficulty
+xpst kb areas                  # list areas in course order
+xpst kb course                 # emit the organized, cited outline
+xpst kb doctor                 # read-only health check of the workspace
+```
+
+Queries are semantic: the query is embedded and vector-searched against the store, with an automatic substring-match fallback when embeddings are unavailable. Every hit carries provenance (source URL, timestamps) and a similarity score, and the response reports which mode answered.
+
+**Honest status:** ingestion is explicit today (`xpst kb add` or the `kb_add` MCP tool); published posts are not yet auto-ingested. Performance-weighted retrieval (rank nuggets by how the source posts performed) is planned on top of the analytics snapshot store but not built yet.
+
+### 4. Three drivable surfaces
+
+- **Desktop GUI** (PySide6/QML): dashboard, content library, analytics, connect, schedule, settings.
+- **CLI** (Click): 25 top-level commands covering the entire workflow.
+- **MCP server**: 13 tools (9 `xpst_*` + 4 `kb_*`) so AI agents can discover providers, check health, post, and mine your knowledge base. See [For AI Agents](#for-ai-agents).
 
 ---
 
@@ -51,13 +71,15 @@ xPST is a local-first, open-source tool that automatically distributes short-for
 
 Run `xpst providers --json` or call the MCP `xpst_providers` tool to inspect the installed provider catalog.
 
-### Destinations
+### Destinations (where xPST posts)
 
 - **YouTube Shorts** — official YouTube Data API v3 with OAuth 2.0
 - **Instagram Reels** — instagrapi session-based uploads and carousel posts
 - **X** — twikit cookie-based uploads and carousel-as-thread posts
 
-### Sources
+> **TikTok is a source only.** xPST does not post to TikTok: there is no official self-serve upload API for this use case and no stable unofficial one, so claiming it would be dishonest. TikTok remains fully supported for downloading your own content as a source.
+
+### Sources (where xPST pulls from)
 
 - **TikTok** — yt-dlp downloads with optional browser cookies
 - **YouTube** — yt-dlp channel/video downloads with optional browser cookies
@@ -67,308 +89,213 @@ Run `xpst providers --json` or call the MCP `xpst_providers` tool to inspect the
 
 ---
 
-## Quick Start
+## Analytics Capability Matrix (honest)
 
-### 1. Install (3 commands)
+Not every metric is collectible on every platform. This is what the current code actually retrieves:
 
-```bash
-# From PyPI (when published)
-pip install xpst
-xpst setup
-xpst run
+| Metric | YouTube | Instagram | X | TikTok (source) |
+|---|---|---|---|---|
+| Views | yes (Data API v3) | insights impressions with a **Business/Creator account**, else public `play_count` | yes | yes (scrape) |
+| Likes | yes | yes | yes | yes (scrape) |
+| Comments | yes | yes | replies | yes (scrape) |
+| Shares | not collected (needs YouTube Analytics API; on roadmap) | **Business/Creator account required** | retweet count (reported as shares) | not exposed |
+| Saves | n/a | **Business/Creator account required** | n/a | not exposed |
+| Reposts | n/a | not exposed by instagrapi | quote count not collected yet | repost count (scrape) |
+| Story-reposts | n/a (no stories) | **impossible without the Meta Graph Business API** | n/a (no stories) | n/a |
 
-# Or from source (development)
-git clone https://github.com/TysAIs/xPST.git
-cd ~/XPST
-pip install -e .
-xpst setup
-xpst run
-```
+Plain-language caveats:
 
-### 2. Configure
-
-```bash
-xpst setup
-```
-
-The interactive wizard walks you through connecting each platform. Alternatively, create `~/.xpst/config.yaml` manually (see [Configuration](#configuration)).
-
-### 3. Run
-
-```bash
-# One-shot: check for new videos and post
-xpst run
-
-# Continuous: watch for new videos every 15 minutes
-xpst watch
-```
+- **Story-reposts are collectible on ZERO platforms via this stack.** No tool built on these libraries can get them; treat any claim otherwise with suspicion.
+- **Instagram shares and saves require a Business or Creator account** (Instagram insights API). On a personal account you get views (play count), likes, and comments.
+- **TikTok metrics come from an unauthenticated yt-dlp scrape.** They may break without notice if TikTok changes its pages, and there is no SLA.
 
 ---
 
-## CLI Commands
+## Video Constraints Per Platform
 
-xPST provides 24 commands for complete control over your cross-posting workflow.
+xPST encodes per-platform but does **not** currently trim or split videos that exceed a platform's duration limit:
 
-### Setup and Maintenance
+| Platform | Aspect | Max duration | What happens if exceeded |
+|---|---|---|---|
+| YouTube Shorts | 9:16 vertical | 60s | Longer videos upload as regular long-form YouTube videos, not Shorts |
+| Instagram Reels | 9:16 vertical | 90s | Upload may be rejected by Instagram |
+| X | any | 140s (2:20) | Upload fails |
+
+Encoding targets (defaults, all configurable): 1920px long edge, H.264 High profile, 60fps cap, BT.709, yuv420p. Sources that already comply are passed through without re-encoding.
+
+---
+
+## Quick Start
+
+### Install from source (recommended today)
+
+xPST is not yet published to PyPI. Until it is, install from source. With [uv](https://docs.astral.sh/uv/) (fastest):
 
 ```bash
-# Interactive first-time setup wizard
+git clone https://github.com/TysAIs/xPST.git
+cd xPST
+uv venv && uv pip install -e ".[mcp,knowledge]"
+uv run xpst setup
+uv run xpst run
+```
+
+Or with plain pip:
+
+```bash
+git clone https://github.com/TysAIs/xPST.git
+cd xPST
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[mcp,knowledge]"
 xpst setup
-
-# Connect a specific platform (or all)
-xpst connect
-xpst connect youtube
-xpst connect instagram --test
-
-# Update all dependencies to latest versions
-xpst update
-xpst update --check
-xpst update --components --json
-
-# Show version and all dependency versions
-xpst version
-
-# Show installed source/destination provider capabilities
-xpst providers
-xpst providers --json
-```
-
-### Core Operations
-
-```bash
-# Check for new videos and cross-post them
 xpst run
-
-# Bidirectional mode: check ALL sources, not just TikTok
-xpst run --bidirectional
-
-# Watch mode: continuous monitoring (default: every 15 minutes)
-xpst watch
-
-# Watch with custom interval (in seconds)
-xpst watch --interval 600
-
-# Watch in bidirectional mode
-xpst watch --bidirectional
-
-# Manually post a video to all platforms
-xpst post --video ./my_video.mp4 --caption "Check this out!"
-
-# Post to specific platforms only
-xpst post --video ./my_video.mp4 --caption "Hello!" --platforms youtube,instagram
-
-# Post a carousel (multiple files)
-xpst post --video ./img1.jpg --video ./img2.jpg --video ./img3.jpg --caption "Album post"
 ```
 
-### Monitoring and Diagnostics
+Optional extras: `mcp` (MCP server), `knowledge` (KB transcription/embeddings/LanceDB), `pyside6` (desktop GUI), `dashboard` (web dashboard), `full` (everything).
+
+### Once published to PyPI
 
 ```bash
-# Test connectivity to all platforms (no uploads)
-xpst health
-
-# Show health status, statistics, and quota usage
-xpst status
-
-# View recent log output
-xpst logs
-
-# Export a redacted support bundle with readiness, providers, versions, and logs
-xpst diagnostics
-xpst diagnostics --output ./xpst-diagnostics.zip
-
-# Show cross-platform analytics summary
-xpst analytics
-
-# Refresh analytics (ignore cache)
-xpst analytics --refresh --platforms youtube,instagram
-
-# Launch the native desktop app (recommended)
-xpst app
-
-# Or launch in browser
-xpst dashboard
-xpst dashboard --port 9090
+pip install "xpst[mcp,knowledge]"   # not yet available; watch the Releases page
 ```
 
-### Authentication
+### Configure and run
 
 ```bash
-# Authenticate with a specific platform
-xpst auth youtube
-xpst auth x
-xpst auth instagram
-xpst auth tiktok
-
-# Show authentication and quota status for all platforms
-xpst auth status
+xpst setup        # interactive wizard: connects platforms, writes ~/.xpst/config.yaml
+xpst health       # test connectivity to all platforms (no uploads)
+xpst run          # one-shot: check for new videos and post
+xpst watch        # continuous: check every 15 minutes
 ```
 
-### Recovery and Deletion
+See [docs/QUICKSTART.md](docs/QUICKSTART.md) for per-platform authentication walkthroughs and [docs/INSTALL.md](docs/INSTALL.md) for all install paths.
+
+---
+
+## CLI
+
+xPST provides 25 top-level commands (`xpst --help` for the full list):
 
 ```bash
-# Retry failed or incomplete posts
-xpst backfill
-xpst backfill --platforms youtube --limit 5
+# Setup and accounts
+xpst setup | connect | auth | config | readiness | providers
 
-# Delete a posted video from platforms
-xpst delete <video_id>
-xpst delete <video_id> --platform instagram
-xpst delete <video_id> --yes
+# Core posting
+xpst run [--bidirectional]      # fan out new videos from sources
+xpst watch [--interval 600]     # continuous monitoring loop
+xpst post --video ./v.mp4 --caption "..."   # manual post or carousel
+xpst schedule add|list|remove   # scheduled posts
+xpst backfill                   # retry failed or incomplete posts
+xpst delete <video_id>          # delete a posted video from platforms
+
+# Knowledge base
+xpst kb add|query|organize|areas|course|doctor
+
+# Observability and surfaces
+xpst status | health | logs | analytics | diagnostics
+xpst app                        # native desktop GUI
+xpst dashboard                  # web dashboard
+xpst mcp                        # MCP server over stdio
+
+# Maintenance
+xpst update | version | plugins | build
 ```
 
-### Global Options
+Most commands accept a `--json` flag for machine-readable output; coverage is being expanded. See [docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md) for output formats.
+
+### Bidirectional cross-posting
+
+Most cross-posting tools work in one direction. xPST can monitor ALL connected sources for new content and distribute to every connected destination:
 
 ```bash
-# Specify a custom config file
-xpst --config /path/to/config.yaml run
-
-# Enable verbose/debug logging
-xpst --verbose run
+xpst run                  # default source -> YouTube, Instagram, X
+xpst run --bidirectional  # all sources -> all destinations
 ```
+
+In bidirectional mode:
+
+- Post a Reel on Instagram, and it goes to YouTube Shorts and X
+- Upload a Short on YouTube, and it goes to Instagram Reels and X
+- Post a video on X, and it goes to YouTube Shorts and Instagram Reels
+- Post on TikTok, and it goes to YouTube Shorts, Instagram Reels, and X (TikTok is source-only)
+
+The engine deduplicates across platforms so content is not double-posted.
 
 ---
 
 ## For AI Agents
 
-xPST is designed for programmatic use by AI assistants, scripts, and automation tools.
+xPST is designed to be driven end-to-end by AI agents over the Model Context Protocol.
 
-### MCP Server (Recommended)
-
-The built-in [MCP server](docs/MCP_TOOLS.md) exposes all xPST capabilities as tools and resources:
+### MCP server setup
 
 ```bash
-# Start the MCP server (stdio transport)
-xpst-mcp
-
-# Or via CLI
-xpst mcp
+pip install "xpst[mcp]"
 ```
 
-**9 tools available:** `xpst_providers`, `xpst_config_show`, `xpst_auth_status`, `xpst_status`, `xpst_health`, `xpst_run`, `xpst_post`, `xpst_backfill`, `xpst_delete`
+Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 
-The metadata tools are lightweight and do not start the posting engine.
-
-See the full [MCP Tools Reference](docs/MCP_TOOLS.md) for schemas, parameters, and examples.
-
-### CLI `--json` Flag
-
-Every CLI command supports `--json` for machine-readable output:
-
-```bash
-xpst status --json       # Health status as JSON
-xpst run --json           # Cross-posting results as JSON
-xpst health --json        # Platform connectivity as JSON
-xpst analytics --json     # Analytics summary as JSON
-xpst version --json       # Version info as JSON
-xpst diagnostics --json   # Redacted support bundle path as JSON
+```json
+{
+  "mcpServers": {
+    "xpst": {
+      "command": "xpst-mcp",
+      "transport": "stdio"
+    }
+  }
+}
 ```
 
-JSON mode is also auto-enabled when stdout is not a TTY (e.g., piped to another program).
+### 13 tools
 
-See the full [Agent Guide](docs/AGENT_GUIDE.md) for all commands, output formats, and Python API usage.
+**9 posting/ops tools:** `xpst_providers`, `xpst_config_show`, `xpst_auth_status`, `xpst_status`, `xpst_health`, `xpst_run`, `xpst_post`, `xpst_backfill`, `xpst_delete`
+
+**4 knowledge-base tools:** `kb_add`, `kb_query`, `kb_organize`, `kb_areas`
+
+Metadata tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) are lightweight and never start the posting engine. **`xpst_run` and `xpst_post` post to your real accounts** — agents should always use `dry_run: true` first and confirm with the user before a live post.
+
+Recommended cold-start flow for an agent: `xpst_providers` (discover the catalog) → `xpst_auth_status` / `xpst_health` (confirm readiness) → `xpst_run` with `dry_run: true` → live run after user confirmation → `kb_query` to mine the creator's content.
+
+See [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md) for every tool's schema, arguments, and example calls, and [docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md) for the CLI/JSON and Python API surfaces.
 
 ---
 
-## Dashboard
-
-Launch the native desktop app (appears in your dock):
+## Desktop App and Dashboard
 
 ```bash
-xpst app
+xpst app          # native desktop app (PySide6/QML), appears in your dock
+xpst dashboard    # local web dashboard at http://localhost:8080
 ```
 
-Or launch in your browser:
+Both read the same local state as the CLI and require no external services. They provide upload history, per-platform health, analytics, quota tracking, and the dead-letter queue of failed posts.
 
-```bash
-xpst dashboard
-```
+**Screenshots**
 
-This opens a local web server at `http://localhost:8080` (configurable with `--port`). The dashboard provides:
-
-- **Upload history** — every post across all platforms with timestamps
-- **Platform health** — live status of each connected account
-- **Analytics** — views, likes, comments, and shares per post
-- **Quota tracking** — daily upload usage per platform
-- **Dead letter queue** — failed posts with error details and retry options
-
-### Screenshots
-
-**Overview Dashboard**
 ![Overview](docs/screenshots/dashboard-overview.png)
-
-**Content Library**
-![Content Library](docs/screenshots/dashboard-content.png)
-
-**Analytics**
 ![Analytics](docs/screenshots/dashboard-analytics.png)
-
-**Settings — Rate Limits**
-![Settings](docs/screenshots/dashboard-settings.png)
-- **Rate limit visibility** — how close you are to daily limits
-
-The dashboard requires no external services — it reads from the same local state files as the CLI.
 
 ---
 
 ## Architecture
 
 ```
-                    +------------------+
-                    |     SOURCES      |
-                    +------------------+
-                    | TikTok (yt-dlp)  |
-                    | Local filesystem |
-                    +--------+---------+
-                             |
-                             v
-                    +------------------+
-                    |   SOURCE SERVICE  |
-                    | (fetch, filter,  |
-                    |  deduplicate)    |
-                    +--------+---------+
-                             |
-                             v
-+--------------------------------------------------+
-|                  CROSS-POST ENGINE                |
-|                                                    |
-|  +-------------+  +----------------+  +---------+ |
-|  | Video Proc  |  | Upload Service |  | State   | |
-|  | (FFmpeg     |  | (per-platform  |  | Manager | |
-|  |  encode)    |  |  encoding +    |  | (JSON)  | |
-|  +-------------+  |  upload)       |  +---------+ |
-|                    +-------+--------+              |
-|  +-------------+          |         +-----------+  |
-|  | Circuit     |          |         | Crash     |  |
-|  | Breakers    |          |         | Recovery  |  |
-|  +-------------+          |         +-----------+  |
-|  +-------------+          |         +-----------+  |
-|  | Anti-Bot    |          |         | Quota     |  |
-|  | Protection  |          |         | Manager   |  |
-|  +-------------+          |         +-----------+  |
-+----------------------------|---------------------- -+
-                             |
-                             v
-                    +------------------+
-                    |    PLATFORMS     |
-                    +------------------+
-                    | YouTube Shorts   |
-                    | Instagram Reels  |
-                    | X/Twitter        |
-                    +--------+---------+
-                             |
-                             v
-                    +------------------+
-                    |  NOTIFICATIONS   |
-                    +------------------+
-                    | Discord Webhook  |
-                    | Telegram Bot     |
-                    +------------------+
+ SOURCES (TikTok, YouTube, Instagram, X, Local)
+    |  yt-dlp / instagrapi download, dedup, filter
+    v
+ CROSS-POST ENGINE
+    |  orientation-aware encode (FFmpeg) or passthrough
+    |  circuit breakers, anti-bot pacing, quotas, crash recovery
+    v
+ DESTINATIONS (YouTube Shorts, Instagram Reels, X)
+    |
+    +--> ANALYTICS (xpst analytics: per-post snapshots -> ~/.xpst/analytics.db)
+    +--> NOTIFICATIONS (Discord, Telegram)
+
+ KNOWLEDGE BASE (xpst kb add: transcribe -> nuggets -> embed -> store)
 ```
 
-**Pipeline per video:** Fetch metadata -> Download source -> Encode per-platform (FFmpeg) -> Upload -> Track state -> Notify
+**Pipeline per video:** fetch metadata → download source → encode per platform (or pass through) → upload → track state → notify.
 
-**Reliability layers:** Circuit breakers disable failing platforms automatically. Exponential backoff retries transient failures. Crash recovery resumes from checkpoints. Quota manager prevents API limit violations.
+Full diagrams and module layout: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -377,232 +304,77 @@ The dashboard requires no external services — it reads from the same local sta
 xPST loads configuration from `~/.xpst/config.yaml` with environment variable overrides (`XPST_*` prefix). Priority: environment variables > config file > defaults.
 
 ```yaml
-# ~/.xpst/config.yaml
-
+# ~/.xpst/config.yaml (excerpt; xpst setup generates this)
 accounts:
   tiktok:
-    username: "your_tiktok_username"
-    cookies_from_browser: true    # Use browser cookies for HD downloads
-    # cookies_file: "~/.xpst/credentials/tiktok_cookies.json"
-
+    username: "your_tiktok_username"     # source only
+    cookies_from_browser: true           # HD downloads
   youtube:
     enabled: true
     client_secrets: "~/.xpst/credentials/youtube_client_secrets.json"
-    token_file: "~/.xpst/credentials/youtube_token.json"
-
   x:
     enabled: true
     cookies_file: "~/.xpst/credentials/x_cookies.json"
-
   instagram:
     enabled: true
     session_file: "~/.xpst/credentials/instagram_session.json"
-    username: "your_instagram_username"
 
 video:
-  download_dir: "~/.xpst/downloads"
-  cleanup_after_post: false
   encoding:
-    youtube:
-      resolution: 1080
-      bitrate: "8M"
-      maxrate: "10M"
-      profile: "high"
-      fps: 30
-    instagram:
-      resolution: 720
-      crf: 23
-      maxrate: "3500k"
-      profile: "main"
-      fps: 30
-    x:
-      resolution: 1080
-      bitrate: "10M"
-      maxrate: "12M"
-      profile: "high"
-      fps: 30
+    youtube:   { resolution: 1920, bitrate: "8M",  maxrate: "10M", profile: "high", fps: 60 }
+    instagram: { resolution: 1920, crf: 20,        maxrate: "10M", profile: "high", fps: 60 }
+    x:         { resolution: 1920, bitrate: "10M", maxrate: "12M", profile: "high", fps: 60 }
+    # resolution = long-edge target (orientation-aware); fps = cap, not force
 
-rate_limits:
-  youtube: 5       # Max uploads per day
-  instagram: 5
-  x: 5
-  tiktok: 5
-
-schedule:
-  check_interval: 900      # 15 minutes between checks
-  catchup_window: 172800   # 48 hours lookback for missed videos
-
-reliability:
-  max_retries: 3
-  retry_backoff: 2         # Exponential: 1s, 2s, 4s
-  circuit_breaker_threshold: 5
-  circuit_breaker_reset: 3600
-
-monitoring:
-  log_level: "INFO"
-  log_file: "~/.xpst/logs/xpst.log"
-  log_rotation: "10 MB"
-  dashboard_username: ""   # Optional dashboard auth
-  dashboard_password: ""
-
-notifications:
-  enabled: false
-  on_success: true
-  on_failure: true
-  discord:
-    webhook_url: ""
-  telegram:
-    bot_token: ""
-    chat_id: ""
+rate_limits: { youtube: 5, instagram: 5, x: 5 }   # uploads per day
+schedule:    { check_interval: 900 }               # seconds between checks
 ```
 
-### Environment Variable Overrides
+Every value can be overridden: `export XPST_RATE_LIMITS_YOUTUBE=10`. See `configs/example.yaml` for the full reference.
 
-Every config value can be overridden with an environment variable using the `XPST_` prefix:
+---
 
-```bash
-export XPST_TIKTOK_USERNAME="myusername"
-export XPST_YOUTUBE_ENABLED="true"
-export XPST_RATE_LIMITS_YOUTUBE="10"
-```
+## Platform Risk and Terms of Service
+
+Read this before connecting real accounts.
+
+- **Instagram and X integrations use unofficial, reverse-engineered clients** ([instagrapi](https://github.com/subzeroid/instagrapi) and [twikit](https://github.com/d60/twikit)). These libraries automate the private APIs that the official apps use. **Using them may violate the platforms' Terms of Service and can result in rate limiting, challenges, shadow restrictions, or account suspension.** Only YouTube uses an official, sanctioned API (Data API v3 with your own OAuth project).
+- **Downloads use [yt-dlp](https://github.com/yt-dlp/yt-dlp)**, including unauthenticated scraping for TikTok metadata. Scrape-based features can break without notice when platforms change.
+- xPST ships conservative anti-bot defaults (randomized delays, time-of-day awareness, 5 uploads/day per platform, User-Agent rotation), but **no automation tool can guarantee your accounts will not be flagged. By using xPST you accept this risk.** Use accounts you can afford to lose while evaluating, and increase limits gradually.
+- xPST keeps everything local: credentials go to your OS keychain (encrypted file fallback), state stays in `~/.xpst/`, and nothing is sent to any xPST server because there isn't one.
+
+See the [Security Policy](SECURITY.md) and [Privacy](docs/PRIVACY.md) for the full posture, and [docs/X_AUTH_GUIDE.md](docs/X_AUTH_GUIDE.md) for X-specific guidance.
 
 ---
 
 ## Security
 
-xPST takes a **local-first, zero-trust** approach to security:
-
-- **OS keychain storage** — credentials are stored in your operating system's secure keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager). If the keychain is unavailable, xPST falls back to local encrypted `.enc` files when `cryptography` is available.
-- **No passwords in config** — the config file references credential paths, never stores secrets directly.
-- **No cloud servers** — your content, credentials, and state never leave your machine. There is no xPST cloud service.
-- **No third-party OAuth sharing** — Instagram and X use your own browser cookies. Only YouTube uses a standard OAuth 2.0 flow (your own Google Cloud project).
-- **Atomic state writes** — state files are written atomically (write-then-rename) to prevent corruption.
-- **Pidfile locking** — prevents concurrent instances from corrupting shared state.
-
-See [Security Policy](SECURITY.md), [Privacy](docs/PRIVACY.md), and [Enterprise Readiness](docs/ENTERPRISE_READINESS.md) for the release/security posture.
-
-### Authentication Methods
-
-- **YouTube** — OAuth 2.0 via Google Cloud Console (free, your own project)
-- **Instagram** — Browser session cookies via instagrapi
-- **X/Twitter** — Browser cookies via twikit
-- **TikTok** — Browser cookies via yt-dlp (optional, for HD quality)
-
----
-
-## Anti-Bot Protection
-
-xPST includes built-in protections to minimize the risk of platform bans:
-
-- **Randomized delays** — jittered intervals between uploads mimic human behavior
-- **Time-of-day awareness** — respects typical posting hours, avoids suspicious off-activity patterns
-- **Caption variation** — adds subtle variation to captions to avoid duplicate content detection
-- **User-Agent rotation** — rotates browser User-Agent strings across requests
-- **Randomized platform order** — upload order varies per run to avoid predictable patterns
-- **Conservative defaults** — 5 uploads/day per platform out of the box
-
-**Important:** No automation tool can guarantee you won't be flagged. xPST minimizes risk through conservative defaults and human-like behavior patterns, but use at your own discretion. Start with the default rate limits and increase gradually.
-
----
-
-## Rate Limits
-
-xPST enforces configurable per-platform daily upload limits:
-
-- **Default:** 5 uploads/day per platform (20 total across all platforms)
-- **Configurable:** set per-platform limits in `config.yaml` or via the dashboard
-- **Tracked persistently:** daily counts survive restarts and crashes
-- **Quota-aware:** separate from API quotas (e.g., YouTube Data API has its own daily limit)
-
-```yaml
-# Example: more aggressive limits
-rate_limits:
-  youtube: 10
-  instagram: 8
-  x: 12
-  tiktok: 5
-```
-
-When a limit is reached, remaining videos are queued and automatically picked up the next day.
-
----
-
-## Bidirectional Cross-Posting
-
-Most cross-posting tools work in one direction: pick one source platform, post to the rest. xPST supports **bidirectional cross-posting** — it monitors ALL connected platforms for new content and distributes in every direction.
-
-**How it works:**
-
-```bash
-# Standard mode: TikTok -> YouTube, Instagram, X
-xpst run
-
-# Bidirectional mode: ALL sources -> ALL targets
-xpst run --bidirectional
-```
-
-In bidirectional mode:
-
-- Post a Reel on Instagram -> automatically goes to YouTube Shorts, X, TikTok
-- Upload a Short on YouTube -> automatically goes to Instagram Reels, X, TikTok
-- Post a video on X -> automatically goes to YouTube Shorts, Instagram Reels, TikTok
-
-The engine deduplicates across platforms so content is never double-posted. Each platform acts as both a source and a destination.
+- **OS keychain storage** for credentials (macOS Keychain, Linux Secret Service, Windows Credential Manager), with encrypted `.enc` file fallback.
+- **No passwords in config** — the config file references credential paths, never secrets.
+- **Atomic state writes** (write-then-rename) and pidfile locking prevent corruption.
+- **No cloud component** — there is no xPST service to leak to.
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Here's how to get started:
-
 ```bash
-# Clone the repository
 git clone https://github.com/TysAIs/xPST.git
-cd ~/XPST
-
-# Create a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install in development mode
-pip install -e ".[dev]"
-
-# Run the test suite
-pytest
-
-# Run with coverage
-pytest --cov=xpst --cov-report=term-missing
+cd xPST
+uv venv && uv pip install -e ".[dev]"
+uv run pytest                  # keep it green (1198 tests)
+uv run ruff check src tests
+uv run mypy src/xpst
+uv run lint-imports            # architectural import walls
 ```
 
-### Guidelines
+Guidelines:
 
-- **Tests required** — all new features must include tests. The suite has 800+ tests; keep it green.
-- **Type hints** — use Python 3.10+ type hints throughout.
-- **Docstrings** — Google-style docstrings for all public functions and classes.
-- **No new dependencies** — discuss in an issue before adding dependencies.
-- **Commit messages** — use conventional commits (`feat:`, `fix:`, `docs:`, `test:`).
-
-### Project Structure
-
-```
-xPST/
-  src/xpst/
-    cli.py              # CLI interface (Click)
-    config.py           # Configuration management
-    engine.py           # Core cross-posting engine
-    state.py            # Persistent state management
-    scheduler.py        # Watch mode scheduling
-    anti_bot.py         # Anti-bot protection
-    crash_recovery.py   # Checkpoint-based crash recovery
-    providers.py        # Shared provider metadata contract
-    platforms/          # Destination uploaders (youtube, instagram, x)
-    sources/            # Content sources (tiktok, youtube, instagram, x, local)
-    services/           # Upload and source services
-    utils/              # Credentials, logging, quotas, video processing
-    dashboard/          # Web dashboard (NiceGUI)
-  tests/                # Test suite (800+ tests)
-  docs/                 # Documentation
-```
+- **Tests required** for new features; the suite must stay green.
+- **Type hints** (Python 3.10+) and Google-style docstrings on public APIs.
+- **No new dependencies** without discussion in an issue first.
+- **Conventional commits** (`feat:`, `fix:`, `docs:`, `test:`).
+- See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ---
 
@@ -610,10 +382,10 @@ xPST/
 
 Licensed under either of:
 
-- **MIT License** ([LICENSE](LICENSE))
-- **Apache License 2.0** ([LICENSE](LICENSE))
+- **MIT License**
+- **Apache License 2.0**
 
-at your option. You may use this software under the terms of either license.
+at your option (`MIT OR Apache-2.0`). The combined license text is in [LICENSE](LICENSE); see [LICENSING_REPORT.md](LICENSING_REPORT.md) and [NOTICES.md](NOTICES.md) for the dependency licensing posture (including Qt/PySide6 LGPL notes for desktop bundles).
 
 ---
 
@@ -621,11 +393,12 @@ at your option. You may use this software under the terms of either license.
 
 xPST stands on the shoulders of these excellent open-source projects:
 
-- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** — video downloading from TikTok and other platforms
-- **[instagrapi](https://github.com/subzeroid/instagrapi)** — Instagram API client for Reels uploads
-- **[twikit](https://github.com/david-lev/twikit)** — X/Twitter API client for video uploads
-- **[google-api-python-client](https://github.com/googleapis/google-api-python-client)** — YouTube Data API v3 client
-- **[NiceGUI](https://github.com/zauberzeug/nicegui)** — web dashboard framework
-- **[Click](https://github.com/pallets/click)** — CLI framework
-- **[Rich](https://github.com/Textualize/rich)** — terminal formatting and tables
-- **[FFmpeg](https://ffmpeg.org)** — video encoding and processing
+- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** — video downloading
+- **[instagrapi](https://github.com/subzeroid/instagrapi)** — Instagram client
+- **[twikit](https://github.com/d60/twikit)** — X/Twitter client
+- **[google-api-python-client](https://github.com/googleapis/google-api-python-client)** — YouTube Data API v3
+- **[faster-whisper](https://github.com/SYSTRAN/faster-whisper)** — transcription
+- **[fastembed](https://github.com/qdrant/fastembed)** / **[LanceDB](https://github.com/lancedb/lancedb)** — embeddings and vector store
+- **[FFmpeg](https://ffmpeg.org)** — video encoding
+- **[Click](https://github.com/pallets/click)** / **[Rich](https://github.com/Textualize/rich)** — CLI
+- **[PySide6](https://wiki.qt.io/Qt_for_Python)** — desktop GUI

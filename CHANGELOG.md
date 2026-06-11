@@ -5,6 +5,46 @@ All notable changes to xPST will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Knowledge Base (new subsystem)
+- Personal content knowledge base under `src/xpst/knowledge/` (optional `xpst[knowledge]` extra): ingest a local file or URL, transcribe with faster-whisper, extract cited knowledge "nuggets" (strict-JSON extraction with source URL + timestamps), embed via fastembed or a local embedding endpoint, and store locally
+- Stores: JSON nugget store plus a LanceDB vector store
+- Organize pipeline: cluster nuggets into knowledge areas by embedding similarity, tag difficulty, and order areas into a course outline
+- CLI: `xpst kb add|query|organize|areas|course|doctor` (doctor is a read-only workspace health check covering deps, store integrity, queue state, and embedding consistency)
+- Durable ingestion queue with stale-claim requeue for background processing
+- 4 MCP tools (`kb_add`, `kb_query`, `kb_organize`, `kb_areas`) bringing the MCP server to 13 tools total; heavy deps stay lazy-imported off the cold path (enforced by import-linter contracts)
+- Semantic query surface shared by CLI and MCP: `kb query` embeds the query and vector-searches the store, with automatic substring fallback when embeddings are unavailable; every hit carries provenance (source URL, timestamps) and a similarity score
+
+### Video Fidelity Overhaul
+- Orientation-aware scaling targeting a 1920px long edge (fixes vertical 1080x1920 sources previously being downscaled to sub-SD width)
+- Frame rate is now a cap (`-fpsmax 60`), never a force: 60fps sources keep 60fps
+- Instagram profile modernized to Reels-grade 1080p+ (long edge 1920, CRF 20, High@4.0, 10M maxrate) from the obsolete 720p/CRF23/Main profile
+- Smart passthrough: a compliance probe skips re-encoding entirely when the source already satisfies the platform profile
+- yt-dlp downloads now select split video+audio streams (`bv*+ba`) with `--merge-output-format mp4` instead of pre-muxed lower-quality files
+
+### Analytics Foundation
+- Instagram collection now uses the real instagrapi API (`login_by_sessionid`/`load_settings`, `insights_media`, `media_info`); the previous code called methods that do not exist in instagrapi, so Instagram analytics was permanently empty and only mocks kept tests green
+- Persistent per-post snapshot store: append-only SQLite at `~/.xpst/analytics.db` keyed on `(platform, post_id, captured_at)` — the foundation for real trend history and future knowledge-base performance weighting
+- Instagram insights parsed defensively: shares/saves require a Business/Creator account, with public `media_info` counts as fallback
+
+### Engine Correctness (double-post guard cluster)
+- `_process_video` no longer hardcodes the TikTok source; the requested source is threaded through
+- Clearing the dead-letter queue no longer deletes posted-video history (re-post risk eliminated)
+- `source_platform` and content hash are now recorded uniformly across the unidirectional and bidirectional flows, so cross-flow deduplication and source-scoped backfill work
+- Deduplication uses file content fingerprints instead of caption-only hashes
+- Retry paths verify post existence before re-uploading after ambiguous failures
+- `post_manual` performs an already-posted check with a stable video ID
+
+### CI
+- Consolidated to a single GitHub Actions workflow; duplicate weaker `test.yml` removed; `feat/knowledge-base` added to push triggers
+
+### Documentation
+- README rewritten: four-pillar framing, honest per-platform analytics capability matrix (story-reposts collectible on zero platforms; IG shares/saves need a Business account; TikTok metrics are unauthenticated scrape), per-platform video constraints, TikTok corrected to source-only everywhere, verified counts (25 CLI commands, 13 MCP tools), PyPI install gated behind a published note, platform-risk/ToS disclosure section
+- docs/MCP_TOOLS.md regenerated from the live registry: all 13 tools documented with arguments, examples, and a real-account guardrails section
+- docs/ENTERPRISE_READINESS.md marked as a superseded historical snapshot
+- Added .github/PULL_REQUEST_TEMPLATE.md and CODE_OF_CONDUCT.md (Contributor Covenant 2.1)
+
 ## [0.1.0] - 2026-06-08
 
 ### Core Engine
