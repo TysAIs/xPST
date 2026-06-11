@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from dataclasses import asdict
+from typing import TYPE_CHECKING, Any
 
 # The 'mcp' package is an optional extra. Import it gracefully so that simply
 # importing this module (e.g. for build_provider_catalog) does not hard-fail
@@ -68,8 +69,11 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
     Tool = _MCPStub  # type: ignore[assignment,misc]
 
 from xpst.config import XPSTConfig
-from xpst.engine_v2 import CrossPostEngine
+from xpst.engine import CrossPostEngine, CrossPostResult
 from xpst.utils.logger import get_logger, setup_logging
+
+if TYPE_CHECKING:
+    from xpst.sources.base import VideoMetadata
 
 logger = get_logger(__name__)
 
@@ -92,13 +96,19 @@ class XPSTMCPServer:
         self._initialized = False
 
     async def initialize(self) -> None:
-        """Initialize the engine and components."""
+        """Initialize the engine and components.
+
+        The canonical :class:`~xpst.engine.CrossPostEngine` wires all of its
+        sub-components synchronously in ``__init__`` (state, services, platforms,
+        crash recovery), so there is no separate async init step. This method
+        stays a coroutine to preserve the lazy-init contract used by the MCP
+        tool dispatch (engine is built only when an engine-backed tool runs).
+        """
         if self._initialized:
             return
 
         setup_logging(self.config.monitoring.log_level)
         self.engine = CrossPostEngine(self.config)
-        await self.engine.initialize()
         self._initialized = True
 
     def get_engine(self) -> CrossPostEngine:
@@ -345,40 +355,57 @@ async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallTool
     catch_up = args.get("catch_up", False)
 
     if dry_run:
-        fetch_uc = engine.usecase_factory.create_fetch_videos()
-        result = await fetch_uc.execute(
-            source_name=source,
-            max_count=max_posts,
-            catch_up=catch_up,
+        actual_max = 20 if catch_up else max_posts
+        videos = await engine.source_service.fetch_new_videos(source, actual_max)
+        new_videos: list[VideoMetadata] = engine.source_service.filter_new(
+            videos, engine.state, engine._platforms
         )
+        targets = list(engine._platforms.keys())
         return CallToolResult(
             content=[TextContent(
                 type="text",
                 text=json.dumps({
                     "dry_run": True,
-                    "fetch_count": result.fetch_count,
+                    "fetch_count": len(new_videos),
                     "videos": [
                         {
                             "video_id": v.video_id,
                             "caption": v.caption[:100] if v.caption else "",
                             "source": v.source_platform,
-                            "targets": list(engine.platforms.keys()),
+                            "targets": targets,
                         }
-                        for v in result.videos
+                        for v in new_videos
                     ],
                 }, indent=2, default=str),
             )],
         )
 
-    await engine.run(max_posts=max_posts, source=source, catch_up=catch_up)
+    await engine.check_and_post(catch_up=catch_up)
     return CallToolResult(
         content=[TextContent(type="text", text="Cross-post cycle completed successfully")],
     )
 
 
+def _serialize_result(result: CrossPostResult) -> dict[str, Any]:
+    """Convert a :class:`CrossPostResult` into a JSON-serializable dict.
+
+    Mirrors the response shape previously emitted by the MCP server: the
+    per-platform :class:`UploadResult` dataclasses are expanded into plain
+    dicts so MCP clients see the full upload outcome.
+    """
+    return {
+        "video_id": result.video_id,
+        "caption": result.caption,
+        "results": {p: asdict(r) for p, r in result.results.items()},
+        "all_success": result.all_success,
+        "partial_success": result.partial_success,
+    }
+
+
 async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToolResult:
     """Handle xpst_post tool."""
     dry_run = args.get("dry_run", False)
+    carousel_paths = args.get("carousel_paths", [])
 
     if dry_run:
         return CallToolResult(
@@ -388,25 +415,38 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                     "dry_run": True,
                     "video": args["video_path"],
                     "caption": args["caption"][:100],
-                    "carousel": len(args.get("carousel_paths", [])) > 0,
-                    "targets": args.get("platforms") or list(engine.platforms.keys()),
+                    "carousel": len(carousel_paths) > 0,
+                    "targets": args.get("platforms") or list(engine._platforms.keys()),
                 }, indent=2),
             )],
         )
 
-    result = await engine.manual_post(
-        video_path=args["video_path"],
-        caption=args["caption"],
-        platforms=args.get("platforms"),
-    )
+    from pathlib import Path
+
+    if carousel_paths:
+        media_paths = [Path(args["video_path"]), *(Path(p) for p in carousel_paths)]
+        result = await engine.post_manual_carousel(
+            media_paths=media_paths,
+            caption=args["caption"],
+            platforms=args.get("platforms"),
+        )
+    else:
+        result = await engine.post_manual(
+            video_path=Path(args["video_path"]),
+            caption=args["caption"],
+            platforms=args.get("platforms"),
+        )
     return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+        content=[TextContent(
+            type="text",
+            text=json.dumps(_serialize_result(result), indent=2, default=str),
+        )],
     )
 
 
 async def _handle_health(engine: CrossPostEngine) -> CallToolResult:
     """Handle xpst_health tool."""
-    health = await engine.health_check()
+    health = await engine.check_health()
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(health, indent=2, default=str))],
     )
@@ -436,14 +476,20 @@ async def _handle_backfill(engine: CrossPostEngine, args: dict[str, Any]) -> Cal
                     "dry_run": True,
                     "source": source,
                     "max_count": max_count,
-                    "targets": platforms or list(engine.platforms.keys()),
+                    "targets": platforms or list(engine._platforms.keys()),
                 }, indent=2),
             )],
         )
 
-    result = await engine.backfill(source=source, max_count=max_count, platforms=platforms)
+    results = await engine.backfill(platforms=platforms, limit=max_count)
+    successful = sum(1 for r in results if r.all_success)
+    payload = {
+        "attempted": len(results),
+        "successful": successful,
+        "results": [_serialize_result(r) for r in results],
+    }
     return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+        content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
     )
 
 
@@ -539,15 +585,33 @@ def build_provider_catalog(config: XPSTConfig) -> dict[str, Any]:
 
 
 async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallToolResult:
-    """Handle xpst_delete tool."""
+    """Handle xpst_delete tool.
+
+    Removes a post *record* from local state. ``platform="all"`` removes the
+    record for every platform the video was posted to. This is a state-only
+    operation and does not call the social platform's delete API (use the CLI
+    ``delete`` command for live deletion).
+    """
     video_id = args["video_id"]
     platform = args.get("platform", "all")
 
-    result = await engine.usecase_factory.create_delete_post().execute(
-        video_id=video_id,
-        platform=platform if platform != "all" else None,
-        delete_from_platform=False,
+    video = engine.state.get_video(video_id)
+    platforms = (
+        list((video or {}).get("posted_to", {}).keys())
+        if platform == "all"
+        else [platform]
     )
+
+    for plat in platforms:
+        engine.state.remove_post(video_id, plat)
+    engine.state.save()
+
+    result = {
+        "video_id": video_id,
+        "platform": platform,
+        "removed": platforms,
+        "success": True,
+    }
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],

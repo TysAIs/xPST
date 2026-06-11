@@ -1,48 +1,51 @@
 # xPST API Reference
 
-## CrossPostEngine (v2)
+## CrossPostEngine
 
-### `CrossPostEngine(config: XPSTConfig | None = None)`
+`xpst.engine.CrossPostEngine` is the single canonical engine. It is shared by
+the CLI, scheduler, desktop backend, and the MCP server. It wires its services
+(state, upload, source, circuit breakers, crash recovery, notifications) in
+``__init__`` — there is no separate async initialize step.
 
-Main engine class using use-case layer with dependency injection.
+### `CrossPostEngine(config: XPSTConfig)`
 
-#### Properties
-- `platforms: dict[str, PlatformUploader]` - Loaded platform uploaders
-- `sources: dict[str, VideoSource]` - Loaded video sources
-- `usecase_factory: UseCaseFactory` - Factory for use-cases
+Main engine class. Orchestrates fetching, downloading, encoding, uploading,
+state tracking, and notifications. Each platform is handled independently so a
+single platform failure never blocks others.
+
+#### Attributes
+- `config: XPSTConfig` - Loaded configuration
+- `state: StateManager` - Persistent state manager
+- `source_service: SourceService` - Source fetching/filtering service
+- `upload_service: UploadService` - Upload pipeline service
+- `circuit_breakers: CircuitBreakerManager` - Per-platform circuit breakers
 
 #### Methods
 
-##### `async initialize() -> None`
-Initialize all engine components (logging, state, circuit breakers, quota, session manager, platforms, sources).
+##### `async check_and_post(catch_up: bool = False) -> list[CrossPostResult]`
+Check TikTok for new videos and cross-post them to all enabled platforms.
+`catch_up=True` fetches up to 20 videos instead of 5.
 
-##### `async run(max_posts: int = 5, source: str = "tiktok", catch_up: bool = False) -> None`
-Run one cross-posting cycle.
+##### `async check_and_post_bidirectional(max_per_source: int = 5) -> list[CrossPostResult]`
+Poll all enabled sources; cross-post any new post to the other platforms.
 
-**Parameters:**
-- `max_posts`: Maximum videos to post per cycle
-- `source`: Source platform to fetch from
-- `catch_up`: Fetch extra videos after downtime
+##### `async post_manual(video_path: Path, caption: str, platforms: list[str] | None = None) -> CrossPostResult`
+Manually post a single local video file to the given platforms (all enabled if None).
 
-##### `async shutdown() -> None`
-Graceful shutdown (save state, circuit breakers, cancel background tasks).
+##### `async post_manual_carousel(media_paths: list[Path], caption: str, platforms: list[str] | None = None) -> CrossPostResult`
+Manually post a carousel/multi-media set.
 
-##### `async health_check() -> dict`
-Full health check on all sources, platforms, circuit breakers, state, quotas.
+##### `async backfill(platforms: list[str] | None = None, limit: int = 10) -> list[CrossPostResult]`
+Retry videos missing from any platform, reusing previously downloaded files.
 
-##### `async manual_post(video_path: str, caption: str, platforms: list[str] = None) -> dict`
-Post a local video file to platforms.
+##### `async delete_post(video_id: str, platform: str) -> bool`
+Delete a previously posted video from a platform via its API.
 
-##### `async backfill(source: str = "tiktok", max_count: int = 10, platforms: list[str] = None) -> dict`
-Retry failed/incomplete posts from history.
+##### `async check_health() -> dict[str, Any]`
+Health check across sources, platforms, circuit breakers, state, and quotas.
 
-##### `async lifespan() -> AsyncContextManager[CrossPostEngine]`
-Context manager for engine lifespan.
-
-```python
-async with CrossPostEngine() as engine:
-    await engine.run()
-```
+##### `acquire_pidfile() / release_pidfile() -> None`
+Acquire/release the pidfile lock that prevents concurrent instances.
 
 ---
 

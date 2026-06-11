@@ -457,7 +457,7 @@ xpst config set monitoring.dashboard_password mypassword
 xpst/
 ├── cli.py              # Click-based CLI with JSON/TTY detection
 ├── config.py           # Configuration management (YAML + env + defaults)
-├── engine_v2.py        # New engine with use-case layer + DI
+├── engine.py           # Canonical CrossPostEngine (orchestration + services)
 ├── state.py            # StateManager (legacy API)
 ├── state_manager.py    # Business logic for state
 ├── state_store.py      # Atomic I/O, locking, corruption recovery
