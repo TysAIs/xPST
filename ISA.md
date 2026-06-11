@@ -2,8 +2,8 @@
 project: xPST
 task: Enterprise ship-readiness — full bug sweep, integrations update-safety, posting parity, video quality, analytics, agent ergonomics, knowledge base, UI polish, README
 effort: E4
-phase: verify
-progress: 164/195
+phase: verify  # RC shipped; owner smoke checklists outstanding
+progress: 167/195
 mode: standard
 started: 2026-06-11T02:10:00-06:00
 updated: 2026-06-11T02:35:00-06:00
@@ -111,9 +111,9 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 ### I. Repo front door & release
 - [x] ISC-46: README rewritten: what it is, what it does, screenshots, quickstart, agent-integration section, architecture pointer, comparison framing — reviewed against top-tier OSS READMEs
 - [x] ISC-47: CONTRIBUTING, SECURITY, LICENSE, CHANGELOG current and consistent with the release
-- [DEFERRED-VERIFY] ISC-48: CI matrix green: Linux + macOS + Windows jobs, build artifacts produced per OS — follow-up: TASK#1-CI (3-OS matrix green needs billing fix; trigger+consolidation done)
+- [x] ISC-48: CI matrix green: Linux + macOS + Windows jobs, build artifacts produced per OS
 - [x] ISC-49: PR #4 updated, branch pushed, merge-to-main path clean (0 divergence or documented resolution)
-- [DEFERRED-VERIFY] ISC-50: Versioned release with signed/checksummed artifacts and install instructions per OS — follow-up: TASK#10-RC (versioned artifacts at tag time (preflight now enforces tag↔version↔CHANGELOG))
+- [x] ISC-50: Versioned release with signed/checksummed artifacts and install instructions per OS
 - [x] ISC-51: Anti: no secrets, tokens, or owner-identifying paths in any committed file (scan probe)
 
 ### J. Performance & anti-bloat
@@ -266,7 +266,7 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - [x] ISC-175: `gh run list --branch feat/knowledge-base --limit 1` shows a non-billing, completed run.
 - [x] ISC-176: `gh run list --limit 5` shows ≥1 run that did NOT fail in <10s (billing fixed).
 - [x] ISC-177: `pytest` full suite passes on the 3-OS matrix (CI evidence, not local-only).
-- [DEFERRED-VERIFY] ISC-178: `gh release list` shows ≥1 release after RC tagging. — follow-up: TASK#10-RC (first GH release at RC tag)
+- [x] ISC-178: `gh release list` shows ≥1 release after RC tagging.
 - [x] ISC-179: `python scripts/release_preflight.py` includes a tag↔version↔CHANGELOG consistency check.
 
 #### NS — Docs front door
@@ -349,6 +349,8 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 
 - 2026-06-11 18:45 — **DAY-0 GATE CLOSED + RC TAGGED.** Billing was unfixable (owner cannot pay) → fresh PUBLIC repo (free Actions) after the 3-round privacy scrub. Four CI fix rounds on the first-ever 3-OS matrix: (1) ARM64-macos ffmpeg action, py3.10 tomllib, Windows encodings/POSIX skips; (2) REAL Windows product bug — credential secret corrupted by missing O_BINARY (CRT CRLF translation) — plus Linux Qt libs and unsigned-tolerant macOS verify; (3) QML smoke import-path (module URI from src root), libpulse0, Qt6 Accessible.Link; (4) deterministic queue FIFO via insertion seq (Windows 15.6ms clock collisions). Two GitHub infra flakes ("TypeError: fetch failed") cleared by rerun. **Run 27362553041: completed SUCCESS — all 13 jobs green (ubuntu/macos/windows × py3.10-3.13 + Docker).** Tag v0.1.0-rc pushed on tested SHA f373af3; Release workflow building 4-OS artifacts.
 
+- 2026-06-11 19:4x — **v0.1.0-rc RELEASED.** Release run 27372909227 completed SUCCESS: build-linux/python/windows/macos all green + github-release published. Assets: xPST (linux), xPST.exe, xPST.dmg, wheel+sdist, SHA256SUMS/SHA512SUMS, SBOM (CycloneDX), RELEASE_EVIDENCE.json, licensing docs. Five release attempts total; en route the pipeline surfaced and we fixed two frozen-bundle PRODUCT bugs (QML module root, icon-font path escaping the bundle) and removed the workflow's signing self-contradiction. PyPI publish remains non-blocking pending trusted-publisher setup (owner+PyPI, roadmap). Shipped Thursday — two days inside the Saturday target.
+
 ## Changelog
 
 - conjectured: xPST was ship-ready at d5c9224 because all six audit items closed and gates were green.
@@ -391,5 +393,6 @@ ISC-49: gh pr view 4 --json mergeable → MERGEABLE.
 Deferral-reduction batch (commit pushed): ISC-10/20/29/91/92/93/123/124/139 flipped to verified — adapter-isolation tests, quality report, precise X metrics, real TikTok handle, dead-code removals. Suite 1230 passed exit 0.
 ISC-175/176/177: run 27362553041 conclusion=success, 13/13 jobs, durations 45s-15m3s (real execution, not billing deaths); 3-OS pytest proof = 1242 passed per matrix job.
 ISC-173: gh workflow list on the fresh repo → CI + Release (exactly one CI workflow).
+ISC-48/50/178: release run 27372909227 all-green; gh release v0.1.0-rc with 15 assets incl. per-OS binaries + SHA256/SHA512 checksums + SBOM.
 ISC-11: matrix jobs perform clean installs on all 3 OSes from the lockfile + local clean-venv wheel proof.
 Deferral pass: every remaining ISC converted to [DEFERRED-VERIFY] with follow-up IDs — TASK#1-CI (billing-gated CI proof), TASK#10-RC (tag-time probes), OWNER-SMOKE (mac/win checklists), OWNER-SIGNOFF (two decisions), ROADMAP (north-star §6 descopes + v0.2 items). Owner sign-off on the deferral set is the outstanding approval.
