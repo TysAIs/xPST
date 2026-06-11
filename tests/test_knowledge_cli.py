@@ -124,3 +124,31 @@ def test_kb_areas_empty_is_friendly(tmp_path, monkeypatch):
     out = runner.invoke(main, ["kb", "areas"])
     assert out.exit_code == 0, out.output
     assert "No areas" in out.output
+
+
+def test_kb_course_emits_ordered_cited_outline(tmp_path, monkeypatch):
+    monkeypatch.setenv("XPST_HOME", str(tmp_path))
+    _patch_kb(monkeypatch)
+    monkeypatch.setattr(
+        "xpst.knowledge.cli_kb._build_llm_client",
+        lambda config: _FakeLabelClient(),
+    )
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"fake")
+    runner = CliRunner()
+
+    assert runner.invoke(main, ["kb", "add", str(media)]).exit_code == 0
+    assert runner.invoke(main, ["kb", "organize"]).exit_code == 0
+
+    course = runner.invoke(main, ["kb", "course"])
+    assert course.exit_code == 0, course.output
+    assert "cli idea" in course.output
+    # citation rendered alongside the point
+    assert "@" in course.output
+
+
+def test_kb_course_empty_is_friendly(tmp_path, monkeypatch):
+    monkeypatch.setenv("XPST_HOME", str(tmp_path))
+    out = CliRunner().invoke(main, ["kb", "course"])
+    assert out.exit_code == 0, out.output
+    assert "Nothing to assemble" in out.output

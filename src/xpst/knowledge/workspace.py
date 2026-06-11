@@ -33,3 +33,7 @@ class Workspace:
     @property
     def lancedb_path(self) -> Path:
         return self.root / "lancedb"
+
+    @property
+    def queue_path(self) -> Path:
+        return self.root / "queue.json"

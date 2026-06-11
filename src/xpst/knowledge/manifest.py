@@ -60,6 +60,10 @@ class Manifest:
     def has_source(self, source_video_id: str) -> bool:
         return source_video_id in self._data["sources"]
 
+    def source_count(self) -> int:
+        """Number of distinct sources recorded. Read-only."""
+        return len(self._data["sources"])
+
     def record(self, source_video_id: str, *, source: str | None,
                embed_model: str, embed_dim: int) -> None:
         """Record (or refresh) that a source has been ingested. Idempotent on

@@ -97,6 +97,7 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     "types-PyYAML>=6.0.0",
+    "import-linter>=2.0",
 ]
 
 [project.scripts]
@@ -159,4 +160,73 @@ disable_error_code = [
     "unused-ignore",
     "valid-type",
     "var-annotated",
+]
+
+# ── Architectural wall enforcement (import-linter / `lint-imports`) ──
+# Two structural guarantees the KB design depends on:
+#   1. The heavy KB dependencies (faster-whisper, fastembed, lancedb, torch,
+#      PySide6) never reach the cold path. They are imported ONLY inside the
+#      three adapter functions listed in `ignore_imports` (the lazy seams).
+#      Adding a new module-load-time heavy import anywhere on the cold path
+#      breaks this contract. The runtime `sys.modules` wall is additionally
+#      proven by tests/test_knowledge_wall.py and friends.
+#   2. The cross-poster core (engine/platforms/sources) never imports the
+#      optional `xpst.knowledge` subsystem — dependency direction is one-way.
+[tool.importlinter]
+root_package = "xpst"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "KB heavy deps stay off the cold path (lazy-load wall)"
+type = "forbidden"
+source_modules = [
+    "xpst.cli",
+    "xpst.mcp.server",
+    "xpst.knowledge.cli_kb",
+    "xpst.knowledge.mcp.tools",
+    "xpst.knowledge.queue",
+    "xpst.knowledge.doctor",
+    "xpst.knowledge.course.assemble",
+    "xpst.knowledge.organize.pipeline",
+    "xpst.knowledge.organize.cluster",
+    "xpst.knowledge.organize.router",
+    "xpst.knowledge.organize.difficulty",
+    "xpst.knowledge.models",
+    "xpst.knowledge.manifest",
+    "xpst.knowledge.workspace",
+    "xpst.knowledge.config",
+    "xpst.knowledge.store.json_store",
+    "xpst.knowledge.ingest.pipeline",
+]
+forbidden_modules = [
+    "faster_whisper",
+    "fastembed",
+    "lancedb",
+    "torch",
+    "PySide6",
+]
+# The three intentional lazy seams: heavy deps are imported INSIDE adapter
+# functions here, never at module load. These edges are the wall's pressure
+# valve; everything else routed to a heavy dep is a wall breach.
+ignore_imports = [
+    "xpst.knowledge.ingest.transcribe -> faster_whisper",
+    "xpst.knowledge.llm.embeddings -> fastembed",
+    "xpst.knowledge.store.vector_lancedb -> lancedb",
+    # The desktop GUI's own lazy seam: `xpst desktop` lazily imports the
+    # PySide6 app subtree inside the command, never at CLI load. Cutting this
+    # one edge keeps the whole desktop/PySide6 subtree off the CLI cold path.
+    "xpst.cli -> xpst.desktop_app.main",
+]
+
+[[tool.importlinter.contracts]]
+name = "Cross-poster core never imports the optional knowledge subsystem"
+type = "forbidden"
+source_modules = [
+    "xpst.engine",
+    "xpst.platforms",
+    "xpst.sources",
+    "xpst.scheduler",
+]
+forbidden_modules = [
+    "xpst.knowledge",
 ]

@@ -143,3 +143,72 @@ def kb_areas(workspace: str) -> None:
             f"[bold]{area.order_index + 1}. {area.label}[/bold] "
             f"({len(area.nugget_ids)} nuggets)"
         )
+
+
+@kb.command("course")
+@click.option("--workspace", "-w", default="default", help="Workspace name")
+@click.option("--area", "-a", "area_id", default=None,
+              help="Assemble only this area (by id)")
+def kb_course(workspace: str, area_id: str | None) -> None:
+    """Emit the organized outline (areas -> ordered, cited nuggets) for an AI to
+    write a course from. Pre-ordered beginner -> advanced."""
+    from xpst.knowledge.course.assemble import assemble_course
+    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.workspace import Workspace
+
+    ws = Workspace.resolve(workspace)
+    store = JsonKnowledgeStore(ws.nuggets_path)
+    course = assemble_course(store, workspace=ws.name, area_id=area_id)
+    if not course.areas:
+        console.print(
+            "[yellow]Nothing to assemble. Ingest with 'xpst kb add' and "
+            "organize with 'xpst kb organize'.[/yellow]"
+        )
+        return
+    for area in course.areas:
+        console.print(
+            f"[bold]{area.order + 1}. {area.label}[/bold] "
+            f"({len(area.nuggets)} nuggets)"
+        )
+        for nugget in area.nuggets:
+            console.print(
+                f"  - [{nugget.difficulty}] {nugget.point}\n"
+                f"    ({nugget.citation} @ "
+                f"{nugget.timestamp_start:.1f}-{nugget.timestamp_end:.1f}s)"
+            )
+
+
+@kb.command("doctor")
+@click.option("--workspace", "-w", default="default", help="Workspace name")
+def kb_doctor(workspace: str) -> None:
+    """Health-check the knowledge base (read-only): deps, store integrity,
+    queue state, embedding consistency, orphaned areas/nuggets."""
+    from xpst.knowledge.doctor import (
+        SEVERITY_ERROR,
+        SEVERITY_OK,
+        SEVERITY_WARNING,
+        diagnose,
+    )
+    from xpst.knowledge.workspace import Workspace
+
+    ws = Workspace.resolve(workspace)
+    report = diagnose(ws)
+    style = {
+        SEVERITY_OK: "green",
+        SEVERITY_WARNING: "yellow",
+        SEVERITY_ERROR: "red",
+    }
+    for finding in report.findings:
+        colour = style.get(finding.severity, "white")
+        console.print(
+            f"[{colour}]{finding.severity.upper():7}[/{colour}] "
+            f"{finding.check}: {finding.message}"
+        )
+    verdict = "OK" if report.ok else "PROBLEMS FOUND"
+    colour = "green" if report.ok else "red"
+    console.print(
+        f"[bold {colour}]{verdict}[/bold {colour}] "
+        f"({report.error_count} errors, {report.warning_count} warnings)"
+    )
+    if not report.ok:
+        raise SystemExit(1)

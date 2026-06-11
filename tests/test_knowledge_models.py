@@ -1,4 +1,10 @@
-from xpst.knowledge.models import Area, Nugget
+from xpst.knowledge.models import (
+    QUEUE_DONE,
+    QUEUE_PENDING,
+    Area,
+    Nugget,
+    QueueItem,
+)
 
 
 def test_nugget_id_is_stable_hash_of_source_and_point():
@@ -110,3 +116,27 @@ def test_area_create_empty_membership_keys_on_label_not_constant():
     b = Area.create(label="Beta")
     assert a.id != b.id
     assert Area.create(label="Alpha").id == a.id
+
+
+def test_queue_item_id_is_stable_hash_of_source():
+    a = QueueItem.create(source="https://x/v")
+    b = QueueItem.create(source="https://x/v")
+    c = QueueItem.create(source="https://x/other")
+    assert a.id == b.id  # idempotency key is the source content hash
+    assert a.id != c.id
+    assert a.status == QUEUE_PENDING
+
+
+def test_queue_item_roundtrip():
+    item = QueueItem.create(source="s", workspace="w", enqueued_at=12.0)
+    assert QueueItem.from_dict(item.to_dict()) == item
+
+
+def test_queue_item_from_dict_tolerates_unknown_status():
+    item = QueueItem.from_dict({"id": "x", "source": "s", "status": "bogus"})
+    assert item.status == QUEUE_PENDING
+
+
+def test_queue_item_from_dict_preserves_terminal_status():
+    item = QueueItem.from_dict({"id": "x", "source": "s", "status": QUEUE_DONE})
+    assert item.status == QUEUE_DONE
