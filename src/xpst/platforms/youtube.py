@@ -126,10 +126,10 @@ class YouTubeUploader(PlatformUploader):
                     "Run: xpst auth youtube"
                 )
 
-        # Save refreshed token
-        token_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(token_file, "w") as f:
-            f.write(creds.to_json())
+        # Save refreshed token with owner-only perms (see SECURITY.md)
+        from xpst.utils.secure_io import write_text_0600
+
+        write_text_0600(token_file, creds.to_json())
 
         # Build service
         service = build("youtube", "v3", credentials=creds)

@@ -25,6 +25,7 @@ from pathlib import Path
 
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger
+from xpst.utils.secure_io import write_text_0600
 
 logger = get_logger(__name__)
 
@@ -105,10 +106,10 @@ class SessionManager:
                 creds.refresh(Request())
                 logger.info("YouTube credentials refreshed successfully")
 
-                # Save refreshed token
+                # Save refreshed token (owner-only perms — see SECURITY.md)
                 token_json = creds.to_json()
                 self.credentials.store("youtube_token", token_json)
-                token_file.write_text(token_json)
+                write_text_0600(token_file, token_json)
 
             except Exception as e:
                 logger.warning(f"Token refresh failed: {e}")
@@ -180,10 +181,10 @@ class SessionManager:
                 client.get_timeline_feed()
                 logger.info("Instagram session valid")
 
-                # Save refreshed session
+                # Save refreshed session (owner-only perms — see SECURITY.md)
                 refreshed = client.get_settings()
                 self.credentials.store_json("instagram_session", refreshed)
-                session_path.write_text(json.dumps(refreshed, default=str))
+                write_text_0600(session_path, json.dumps(refreshed, default=str))
 
                 return client
             except LoginRequired:
@@ -195,10 +196,10 @@ class SessionManager:
                 client.set_uuids(old_session.get("uuids", {}))
                 client.login(username or "", password or "")
 
-                # Save new session
+                # Save new session (owner-only perms — see SECURITY.md)
                 refreshed = client.get_settings()
                 self.credentials.store_json("instagram_session", refreshed)
-                session_path.write_text(json.dumps(refreshed, default=str))
+                write_text_0600(session_path, json.dumps(refreshed, default=str))
 
                 return client
 
@@ -258,10 +259,10 @@ class SessionManager:
                 await client.user()
                 logger.info("X cookies valid")
 
-                # Save refreshed cookies
+                # Save refreshed cookies (owner-only perms — see SECURITY.md)
                 cookies = client.get_cookies()
                 self.credentials.store_json("x_cookies", cookies)
-                cookies_path.write_text(json.dumps(cookies, default=str))
+                write_text_0600(cookies_path, json.dumps(cookies, default=str))
 
                 return client
             except Exception:
@@ -276,10 +277,10 @@ class SessionManager:
                 await client.login(username, password)
                 logger.info("X login successful")
 
-                # Save cookies
+                # Save cookies (owner-only perms — see SECURITY.md)
                 cookies = client.get_cookies()
                 self.credentials.store_json("x_cookies", cookies)
-                cookies_path.write_text(json.dumps(cookies, default=str))
+                write_text_0600(cookies_path, json.dumps(cookies, default=str))
 
                 return client
             except Exception as e:

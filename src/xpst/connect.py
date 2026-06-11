@@ -17,7 +17,9 @@ Usage:
 """
 
 import asyncio
+import contextlib
 import json
+import stat
 import time
 from pathlib import Path
 
@@ -28,6 +30,7 @@ from rich.table import Table
 from xpst.config import XPSTConfig
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger
+from xpst.utils.secure_io import write_text_0600
 
 console = Console()
 logger = get_logger(__name__)
@@ -156,8 +159,8 @@ def connect_youtube(config: XPSTConfig) -> bool:
             success_message="[green]✅ Authorization successful! You can close this tab.[/green]",
         )
 
-        # Save token
-        token_path.write_text(creds.to_json())
+        # Save token with owner-only perms (see SECURITY.md)
+        write_text_0600(token_path, creds.to_json())
 
         # Store in keyring
         cred_store = CredentialStore(config.config_dir)
@@ -222,8 +225,7 @@ def connect_instagram(config: XPSTConfig) -> bool:
         # Try loading existing settings first for stability
         if session_path.exists():
             try:
-                import json
-                with open(session_path) as f:
+                with open(session_path, encoding="utf-8") as f:
                     existing = json.load(f)
                 if "settings" in existing:
                     client.set_settings(existing["settings"])
@@ -282,7 +284,8 @@ def connect_instagram(config: XPSTConfig) -> bool:
             "username": username,
             "connected_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         }
-        session_path.write_text(json.dumps(session_data, indent=2))
+        # Owner-only perms on the session file (see SECURITY.md)
+        write_text_0600(session_path, json.dumps(session_data, indent=2))
 
         # Store in keyring
         cred_store = CredentialStore(config.config_dir)
@@ -377,6 +380,11 @@ def connect_x(config: XPSTConfig) -> bool:
             return screen_name
 
         screen_name = asyncio.run(_do_connect())
+
+        # twikit wrote the cookies file itself; tighten it to owner-only.
+        if cookies_path.exists():
+            with contextlib.suppress(OSError):
+                cookies_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
         # Store in keyring
         cred_store = CredentialStore(config.config_dir)

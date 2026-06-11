@@ -37,13 +37,30 @@ If `cryptography` is deliberately removed or unavailable **and** the OS keychain
 is also unusable, xPST **refuses to store the credential** (raising an error and
 logging it) rather than ever writing the secret to disk in cleartext.
 
+### Compatibility token/session/cookie files
+
+Several upstream libraries (google-auth, instagrapi, twikit) expect to read and
+refresh their credentials from a JSON file on disk. For compatibility xPST keeps
+those library-native files under `~/.xpst/credentials/`:
+
+- `youtube_token.json` — google-auth OAuth2 token
+- `instagram_session.json` — instagrapi session
+- `x_cookies.json` — twikit cookies
+
+These files are **not** Fernet-encrypted (the libraries require plaintext to
+parse them), so they are **always written with `0600` (owner read/write only)
+permissions** so no other user on the machine can read them. The same secret is
+*also* mirrored into the OS keychain / encrypted fallback above, which remains
+the canonical secure store. Treat the `~/.xpst/credentials/` directory as
+sensitive and do not loosen its permissions.
+
 ### What Is Stored
 
 | Credential | Key | Storage |
 |---|---|---|
-| YouTube OAuth Token | `youtube_token` | Keychain / encrypted file fallback |
-| X/Twitter Cookies | `x_cookies` | Keychain / encrypted file fallback |
-| Instagram Session | `instagram_session` | Keychain / encrypted file fallback |
+| YouTube OAuth Token | `youtube_token` | Keychain / encrypted file fallback + `0600` `youtube_token.json` |
+| X/Twitter Cookies | `x_cookies` | Keychain / encrypted file fallback + `0600` `x_cookies.json` |
+| Instagram Session | `instagram_session` | Keychain / encrypted file fallback + `0600` `instagram_session.json` |
 
 ### What Is NOT Stored
 

@@ -57,8 +57,7 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
     
-    # Auth & HTTP
-    "authlib>=1.3.0",
+    # HTTP (knowledge-base LLM client)
     "httpx>=0.24.0",
     
     # Config management
