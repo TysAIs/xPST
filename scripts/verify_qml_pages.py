@@ -212,6 +212,9 @@ def _make_engine(qml_dir: Path) -> tuple[QQmlApplicationEngine, ThemeProvider, S
     engine = QQmlApplicationEngine()
     engine.addImportPath(str(qml_dir))
     engine.addImportPath(str(qml_dir / "pages"))
+    # The 'xpst.desktop_app.qml 1.0' module URI resolves from the src root
+    # (src/xpst/desktop_app/qml/qmldir) — mirror the app's import setup.
+    engine.addImportPath(str(qml_dir.parents[2]))
 
     theme = ThemeProvider()
     controller = SmokeController()

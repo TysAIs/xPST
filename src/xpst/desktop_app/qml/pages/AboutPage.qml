@@ -351,7 +351,7 @@ Page {
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: Qt.openUrlExternally(modelData.url)
                                     Accessible.name: "Open " + modelData.label + " link"
-                                    Accessible.role: Accessible.Hyperlink
+                                    Accessible.role: Accessible.Link
                                 }
                             }
                         }
