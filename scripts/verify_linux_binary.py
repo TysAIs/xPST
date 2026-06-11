@@ -64,7 +64,12 @@ def verify_linux_binary(path: Path, seconds: int = 12) -> dict[str, Any]:
     digest = sha256_digest(path)
     env = os.environ.copy()
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
-    process = subprocess.Popen([str(path)], env=env)
+    # Capture output so a failing launch is diagnosable from the JSON
+    # instead of a blind exit code.
+    process = subprocess.Popen(
+        [str(path)], env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
     deadline = time.monotonic() + seconds
     exit_code: int | None = None
 
@@ -74,8 +79,14 @@ def verify_linux_binary(path: Path, seconds: int = 12) -> dict[str, Any]:
             break
         time.sleep(0.25)
 
+    output_tail = ""
     if exit_code is None:
         _stop_process(process)
+    try:
+        captured, _ = process.communicate(timeout=10)
+        output_tail = (captured or "")[-2000:]
+    except Exception:
+        pass
 
     stayed_alive = exit_code is None
     clean_exit = exit_code == 0
@@ -87,6 +98,7 @@ def verify_linux_binary(path: Path, seconds: int = 12) -> dict[str, Any]:
         "stayed_alive": stayed_alive,
         "exit_code": exit_code,
         "sha256": digest,
+        "output_tail": output_tail,
         "error": "" if launch_ok else f"Binary exited with code {exit_code} before {seconds}s.",
     }
 

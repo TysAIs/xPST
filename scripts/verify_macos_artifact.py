@@ -115,7 +115,16 @@ def _macos_security_checks(
     if dmg_path and dmg_path.exists():
         if spctl:
             result = _run([spctl, "--assess", "--type", "open", "--context", "context:primary-signature", str(dmg_path)])
-            checks.append({"id": "spctl_dmg_assess", "ok": result["ok"], "message": result["stderr"] or result["stdout"], "result": result})
+            # Same unsigned-RC gating as the app assess: Gatekeeper rejects
+            # unsigned DMGs by design; only required for public releases.
+            checks.append({
+                "id": "spctl_dmg_assess",
+                "ok": result["ok"] or not (require_developer_id or require_notarized),
+                "assessed_ok": result["ok"],
+                "message": result["stderr"] or result["stdout"] or "assessment passed",
+                "required": require_developer_id or require_notarized,
+                "result": result,
+            })
         if stapler:
             result = _run(["xcrun", "stapler", "validate", str(dmg_path)])
             checks.append(
