@@ -301,6 +301,84 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    # ── Knowledge-base tools (optional 'knowledge' extra) ──
+    # These mirror the `xpst kb ...` CLI. Their handlers lazy-import the heavy KB
+    # subsystem (faster-whisper / fastembed / lancedb) only when invoked, so
+    # listing them here keeps the cold import path light.
+    Tool(
+        name="kb_add",
+        description="Ingest a local file or URL into the knowledge base",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "description": "Local file path or URL to ingest",
+                },
+                "workspace": {
+                    "type": "string",
+                    "description": "Workspace name (isolated data dir)",
+                    "default": "default",
+                },
+            },
+            "required": ["source"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="kb_query",
+        description="Return stored knowledge nuggets whose text matches the query",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Text to match against stored nuggets",
+                },
+                "workspace": {
+                    "type": "string",
+                    "description": "Workspace name (isolated data dir)",
+                    "default": "default",
+                },
+            },
+            "required": ["text"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="kb_organize",
+        description="Discover areas, tag difficulty, and assign nuggets",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "workspace": {
+                    "type": "string",
+                    "description": "Workspace name (isolated data dir)",
+                    "default": "default",
+                },
+                "threshold": {
+                    "type": "number",
+                    "description": "Cosine similarity threshold for clustering/routing",
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="kb_areas",
+        description="List discovered knowledge areas in course order (beginner -> advanced)",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "workspace": {
+                    "type": "string",
+                    "description": "Workspace name (isolated data dir)",
+                    "default": "default",
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 
@@ -334,6 +412,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         elif name == "xpst_delete":
             engine = server.get_engine()
             return await _handle_delete(engine, arguments)
+        elif name in {"kb_add", "kb_query", "kb_organize", "kb_areas"}:
+            return await _handle_kb_tool(name, arguments)
         else:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"Unknown tool: {name}")],
@@ -615,6 +695,46 @@ async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallT
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+    )
+
+
+async def _handle_kb_tool(name: str, args: dict[str, Any]) -> CallToolResult:
+    """Dispatch a knowledge-base tool call.
+
+    The heavy KB subsystem (faster-whisper / fastembed / lancedb) is imported
+    lazily here, never at module load, preserving the cold-path import wall. The
+    underlying handlers are synchronous and can block (transcription, embedding,
+    clustering), so they run in a worker thread to keep the event loop free. A
+    missing ``xpst[knowledge]`` extra surfaces as a clear, actionable error.
+    """
+    try:
+        from xpst.knowledge.mcp import tools as kb_tools
+    except ImportError as exc:  # pragma: no cover - exercised only without extra
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=(
+                    "Knowledge features need the extra: "
+                    f"pip install 'xpst[knowledge]' ({exc})"
+                ),
+            )],
+            isError=True,
+        )
+
+    workspace = args.get("workspace", "default")
+    if name == "kb_add":
+        payload = await asyncio.to_thread(kb_tools.kb_add, args["source"], workspace)
+    elif name == "kb_query":
+        payload = await asyncio.to_thread(kb_tools.kb_query, args["text"], workspace)
+    elif name == "kb_organize":
+        payload = await asyncio.to_thread(
+            kb_tools.kb_organize, workspace, args.get("threshold")
+        )
+    else:  # kb_areas
+        payload = await asyncio.to_thread(kb_tools.kb_areas, workspace)
+
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
     )
 
 
