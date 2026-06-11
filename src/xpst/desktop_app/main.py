@@ -313,6 +313,11 @@ def main(no_splash: bool = False) -> int:
     # next to this file. We add the *parent* of the qml dir so 'qml' resolves.
     qml_main = _find_qml_path()
     engine.addImportPath(str(qml_main.parent.parent))
+    # The versioned module URI 'xpst.desktop_app.qml 1.0' (declared in
+    # qml/qmldir) resolves from the root CONTAINING the xpst/ tree:
+    # sys._MEIPASS in a frozen bundle, src/ in a checkout. Without this the
+    # frozen app fails with 'module "xpst.desktop_app.qml" is not installed'.
+    engine.addImportPath(str(qml_main.parents[3]))
 
     # Create backend objects (lightweight - defer heavy init)
     controller = AppController()

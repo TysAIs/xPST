@@ -37,9 +37,13 @@ def icon_font_path() -> Path:
     display; the caller checks ``.exists()`` and registers it with Qt's font
     database at startup.
     """
-    # src/xpst/desktop_app/icon_glyphs.py -> project root is 4 parents up.
-    project_root = Path(__file__).resolve().parent.parent.parent.parent
-    return project_root.joinpath(*ICON_FONT_RELATIVE_PARTS)
+    # resource_path resolves against sys._MEIPASS in frozen builds and the
+    # project root in a checkout — walking __file__ parents landed OUTSIDE
+    # the bundle when frozen (/tmp/assets/...), so packaged apps lost the
+    # icon font and rendered boxes.
+    from xpst.desktop_app.resource_path import resource_path
+
+    return resource_path(*ICON_FONT_RELATIVE_PARTS)
 
 #: Logical icon name -> codepoint (int) in the bundled Lucide font.
 #:
