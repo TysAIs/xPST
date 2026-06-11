@@ -2,7 +2,7 @@
 
 on:
   push:
-    branches: ["main", "codex/**"]
+    branches: ["main", "feat/knowledge-base", "codex/**"]
   pull_request:
   workflow_dispatch:
 
