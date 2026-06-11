@@ -19,6 +19,7 @@ from xpst.config import XPSTConfig
 from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
+from xpst.utils.secure_io import write_text_0600
 
 logger = get_logger(__name__)
 
@@ -127,8 +128,6 @@ class YouTubeUploader(PlatformUploader):
                 )
 
         # Save refreshed token with owner-only perms (see SECURITY.md)
-        from xpst.utils.secure_io import write_text_0600
-
         write_text_0600(token_file, creds.to_json())
 
         # Build service

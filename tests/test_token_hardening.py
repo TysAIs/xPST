@@ -148,6 +148,62 @@ class TestConnectYouTube:
         assert ok is False
 
 
+class TestTestConnectionsYouTubeRefresh:
+    """``connect.test_connections`` refreshes an expired YouTube token and must
+    persist it 0600 (regression for AUDIT item 10: this write site was a bare
+    ``Path.write_text`` that landed at default umask)."""
+
+    def test_refreshed_token_written_0600(self, tmp_path):
+        from xpst import connect
+
+        config = _make_config(tmp_path)
+        config.youtube.enabled = True
+        config.instagram.enabled = False
+        config.x.enabled = False
+
+        token_path = Path(config.youtube.token_file)
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        # Pre-existing (deliberately loose) token file that will be refreshed.
+        token_path.write_text('{"token": "old"}')
+        if not sys.platform.startswith("win"):
+            os.chmod(token_path, 0o644)
+
+        refreshed_json = '{"token": "fresh", "refresh_token": "r"}'
+        fake_creds = MagicMock()
+        fake_creds.expired = True
+        fake_creds.refresh_token = "r"
+        fake_creds.to_json.return_value = refreshed_json
+        fake_creds.refresh.return_value = None
+
+        fake_credentials_mod = MagicMock()
+        fake_credentials_mod.Credentials.from_authorized_user_file.return_value = fake_creds
+
+        fake_transport = MagicMock()
+
+        fake_service = MagicMock()
+        fake_service.channels().list().execute.return_value = {
+            "items": [{"snippet": {"title": "Test Channel"}}]
+        }
+        fake_discovery = MagicMock()
+        fake_discovery.build.return_value = fake_service
+
+        with patch.dict(
+            sys.modules,
+            {
+                "google.auth.transport.requests": fake_transport,
+                "google.oauth2.credentials": fake_credentials_mod,
+                "googleapiclient.discovery": fake_discovery,
+            },
+        ):
+            results = asyncio.run(connect.test_connections(config))
+
+        assert results["youtube"] is True
+        fake_creds.refresh.assert_called_once()
+        assert json.loads(token_path.read_text())["token"] == "fresh"
+        if not sys.platform.startswith("win"):
+            assert _mode(token_path) == 0o600
+
+
 class TestConnectInstagram:
     def test_happy_path_writes_session_0600(self, tmp_path):
         from xpst import connect

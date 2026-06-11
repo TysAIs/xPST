@@ -504,7 +504,8 @@ async def test_connections(config: XPSTConfig) -> dict[str, bool]:
                 creds = Credentials.from_authorized_user_file(str(token_file))
                 if creds.expired and creds.refresh_token:
                     creds.refresh(Request())
-                    token_file.write_text(creds.to_json())
+                    # Save refreshed token with owner-only perms (see SECURITY.md)
+                    write_text_0600(token_file, creds.to_json())
 
                 service = build("youtube", "v3", credentials=creds)
                 response = service.channels().list(part="snippet", mine=True).execute()
