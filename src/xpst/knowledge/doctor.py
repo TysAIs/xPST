@@ -249,7 +249,7 @@ def diagnose(workspace: Workspace) -> DoctorReport:
     findings.extend(_check_embeddings(nuggets))
     findings.extend(_check_orphans(nuggets, areas))
 
-    queue = IngestionQueue(workspace.queue_path)
+    queue = IngestionQueue(workspace.queue_path, readonly=True)
     findings.extend(_check_queue(queue))
 
     # Touch the manifest so a corrupt one is surfaced (Manifest recovers to

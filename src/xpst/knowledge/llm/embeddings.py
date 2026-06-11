@@ -65,6 +65,9 @@ class EndpointEmbedder:
                  api_key: str | None = None, *, timeout: float = 120.0) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
+        # Public so the ingestion manifest records the real model id instead
+        # of "unknown" — the re-embed migration keys off this value (G34).
+        self.model_name = model
         self._api_key = api_key
         self._timeout = timeout
         self._dim: int | None = None

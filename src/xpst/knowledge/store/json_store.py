@@ -5,10 +5,14 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from xpst.knowledge.models import Area, Nugget
+from xpst.utils.logger import get_logger
+
+logger = get_logger(__name__)
 from xpst.knowledge.store.base import KnowledgeStore
 
 if TYPE_CHECKING:
@@ -35,26 +39,53 @@ class JsonKnowledgeStore(KnowledgeStore):
         self._load()
 
     def _load(self) -> None:
-        if self._path.exists():
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-            self._nuggets = {k: Nugget.from_dict(v) for k, v in raw.items()}
-        if self._areas_path.exists():
-            raw = json.loads(self._areas_path.read_text(encoding="utf-8"))
-            self._areas = {k: Area.from_dict(v) for k, v in raw.items()}
+        self._nuggets = self._load_file(self._path, Nugget.from_dict)
+        self._areas = self._load_file(self._areas_path, Area.from_dict)
+
+    @staticmethod
+    def _load_file(path: Path, decode) -> dict:
+        """Corruption-tolerant load (G33): a truncated/corrupt JSON file is
+        quarantined to ``<name>.corrupt`` and the store starts empty instead
+        of crashing every subsequent KB operation."""
+        if not path.exists():
+            return {}
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return {k: decode(v) for k, v in raw.items()}
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError, KeyError) as exc:
+            quarantine = path.with_suffix(path.suffix + ".corrupt")
+            try:
+                path.replace(quarantine)
+            except OSError:
+                pass
+            logger.warning("Corrupt store file %s quarantined to %s (%s)",
+                           path.name, quarantine.name, exc)
+            return {}
+
+    @staticmethod
+    def _atomic_write(path: Path, data: dict) -> None:
+        """tempfile + os.replace so a crash mid-write never truncates the
+        store (G33) — same pattern as manifest.py/queue.py."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
 
     def _flush(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        data = {k: v.to_dict() for k, v in self._nuggets.items()}
-        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self._atomic_write(self._path,
+                           {k: v.to_dict() for k, v in self._nuggets.items()})
 
     def _flush_areas(self) -> None:
-        self._areas_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {k: v.to_dict() for k, v in self._areas.items()}
-        self._areas_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        self._atomic_write(self._areas_path,
+                           {k: v.to_dict() for k, v in self._areas.items()})
 
     def add_nugget(self, nugget: Nugget) -> None:
         if nugget.id in self._nuggets:
             return
+        self._nuggets[nugget.id] = nugget
+        self._flush()
+
+    def replace_nugget(self, nugget: Nugget) -> None:
         self._nuggets[nugget.id] = nugget
         self._flush()
 
@@ -68,6 +99,11 @@ class JsonKnowledgeStore(KnowledgeStore):
         return list(self._nuggets.values())
 
     def search(self, embedding: Sequence[float], k: int) -> list[Nugget]:
+        return [n for n, _s in self.search_with_scores(embedding, k)]
+
+    def search_with_scores(
+        self, embedding: Sequence[float], k: int
+    ) -> list[tuple[Nugget, float | None]]:
         scored = [
             (_cosine(embedding, n.embedding), n)
             for n in self._nuggets.values()
@@ -75,7 +111,7 @@ class JsonKnowledgeStore(KnowledgeStore):
         ]
         scored = [(s, n) for s, n in scored if s > -1.0]
         scored.sort(key=lambda pair: pair[0], reverse=True)
-        return [n for _s, n in scored[: max(0, k)]]
+        return [(n, s) for s, n in scored[: max(0, k)]]
 
     def upsert_area(self, area: Area) -> None:
         self._areas[area.id] = area

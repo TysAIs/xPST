@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from xpst.knowledge.ingest.extract import extract_nuggets as _default_extract
-from xpst.knowledge.ingest.resolve import resolve_source, source_id
+from xpst.knowledge.ingest.resolve import content_fingerprint, resolve_source, source_id
 from xpst.knowledge.ingest.transcribe import Transcriber, Transcript
 from xpst.knowledge.models import Nugget
 
@@ -56,6 +56,13 @@ def ingest(source: str, *, store: KnowledgeStore, transcriber: Transcriber,
     # video can never corrupt the store (spec §5: graceful degradation).
     try:
         media_path = resolve_source(source)
+        # Content-byte dedup (G33): two different source strings (e.g. share
+        # URL vs canonical URL) resolving to the same media must not
+        # double-ingest. The fingerprint is recorded as a manifest alias.
+        content_sid = content_fingerprint(media_path)
+        if manifest.has_source(content_sid):
+            return IngestResult(nuggets=[], skipped=True,
+                                reason=f"already ingested (content match): {content_sid}")
         transcript = transcriber.transcribe(media_path)
         raw_nuggets = extractor(transcript, llm_client)
         points = [r["point"] for r in raw_nuggets]
@@ -80,4 +87,6 @@ def ingest(source: str, *, store: KnowledgeStore, transcriber: Transcriber,
     manifest.record(sid, source=source_url,
                     embed_model=getattr(embedder, "model_name", "unknown"),
                     embed_dim=embed_dim)
+    if content_sid != sid:
+        manifest.record_alias(content_sid, sid)
     return IngestResult(nuggets=built, skipped=False, reason=None)

@@ -212,6 +212,10 @@ ignore_imports = [
     "xpst.knowledge.ingest.transcribe -> faster_whisper",
     "xpst.knowledge.llm.embeddings -> fastembed",
     "xpst.knowledge.store.vector_lancedb -> lancedb",
+    # open_default_store probes for the lancedb extra inside the function
+    # (try/ImportError, G32). Grimp sees function-local imports statically;
+    # the runtime wall tests prove it never loads on the cold path.
+    "xpst.knowledge.store -> lancedb",
     # The desktop GUI's own lazy seam: `xpst desktop` lazily imports the
     # PySide6 app subtree inside the command, never at CLI load. Cutting this
     # one edge keeps the whole desktop/PySide6 subtree off the CLI cold path.

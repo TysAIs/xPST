@@ -32,11 +32,16 @@ class Manifest:
 
     @staticmethod
     def _empty() -> dict[str, Any]:
-        return {"schema_version": Manifest.SCHEMA_VERSION, "sources": {}}
+        return {
+            "schema_version": Manifest.SCHEMA_VERSION,
+            "sources": {},
+            "aliases": {},
+        }
 
     def _ensure_keys(self, data: dict[str, Any]) -> dict[str, Any]:
         data.setdefault("schema_version", self.SCHEMA_VERSION)
         data.setdefault("sources", {})
+        data.setdefault("aliases", {})
         return data
 
     def _atomic_write(self) -> None:
@@ -58,7 +63,18 @@ class Manifest:
             raise
 
     def has_source(self, source_video_id: str) -> bool:
-        return source_video_id in self._data["sources"]
+        return (
+            source_video_id in self._data["sources"]
+            or source_video_id in self._data["aliases"]
+        )
+
+    def record_alias(self, alias_id: str, canonical_id: str) -> None:
+        """Map a secondary dedup key (e.g. a content-byte fingerprint) onto a
+        recorded source so the same media reached via a different source
+        string is never re-ingested (G33). Aliases do not inflate
+        ``source_count``."""
+        self._data["aliases"][alias_id] = canonical_id
+        self._atomic_write()
 
     def source_count(self) -> int:
         """Number of distinct sources recorded. Read-only."""

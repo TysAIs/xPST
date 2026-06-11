@@ -17,9 +17,13 @@ class Workspace:
     root: Path
 
     @classmethod
-    def resolve(cls, name: str = "default") -> Workspace:
+    def resolve(cls, name: str = "default", *, create: bool = True) -> Workspace:
+        """Resolve a workspace directory. Read paths (query, doctor, areas)
+        pass ``create=False`` so probing a nonexistent workspace never
+        creates it as a side effect (G30)."""
         root = _xpst_home() / "knowledge" / name
-        root.mkdir(parents=True, exist_ok=True)
+        if create:
+            root.mkdir(parents=True, exist_ok=True)
         return cls(name=name, root=root)
 
     @property

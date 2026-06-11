@@ -71,32 +71,15 @@ def kb_add(source: str, workspace: str = "default") -> dict[str, Any]:
     }
 
 
-def kb_query(text: str, workspace: str = "default") -> dict[str, Any]:
-    """Return stored nuggets whose text matches (Phase 1: substring match).
+def kb_query(text: str, workspace: str = "default", k: int = 8) -> dict[str, Any]:
+    """Semantic search over stored nuggets with substring fallback (G31).
 
-    Mirrors ``xpst kb query``.
+    Mirrors ``xpst kb query``. Results carry provenance and a similarity
+    score; ``mode`` reports whether the query ran semantically.
     """
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
-    from xpst.knowledge.workspace import Workspace
+    from xpst.knowledge.query import query_nuggets
 
-    ws = Workspace.resolve(workspace)
-    store = JsonKnowledgeStore(ws.nuggets_path)
-    needle = text.lower()
-    hits = [n for n in store.all_nuggets() if needle in n.point.lower()]
-    return {
-        "workspace": ws.name,
-        "query": text,
-        "count": len(hits),
-        "nuggets": [
-            {
-                "point": n.point,
-                "citation": n.source_url or n.source_video_id,
-                "timestamp_start": n.timestamp_start,
-                "timestamp_end": n.timestamp_end,
-            }
-            for n in hits
-        ],
-    }
+    return query_nuggets(text, workspace=workspace, k=k)
 
 
 def kb_organize(

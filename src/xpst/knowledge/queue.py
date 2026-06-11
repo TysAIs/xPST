@@ -50,14 +50,18 @@ class IngestionQueue:
     """
 
     def __init__(self, path: str | Path, *,
-                 now: float | None = None) -> None:
+                 now: float | None = None, readonly: bool = False) -> None:
         self.path = Path(path)
+        self.readonly = readonly
         # ``_items`` preserves enqueue order; dict keyed by id for O(1) lookup.
         self._items: dict[str, QueueItem] = {}
         self._load()
         # Recover from a crash: an item left ``in_progress`` had no worker to
-        # finish it, so make it dequeueable again.
-        self._requeue_stale(persist=True)
+        # finish it, so make it dequeueable again. Readonly opens (doctor)
+        # must never rewrite queue.json — a diagnostic that mutates state can
+        # corrupt an active worker's claim (G30).
+        if not readonly:
+            self._requeue_stale(persist=True)
 
     # ── persistence ────────────────────────────────────────────────────────
 

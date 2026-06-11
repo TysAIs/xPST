@@ -95,6 +95,12 @@ class LanceDBStore(KnowledgeStore):
             return []
         return [_row_to_nugget(r) for r in tbl.search().limit(10_000).to_list()]
 
+    def replace_nugget(self, nugget: Nugget) -> None:
+        db = self._conn()
+        if _NUGGETS in db.table_names():
+            db.open_table(_NUGGETS).delete(f"id = '{nugget.id}'")
+        self.add_nugget(nugget)
+
     def search(self, embedding: Sequence[float], k: int) -> list[Nugget]:
         tbl = self._open(_NUGGETS, None)
         if tbl is None or k <= 0:

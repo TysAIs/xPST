@@ -30,6 +30,17 @@ class KnowledgeStore(ABC):
         best match first. Nuggets without an embedding are ignored."""
         ...
 
+    def replace_nugget(self, nugget: Nugget) -> None:
+        """Insert or replace a nugget by id (re-embedding migration path)."""
+        raise NotImplementedError
+
+    def search_with_scores(
+        self, embedding: Sequence[float], k: int
+    ) -> list[tuple[Nugget, float | None]]:
+        """Like :meth:`search` but with a similarity score per hit (higher =
+        closer). Backends without native distances return ``None`` scores."""
+        return [(n, None) for n in self.search(embedding, k)]
+
     @abstractmethod
     def upsert_area(self, area: Area) -> None:
         """Insert or replace an area by its id."""

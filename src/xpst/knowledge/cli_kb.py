@@ -81,24 +81,99 @@ def kb_add(source: str, workspace: str) -> None:
 @kb.command("query")
 @click.argument("text")
 @click.option("--workspace", "-w", default="default", help="Workspace name")
-def kb_query(text: str, workspace: str) -> None:
-    """Return stored nuggets whose text matches (Phase 1: substring match)."""
+@click.option("--limit", "-k", "limit", default=8, help="Max results")
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+def kb_query(text: str, workspace: str, limit: int, as_json: bool) -> None:
+    """Semantic search over your content (substring fallback, cited)."""
+    import json as _json
+
+    from xpst.knowledge.query import query_nuggets
+
+    result = query_nuggets(text, workspace=workspace, k=limit)
+    if as_json:
+        console.print_json(_json.dumps(result))
+        return
+    if not result["nuggets"]:
+        console.print("[yellow]No matching nuggets.[/yellow]")
+        return
+    console.print(f"[dim]mode: {result['mode']}[/dim]")
+    for n in result["nuggets"]:
+        score = f" [dim]{n['score']:.3f}[/dim]" if n["score"] is not None else ""
+        console.print(
+            f"[bold]{n['point']}[/bold]{score}\n  ({n['citation']} @ "
+            f"{n['timestamp_start']:.1f}-{n['timestamp_end']:.1f}s)"
+        )
+
+
+@kb.command("reembed")
+@click.option("--workspace", "-w", default="default", help="Workspace name")
+@click.option("--force", is_flag=True, help="Re-embed even if the model matches")
+def kb_reembed(workspace: str, force: bool) -> None:
+    """Re-embed all nuggets with the configured embedding model (G34).
+
+    Use after changing XPST_KB_EMBED_MODEL; the manifest records which
+    model produced the stored vectors.
+    """
+    from xpst.knowledge.config import KnowledgeConfig
+    from xpst.knowledge.llm.embeddings import build_embedder
+    from xpst.knowledge.manifest import Manifest
+    from xpst.knowledge.store import open_default_store
+    from xpst.knowledge.workspace import Workspace
+
+    ws = Workspace.resolve(workspace, create=False)
+    store = open_default_store(ws)
+    nuggets = list(store.all_nuggets())
+    if not nuggets:
+        console.print("[yellow]No nuggets to re-embed.[/yellow]")
+        return
+    config = KnowledgeConfig.from_env()
+    if not force:
+        console.print(
+            f"Re-embedding {len(nuggets)} nuggets with {config.embed_model} "
+            "(use --force to skip this notice)"
+        )
+    embedder = build_embedder(config)
+    vectors = embedder.embed([n.point for n in nuggets])
+    for nugget, vec in zip(nuggets, vectors, strict=True):
+        store.replace_nugget(nugget.with_embedding(vec))
+    # Refresh the manifest's recorded model so queries/doctor see the truth.
+    manifest = Manifest(ws.manifest_path)
+    manifest.record("reembed:latest", source=None,
+                    embed_model=config.embed_model, embed_dim=embedder.dim)
+    console.print(f"[green]Re-embedded[/green] {len(nuggets)} nuggets with {config.embed_model}")
+
+
+@kb.command("migrate-store")
+@click.option("--workspace", "-w", default="default", help="Workspace name")
+def kb_migrate_store(workspace: str) -> None:
+    """Copy the JSON store into LanceDB (requires the knowledge extra).
+
+    JSON files are left in place as a backup; queries prefer LanceDB once
+    the table exists (G32).
+    """
     from xpst.knowledge.store.json_store import JsonKnowledgeStore
     from xpst.knowledge.workspace import Workspace
 
-    ws = Workspace.resolve(workspace)
-    store = JsonKnowledgeStore(ws.nuggets_path)
-    needle = text.lower()
-    hits = [n for n in store.all_nuggets() if needle in n.point.lower()]
-    if not hits:
-        console.print("[yellow]No matching nuggets.[/yellow]")
+    ws = Workspace.resolve(workspace, create=False)
+    if not ws.nuggets_path.exists():
+        console.print("[yellow]No JSON store to migrate.[/yellow]")
         return
-    for n in hits:
-        cite = n.source_url or n.source_video_id
-        console.print(
-            f"[bold]{n.point}[/bold]\n  ({cite} @ "
-            f"{n.timestamp_start:.1f}-{n.timestamp_end:.1f}s)"
-        )
+    try:
+        from xpst.knowledge.store.vector_lancedb import LanceDBStore
+        lance = LanceDBStore(ws.lancedb_path)
+    except ImportError:
+        console.print("[red]lancedb is not installed[/red] — `uv sync --extra knowledge`")
+        raise SystemExit(1) from None
+    source = JsonKnowledgeStore(ws.nuggets_path)
+    nuggets = list(source.all_nuggets())
+    for nugget in nuggets:
+        lance.add_nugget(nugget)
+    for area in source.areas():
+        lance.upsert_area(area)
+    console.print(
+        f"[green]Migrated[/green] {len(nuggets)} nuggets + {len(source.areas())} areas to LanceDB "
+        f"(JSON left as backup at {ws.nuggets_path.name})"
+    )
 
 
 @kb.command("organize")
