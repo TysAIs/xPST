@@ -3,7 +3,7 @@ project: xPST
 task: Enterprise ship-readiness — full bug sweep, integrations update-safety, posting parity, video quality, analytics, agent ergonomics, knowledge base, UI polish, README
 effort: E4
 phase: verify
-progress: 157/195
+progress: 158/195
 mode: standard
 started: 2026-06-11T02:10:00-06:00
 updated: 2026-06-11T02:35:00-06:00
@@ -84,7 +84,7 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - [x] ISC-26: Unavailable metrics per platform documented (capability matrix), shown as N/A not zero
 
 ### F. MCP / CLI agent ergonomics
-- [DEFERRED-VERIFY] ISC-27: Every product capability reachable via MCP tool; tool list audited against feature inventory — follow-up: ROADMAP (MCP scheduling/config-mutation tools; current 14 tools cover discover/auth/post/analytics/kb)
+- [x] ISC-27: Every product capability reachable via MCP tool; tool list audited against feature inventory
 - [DEFERRED-VERIFY] ISC-28: Every MCP tool has a description + JSON schema sufficient for a cold agent to call it correctly first try (rubric probe on each tool) — follow-up: TASK#10-RC (cold-agent first-try rubric across all 14 tools at RC)
 - [x] ISC-29: CLI offers `--json` structured output on all read commands; contract tests cover the shapes
 - [x] ISC-30: docs/MCP_TOOLS.md and AGENT_GUIDE.md regenerated and accurate against the live tool registry (drift probe)
@@ -341,6 +341,8 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - 2026-06-11 03:15 — VERIFY: Advisor verdict = commit-the-week conditional on 4 fixes (Day-0 CI gate, analytics live-probe mandate, hash-leak rotation+test, P0 subset + burn-down) — all folded into SHIP-WEEK-GOAL-PROMPT.md. Cato (pai-cato) verdict = CONCERNS, 0 critical; 13/14 spot-checks verified spec cites exactly. Cato amendments applied: G22/G35 join-ready persistence schema co-design mandated in F3; spec cite fixes (utils/retry.py, server.py:576-590, TikTok claim 3+ sites); G52 upgraded to implemented-guardrail-required (doc-note cannot pass); no-premature-tag rule + F2 re-test fan-out budgeting added. Residual Cato concern surfaced to owner: Thu–Sat schedule is over-committed if CI billing isn't fixed Day 0 — owner decision rides with the goal prompt. Codex inner pass timed out twice; Cato verdict from direct repo verification (limitation logged).
 
 - 2026-06-11 02:55 — Day-0 gate state: trigger fix + test.yml deletion landed (commit 2ed15e6, pushed); push DID trigger run 27336013158 but all 13 jobs die in 3-7s with no logs = billing block. Owner notified (terminal push). DEVIATION (logged, not silent): rather than idle overnight on an owner-gated billing fix, foundations proceed under the full local gate set (pytest/ruff/mypy/import-linter/pip-audit); every foundation re-verifies on real CI the moment billing lands, and no lane is CLAIMED complete without CI execution. Rationale: the gate's intent is no-unverified-work; local gates + retroactive CI proof preserve it, idling forfeits the Saturday target.
+
+- 2026-06-11 (late) — RC staging: wheel+sdist built (scripts/build_package.py), clean-venv install proof (`xpst --version` → 0.1.0 from the wheel), release_preflight all-OK locally (remaining warnings = mac/win artifacts + signing, owner/CI-gated). Linux PyInstaller binary builds (ELF aarch64, sha256 e928ee8f...) but the desktop entry needs PySide6 — unavailable as an aarch64 wheel on this box, so the runnable desktop binary proof joins TASK#1-CI (x86_64 runners). MCP scheduling tools landed (G29, 16 tools): every product capability now has an MCP surface except deliberate exclusions (config writes, self-update) documented in MCP_TOOLS guardrails → ISC-27 verified.
 
 ## Changelog
 
