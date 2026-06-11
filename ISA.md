@@ -3,7 +3,7 @@ project: xPST
 task: Enterprise ship-readiness — full bug sweep, integrations update-safety, posting parity, video quality, analytics, agent ergonomics, knowledge base, UI polish, README
 effort: E4
 phase: verify
-progress: 159/195
+progress: 164/195
 mode: standard
 started: 2026-06-11T02:10:00-06:00
 updated: 2026-06-11T02:35:00-06:00
@@ -60,7 +60,7 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - [x] ISC-8: Inventory doc lists every integrated/vendored open-source project with version, role, license, and adapter seam path
 - [x] ISC-9: `xpst doctor` (or equivalent) reports available updates for each integrated project
 - [x] ISC-10: Each platform adapter import is isolated: simulated ImportError/API-change in one adapter leaves app + other platforms functional (test probe)
-- [DEFERRED-VERIFY] ISC-11: Dependency pins + lockfile reproduce a working install from scratch on a clean machine — follow-up: TASK#1-CI (clean-machine install proof needs the CI matrix (billing-blocked))
+- [x] ISC-11: Dependency pins + lockfile reproduce a working install from scratch on a clean machine
 - [x] ISC-12: Anti: no integration update path auto-applies an upstream update without explicit user action
 
 ### C. Cross-platform posting parity
@@ -261,11 +261,11 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - [x] ISC-170: `rg "pip install --upgrade" src/xpst/updater.py` is constrained (pins) and followed by a smoke/rollback.
 - [x] ISC-171: `rg "authlib" NOTICES.md LICENSING_REPORT.md` returns nothing (or authlib is actually a dep).
 - [x] ISC-172: `python -c "import tomllib;d=tomllib.load(open('pyproject.toml','rb'));print([x for x in d['project']['optional-dependencies']['knowledge'] if '<' not in x])"` prints `[]` (upper bounds present).
-- [DEFERRED-VERIFY] ISC-173: `gh workflow list` shows one CI workflow (test.yml deleted). — follow-up: TASK#10-RC (gh workflow list still shows two CI registrations until test.yml deletion merges to main)
+- [x] ISC-173: `gh workflow list` shows one CI workflow (test.yml deleted).
 - [x] ISC-174: `rg "feat/knowledge-base" .github/workflows/ci.yml` matches (branch trigger) — or default branch updated.
-- [DEFERRED-VERIFY] ISC-175: `gh run list --branch feat/knowledge-base --limit 1` shows a non-billing, completed run. — follow-up: TASK#1-CI (non-billing completed run — billing is owner-gated)
-- [DEFERRED-VERIFY] ISC-176: `gh run list --limit 5` shows ≥1 run that did NOT fail in <10s (billing fixed). — follow-up: TASK#1-CI (run not failing <10s — same)
-- [DEFERRED-VERIFY] ISC-177: `pytest` full suite passes on the 3-OS matrix (CI evidence, not local-only). — follow-up: TASK#1-CI (3-OS suite proof — same)
+- [x] ISC-175: `gh run list --branch feat/knowledge-base --limit 1` shows a non-billing, completed run.
+- [x] ISC-176: `gh run list --limit 5` shows ≥1 run that did NOT fail in <10s (billing fixed).
+- [x] ISC-177: `pytest` full suite passes on the 3-OS matrix (CI evidence, not local-only).
 - [DEFERRED-VERIFY] ISC-178: `gh release list` shows ≥1 release after RC tagging. — follow-up: TASK#10-RC (first GH release at RC tag)
 - [x] ISC-179: `python scripts/release_preflight.py` includes a tag↔version↔CHANGELOG consistency check.
 
@@ -347,6 +347,8 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - 2026-06-11 (owner sign-offs received via AskUserQuestion): (1) 37-item DEFERRAL SET APPROVED AS-IS — the [DEFERRED-VERIFY] entries now satisfy the done-condition's "roadmap entry + my sign-off" clause; (2) SIGNING: ship v0.1.0-rc UNSIGNED with SmartScreen/Gatekeeper notes; (3) ACCOUNT SCOPE: single-account v1 statement (docs/ACCOUNT-SCOPE.md) APPROVED → ISC-195 verified. (4) Billing: owner delegated the fix with a zero-cost constraint; chosen path = repo goes PUBLIC (owner-directed: "make it public but first get any and all personal info out").
 - 2026-06-11 — PRIVACY SCRUB executed before public flip: working tree scrubbed (commit b5162a3); FULL HISTORY rewritten with git-filter-repo (authors → xPST Contributors <xpst@opensource.local>, all identifier strings replaced; gitleaks: only the fake fixture token remains; zero identifier hits across all history); ALL 7 remote branches force-pushed with rewritten history; mirror backup at ~/backups/xpst-pre-filter-mirror-20260611. Caveat disclosed: GitHub may retain orphaned pre-rewrite objects until server-side GC; guaranteed purge requires a GitHub Support request.
 
+- 2026-06-11 18:45 — **DAY-0 GATE CLOSED + RC TAGGED.** Billing was unfixable (owner cannot pay) → fresh PUBLIC repo (free Actions) after the 3-round privacy scrub. Four CI fix rounds on the first-ever 3-OS matrix: (1) ARM64-macos ffmpeg action, py3.10 tomllib, Windows encodings/POSIX skips; (2) REAL Windows product bug — credential secret corrupted by missing O_BINARY (CRT CRLF translation) — plus Linux Qt libs and unsigned-tolerant macOS verify; (3) QML smoke import-path (module URI from src root), libpulse0, Qt6 Accessible.Link; (4) deterministic queue FIFO via insertion seq (Windows 15.6ms clock collisions). Two GitHub infra flakes ("TypeError: fetch failed") cleared by rerun. **Run 27362553041: completed SUCCESS — all 13 jobs green (ubuntu/macos/windows × py3.10-3.13 + Docker).** Tag v0.1.0-rc pushed on tested SHA f373af3; Release workflow building 4-OS artifacts.
+
 ## Changelog
 
 - conjectured: xPST was ship-ready at d5c9224 because all six audit items closed and gates were green.
@@ -387,4 +389,7 @@ ISC-3/6/7/52: dispositions + hot-path profile appended to docs/AUDIT-2026-06-10.
 ISC-179: release_preflight.py version_changelog_consistency → 'pyproject version 0.1.0 has a CHANGELOG entry.'
 ISC-49: gh pr view 4 --json mergeable → MERGEABLE.
 Deferral-reduction batch (commit pushed): ISC-10/20/29/91/92/93/123/124/139 flipped to verified — adapter-isolation tests, quality report, precise X metrics, real TikTok handle, dead-code removals. Suite 1230 passed exit 0.
+ISC-175/176/177: run 27362553041 conclusion=success, 13/13 jobs, durations 45s-15m3s (real execution, not billing deaths); 3-OS pytest proof = 1242 passed per matrix job.
+ISC-173: gh workflow list on the fresh repo → CI + Release (exactly one CI workflow).
+ISC-11: matrix jobs perform clean installs on all 3 OSes from the lockfile + local clean-venv wheel proof.
 Deferral pass: every remaining ISC converted to [DEFERRED-VERIFY] with follow-up IDs — TASK#1-CI (billing-gated CI proof), TASK#10-RC (tag-time probes), OWNER-SMOKE (mac/win checklists), OWNER-SIGNOFF (two decisions), ROADMAP (north-star §6 descopes + v0.2 items). Owner sign-off on the deferral set is the outstanding approval.
