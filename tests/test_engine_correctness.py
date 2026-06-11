@@ -337,3 +337,75 @@ class TestProcessVideoSource:
         video = VideoMetadata(video_id="v", url="u", caption="c")
         result = await engine._process_video(video, source="nonexistent")
         assert result.results == {}
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight duration caps (G08)
+# ---------------------------------------------------------------------------
+
+
+class TestDurationLimits:
+    def _service_with_duration(self, tmp_path, duration: float) -> UploadService:
+        state = StateManager(str(tmp_path))
+        processor = MagicMock()
+        processor.get_video_info.return_value = {"format": {"duration": str(duration)}}
+        return UploadService(
+            video_processor=processor, circuit_breakers=MagicMock(),
+            quota_manager=MagicMock(), state=state, notifier=MagicMock(),
+            shutdown_handler=MagicMock(), config=MagicMock(), anti_bot=None,
+        )
+
+    def _uploader_with_limit(self, platform: str, limit: int) -> MagicMock:
+        uploader = _make_uploader(platform)
+        manifest = MagicMock()
+        manifest.extra = {"max_video_duration_seconds": limit} if platform == "x" \
+            else {"max_duration_seconds": limit}
+        uploader.manifest.return_value = manifest
+        return uploader
+
+    @pytest.mark.asyncio
+    async def test_duration_limit_x(self, tmp_path):
+        """G08: a 200s video must be pre-flight skipped on X (140s cap),
+        not uploaded into a guaranteed rejection."""
+        video = tmp_path / "long.mp4"
+        video.write_bytes(b"v" * 2048)
+        service = self._service_with_duration(tmp_path, 200.0)
+        uploader = self._uploader_with_limit("x", 140)
+
+        result = await service.upload_to_platform(
+            uploader=uploader, video_path=video, caption="c",
+            platform_name="x", video_id="long1",
+        )
+        assert result.success is False
+        assert "140" in (result.error or "")
+        assert result.metadata.get("preflight") is True
+        uploader.upload.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_duration_limit_youtube_shorts(self, tmp_path):
+        video = tmp_path / "long2.mp4"
+        video.write_bytes(b"v" * 2048)
+        service = self._service_with_duration(tmp_path, 90.0)
+        uploader = self._uploader_with_limit("youtube", 60)
+
+        result = await service.upload_to_platform(
+            uploader=uploader, video_path=video, caption="c",
+            platform_name="youtube", video_id="long2",
+        )
+        assert result.success is False
+        assert "60" in (result.error or "")
+        uploader.upload.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_under_limit_proceeds(self, tmp_path):
+        video = tmp_path / "ok.mp4"
+        video.write_bytes(b"v" * 2048)
+        service = self._service_with_duration(tmp_path, 45.0)
+        uploader = self._uploader_with_limit("youtube", 60)
+
+        result = await service.upload_to_platform(
+            uploader=uploader, video_path=video, caption="c",
+            platform_name="youtube", video_id="ok1",
+        )
+        assert result.success is True
+        uploader.upload.assert_awaited_once()

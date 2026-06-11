@@ -231,6 +231,26 @@ class UploadService:
                 },
             )
 
+        # ── Pre-flight capability check (G08): platforms hard-cap video
+        # duration (X 140s, YT Shorts 60s). Enforce it BEFORE encode/upload
+        # with an actionable reason instead of burning an upload on a
+        # guaranteed platform-side rejection.
+        duration_limit = self._duration_limit(uploader)
+        if duration_limit:
+            duration = self._probe_duration(video_path)
+            if duration and duration > duration_limit:
+                reason = (
+                    f"Video is {duration:.0f}s — over {platform_name}'s "
+                    f"{duration_limit}s limit. Trim it or exclude {platform_name}."
+                )
+                logger.warning("Pre-flight skip for %s: %s", platform_name, reason)
+                return UploadResult(
+                    success=False,
+                    error=reason,
+                    platform=platform_name,
+                    metadata={"capability": "duration", "preflight": True},
+                )
+
         # Encode for platform
         encoded_path = video_path
         try:
@@ -609,6 +629,28 @@ class UploadService:
                 except OSError:
                     pass
             raise
+
+    @staticmethod
+    def _duration_limit(uploader: PlatformUploader) -> int | None:
+        """Platform max video duration from the provider manifest (G08)."""
+        try:
+            extra = uploader.manifest().extra or {}
+        except Exception:
+            return None
+        for key in ("max_duration_seconds", "max_video_duration_seconds"):
+            value = extra.get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                return int(value)
+        return None
+
+    def _probe_duration(self, video_path: Path) -> float | None:
+        """Source duration in seconds via ffprobe; None if unprobeable."""
+        try:
+            info = self.video_processor.get_video_info(video_path)
+            return float(info.get("format", {}).get("duration", 0)) or None
+        except Exception as e:
+            logger.debug("Duration probe failed (will rely on platform): %s", e)
+            return None
 
     def crash_recovery_clear(self, video_id: str, platform_name: str) -> None:
         """Clear crash recovery checkpoint on success (no-op if no crash_recovery)."""
