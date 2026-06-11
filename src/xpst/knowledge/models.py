@@ -23,6 +23,12 @@ class Nugget:
     timestamp_start: float
     timestamp_end: float
     source_url: str | None = None
+    # Join contract with the analytics store (G22 co-design): a nugget whose
+    # source was published through xPST resolves to its performance history
+    # via metric_snapshots(platform=source_platform, post_id=source_post_id).
+    # Optional — saved external content has no performance row.
+    source_platform: str | None = None
+    source_post_id: str | None = None
     area_id: str | None = None
     difficulty: str = "beginner"
     prerequisites: tuple[str, ...] = field(default_factory=tuple)

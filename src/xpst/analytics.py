@@ -82,6 +82,12 @@ class AnalyticsCollector:
         self._cache_ttl = cache_ttl
         self._config: dict[str, Any] = {}
         self._load_config()
+        # Persistent snapshot store (G22): every collection appends one
+        # snapshot per post, giving real trend history and the join surface
+        # for KB performance weighting (platform + post_id).
+        from xpst.analytics_store import AnalyticsStore
+
+        self.store = AnalyticsStore(Path(self.config_dir) / "analytics.db")
 
     def _load_config(self) -> None:
         """Load xPST config.yaml."""
@@ -145,6 +151,19 @@ class AnalyticsCollector:
         # Update cache
         self._cache = data
         self._cache_time = time.time()
+
+        # Persist snapshots (append-only; failures never block collection)
+        try:
+            rows = [
+                {"platform": platform, "post_id": post_id, **metrics}
+                for platform, posts in data.items()
+                for post_id, metrics in posts.items()
+                if isinstance(metrics, dict)
+            ]
+            if rows:
+                self.store.record_snapshots(rows)
+        except Exception as e:
+            logger.warning(f"Analytics persistence failed: {e}")
 
         return data
 
@@ -231,40 +250,66 @@ class AnalyticsCollector:
             with open(session_path) as f:
                 session_data = json.load(f)
 
+            # Authenticate the same way the working uploader does
+            # (platforms/instagram.py): login_by_sessionid. The previous code
+            # called two client methods that do not exist in instagrapi, so IG
+            # analytics was permanently empty and only fabricated mocks kept
+            # the tests green (G18). Only real-API methods below.
             client = IGClient()
             auth_data = session_data.get("authorization_data", session_data)
-            if "sessionid" in auth_data:
-                client.load_session(auth_data)
+            sessionid = (
+                auth_data.get("sessionid")
+                or session_data.get("cookies", {}).get("sessionid")
+                or session_data.get("sessionid")
+            )
+            if sessionid:
+                client.login_by_sessionid(sessionid)
             else:
-                client.load_cookies(str(session_path))
+                client.load_settings(str(session_path))
 
             results = []
             for media_id in media_ids:
                 try:
                     media_pk = int(media_id) if str(media_id).isdigit() else media_id
 
-                    # Try insights
+                    # Insights require a Business/Creator account; parse
+                    # defensively and fall back to public media_info counts.
                     metric_map: dict[str, int] = {}
                     try:
-                        insights = client.insights.get_media_insights(media_pk)
-                        for metric in insights.get("data", []):
-                            name = metric.get("name", "")
-                            values = metric.get("values", [])
-                            if values:
-                                metric_map[name] = values[0].get("value", 0)
+                        insights = client.insights_media(media_pk)
+                        if isinstance(insights, dict):
+                            for metric in insights.get("data", []) or []:
+                                name = metric.get("name", "")
+                                values = metric.get("values", [])
+                                if values:
+                                    metric_map[name] = values[0].get("value", 0)
+                            for key in (
+                                "impression_count", "impressions",
+                                "save_count", "saved",
+                                "share_count", "shares",
+                            ):
+                                value = insights.get(key)
+                                if isinstance(value, int):
+                                    metric_map[key] = value
                     except Exception as e:
-                        logger.debug("Unexpected error: %s", e)
-                        pass
+                        logger.debug(
+                            "Instagram insights unavailable (Business account required?): %s", e
+                        )
 
                     info = client.media_info(str(media_pk))
+                    play_count = getattr(info, "play_count", 0) or 0
                     results.append({
                         "platform": "instagram",
                         "post_id": str(media_id),
-                        "views": metric_map.get("impressions", 0),
+                        "views": (
+                            metric_map.get("impressions")
+                            or metric_map.get("impression_count")
+                            or play_count
+                        ),
                         "likes": getattr(info, "like_count", 0) or 0,
                         "comments": getattr(info, "comment_count", 0) or 0,
-                        "shares": metric_map.get("shares", 0),
-                        "saves": metric_map.get("saved", 0),
+                        "shares": metric_map.get("shares") or metric_map.get("share_count") or 0,
+                        "saves": metric_map.get("saved") or metric_map.get("save_count") or 0,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
                 except Exception as e:
