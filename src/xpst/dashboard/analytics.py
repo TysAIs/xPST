@@ -516,7 +516,103 @@ class AnalyticsCollector:
         posts.sort(key=lambda p: p.get("downloaded_at") or "", reverse=True)
         return posts
 
-    def get_summary_stats(self) -> dict[str, Any]:
+    def _store(self):
+        from xpst.analytics_store import AnalyticsStore
+        return AnalyticsStore(Path(self.config_dir).expanduser() / "analytics.db")
+
+    def get_engagement_from_snapshots(self) -> dict[str, dict]:
+        """Engagement aggregated from PERSISTED snapshots only — no network,
+        safe on any thread (G20). Same shape as get_engagement_data."""
+        state = load_state(self.config_dir)
+        posted = state.get("posted_videos", {})
+        engagement: dict[str, dict] = {
+            name: {"posts": 0, "views": 0, "likes": 0, "comments": 0, "shares": 0}
+            for name in ["youtube", "instagram", "x", "tiktok"]
+        }
+        for video_data in posted.values():
+            for platform in video_data.get("posted_to", {}):
+                if platform in engagement:
+                    engagement[platform]["posts"] += 1
+        try:
+            for row in self._store().latest():
+                agg = engagement.get(row["platform"])
+                if agg is None:
+                    continue
+                for key in ("views", "likes", "comments", "shares"):
+                    agg[key] += row.get(key) or 0
+        except Exception as exc:
+            logger.debug("Snapshot read failed: %s", exc)
+        return engagement
+
+    def get_analytics_payload(self, live: bool = False) -> dict[str, Any]:
+        """QML-ready analytics payload (G19) matching AnalyticsPage's
+        contract: summary.total_*, platforms[].platform/total_*, top_posts[]
+        with real per-post metrics, and prev_totals for honest week-over-week
+        (None until 7 days of history exist — never fabricated, G21).
+
+        live=False never touches the network (G20); live=True refreshes via
+        the platform APIs first and must run off the GUI thread.
+        """
+        from datetime import timezone as _tz
+
+        engagement = (
+            self.get_engagement_data() if live else self.get_engagement_from_snapshots()
+        )
+        summary = self.get_summary_stats(engagement=engagement)
+        totals = {"views": 0, "likes": 0, "comments": 0, "shares": 0}
+        platforms = []
+        for platform, metrics in engagement.items():
+            for key in totals:
+                totals[key] += metrics.get(key, 0)
+            platforms.append({
+                "platform": platform,
+                "posts": metrics.get("posts", 0),
+                "total_views": metrics.get("views", 0),
+                "total_likes": metrics.get("likes", 0),
+                "total_comments": metrics.get("comments", 0),
+                "total_shares": metrics.get("shares", 0),
+            })
+
+        prev_totals = None
+        try:
+            cutoff = (datetime.now(_tz.utc) - timedelta(days=7)).isoformat()
+            prev_totals = self._store().totals_before(cutoff)
+        except Exception as exc:
+            logger.debug("prev_totals unavailable: %s", exc)
+
+        # Join real per-post metrics onto the top posts (platform, post_id)
+        metrics_by_post: dict[tuple, dict] = {}
+        try:
+            for row in self._store().latest():
+                metrics_by_post[(row["platform"], str(row["post_id"]))] = row
+        except Exception:
+            pass
+        top_posts = []
+        for post in self.get_top_posts(limit=5):
+            views = likes = 0
+            for platform, info in (post.get("platforms") or {}).items():
+                row = metrics_by_post.get((platform, str(info.get("post_id") or info.get("id") or "")))
+                if row:
+                    views += row.get("views") or 0
+                    likes += row.get("likes") or 0
+            top_posts.append({**post, "total_views": views, "total_likes": likes})
+
+        return {
+            "available": True,
+            "live": live,
+            "summary": {
+                **summary,
+                "total_views": totals["views"],
+                "total_likes": totals["likes"],
+                "total_comments": totals["comments"],
+                "total_shares": totals["shares"],
+                "prev_totals": prev_totals,
+            },
+            "platforms": platforms,
+            "top_posts": top_posts,
+        }
+
+    def get_summary_stats(self, engagement: dict[str, dict] | None = None) -> dict[str, Any]:
         """Compute aggregate summary statistics from state.json.
 
         Returns:
@@ -546,8 +642,12 @@ class AnalyticsCollector:
             if ts and ts >= week_ago:
                 posts_this_week += 1
 
-        # Best platform by engagement (views + likes + comments + shares)
-        engagement = self.get_engagement_data()
+        # Best platform by engagement (views + likes + comments + shares).
+        # Callers pass precomputed engagement; the default reads persisted
+        # snapshots only so this NEVER does network IO on the caller's
+        # thread (G20 — the old default live-fetched on the Qt thread).
+        if engagement is None:
+            engagement = self.get_engagement_from_snapshots()
         best_platform = None
         max_engagement = 0
         for platform, metrics in engagement.items():
@@ -680,11 +780,14 @@ class AnalyticsCollector:
                     if info.get("post_id"):
                         post_ids[platform].append(info["post_id"])
 
-        # Try to collect real metrics from APIs
+        # Try to collect real metrics from APIs (one cached collector — a
+        # fresh instance per call defeated its 15-minute TTL, G20)
         try:
             from xpst.analytics import AnalyticsCollector
 
-            collector = AnalyticsCollector(self.config_dir)
+            if getattr(self, "_live_collector", None) is None:
+                self._live_collector: Any = AnalyticsCollector(self.config_dir)
+            collector = self._live_collector
             # Only attempt if we have IDs to query
             has_ids = any(ids for ids in post_ids.values())
             if has_ids:

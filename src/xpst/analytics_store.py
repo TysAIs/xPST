@@ -134,6 +134,30 @@ class AnalyticsStore:
             )
             return [self._row_to_dict(r) for r in rows]
 
+    def totals_before(self, cutoff_iso: str) -> dict[str, int] | None:
+        """Sum of each core metric over the latest snapshot per post captured
+        at or before ``cutoff_iso``. None when no history that old exists —
+        callers show "no history yet" instead of fabricating a comparison."""
+        query = """
+            SELECT s.* FROM metric_snapshots s
+            JOIN (
+                SELECT platform, post_id, MAX(captured_at) AS captured_at
+                FROM metric_snapshots
+                WHERE captured_at <= ?
+                GROUP BY platform, post_id
+            ) m ON s.platform = m.platform AND s.post_id = m.post_id
+               AND s.captured_at = m.captured_at
+        """
+        with self._connect() as conn:
+            rows = [self._row_to_dict(r) for r in conn.execute(query, (cutoff_iso,))]
+        if not rows:
+            return None
+        totals = {"views": 0, "likes": 0, "comments": 0, "shares": 0}
+        for row in rows:
+            for key in totals:
+                totals[key] += row.get(key) or 0
+        return totals
+
     def snapshot_count(self) -> int:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM metric_snapshots").fetchone()[0])

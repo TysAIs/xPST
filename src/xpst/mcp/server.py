@@ -77,6 +77,36 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
+def _provider_enums() -> tuple[list[str], list[str]]:
+    """Platform/source enums for tool schemas, derived from the live provider
+    catalog instead of hardcoded literals (G25) so plugin providers are
+    reachable over MCP. Falls back to the built-ins if discovery fails."""
+    platforms = ["youtube", "x", "instagram"]
+    sources = ["tiktok", "youtube", "x", "instagram", "local"]
+    try:
+        from xpst.platforms.base import PlatformRegistry
+
+        PlatformRegistry.auto_discover()
+        discovered = [m.name for m in PlatformRegistry.list_manifests(None)]
+        if discovered:
+            platforms = sorted(set(platforms) | set(discovered))
+    except Exception:  # noqa: BLE001 — schema fallback must never crash startup
+        pass
+    try:
+        from xpst.sources.base import SourceRegistry
+
+        SourceRegistry.auto_discover()
+        discovered_sources = [m.name for m in SourceRegistry.list_manifests(None)]
+        if discovered_sources:
+            sources = sorted(set(sources) | set(discovered_sources))
+    except Exception:  # noqa: BLE001
+        pass
+    return platforms, sources
+
+
+_PLATFORM_ENUM, _SOURCE_ENUM = _provider_enums()
+
+
 _MCP_INSTALL_HINT = "The MCP server requires the optional 'mcp' extra. Install it with: pip install 'xpst[mcp]'"
 
 
@@ -155,7 +185,7 @@ TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Source to fetch from",
                     "default": "tiktok",
-                    "enum": ["tiktok", "youtube", "x", "instagram", "local"],
+                    "enum": _SOURCE_ENUM,
                 },
                 "catch_up": {
                     "type": "boolean",
@@ -187,7 +217,7 @@ TOOLS: list[Tool] = [
                 },
                 "platforms": {
                     "type": "array",
-                    "items": {"type": "string", "enum": ["youtube", "x", "instagram"]},
+                    "items": {"type": "string", "enum": _PLATFORM_ENUM},
                     "description": "Target platforms (default: all configured)",
                 },
                 "carousel_paths": {
@@ -202,6 +232,31 @@ TOOLS: list[Tool] = [
                 },
             },
             "required": ["video_path", "caption"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_analytics",
+        description=(
+            "Per-post and per-platform engagement metrics (views, likes, "
+            "comments, shares) with persisted snapshot history. live=false "
+            "reads the local snapshot store only (fast, offline); live=true "
+            "refreshes from the platform APIs first."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "platform": {
+                    "type": "string",
+                    "description": "Limit to one platform",
+                    "enum": _PLATFORM_ENUM + ["tiktok"],
+                },
+                "live": {
+                    "type": "boolean",
+                    "description": "Refresh from platform APIs before reading",
+                    "default": False,
+                },
+            },
             "additionalProperties": False,
         },
     ),
@@ -241,7 +296,7 @@ TOOLS: list[Tool] = [
                 },
                 "platforms": {
                     "type": "array",
-                    "items": {"type": "string", "enum": ["youtube", "x", "instagram"]},
+                    "items": {"type": "string", "enum": _PLATFORM_ENUM},
                     "description": "Target platforms",
                 },
                 "dry_run": {
@@ -293,7 +348,7 @@ TOOLS: list[Tool] = [
                 "platform": {
                     "type": "string",
                     "description": "Platform to delete from (or all)",
-                    "enum": ["youtube", "x", "instagram", "all"],
+                    "enum": [*_PLATFORM_ENUM, "all"],
                     "default": "all",
                 },
             },
@@ -403,6 +458,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         elif name == "xpst_backfill":
             engine = server.get_engine()
             return await _handle_backfill(engine, arguments)
+        elif name == "xpst_analytics":
+            return await _handle_analytics(arguments)
         elif name == "xpst_config_show":
             return await _handle_config_show(server.config)
         elif name == "xpst_auth_status":
@@ -460,9 +517,18 @@ async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallTool
             )],
         )
 
-    await engine.check_and_post(catch_up=catch_up, source=source, max_posts=max_posts)
+    results = await engine.check_and_post(
+        catch_up=catch_up, source=source, max_posts=max_posts
+    )
+    # G28: agents need the per-video outcomes and post URLs, not a bare
+    # success string.
+    payload = {
+        "ok": True,
+        "processed": len(results),
+        "results": [_serialize_result(r) for r in results],
+    }
     return CallToolResult(
-        content=[TextContent(type="text", text="Cross-post cycle completed successfully")],
+        content=[TextContent(type="text", text=json.dumps(payload, default=str))],
     )
 
 
@@ -573,24 +639,63 @@ async def _handle_backfill(engine: CrossPostEngine, args: dict[str, Any]) -> Cal
     )
 
 
+async def _handle_analytics(arguments: dict[str, Any]) -> CallToolResult:
+    """Handle xpst_analytics (G27): expose the same numbers the UI shows.
+
+    Reads the persisted snapshot store by default; live=true runs a real
+    collection first (network, may take seconds and consume API quota).
+    """
+    from xpst.analytics import AnalyticsCollector
+
+    platform = arguments.get("platform")
+    live = bool(arguments.get("live", False))
+
+    collector = AnalyticsCollector()
+    if live:
+        await collector.collect_all()
+
+    store = collector.store
+    latest = store.latest(platform)
+    per_platform: dict[str, dict[str, Any]] = {}
+    for row in latest:
+        agg = per_platform.setdefault(row["platform"], {
+            "posts": 0, "views": 0, "likes": 0, "comments": 0, "shares": 0,
+        })
+        agg["posts"] += 1
+        for key in ("views", "likes", "comments", "shares"):
+            agg[key] += row.get(key) or 0
+
+    payload = {
+        "live": live,
+        "snapshot_count": store.snapshot_count(),
+        "platforms": per_platform,
+        "posts": latest,
+    }
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, default=str))],
+    )
+
+
 async def _handle_config_show(config: XPSTConfig) -> CallToolResult:
     """Handle xpst_config_show tool."""
-    # Return config with sensitive fields masked
-    masked = {
-        "accounts": {},
-        "video": config.video.__dict__ if hasattr(config.video, '__dict__') else {},
-        "monitoring": config.monitoring.__dict__ if hasattr(config.monitoring, '__dict__') else {},
-        "schedule": config.schedule.__dict__ if hasattr(config.schedule, '__dict__') else {},
-    }
-    for platform, acc in config.accounts.__dict__.items():
-        if platform == "tiktok":
-            masked["accounts"][platform] = {**acc.__dict__}
-        else:
-            masked["accounts"][platform] = {**acc.__dict__}
-            # Mask sensitive fields
-            for key in ["client_secrets", "token_file", "cookies_file", "session_file", "password"]:
-                if key in masked["accounts"][platform] and masked["accounts"][platform][key]:
-                    masked["accounts"][platform][key] = "***MASKED***"
+    # G26: reuse the CLI's recursive masker — the previous hand-rolled
+    # version dumped monitoring.__dict__ unmasked, leaking the dashboard
+    # password hash (and username) to any connected agent.
+    from xpst.cli import _mask_sensitive_values
+
+    def _section(obj: Any) -> dict[str, Any]:
+        return dict(obj.__dict__) if hasattr(obj, "__dict__") else {}
+
+    masked = _mask_sensitive_values({
+        "accounts": {
+            platform: _section(getattr(config, platform))
+            for platform in ("tiktok", "youtube", "x", "instagram", "local")
+            if hasattr(config, platform)
+        },
+        "video": _section(config.video),
+        "monitoring": _section(config.monitoring),
+        "schedule": _section(config.schedule),
+    })
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(masked, indent=2, default=str))],

@@ -541,28 +541,48 @@ class AppController(QObject):
             self._config_data = json.dumps({"error": str(exc)})
 
     def _refresh_analytics(self) -> None:
-        """Collect analytics data for QML."""
+        """Build the QML analytics payload from PERSISTED data only.
+
+        Never touches the network: the periodic refresh timer runs on the
+        GUI thread, and the old implementation live-fetched there — freezing
+        the UI and hammering platform APIs every 30s (G20). Live refresh is
+        an explicit user action via refreshAnalyticsLive().
+        """
         analytics = self._get_analytics()
         if analytics is None:
             self._analytics_data = json.dumps({"available": False})
             return
 
         try:
-            data: dict[str, Any] = {"available": True}
-
-            summary = analytics.get_summary_stats()
-            data["summary"] = summary
-
-            health_list = analytics.get_platform_health_all()
-            data["platforms"] = health_list
-
-            top = analytics.get_top_posts(limit=5)
-            data["top_posts"] = top
-
-            self._analytics_data = json.dumps(data, default=str)
+            payload = analytics.get_analytics_payload(live=False)
+            payload["health"] = analytics.get_platform_health_all()
+            self._analytics_data = json.dumps(payload, default=str)
         except Exception as exc:
             logger.warning("Analytics refresh error: %s", exc)
             self._analytics_data = json.dumps({"available": False, "error": str(exc)})
+
+    @Slot()
+    def refreshAnalyticsLive(self) -> None:
+        """Refresh analytics from the platform APIs on a worker thread (G20),
+        then publish the new payload via dataChanged."""
+        analytics = self._get_analytics()
+        if analytics is None or getattr(self, "_analytics_live_inflight", False):
+            return
+        self._analytics_live_inflight = True
+
+        def _work() -> None:
+            try:
+                payload = analytics.get_analytics_payload(live=True)
+                payload["health"] = analytics.get_platform_health_all()
+                self._analytics_data = json.dumps(payload, default=str)
+            except Exception as exc:
+                logger.warning("Live analytics refresh failed: %s", exc)
+            finally:
+                self._analytics_live_inflight = False
+                # Cross-thread signal emission is queued by Qt — safe here.
+                self.dataChanged.emit()
+
+        threading.Thread(target=_work, name="xpst-analytics-live", daemon=True).start()
 
     def _refresh_quota(self) -> None:
         """Serialize quota status for QML."""

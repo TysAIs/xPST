@@ -17,6 +17,13 @@ Page {
         return ({"available": false})
     }
 
+    Component.onCompleted: {
+        // Live metrics refresh runs on a Python worker thread (G20); the
+        // periodic timer only re-reads persisted snapshots.
+        if (typeof controller !== "undefined" && controller.refreshAnalyticsLive)
+            controller.refreshAnalyticsLive()
+    }
+
     property bool hasData: analyticsJson.available === true &&
                            analyticsJson.summary &&
                            (analyticsJson.summary.total_views > 0 ||
@@ -284,6 +291,11 @@ Page {
                             rawValue: analyticsPage.analyticsJson.summary
                                    ? (analyticsPage.analyticsJson.summary.total_views || 0)
                                    : 0,
+                            prevValue: (analyticsPage.analyticsJson.summary
+                                        && analyticsPage.analyticsJson.summary.prev_totals)
+                                   ? (analyticsPage.analyticsJson.summary.prev_totals.views !== undefined
+                                      ? analyticsPage.analyticsJson.summary.prev_totals.views : -1)
+                                   : -1,
                             icon: "V",
                             color: "#6366f1"
                         },
@@ -295,6 +307,11 @@ Page {
                             rawValue: analyticsPage.analyticsJson.summary
                                    ? (analyticsPage.analyticsJson.summary.total_likes || 0)
                                    : 0,
+                            prevValue: (analyticsPage.analyticsJson.summary
+                                        && analyticsPage.analyticsJson.summary.prev_totals)
+                                   ? (analyticsPage.analyticsJson.summary.prev_totals.likes !== undefined
+                                      ? analyticsPage.analyticsJson.summary.prev_totals.likes : -1)
+                                   : -1,
                             icon: "L",
                             color: "#ef4444"
                         },
@@ -306,6 +323,11 @@ Page {
                             rawValue: analyticsPage.analyticsJson.summary
                                    ? (analyticsPage.analyticsJson.summary.total_comments || 0)
                                    : 0,
+                            prevValue: (analyticsPage.analyticsJson.summary
+                                        && analyticsPage.analyticsJson.summary.prev_totals)
+                                   ? (analyticsPage.analyticsJson.summary.prev_totals.comments !== undefined
+                                      ? analyticsPage.analyticsJson.summary.prev_totals.comments : -1)
+                                   : -1,
                             icon: "C",
                             color: "#f59e0b"
                         },
@@ -317,13 +339,15 @@ Page {
                             rawValue: analyticsPage.analyticsJson.summary
                                    ? (analyticsPage.analyticsJson.summary.total_shares || 0)
                                    : 0,
+                            prevValue: (analyticsPage.analyticsJson.summary
+                                        && analyticsPage.analyticsJson.summary.prev_totals)
+                                   ? (analyticsPage.analyticsJson.summary.prev_totals.shares !== undefined
+                                      ? analyticsPage.analyticsJson.summary.prev_totals.shares : -1)
+                                   : -1,
                             icon: "S",
                             color: "#22c55e"
                         }
                     ]
-
-                    // Compute last week value for comparison
-                    property var lastWeekMultipliers: [0.72, 0.65, 0.8, 0.58]
 
                     Rectangle {
                         Layout.fillWidth: true
@@ -357,17 +381,27 @@ Page {
                                 font.weight: Font.DemiBold
                                 color: theme.textPrimary
                             }
-                            // Comparison delta (#31)
+                            // Comparison delta — REAL history from the
+                            // persisted snapshot store; hidden until 7 days
+                            // of snapshots exist (G21: the old version
+                            // fabricated multipliers and presented them as
+                            // last week's data).
                             Text {
-                                property int lastWeekVal: Math.round(modelData.rawValue * (parent.cardIndex >= 0 ? parent.parent.parent.lastWeekMultipliers[parent.cardIndex] : 0.7))
+                                property int lastWeekVal: modelData.prevValue
                                 property int delta: modelData.rawValue - lastWeekVal
                                 property int deltaPercent: lastWeekVal > 0 ? Math.round((delta / lastWeekVal) * 100) : (modelData.rawValue > 0 ? 100 : 0)
                                 property string deltaText: deltaPercent >= 0 ? ("+" + deltaPercent + "%") : (deltaPercent + "%")
-                                visible: analyticsPage.compareMode && modelData.rawValue > 0
+                                visible: analyticsPage.compareMode && modelData.rawValue > 0 && lastWeekVal >= 0
                                 text: deltaText + " vs last week"
                                 font.pixelSize: 10
                                 font.weight: Font.DemiBold
                                 color: deltaPercent >= 0 ? theme.success : theme.error
+                            }
+                            Text {
+                                visible: analyticsPage.compareMode && modelData.prevValue < 0
+                                text: "no history yet"
+                                font.pixelSize: 10
+                                color: theme.textMuted
                             }
                             Rectangle {
                                 Layout.preferredWidth: 40

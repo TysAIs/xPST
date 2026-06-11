@@ -882,7 +882,8 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, as_json:
 
     platform_list = platforms.split(",") if platforms else None
 
-    console.print("[bold blue]xPST - Cross-Platform Analytics[/bold blue]\n")
+    if not as_json:
+        console.print("[bold blue]xPST - Cross-Platform Analytics[/bold blue]\n")
 
     # Load state to get post IDs
     from xpst.analytics import AnalyticsCollector
@@ -900,13 +901,40 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, as_json:
 
     total_ids = sum(len(v) for v in post_ids.values())
     if total_ids == 0:
-        console.print("[yellow]No posts found in state. Run `xpst run` first.[/yellow]")
+        if as_json:
+            import json as _json
+
+            click.echo(_json.dumps({"platforms": {}}))
+        else:
+            console.print("[yellow]No posts found in state. Run `xpst run` first.[/yellow]")
         return
 
-    console.print(f"[dim]Fetching analytics for {total_ids} posts across {len(post_ids)} platforms...[/dim]\n")
+    if not as_json:
+        console.print(f"[dim]Fetching analytics for {total_ids} posts across {len(post_ids)} platforms...[/dim]\n")
 
     # Collect analytics
     data = asyncio.run(collector.collect_all(post_ids))
+
+    # G24: machine-readable output for agents/scripts. The flag existed but
+    # the body unconditionally printed tables.
+    if as_json:
+        import json as _json
+
+        payload = {
+            "platforms": {
+                platform: {
+                    "posts": len(posts_data),
+                    "views": sum(m.get("views", 0) for m in posts_data.values()),
+                    "likes": sum(m.get("likes", 0) for m in posts_data.values()),
+                    "comments": sum(m.get("comments", 0) for m in posts_data.values()),
+                    "shares": sum(m.get("shares", 0) for m in posts_data.values()),
+                    "post_metrics": posts_data,
+                }
+                for platform, posts_data in data.items()
+            },
+        }
+        click.echo(_json.dumps(payload, indent=2, default=str))
+        return
 
     # Display summary table
     table = Table(title="Platform Analytics")

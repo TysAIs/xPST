@@ -63,7 +63,7 @@ Queries are semantic: the query is embedded and vector-searched against the stor
 
 - **Desktop GUI** (PySide6/QML): dashboard, content library, analytics, connect, schedule, settings.
 - **CLI** (Click): 25 top-level commands covering the entire workflow.
-- **MCP server**: 13 tools (9 `xpst_*` + 4 `kb_*`) so AI agents can discover providers, check health, post, and mine your knowledge base. See [For AI Agents](#for-ai-agents).
+- **MCP server**: 14 tools (10 `xpst_*` + 4 `kb_*`) so AI agents can discover providers, check health, post, and mine your knowledge base. See [For AI Agents](#for-ai-agents).
 
 ---
 
@@ -245,7 +245,7 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 }
 ```
 
-### 13 tools
+### 14 tools
 
 **9 posting/ops tools:** `xpst_providers`, `xpst_config_show`, `xpst_auth_status`, `xpst_status`, `xpst_health`, `xpst_run`, `xpst_post`, `xpst_backfill`, `xpst_delete`
 
