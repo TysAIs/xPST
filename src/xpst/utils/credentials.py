@@ -120,7 +120,12 @@ class CredentialStore:
         creation; ``chmod`` is also applied for defence in depth and to fix any
         pre-existing file that may have looser permissions.
         """
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+        # O_BINARY is required on Windows: without it the CRT translates
+        # 0x0A bytes in the random secret to \r\n on write, so the on-disk
+        # secret differs from the in-memory one used to derive the first
+        # Fernet key — every later decrypt fails and credentials silently
+        # return None. No-op on POSIX.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
         fd = os.open(path, flags, 0o600)
         try:
             os.write(fd, data)

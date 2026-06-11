@@ -70,7 +70,16 @@ def _macos_security_checks(
 
     if codesign:
         result = _run([codesign, "--verify", "--deep", "--strict", str(app_path)])
-        checks.append({"id": "codesign_verify", "ok": result["ok"], "message": result["stderr"] or result["stdout"], "result": result})
+        # Unsigned bundles are tolerated unless a Developer ID is required
+        # (local/RC mode ships unsigned by owner decision; public mode gates).
+        checks.append({
+            "id": "codesign_verify",
+            "ok": result["ok"] or not require_developer_id,
+            "signed": result["ok"],
+            "message": result["stderr"] or result["stdout"] or "signature verified",
+            "required": require_developer_id,
+            "result": result,
+        })
         display = _run([codesign, "--display", "--verbose=4", str(app_path)])
         authority_text = "\n".join([display.get("stdout", ""), display.get("stderr", "")])
         developer_id = "Developer ID Application:" in authority_text
@@ -84,15 +93,24 @@ def _macos_security_checks(
             }
         )
     else:
-        checks.append({"id": "codesign_verify", "ok": False, "message": "codesign not found"})
+        checks.append({"id": "codesign_verify", "ok": not require_developer_id, "message": "codesign not found"})
         if require_developer_id:
             checks.append({"id": "developer_id_signature", "ok": False, "message": "codesign not found", "required": True})
 
     if spctl:
         result = _run([spctl, "--assess", "--type", "execute", str(app_path)])
-        checks.append({"id": "spctl_app_assess", "ok": result["ok"], "message": result["stderr"] or result["stdout"], "result": result})
+        # Gatekeeper rejects unsigned/un-notarized apps by design; only a
+        # public release requires it to pass.
+        checks.append({
+            "id": "spctl_app_assess",
+            "ok": result["ok"] or not (require_developer_id or require_notarized),
+            "assessed_ok": result["ok"],
+            "message": result["stderr"] or result["stdout"] or "assessment passed",
+            "required": require_developer_id or require_notarized,
+            "result": result,
+        })
     else:
-        checks.append({"id": "spctl_app_assess", "ok": False, "message": "spctl not found"})
+        checks.append({"id": "spctl_app_assess", "ok": not (require_developer_id or require_notarized), "message": "spctl not found"})
 
     if dmg_path and dmg_path.exists():
         if spctl:
