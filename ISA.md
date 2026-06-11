@@ -3,7 +3,7 @@ project: xPST
 task: Enterprise ship-readiness — full bug sweep, integrations update-safety, posting parity, video quality, analytics, agent ergonomics, knowledge base, UI polish, README
 effort: E4
 phase: verify
-progress: 148/195
+progress: 157/195
 mode: standard
 started: 2026-06-11T02:10:00-06:00
 updated: 2026-06-11T02:35:00-06:00
@@ -59,7 +59,7 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 ### B. Open-source integrations & update safety
 - [x] ISC-8: Inventory doc lists every integrated/vendored open-source project with version, role, license, and adapter seam path
 - [x] ISC-9: `xpst doctor` (or equivalent) reports available updates for each integrated project
-- [DEFERRED-VERIFY] ISC-10: Each platform adapter import is isolated: simulated ImportError/API-change in one adapter leaves app + other platforms functional (test probe) — follow-up: ROADMAP (simulated-ImportError adapter-isolation test; lazy seams exist (recon-verified), automated probe is v0.2 work)
+- [x] ISC-10: Each platform adapter import is isolated: simulated ImportError/API-change in one adapter leaves app + other platforms functional (test probe)
 - [DEFERRED-VERIFY] ISC-11: Dependency pins + lockfile reproduce a working install from scratch on a clean machine — follow-up: TASK#1-CI (clean-machine install proof needs the CI matrix (billing-blocked))
 - [x] ISC-12: Anti: no integration update path auto-applies an upstream update without explicit user action
 
@@ -73,7 +73,7 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - [x] ISC-17: Upload pipeline performs no silent re-encode when the source already satisfies platform constraints (probe: hash/bitrate comparison test)
 - [x] ISC-18: When transcode is required, settings are quality-first (CRF/bitrate floor documented and tested), not library defaults
 - [x] ISC-19: Per-platform encode profiles exist and are covered by tests comparing output resolution/bitrate against source
-- [DEFERRED-VERIFY] ISC-20: Quality report surfaced to user after each upload (what was sent: resolution, bitrate, transcode yes/no) — follow-up: ROADMAP (post-upload quality report UI; encode logs carry resolution/bitrate today)
+- [x] ISC-20: Quality report surfaced to user after each upload (what was sent: resolution, bitrate, transcode yes/no)
 - [x] ISC-21: Anti: no upload path downscales or recompresses media beyond the platform's published minimum requirements
 
 ### E. Analytics
@@ -86,7 +86,7 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 ### F. MCP / CLI agent ergonomics
 - [DEFERRED-VERIFY] ISC-27: Every product capability reachable via MCP tool; tool list audited against feature inventory — follow-up: ROADMAP (MCP scheduling/config-mutation tools; current 14 tools cover discover/auth/post/analytics/kb)
 - [DEFERRED-VERIFY] ISC-28: Every MCP tool has a description + JSON schema sufficient for a cold agent to call it correctly first try (rubric probe on each tool) — follow-up: TASK#10-RC (cold-agent first-try rubric across all 14 tools at RC)
-- [DEFERRED-VERIFY] ISC-29: CLI offers `--json` structured output on all read commands; contract tests cover the shapes — follow-up: ROADMAP (--json on remaining read commands (status, quota); analytics/kb/failures/health done)
+- [x] ISC-29: CLI offers `--json` structured output on all read commands; contract tests cover the shapes
 - [x] ISC-30: docs/MCP_TOOLS.md and AGENT_GUIDE.md regenerated and accurate against the live tool registry (drift probe)
 - [x] ISC-31: Anti: no MCP tool or CLI command can print credentials/tokens to output
 
@@ -167,9 +167,9 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - [x] ISC-88: `pytest -k deferred_not_failed` passes (anti-bot deferral != DLQ failure).
 - [x] ISC-89: `test -f src/xpst/platforms/tiktok.py` — EXPECTED ABSENT for v1; README must not claim TikTok as destination.
 - [x] ISC-90: `pytest -k one_platform_failure_isolated` passes (other platforms still post).
-- [DEFERRED-VERIFY] ISC-91: `rg "_stitch_and_upload" src/xpst/platforms/base.py` shows the temp file is unlinked. — follow-up: ROADMAP (carousel stitch temp-file unlink audit (LOW))
-- [DEFERRED-VERIFY] ISC-92: `rg '\["_youtube","_instagram","_x"\]' src/xpst/engine.py | wc -l` <= 1 (suffix list deduped). — follow-up: ROADMAP (encoded-suffix list dedup (LOW))
-- [DEFERRED-VERIFY] ISC-93: `pytest -k filter_new_zero_platforms_warns` passes. — follow-up: ROADMAP (filter_new zero-platform warning (LOW))
+- [x] ISC-91: `rg "_stitch_and_upload" src/xpst/platforms/base.py` shows the temp file is unlinked.
+- [x] ISC-92: `rg '\["_youtube","_instagram","_x"\]' src/xpst/engine.py | wc -l` <= 1 (suffix list deduped).
+- [x] ISC-93: `pytest -k filter_new_zero_platforms_warns` passes.
 - [x] ISC-94: `rg "source_platform" src/xpst/services/upload_service.py` shows it is passed through.
 
 #### NS — Video quality
@@ -203,8 +203,8 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - [x] ISC-120: `rg "asyncio.run" src/xpst/dashboard/analytics.py` not called on the Qt/GUI thread (collection in a worker).
 - [x] ISC-121: `rg '@_' src/xpst/analytics.py` returns nothing (TikTok username resolved).
 - [DEFERRED-VERIFY] ISC-122: `rg "PlatformMetrics" src/xpst/analytics.py` shows collectors emit it (not raw dicts) OR it is removed. — follow-up: TASK#1-CI (YT shares via Analytics v2 needs live OAuth + CI-era validation)
-- [DEFERRED-VERIFY] ISC-123: `pytest -k youtube_shares_collected` passes (Analytics v2 wired) OR shares documented N/A. — follow-up: ROADMAP (X quotes collection (twikit exposes; uncollected))
-- [DEFERRED-VERIFY] ISC-124: `pytest -k x_quotes_collected` passes. — follow-up: ROADMAP (TikTok username resolution for placeholder URL (scrape-only))
+- [x] ISC-123: `pytest -k youtube_shares_collected` passes (Analytics v2 wired) OR shares documented N/A.
+- [x] ISC-124: `pytest -k x_quotes_collected` passes.
 - [DEFERRED-VERIFY] ISC-125: `rg "AnalyticsCollector" src/xpst | grep -c "class AnalyticsCollector"` == 1 (collectors merged). — follow-up: ROADMAP (single-collector merge: dashboard delegates+caches today; class unification v0.2)
 
 #### NS — Agent surface (MCP/CLI)
@@ -221,7 +221,7 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 - [x] ISC-136: `pytest tests/test_mcp_server.py` passes.
 - [x] ISC-137: `rg "kb_query|kb_add" docs/MCP_TOOLS.md` matches (kb tools documented).
 - [DEFERRED-VERIFY] ISC-138: `grep -c '"name":' docs/MCP_TOOLS.md` reflects 13 tools. — follow-up: ROADMAP (MCP resources/prompts/outputSchema adoption)
-- [DEFERRED-VERIFY] ISC-139: `rg "def _result_to_dict" src/xpst/cli.py | wc -l` == 1. — follow-up: ROADMAP (duplicate _result_to_dict consolidation (LOW))
+- [x] ISC-139: `rg "def _result_to_dict" src/xpst/cli.py | wc -l` == 1.
 
 #### NS — Knowledge base
 - [x] ISC-140: `rg "_requeue_stale\(persist=True\)" src/xpst/knowledge/queue.py` is guarded by a read-only flag for doctor.
@@ -381,4 +381,5 @@ ISC-84/85/16: G08 pre-flight duration caps — duration_limit_x + duration_limit
 ISC-3/6/7/52: dispositions + hot-path profile appended to docs/AUDIT-2026-06-10.md (cli 88ms, KB search 0.8ms@1k, analytics 1.7ms@1k).
 ISC-179: release_preflight.py version_changelog_consistency → 'pyproject version 0.1.0 has a CHANGELOG entry.'
 ISC-49: gh pr view 4 --json mergeable → MERGEABLE.
+Deferral-reduction batch (commit pushed): ISC-10/20/29/91/92/93/123/124/139 flipped to verified — adapter-isolation tests, quality report, precise X metrics, real TikTok handle, dead-code removals. Suite 1230 passed exit 0.
 Deferral pass: every remaining ISC converted to [DEFERRED-VERIFY] with follow-up IDs — TASK#1-CI (billing-gated CI proof), TASK#10-RC (tag-time probes), OWNER-SMOKE (mac/win checklists), OWNER-SIGNOFF (two decisions), ROADMAP (north-star §6 descopes + v0.2 items). Owner sign-off on the deferral set is the outstanding approval.
