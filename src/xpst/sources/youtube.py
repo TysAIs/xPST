@@ -39,11 +39,15 @@ class YouTubeSource(VideoSource):
     """
 
     # yt-dlp format selection strategies
+    # G16: prefer best-video + best-audio merged via ffmpeg over pre-muxed
+    # files. The old height<=1080 cap also excluded 1080x1920 portrait
+    # (height 1920) and forced Shorts down to 608x1080 — cap both edges at
+    # 1920 instead so portrait and landscape keep native quality.
     FORMATS = {
-        "best_mp4": "best[ext=mp4][height<=1080]/best[ext=mp4]/best",
-        "best_webm": "best[ext=webm][height<=1080]/best[ext=webm]/best",
-        "h264_preferred": "best[vcodec^=h264][ext=mp4][height<=1080]/best[ext=mp4]/best",
-        "best_quality": "best[height<=1080]/best",
+        "best_mp4": "bv*[ext=mp4][width<=1920][height<=1920]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b",
+        "best_webm": "bv*[ext=webm][width<=1920][height<=1920]+ba/b[ext=webm]/b",
+        "h264_preferred": "bv*[vcodec^=h264][ext=mp4][width<=1920][height<=1920]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b",
+        "best_quality": "bv*[width<=1920][height<=1920]+ba/b",
     }
 
     def __init__(self, config: XPSTConfig) -> None:
@@ -128,6 +132,7 @@ class YouTubeSource(VideoSource):
             "--no-warnings",
             "--no-check-certificates",
             "--extractor-retries", "3",
+            "--merge-output-format", "mp4",
         ])
 
         return cmd

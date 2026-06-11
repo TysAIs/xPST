@@ -58,35 +58,35 @@ DEFAULT_CONFIG = {
         "encoding": {
             "youtube": {
                 "passthrough": False,
-                "resolution": 1080,
+                "resolution": 1920,
                 "bitrate": "8M",
                 "maxrate": "10M",
                 "bufsize": "12M",
                 "profile": "high",
                 "gop": 15,
-                "fps": 30,
+                "fps": 60,
                 "color": "bt709",
                 "pix_fmt": "yuv420p",
             },
             "instagram": {
-                "resolution": 720,
-                "crf": 23,
-                "maxrate": "3500k",
-                "profile": "main",
-                "level": "3.0",
+                "resolution": 1920,
+                "crf": 20,
+                "maxrate": "10M",
+                "profile": "high",
+                "level": "4.0",
                 "gop": 72,
-                "fps": 30,
+                "fps": 60,
                 "color": "bt709",
                 "pix_fmt": "yuv420p",
             },
             "x": {
-                "resolution": 1080,
+                "resolution": 1920,
                 "bitrate": "10M",
                 "maxrate": "12M",
                 "profile": "high",
                 "level": "4.0",
                 "gop": 90,
-                "fps": 30,
+                "fps": 60,
                 "color": "bt709",
                 "pix_fmt": "yuv420p",
             },
@@ -189,7 +189,13 @@ class LocalAccountConfig:
 
 @dataclass
 class EncodingConfig:
-    """Video encoding configuration for a platform"""
+    """Video encoding configuration for a platform.
+
+    resolution is the LONG-EDGE target in pixels (orientation-aware): a
+    1080x1920 portrait and a 1920x1080 landscape both satisfy 1920.
+    fps is an output CAP (ffmpeg -fpsmax), never a force: sources below the
+    cap keep their native frame rate.
+    """
     resolution: int | None = None
     crf: int | None = None
     bitrate: str | None = None
@@ -210,13 +216,13 @@ class VideoConfig:
     download_dir: str = "~/.xpst/downloads"
     cleanup_after_post: bool = False
     encoding_youtube: EncodingConfig = field(default_factory=lambda: EncodingConfig(
-        resolution=1080, bitrate="8M", maxrate="10M", bufsize="12M", profile="high", gop=15, fps=30
+        resolution=1920, bitrate="8M", maxrate="10M", bufsize="12M", profile="high", gop=15, fps=60
     ))
     encoding_instagram: EncodingConfig = field(default_factory=lambda: EncodingConfig(
-        resolution=720, crf=23, maxrate="3500k", profile="main", level="3.0", gop=72, fps=30
+        resolution=1920, crf=20, maxrate="10M", profile="high", level="4.0", gop=72, fps=60
     ))
     encoding_x: EncodingConfig = field(default_factory=lambda: EncodingConfig(
-        resolution=1080, bitrate="10M", maxrate="12M", profile="high", level="4.0", gop=90, fps=30
+        resolution=1920, bitrate="10M", maxrate="12M", profile="high", level="4.0", gop=90, fps=60
     ))
 
 

@@ -10,12 +10,19 @@ Research sources:
 - X/Twitter: gehrcke.de + gist.github.com/transkatgirl (official requirements)
 - YouTube: Upscale to 1080p + re-encode at 8 Mbps to avoid low-bitrate tier
 
-Key findings:
-- Instagram: 720p @ CRF 23, Main@L3.0, fixed GOP 72, 30fps, bt.709, yuv420p
-- X/Twitter: 1080p @ 10 Mbps, High@L4.0, yuv420p (REQUIRED), bt.709, keyint=90
-- YouTube: 1920x1080 @ 8 Mbps, High Profile, closed GOP 15, 30fps, bt.709, yuv420p
+Key findings (updated 2026-06-11, fidelity-first):
+- Scaling is ORIENTATION-AWARE, targeting the LONG edge (1920). The old
+  height-keyed `scale=-2:{res}` crushed 1080x1920 portrait video to 608x1080
+  (Instagram: 406x720) — the direct cause of degraded upload quality.
+- Instagram Reels: 1080x1920 @ CRF 20, High@L4.0, fixed GOP 72, bt.709, yuv420p
+- X/Twitter: up to 1920 long edge @ 10 Mbps, High@L4.0, yuv420p (REQUIRED), keyint=90
+- YouTube: long edge 1920 (upscaled if smaller, to avoid the low-bitrate tier),
+  8 Mbps, High Profile, closed GOP 15, bt.709, yuv420p
+- Frame rate is a CAP (`-fpsmax`), never a force: 60fps sources stay 60fps;
+  the old forced `-r 30` halved them.
 """
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -25,6 +32,62 @@ from xpst.utils.logger import get_logger
 from xpst.utils.platform import get_ffmpeg_name, get_ffprobe_name
 
 logger = get_logger(__name__)
+
+
+def build_scale_filter(long_edge: int, *, upscale: bool = False, flags: str = "") -> str:
+    """Build an orientation-aware ffmpeg scale filter targeting the long edge.
+
+    Sizes the LONG edge of the video to ``long_edge`` while preserving aspect
+    ratio, so portrait (9:16), landscape (16:9), and square sources all keep
+    their native orientation. With ``upscale=False`` a smaller source passes
+    through at native size — quality is never invented (fidelity invariant).
+
+    The previous height-keyed filter (``scale=-2:{res}``) treated the target
+    as a height, crushing 1080x1920 portrait video to 608x1080.
+    """
+    if upscale:
+        w_target = str(long_edge)
+        h_target = str(long_edge)
+    else:
+        w_target = f"trunc(min({long_edge},iw)/2)*2"
+        h_target = f"trunc(min({long_edge},ih)/2)*2"
+    flag_part = f":flags={flags}" if flags else ""
+    return f"scale=w='if(gt(a,1),{w_target},-2)':h='if(gt(a,1),-2,{h_target})'{flag_part}"
+
+
+def double_rate(rate: str) -> str:
+    """Double an ffmpeg rate string ('3500k' → '7000k', '3.5M' → '7M').
+
+    Used to derive bufsize from maxrate. Handles fractional values that the
+    previous ``int()`` parse rejected.
+    """
+    m = re.fullmatch(r"([0-9.]+)\s*([kKmM]?)", rate.strip())
+    if not m:
+        return rate
+    doubled = float(m.group(1)) * 2
+    value: int | float = int(doubled) if doubled.is_integer() else doubled
+    return f"{value}{m.group(2)}"
+
+
+def _parse_frame_rate(raw: str) -> float | None:
+    """Parse an ffprobe frame-rate fraction ('30000/1001', '60/1') to float."""
+    try:
+        if "/" in raw:
+            num, den = raw.split("/", 1)
+            denominator = float(den)
+            return float(num) / denominator if denominator else None
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _rate_to_bps(rate: str) -> int | None:
+    """Convert an ffmpeg rate string ('10M', '3500k') to bits per second."""
+    m = re.fullmatch(r"([0-9.]+)\s*([kKmM]?)", rate.strip())
+    if not m:
+        return None
+    multiplier = {"k": 1_000, "m": 1_000_000}.get(m.group(2).lower(), 1)
+    return int(float(m.group(1)) * multiplier)
 
 
 def ffmpeg_install_hint() -> str:
@@ -120,6 +183,53 @@ class VideoProcessor:
         import json
         return json.loads(result.stdout)
 
+    def is_platform_compliant(
+        self,
+        video_path: Path,
+        platform: str,
+        config: EncodingConfig,
+    ) -> tuple[bool, str]:
+        """Probe whether a source already satisfies a platform's profile.
+
+        Returns ``(True, summary)`` when uploading the source as-is loses
+        nothing, so the pipeline can skip the re-encode entirely. Fidelity
+        invariant: never spend a quality generation on compliant media.
+        """
+        info = self.get_video_info(video_path)
+        streams = info.get("streams", [])
+        video = next((s for s in streams if s.get("codec_type") == "video"), None)
+        audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+        if video is None:
+            return False, "no video stream"
+
+        if video.get("codec_name") != "h264":
+            return False, f"codec {video.get('codec_name')} != h264"
+        pix_fmt = config.pix_fmt or "yuv420p"
+        if video.get("pix_fmt") != pix_fmt:
+            return False, f"pix_fmt {video.get('pix_fmt')} != {pix_fmt}"
+
+        width = int(video.get("width") or 0)
+        height = int(video.get("height") or 0)
+        long_edge_target = config.resolution or 1920
+        if max(width, height) > long_edge_target:
+            return False, f"long edge {max(width, height)} > {long_edge_target}"
+
+        fps_cap = config.fps or 60
+        fps = _parse_frame_rate(video.get("avg_frame_rate") or video.get("r_frame_rate") or "")
+        if fps and fps > fps_cap + 0.1:
+            return False, f"fps {fps:.1f} > cap {fps_cap}"
+
+        if config.maxrate:
+            max_bps = _rate_to_bps(config.maxrate)
+            bit_rate = int(video.get("bit_rate") or info.get("format", {}).get("bit_rate") or 0)
+            if max_bps and bit_rate > max_bps * 1.25:
+                return False, f"bitrate {bit_rate} exceeds {config.maxrate} (+25% tolerance)"
+
+        if audio is not None and audio.get("codec_name") != "aac":
+            return False, f"audio {audio.get('codec_name')} != aac"
+
+        return True, f"h264/{pix_fmt} {width}x{height} within {platform} profile"
+
     def encode_for_platform(
         self,
         input_path: Path,
@@ -186,23 +296,23 @@ class VideoProcessor:
         """
         Build FFmpeg command for Instagram encoding.
 
-        Instagram optimal settings (research-verified):
-        - 720p height (scale to fit)
-        - CRF 23 (quality-based, ~3500 kbps)
-        - H.264 Main Profile @ Level 3.0
-        - Fixed GOP 72 (2.4 seconds at 30fps)
-        - 30fps
+        Instagram Reels optimal settings (fidelity-first, updated 2026-06-11):
+        - Long edge 1920 (1080x1920 portrait preserved; never upscaled)
+        - CRF 20 quality floor (~8-10 Mbps for Reels-grade detail)
+        - H.264 High Profile @ Level 4.0
+        - Fixed GOP 72
+        - Frame rate capped at 60 (source rate preserved below the cap)
         - yuv420p pixel format
         - bt.709 color space
         - AAC 256k audio
         """
-        resolution = config.resolution or 720
-        crf = config.crf or 23
-        maxrate = config.maxrate or "3500k"
-        profile = config.profile or "main"
-        level = config.level or "3.0"
+        resolution = config.resolution or 1920
+        crf = config.crf or 20
+        maxrate = config.maxrate or "10M"
+        profile = config.profile or "high"
+        level = config.level or "4.0"
         gop = config.gop or 72
-        fps = config.fps or 30
+        fps_cap = config.fps or 60
         color = config.color or "bt709"
         pix_fmt = config.pix_fmt or "yuv420p"
 
@@ -210,7 +320,7 @@ class VideoProcessor:
             self.ffmpeg_path,
             "-y",  # Overwrite output
             "-i", str(input_path),
-            "-vf", f"scale=-2:{resolution},setsar=1,format={pix_fmt}",
+            "-vf", f"{build_scale_filter(resolution)},setsar=1,format={pix_fmt}",
             "-c:v", "libx264",
             "-preset", "slow",  # Better quality
             "-profile:v", profile,
@@ -218,11 +328,11 @@ class VideoProcessor:
             "-x264-params", f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
             "-crf", str(crf),
             "-maxrate", maxrate,
-            "-bufsize", f"{int(maxrate.replace('k', '').replace('M', '')) * 2}{'k' if 'k' in maxrate else 'M'}",
+            "-bufsize", double_rate(maxrate),
             "-color_primaries", color,
             "-color_trc", color,
             "-colorspace", color,
-            "-r", str(fps),
+            "-fpsmax", str(fps_cap),
             "-c:a", "aac",
             "-b:a", "256k",
             "-ar", "44100",
@@ -240,24 +350,24 @@ class VideoProcessor:
         """
         Build FFmpeg command for X/Twitter encoding.
 
-        X/Twitter optimal settings (research-verified):
-        - 1080p height (scale to fit)
-        - 10 Mbps CBR (up to 25 Mbps supported)
+        X/Twitter optimal settings (fidelity-first, updated 2026-06-11):
+        - Long edge 1920 (portrait and landscape preserved; never upscaled)
+        - 10 Mbps (up to 25 Mbps supported)
         - H.264 High Profile @ Level 4.0
-        - Fixed GOP 90 (3 seconds at 30fps)
-        - 30fps
+        - Fixed GOP 90
+        - Frame rate capped at 60 (source rate preserved below the cap)
         - yuv420p pixel format (REQUIRED - X rejects other formats!)
         - bt.709 color space
         - AAC 256k audio
         - Lanczos scaling (high quality)
         """
-        resolution = config.resolution or 1080
+        resolution = config.resolution or 1920
         bitrate = config.bitrate or "10M"
         maxrate = config.maxrate or "12M"
         profile = config.profile or "high"
         level = config.level or "4.0"
         gop = config.gop or 90
-        fps = config.fps or 30
+        fps_cap = config.fps or 60
         color = config.color or "bt709"
         pix_fmt = config.pix_fmt or "yuv420p"
 
@@ -265,7 +375,7 @@ class VideoProcessor:
             self.ffmpeg_path,
             "-y",  # Overwrite output
             "-i", str(input_path),
-            "-vf", f"scale=-2:{resolution}:flags=lanczos,setsar=1,format={pix_fmt}",
+            "-vf", f"{build_scale_filter(resolution, flags='lanczos')},setsar=1,format={pix_fmt}",
             "-c:v", "libx264",
             "-preset", "slow",  # Better quality
             "-profile:v", profile,
@@ -273,11 +383,11 @@ class VideoProcessor:
             "-x264-params", f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
             "-b:v", bitrate,
             "-maxrate", maxrate,
-            "-bufsize", f"{int(maxrate.replace('M', '').replace('k', '')) * 2}{'k' if 'k' in maxrate else 'M'}",
+            "-bufsize", double_rate(maxrate),
             "-color_primaries", color,
             "-color_trc", color,
             "-colorspace", color,
-            "-r", str(fps),
+            "-fpsmax", str(fps_cap),
             "-c:a", "aac",
             "-b:a", "256k",
             "-ar", "44100",
@@ -295,12 +405,13 @@ class VideoProcessor:
         """
         Build FFmpeg command for YouTube encoding.
 
-        YouTube optimal settings:
-        - Upscale to 1080x1920 (Lanczos scaler)
-        - 8 Mbps CBR (maxrate 10M, bufsize 12M)
+        YouTube optimal settings (fidelity-first, updated 2026-06-11):
+        - Long edge scaled to 1920 (Lanczos; upscaled if smaller, to avoid
+          YouTube's low-resolution bitrate tier — orientation preserved)
+        - 8 Mbps (maxrate 10M, bufsize 12M)
         - H.264 High Profile
-        - Closed GOP 15 frames (0.5s at 30fps)
-        - 30fps
+        - Closed GOP 15 frames
+        - Frame rate capped at 60 (source rate preserved below the cap)
         - yuv420p pixel format
         - bt.709 color space
         - AAC 48kHz 256k audio
@@ -312,7 +423,7 @@ class VideoProcessor:
         bufsize = config.bufsize or "12M"
         profile = config.profile or "high"
         gop = config.gop or 15
-        fps = config.fps or 30
+        fps_cap = config.fps or 60
         color = config.color or "bt709"
         pix_fmt = config.pix_fmt or "yuv420p"
 
@@ -320,7 +431,7 @@ class VideoProcessor:
             self.ffmpeg_path,
             "-y",
             "-i", str(input_path),
-            "-vf", f"scale=-2:{resolution}:flags=lanczos,setsar=1,format={pix_fmt}",
+            "-vf", f"{build_scale_filter(resolution, upscale=True, flags='lanczos')},setsar=1,format={pix_fmt}",
             "-c:v", "libx264",
             "-preset", "slow",
             "-profile:v", profile,
@@ -331,7 +442,7 @@ class VideoProcessor:
             "-color_primaries", color,
             "-color_trc", color,
             "-colorspace", color,
-            "-r", str(fps),
+            "-fpsmax", str(fps_cap),
             "-c:a", "aac",
             "-b:a", "256k",
             "-ar", "48000",

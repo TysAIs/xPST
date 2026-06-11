@@ -118,10 +118,13 @@ class XUploader(PlatformUploader):
 
             logger.info(f"Uploading to X: {video_path.name}")
 
-            # Upload media
+            # Upload media. media_category routes the upload through X's
+            # async video pipeline (chunked, higher quality tier) instead of
+            # the default image path (G17).
             media_id = await client.upload_media(
                 str(video_path),
                 wait_for_completion=True,
+                media_category="tweet_video",
             )
 
             # Create tweet with media

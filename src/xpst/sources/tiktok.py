@@ -45,11 +45,13 @@ class TikTokSource(VideoSource):
     - Slideshow / photo-mode carousel detection
     """
 
-    # yt-dlp format selection strategies
+    # yt-dlp format selection strategies (G16: prefer separate best video +
+    # best audio merged via ffmpeg over pre-muxed single files, which are
+    # often a lower-quality tier)
     FORMATS = {
-        "best_no_watermark": "best[ext=mp4]/best",
+        "best_no_watermark": "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b",
         "best_with_watermark": "download",
-        "h264_preferred": "best[vcodec^=h264][ext=mp4]/best[ext=mp4]/best",
+        "h264_preferred": "bv*[vcodec^=h264][ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b",
     }
 
     def __init__(self, config: XPSTConfig) -> None:
@@ -177,6 +179,7 @@ class TikTokSource(VideoSource):
             "--no-warnings",
             "--no-check-certificates",
             "--extractor-retries", "3",
+            "--merge-output-format", "mp4",
         ])
 
         return cmd

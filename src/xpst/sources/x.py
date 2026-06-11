@@ -127,6 +127,7 @@ class XSource(VideoSource):
             "--no-warnings",
             "--no-check-certificates",
             "--extractor-retries", "3",
+            "--merge-output-format", "mp4",
         ])
 
         return cmd
@@ -364,7 +365,7 @@ class XSource(VideoSource):
 
         # Try download with format fallbacks
         formats = [
-            ("best_mp4", "best[ext=mp4]/best"),
+            ("best_mp4", "bv*[ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b"),
             ("best_quality", "best"),
         ]
 

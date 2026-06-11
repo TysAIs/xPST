@@ -508,6 +508,19 @@ class UploadService:
         if config.passthrough:
             return video_path
 
+        # Fidelity invariant: skip the re-encode entirely when the source
+        # already satisfies the platform profile (probe via get_video_info).
+        try:
+            compliant, reason = self.video_processor.is_platform_compliant(
+                video_path, platform, config
+            )
+        except Exception as e:
+            logger.debug("Compliance probe failed, will encode: %s", e)
+            compliant, reason = False, "probe failed"
+        if compliant:
+            logger.info("Passthrough for %s — source already compliant (%s)", platform, reason)
+            return video_path
+
         output_path = video_path.with_stem(f"{video_path.stem}_{platform}")
 
         if output_path.exists() and output_path.stat().st_size > 1000:
