@@ -93,10 +93,16 @@ def build_release_preflight(
     # heading, and any tag being cut must match pyproject.
     version = None
     try:
-        import tomllib
+        pyproject_text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        try:
+            import tomllib  # stdlib on 3.11+
 
-        with open(ROOT / "pyproject.toml", "rb") as f:
-            version = tomllib.load(f)["project"]["version"]
+            version = tomllib.loads(pyproject_text)["project"]["version"]
+        except ImportError:  # 3.10: regex fallback, no extra dependency
+            import re as _re
+
+            match = _re.search(r'^version\s*=\s*"([^"]+)"', pyproject_text, _re.M)
+            version = match.group(1) if match else None
     except Exception:
         pass
     changelog_text = ""

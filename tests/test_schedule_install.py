@@ -12,6 +12,7 @@ subprocess and shutil.which are mocked so no real crontab is touched.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,8 @@ def fake_home(monkeypatch, tmp_path):
     return tmp_path
 
 
+@pytest.mark.skipif(sys.platform == "win32",
+                    reason="cron is POSIX-only; Windows scheduling is roadmap (Task Scheduler)")
 def test_cron_line_uses_expanded_path(monkeypatch, fake_home):
     captured = {}
 

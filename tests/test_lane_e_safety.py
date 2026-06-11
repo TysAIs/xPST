@@ -61,7 +61,7 @@ class TestUpdaterGuards:
     def test_updater_no_unconstrained_blind_upgrade_path(self):
         """G45: every successful upgrade is followed by a smoke check in
         source — no blind 'pip install --upgrade and hope'."""
-        src = Path("src/xpst/updater.py").read_text()
+        src = Path("src/xpst/updater.py").read_text(encoding="utf-8")
         assert "_smoke_check" in src
         assert "sys.frozen" in src  # G44 probe (ISC-168)
 
@@ -69,7 +69,7 @@ class TestUpdaterGuards:
 class TestPins:
     def test_knowledge_extras_have_upper_bounds(self):
         """G48 probe (ISC-172): no unbounded data-coupled deps."""
-        import tomllib
+        tomllib = pytest.importorskip("tomllib")  # stdlib 3.11+
 
         with open("pyproject.toml", "rb") as f:
             data = tomllib.load(f)

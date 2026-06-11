@@ -155,7 +155,7 @@ class TestCliJson:
     def test_analytics_json_source_has_branch(self):
         from pathlib import Path
 
-        src = (Path(__file__).parent.parent / "src/xpst/cli.py").read_text()
+        src = (Path(__file__).parent.parent / "src/xpst/cli.py").read_text(encoding="utf-8")
         assert "if as_json" in src
 
 

@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 
 on:
   push:
@@ -23,8 +23,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # setup-ffmpeg@v3 is x64-only; macos-latest runners are ARM64
       - name: Install FFmpeg
+        if: runner.os != 'macOS'
         uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install FFmpeg (macOS arm64)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
 
       - name: Install package
         shell: bash

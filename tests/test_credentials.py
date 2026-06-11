@@ -1,6 +1,7 @@
 """Tests for xPST credential storage"""
 
 import stat
+import sys
 
 import pytest
 
@@ -110,6 +111,8 @@ class TestCredentialStore:
 class TestFallbackKeyDerivation:
     """Tests for the per-install KDF-derived fallback Fernet key."""
 
+    @pytest.mark.skipif(sys.platform == "win32",
+                        reason="POSIX mode bits; Windows uses ACLs (AppData is user-scoped)")
     def test_secret_and_salt_files_created_with_0600(self, tmp_path):
         """First fallback use generates a random secret + salt stored 0600."""
         store = CredentialStore(str(tmp_path))
