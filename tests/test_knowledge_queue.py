@@ -164,3 +164,16 @@ def test_mark_missing_item_is_noop(tmp_path):
     q.mark_done("nope")  # must not raise
     q.mark_failed("nope", "reason")  # must not raise
     assert q.items() == []
+
+
+def test_fifo_survives_identical_timestamps(tmp_path):
+    """Windows clock granularity (~15.6ms) makes same-tick enqueues common;
+    the insertion sequence must keep FIFO order across persistence even when
+    every enqueued_at is identical."""
+    path = tmp_path / "queue.json"
+    q = IngestionQueue(path, now=1000.0)
+    for name in ("a", "b", "c", "d"):
+        q.enqueue(name)
+    reloaded = IngestionQueue(path)
+    assert [i.source for i in reloaded.items()] == ["a", "b", "c", "d"]
+    assert reloaded.peek().source == "a"

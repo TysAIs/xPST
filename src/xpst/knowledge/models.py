@@ -161,16 +161,20 @@ class QueueItem:
     reason: str | None = None
     enqueued_at: float = 0.0
     updated_at: float = 0.0
+    # Insertion sequence: FIFO tiebreak when timestamps collide (Windows
+    # clock granularity is ~15.6ms, so same-tick enqueues are common there).
+    seq: int = 0
 
     @classmethod
     def create(cls, *, source: str, workspace: str = "default",
-               enqueued_at: float = 0.0) -> QueueItem:
+               enqueued_at: float = 0.0, seq: int = 0) -> QueueItem:
         return cls(
             id=_hash("queue", source),
             source=source,
             workspace=workspace,
             enqueued_at=enqueued_at,
             updated_at=enqueued_at,
+            seq=seq,
         )
 
     def to_dict(self) -> dict:
@@ -185,6 +189,7 @@ class QueueItem:
         d.setdefault("reason", None)
         d.setdefault("enqueued_at", 0.0)
         d.setdefault("updated_at", 0.0)
+        d.setdefault("seq", 0)
         # Tolerate an unknown status by normalizing to pending rather than
         # crashing the worker on a forward-incompatible queue file.
         if d.get("status") not in _QUEUE_STATES:

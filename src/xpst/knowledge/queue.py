@@ -105,7 +105,7 @@ class IngestionQueue:
 
     def _ordered(self) -> list[QueueItem]:
         return sorted(self._items.values(),
-                      key=lambda it: (it.enqueued_at, it.id))
+                      key=lambda it: (it.enqueued_at, it.seq, it.id))
 
     def _requeue_stale(self, *, persist: bool) -> int:
         """Reset any ``in_progress`` item back to ``pending`` (crash recovery).
@@ -135,8 +135,9 @@ class IngestionQueue:
         in-progress) item for the same source already exists it is returned
         unchanged. A previously terminal (done/failed) source is re-opened as a
         fresh ``pending`` item so an explicit re-add can retry it."""
+        next_seq = max((it.seq for it in self._items.values()), default=0) + 1
         item = QueueItem.create(source=source, workspace=workspace,
-                                enqueued_at=self._now())
+                                enqueued_at=self._now(), seq=next_seq)
         existing = self._items.get(item.id)
         if existing is not None and existing.status in _LIVE_STATES:
             return existing
