@@ -312,16 +312,26 @@ class CrossPostEngine:
             except Exception as e:
                 logger.error(f"Failed to initialize Instagram uploader: {e}")
 
-    async def check_and_post(self, catch_up: bool = False) -> list[CrossPostResult]:
+    async def check_and_post(
+        self,
+        catch_up: bool = False,
+        source: str = "tiktok",
+        max_posts: int | None = None,
+    ) -> list[CrossPostResult]:
         """Main workflow: check for new videos and post them to all platforms.
 
-        Fetches recent videos from TikTok, filters to unposted ones, then
-        downloads, encodes, and uploads each to every enabled platform.
-        State is persisted after each video for crash recovery.
+        Fetches recent videos from the requested source, filters to unposted
+        ones, then downloads, encodes, and uploads each to every enabled
+        platform. State is persisted after each video for crash recovery.
 
         Args:
             catch_up: If True, fetches up to 20 videos instead of 5 to
-                compensate for Mac sleep/wake downtime.
+                compensate for Mac sleep/wake downtime. ``catch_up`` takes
+                precedence over ``max_posts`` to preserve the wake-recovery
+                contract.
+            source: Source to fetch from (e.g. ``"tiktok"``, ``"youtube"``).
+            max_posts: Maximum number of videos to fetch in a normal cycle.
+                Ignored when ``catch_up`` is True. Defaults to 5.
 
         Returns:
             List of CrossPostResult, one per processed video. Empty if
@@ -336,9 +346,9 @@ class CrossPostEngine:
             return results
 
         # Fetch videos via source service
-        max_count = 20 if catch_up else 5
-        logger.info(f"Fetching videos (max: {max_count})")
-        videos = await self.source_service.fetch_new_videos("tiktok", max_count)
+        max_count = 20 if catch_up else (max_posts if max_posts is not None else 5)
+        logger.info(f"Fetching videos (source: {source}, max: {max_count})")
+        videos = await self.source_service.fetch_new_videos(source, max_count)
 
         if not videos:
             return results
@@ -646,6 +656,7 @@ class CrossPostEngine:
         self,
         platforms: list[str] | None = None,
         limit: int = 10,
+        source: str | None = None,
     ) -> list[CrossPostResult]:
         """Retry videos that previously failed or weren't fully posted.
 
@@ -656,6 +667,9 @@ class CrossPostEngine:
         Args:
             platforms: Target platforms to backfill. None means all enabled.
             limit: Maximum number of videos to attempt.
+            source: If set, only backfill videos that originated from this
+                source (matched against each record's ``source_platform``).
+                None backfills records from every source.
 
         Returns:
             List of CrossPostResult for attempted backfills.
@@ -667,8 +681,16 @@ class CrossPostEngine:
         results = []
         download_dir = Path(self.config.video.download_dir)
 
+        # Limit AFTER source filtering so a source filter does not silently
+        # consume the candidate budget with records from other sources.
+        candidates = [
+            (video_id, video_data)
+            for video_id, video_data in self.state.state["posted_videos"].items()
+            if source is None or video_data.get("source_platform") == source
+        ]
+
         # Find videos that need backfilling
-        for video_id, video_data in list(self.state.state["posted_videos"].items())[:limit]:
+        for video_id, video_data in candidates[:limit]:
             # Check which platforms need posting
             missing_platforms = []
             for platform in platforms:

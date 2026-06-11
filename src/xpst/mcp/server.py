@@ -380,7 +380,7 @@ async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallTool
             )],
         )
 
-    await engine.check_and_post(catch_up=catch_up)
+    await engine.check_and_post(catch_up=catch_up, source=source, max_posts=max_posts)
     return CallToolResult(
         content=[TextContent(type="text", text="Cross-post cycle completed successfully")],
     )
@@ -481,7 +481,7 @@ async def _handle_backfill(engine: CrossPostEngine, args: dict[str, Any]) -> Cal
             )],
         )
 
-    results = await engine.backfill(platforms=platforms, limit=max_count)
+    results = await engine.backfill(platforms=platforms, limit=max_count, source=source)
     successful = sum(1 for r in results if r.all_success)
     payload = {
         "attempted": len(results),
