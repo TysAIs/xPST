@@ -1,4 +1,4 @@
-﻿import QtQuick 2.15
+import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
@@ -198,14 +198,26 @@ Page {
                         height: 36
                         radius: theme.radiusMd
                         color: analyticsPage.activePlatform === modelData.key ? theme.accent : theme.surfaceCard
+                        Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
-                        Text {
+                        Row {
                             id: tabLabel
                             anchors.centerIn: parent
-                            text: modelData.icon + modelData.name
-                            font.pixelSize: 12
-                            font.weight: analyticsPage.activePlatform === modelData.key ? Font.DemiBold : Font.Normal
-                            color: analyticsPage.activePlatform === modelData.key ? "#ffffff" : theme.textSecondary
+                            spacing: 6
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: modelData.icon
+                                font.family: theme.iconFontFamily
+                                font.pixelSize: 12
+                                color: analyticsPage.activePlatform === modelData.key ? "#ffffff" : theme.textSecondary
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: modelData.name
+                                font.pixelSize: 12
+                                font.weight: analyticsPage.activePlatform === modelData.key ? Font.DemiBold : Font.Normal
+                                color: analyticsPage.activePlatform === modelData.key ? "#ffffff" : theme.textSecondary
+                            }
                         }
 
                         MouseArea {
@@ -329,8 +341,8 @@ Page {
                                 spacing: theme.spacingSm
                                 Text {
                                     text: modelData.icon
+                                    font.family: theme.iconFontFamily
                                     font.pixelSize: 12
-                                    font.weight: Font.DemiBold
                                     color: modelData.color
                                 }
                                 Text {

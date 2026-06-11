@@ -1,4 +1,4 @@
-﻿import QtQuick 2.15
+import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtMultimedia
@@ -644,8 +644,8 @@ Page {
                             spacing: theme.spacingSm
                             Text {
                                 text: modelData.icon
+                                font.family: theme.iconFontFamily
                                 font.pixelSize: 12
-                                font.weight: Font.DemiBold
                                 color: modelData.color
                             }
                             Text {

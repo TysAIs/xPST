@@ -1,4 +1,5 @@
-﻿import QtQuick 2.15
+import QtCore
+import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
@@ -21,12 +22,25 @@ ApplicationWindow {
 
     property string currentPage: "dashboard"
     property var dialogStack: []
-    property bool noSplashMode: typeof noSplashMode !== "undefined" ? noSplashMode : false
+    // Python exposes the flag as xpstNoSplash; a same-named root property
+    // would shadow the context property and bind to itself (G40).
+    property bool noSplashMode: typeof xpstNoSplash !== "undefined" ? xpstNoSplash : false
 
-    // ── Window State Persistence ───────────────────────────────────
+    // ── Window State Persistence (G39) ─────────────────────────────
+    // Qt.application.settings / root.settings do not exist — geometry
+    // never persisted and the try/catch swallowed the error. QtCore
+    // Settings is the real API (org/app names are set in main.py).
+    Settings {
+        id: windowSettings
+        category: "window"
+        property int savedX: -1
+        property int savedY: -1
+        property int savedWidth: 1280
+        property int savedHeight: 800
+        property string savedScreen: ""
+    }
+
     Component.onCompleted: {
-        var settings = Qt.application.settings || null
-        // Restore geometry from QSettings via controller or direct settings
         restoreWindowGeometry()
     }
 
@@ -35,15 +49,13 @@ ApplicationWindow {
     }
 
     function restoreWindowGeometry() {
-        // Uses QSettings (organization/app name set in main.py)
         try {
-            var s = root.settings
-            if (s) {
-                var x = s.value("window/x", -1)
-                var y = s.value("window/y", -1)
-                var w = s.value("window/width", 1280)
-                var h = s.value("window/height", 800)
-                var savedScreen = s.value("window/screen", "")
+            var x = windowSettings.savedX
+            var y = windowSettings.savedY
+            var w = windowSettings.savedWidth
+            var h = windowSettings.savedHeight
+            var savedScreen = windowSettings.savedScreen
+            {
                 if (x >= 0 && y >= 0) {
                     // Check if saved screen still exists
                     var screens = Qt.application.screens || []
@@ -73,16 +85,13 @@ ApplicationWindow {
 
     function saveWindowGeometry() {
         try {
-            var s = root.settings
-            if (s) {
-                s.setValue("window/x", root.x)
-                s.setValue("window/y", root.y)
-                s.setValue("window/width", root.width)
-                s.setValue("window/height", root.height)
-                // Save current screen name for multi-monitor restore
-                if (root.screen && root.screen.name) {
-                    s.setValue("window/screen", root.screen.name)
-                }
+            windowSettings.savedX = root.x
+            windowSettings.savedY = root.y
+            windowSettings.savedWidth = root.width
+            windowSettings.savedHeight = root.height
+            // Save current screen name for multi-monitor restore
+            if (root.screen && root.screen.name) {
+                windowSettings.savedScreen = root.screen.name
             }
         } catch(e) {}
     }
@@ -435,9 +444,14 @@ ApplicationWindow {
             // Process each dropped video file
             for (var i = 0; i < videoFiles.length; i++) {
                 var filePath = videoFiles[i]
-                // Remove file:// prefix if present
-                if (filePath.startsWith("file://"))
+                // Remove file:// prefix if present. Windows URLs are
+                // file:///C:/... — stripping 7 chars leaves /C:/..., so the
+                // leading slash before a drive letter must go too (G40).
+                if (filePath.startsWith("file://")) {
                     filePath = filePath.substring(7)
+                    if (/^\/[A-Za-z]:/.test(filePath))
+                        filePath = filePath.substring(1)
+                }
                 // Prompt for caption via a simple dialog
                 dropCaptionDialog.droppedPath = filePath
                 // Resolve file size

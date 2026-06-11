@@ -327,7 +327,9 @@ Page {
 
                                     Text {
                                         text: modelData.icon
+                                        font.family: theme.iconFontFamily
                                         font.pixelSize: 14
+                                        color: theme.textPrimary
                                     }
                                     Text {
                                         text: modelData.label

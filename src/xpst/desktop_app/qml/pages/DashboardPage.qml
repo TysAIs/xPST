@@ -267,8 +267,8 @@ Page {
                                 spacing: theme.spacingSm
                                 Text {
                                     text: modelData.icon
+                                    font.family: theme.iconFontFamily
                                     font.pixelSize: 12
-                                    font.weight: Font.DemiBold
                                     color: theme.accent
                                 }
                                 Text {

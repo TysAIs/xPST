@@ -330,7 +330,9 @@ def main(no_splash: bool = False) -> int:
     theme_provider = ThemeProvider()
     engine.rootContext().setContextProperty("theme", theme_provider)
     engine.rootContext().setContextProperty("postModel", post_model)
-    engine.rootContext().setContextProperty("noSplashMode", no_splash)
+    # Named xpstNoSplash because a root QML property of the same name would
+    # shadow the context property and self-bind (G40).
+    engine.rootContext().setContextProperty("xpstNoSplash", no_splash)
     if splash:
         splash.showMessage("Starting engine...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
     app.processEvents()

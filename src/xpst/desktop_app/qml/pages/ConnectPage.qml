@@ -1,4 +1,4 @@
-﻿import QtQuick 2.15
+import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 
@@ -641,8 +641,8 @@ Page {
                                     Text {
                                         anchors.centerIn: parent
                                         text: connectPage.providerIcon(providerKey)
+                                        font.family: theme.iconFontFamily
                                         font.pixelSize: 14
-                                        font.weight: Font.DemiBold
                                         color: connectPage.providerColor(providerKey)
                                     }
                                 }
@@ -851,8 +851,8 @@ Page {
                                     Text {
                                         anchors.centerIn: parent
                                         text: connectPage.providerIcon(modelData.name)
+                                        font.family: theme.iconFontFamily
                                         font.pixelSize: 13
-                                        font.weight: Font.DemiBold
                                         color: connectPage.providerColor(modelData.name)
                                     }
                                 }

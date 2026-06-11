@@ -1,4 +1,4 @@
-﻿import QtQuick 2.15
+import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import xpst.desktop_app.qml 1.0
@@ -81,6 +81,7 @@ Rectangle {
                 color: navMouse.containsMouse || sidebar.currentPage === modelData.page
                        ? (sidebar.currentPage === modelData.page ? theme.accentMuted : theme.surfaceAlt)
                        : "transparent"
+                Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
 
                 RowLayout {
                     anchors.fill: parent

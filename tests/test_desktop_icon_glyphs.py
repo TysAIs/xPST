@@ -60,3 +60,68 @@ def test_icon_glyphs_is_qt_free():
     )
     assert result.returncode == 0, result.stderr
     assert "ok" in result.stdout
+
+
+# ── QML glyph lint (G38) ─────────────────────────────────────────────
+
+
+def _qml_files():
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent / "src" / "xpst" / "desktop_app" / "qml"
+    return sorted(root.rglob("*.qml"))
+
+
+def _text_blocks(content: str):
+    """Yield (start_line, block_text) for each Text { ... } block, naive
+    brace matcher — good enough for lint purposes."""
+    lines = content.splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("Text {") or stripped == "Text{":
+            depth = 0
+            block: list[str] = []
+            for j in range(i, len(lines)):
+                depth += lines[j].count("{") - lines[j].count("}")
+                block.append(lines[j])
+                if depth <= 0:
+                    break
+            yield i + 1, "\n".join(block)
+
+
+def test_qml_glyph_lint():
+    """Any Text whose content comes from an icon source (``.icon``,
+    ``providerIcon(``, ``Icons.``, ``glyph(``) must set ``font.family`` —
+    otherwise the PUA codepoint renders as tofu (G38). This is the
+    regression guard for the AnalyticsPage:205 class of bug."""
+    icon_markers = (".icon", "providerIcon(", "Icons.", "glyph(")
+    offenders = []
+    for path in _qml_files():
+        content = path.read_text(encoding="utf-8-sig")
+        for line_no, block in _text_blocks(content):
+            text_lines = [
+                ln for ln in block.splitlines() if ln.strip().startswith("text:")
+            ]
+            if not text_lines:
+                continue
+            uses_icon = any(
+                marker in ln for ln in text_lines for marker in icon_markers
+            )
+            if uses_icon and "font.family" not in block:
+                offenders.append(f"{path.name}:{line_no}")
+    assert not offenders, (
+        "icon-glyph Text without font.family (renders as tofu): "
+        + ", ".join(offenders)
+    )
+
+
+def test_no_glyph_concatenated_into_labels():
+    """Icon glyphs must never be string-concatenated into a default-font
+    label (``modelData.icon + modelData.name``) — split layouts only."""
+    offenders = []
+    for path in _qml_files():
+        content = path.read_text(encoding="utf-8-sig")
+        for i, line in enumerate(content.splitlines(), 1):
+            if ".icon +" in line or "+ modelData.icon" in line:
+                offenders.append(f"{path.name}:{i}")
+    assert not offenders, "glyph concatenated into label: " + ", ".join(offenders)
