@@ -26,6 +26,9 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install -e ".[full,dev]" build pip-audit
 
+      - name: Install Qt runtime libraries
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libpulse0
+
       - name: Release gate
         run: |
           python -m pytest
@@ -96,9 +99,13 @@ jobs:
 
       - name: Smoke Windows executable
         shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
         run: |
           $smokeArgs = @("--path", "dist\xPST.exe", "--seconds", "12", "--json", "--clean-profile")
-          if ("${{ github.event_name }}" -eq "push") {
+          # Require a signature only when signing actually ran (owner ships
+          # the RC unsigned until certs are procured).
+          if ("${{ github.event_name }}" -eq "push" -and $env:WINDOWS_CERTIFICATE_BASE64) {
             $smokeArgs += "--require-signed"
           }
           python scripts/verify_windows_exe.py @smokeArgs
@@ -128,10 +135,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg and Qt runtime libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libpulse0
 
       - name: Build binary
         run: |
@@ -141,6 +148,8 @@ jobs:
           pyinstaller --clean --noconfirm build_linux.spec
 
       - name: Smoke Linux binary
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: |
           python scripts/verify_linux_binary.py --path dist/xPST --seconds 12 --json
 
@@ -179,7 +188,9 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
           macos_args=()
-          if [[ "${{ github.event_name }}" == "push" ]]; then
+          # Public mode requires a codesign identity; the RC ships unsigned
+          # by owner decision, so only escalate when secrets are configured.
+          if [[ "${{ github.event_name }}" == "push" && -n "$MACOS_CODESIGN_IDENTITY" ]]; then
             macos_args+=(--public)
           fi
           bash scripts/verify_macos.sh "${macos_args[@]}"
