@@ -185,3 +185,61 @@ class TestRunResults:
         assert payload["results"][0]["video_id"] == "v1"
         text = result.content[0].text
         assert "https://youtube.com/watch?v=p1" in text
+
+
+class TestScheduleTools:
+    @pytest.mark.asyncio
+    async def test_schedule_add_and_list_roundtrip(self, tmp_path):
+        """G29: agents can schedule posts and read the schedule over MCP."""
+        from unittest.mock import MagicMock
+
+        from xpst.mcp.server import _handle_schedule_add, _handle_schedule_list
+
+        config = MagicMock()
+        config.config_dir = str(tmp_path)
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"x")
+
+        result = await _handle_schedule_add(config, {
+            "video_path": str(video),
+            "caption": "scheduled hello",
+            "scheduled_time": "2026-06-12T09:30:00",
+            "platforms": ["youtube"],
+        })
+        assert not getattr(result, "isError", False), result.content[0].text
+        entry = json.loads(result.content[0].text)["scheduled"]
+        assert entry["status"] == "pending"
+
+        listing = await _handle_schedule_list(config)
+        schedules = json.loads(listing.content[0].text)["schedules"]
+        assert len(schedules) == 1
+        assert schedules[0]["caption"] == "scheduled hello"
+
+    @pytest.mark.asyncio
+    async def test_schedule_add_rejects_missing_file_and_bad_time(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from xpst.mcp.server import _handle_schedule_add
+
+        config = MagicMock()
+        config.config_dir = str(tmp_path)
+        r1 = await _handle_schedule_add(config, {
+            "video_path": str(tmp_path / "missing.mp4"),
+            "caption": "c", "scheduled_time": "2026-06-12T09:30:00",
+        })
+        assert r1.isError
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"x")
+        r2 = await _handle_schedule_add(config, {
+            "video_path": str(video), "caption": "c",
+            "scheduled_time": "not-a-time",
+        })
+        assert r2.isError
+
+    @pytest.mark.asyncio
+    async def test_schedule_add_is_guarded(self, monkeypatch):
+        monkeypatch.setenv("XPST_MCP_READONLY", "1")
+        from xpst.mcp.server import handle_call_tool
+
+        result = await handle_call_tool("xpst_schedule_add", {})
+        assert result.isError and "Blocked" in result.content[0].text

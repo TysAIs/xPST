@@ -2,7 +2,7 @@
 
 The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, run posting workflows, and query the personal content knowledge base without scraping CLI text.
 
-This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **14 tools total: 9 `xpst_*` + 4 `kb_*`.**
+This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **16 tools total: 9 `xpst_*` + 4 `kb_*`.**
 
 ## Setup
 

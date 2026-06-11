@@ -263,6 +263,35 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="xpst_schedule_list",
+        description="List scheduled posts (pending, completed, failed) with times and targets",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_schedule_add",
+        description=(
+            "Schedule a post for later: local video file + caption + ISO-8601 "
+            "time, optional platform list and repeat rule (daily/weekly/monthly)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
+                "video_path": {"type": "string", "description": "Local video file path"},
+                "caption": {"type": "string", "description": "Post caption"},
+                "scheduled_time": {"type": "string", "description": "ISO-8601 local datetime, e.g. 2026-06-12T09:30:00"},
+                "platforms": {"type": "array", "items": {"type": "string", "enum": _PLATFORM_ENUM}, "description": "Targets (default: all enabled)"},
+                "repeat_rule": {"type": "string", "enum": ["daily", "weekly", "monthly"], "description": "Optional repeat"},
+            },
+            "required": ["video_path", "caption", "scheduled_time"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_health",
         description="Test connectivity to all platforms and sources (no uploads)",
         inputSchema={
@@ -449,6 +478,7 @@ TOOLS: list[Tool] = [
 # surface that any connected agent can drive.
 _MUTATING_TOOLS = {
     "xpst_run", "xpst_post", "xpst_backfill", "xpst_delete",
+    "xpst_schedule_add",
     "kb_add", "kb_organize",
 }
 
@@ -509,6 +539,10 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             return await _handle_backfill(engine, arguments)
         elif name == "xpst_analytics":
             return await _handle_analytics(arguments)
+        elif name == "xpst_schedule_list":
+            return await _handle_schedule_list(server.config)
+        elif name == "xpst_schedule_add":
+            return await _handle_schedule_add(server.config, arguments)
         elif name == "xpst_config_show":
             return await _handle_config_show(server.config)
         elif name == "xpst_auth_status":
@@ -685,6 +719,51 @@ async def _handle_backfill(engine: CrossPostEngine, args: dict[str, Any]) -> Cal
     }
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
+    )
+
+
+async def _handle_schedule_list(config: XPSTConfig) -> CallToolResult:
+    """Handle xpst_schedule_list (G29)."""
+    from xpst.schedule_manager import ScheduleManager
+
+    manager = ScheduleManager(config.config_dir)
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(
+            {"schedules": manager.list()}, default=str,
+        ))],
+    )
+
+
+async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) -> CallToolResult:
+    """Handle xpst_schedule_add (G29)."""
+    from datetime import datetime
+    from pathlib import Path
+
+    from xpst.schedule_manager import ScheduleManager
+
+    video_path = Path(arguments["video_path"]).expanduser()
+    if not video_path.exists():
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(type="text", text=f"Video not found: {video_path}")],
+        )
+    try:
+        when = datetime.fromisoformat(arguments["scheduled_time"])
+    except ValueError as exc:
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(type="text", text=f"Bad scheduled_time (need ISO-8601): {exc}")],
+        )
+    manager = ScheduleManager(config.config_dir)
+    entry = manager.add(
+        video_path=str(video_path),
+        caption=arguments["caption"],
+        scheduled_time=when,
+        platforms=arguments.get("platforms"),
+        repeat_rule=arguments.get("repeat_rule"),
+    )
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps({"scheduled": entry}, default=str))],
     )
 
 
