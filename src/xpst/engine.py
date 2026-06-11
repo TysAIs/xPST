@@ -49,6 +49,9 @@ from xpst.utils.video import VideoProcessor
 
 logger = get_logger(__name__)
 
+# Platform-encoded temp-file suffixes (single source, ISC-92)
+_ENCODED_SUFFIXES = ("_youtube", "_instagram", "_x")
+
 
 @dataclass
 class CrossPostResult:
@@ -265,7 +268,7 @@ class CrossPostEngine:
                 if video_path:
                     path = Path(video_path)
                     # Clean up platform-specific encoded files
-                    for suffix in ["_youtube", "_instagram", "_x"]:
+                    for suffix in _ENCODED_SUFFIXES:
                         encoded = path.with_stem(f"{path.stem}{suffix}")
                         if encoded.exists():
                             try:
@@ -517,7 +520,7 @@ class CrossPostEngine:
 
     def _cleanup_encoded_files(self, video_path: Path) -> None:
         """Remove platform-specific encoded copies of a video."""
-        for suffix in ["_youtube", "_instagram", "_x"]:
+        for suffix in _ENCODED_SUFFIXES:
             encoded = video_path.with_stem(f"{video_path.stem}{suffix}")
             if encoded.exists():
                 try:

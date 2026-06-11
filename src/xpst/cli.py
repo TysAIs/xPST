@@ -1226,26 +1226,6 @@ def mcp():
 # Helpers
 # ──────────────────────────────────────────────
 
-def _result_to_dict(result: CrossPostResult) -> dict:
-    """Convert a CrossPostResult to a JSON-serialisable dict."""
-    return {
-        "video_id": result.video_id,
-        "caption": result.caption,
-        "all_success": result.all_success,
-        "partial_success": result.partial_success,
-        "results": {
-            platform: {
-                "success": ur.success,
-                "post_url": ur.post_url,
-                "post_id": ur.post_id,
-                "error": ur.error,
-                "platform": ur.platform,
-            }
-            for platform, ur in result.results.items()
-        },
-    }
-
-
 def _display_result(result: CrossPostResult) -> None:
     """Display a cross-posting result as a rich table.
 

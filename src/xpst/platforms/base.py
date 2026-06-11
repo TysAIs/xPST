@@ -155,6 +155,7 @@ class PlatformUploader(ABC):
 
         from xpst.utils.video import VideoProcessor
 
+        output_path: Path | None = None
         try:
             processor = VideoProcessor()
             with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
@@ -169,6 +170,10 @@ class PlatformUploader(ABC):
                 error=f"Carousel stitch failed: {str(e)[:200]}",
                 platform=self.platform_name,
             )
+        finally:
+            # The stitched video is a temp artifact — never leak it (ISC-91)
+            if output_path is not None:
+                output_path.unlink(missing_ok=True)
 
     def _validate_video(self, video_path: Path) -> None:
         """Validate that a video file exists, is non-empty, and within size limits.

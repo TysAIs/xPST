@@ -229,3 +229,81 @@ class TestSessionHealth:
         assert sessions["instagram"]["present"] is True
         assert sessions["instagram"]["age_days"] == 0
         assert sessions["x"]["present"] is False
+
+
+class TestAdapterIsolation:
+    @pytest.mark.asyncio
+    async def test_adapter_import_failure_degrades_one_platform(self, monkeypatch, tmp_path):
+        """ISC-10: a broken underlying client lib (simulated ImportError)
+        fails that adapter's upload gracefully — no crash, no impact on
+        importing the engine or other adapters."""
+        import sys
+
+        # Make `import instagrapi` raise ImportError inside the adapter
+        monkeypatch.setitem(sys.modules, "instagrapi", None)
+
+        import importlib
+
+        importlib.reload(importlib.import_module("xpst.platforms.instagram"))
+        from xpst.platforms.instagram import InstagramUploader
+
+        config = MagicMock()
+        config.config_dir = str(tmp_path)
+        uploader = InstagramUploader(config)
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"x" * 2048)
+
+        result = await uploader.upload(video, "caption")
+        assert result.success is False, "broken lib must fail the upload, not crash"
+        assert result.error
+
+    def test_other_adapters_unaffected_by_one_broken_lib(self, monkeypatch):
+        import sys
+
+        monkeypatch.setitem(sys.modules, "instagrapi", None)
+        from xpst.platforms.x import XUploader  # noqa: F401
+        from xpst.platforms.youtube import YouTubeUploader  # noqa: F401
+
+
+class TestQualityReport:
+    @pytest.mark.asyncio
+    async def test_quality_report_attached_on_success(self, tmp_path):
+        """ISC-20: a successful upload carries what was actually sent."""
+        from unittest.mock import AsyncMock
+
+        from xpst.platforms.base import PlatformUploader, UploadResult
+        from xpst.services.upload_service import UploadService
+        from xpst.state import StateManager
+
+        processor = MagicMock()
+        # compliance probe: not compliant (forces the normal path);
+        # quality probe: report 1080x1920
+        processor.is_platform_compliant.return_value = (False, "test")
+        processor.get_video_info.return_value = {
+            "streams": [{"codec_type": "video", "width": 1080,
+                         "height": 1920, "bit_rate": "8000000"}],
+            "format": {"duration": "30"},
+        }
+        processor.encode_for_platform.side_effect = lambda i, o, p, c: i
+
+        service = UploadService(
+            video_processor=processor, circuit_breakers=MagicMock(),
+            quota_manager=MagicMock(), state=StateManager(str(tmp_path)),
+            notifier=MagicMock(), shutdown_handler=MagicMock(),
+            config=MagicMock(), anti_bot=None,
+        )
+        uploader = MagicMock(spec=PlatformUploader)
+        uploader.manifest.side_effect = Exception("no manifest")
+        uploader.upload = AsyncMock(return_value=UploadResult(
+            success=True, post_id="p", post_url="u", platform="youtube",
+        ))
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"x" * 2048)
+
+        result = await service.upload_to_platform(
+            uploader=uploader, video_path=video, caption="c",
+            platform_name="youtube", video_id="q1",
+        )
+        assert result.success
+        quality = result.metadata.get("quality")
+        assert quality and quality["width"] == 1080 and quality["height"] == 1920

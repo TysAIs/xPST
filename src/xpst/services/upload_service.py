@@ -275,6 +275,34 @@ class UploadService:
                 platform=platform_name,
             )
 
+        # Quality report (ISC-20): record exactly what is being sent so the
+        # user can verify fidelity without re-probing the platform.
+        quality_report: dict[str, Any] = {"transcoded": encoded_path != video_path}
+        try:
+            info = self.video_processor.get_video_info(encoded_path)
+            stream = next(
+                (s for s in info.get("streams", []) if s.get("codec_type") == "video"),
+                {},
+            )
+            quality_report.update({
+                "width": stream.get("width"),
+                "height": stream.get("height"),
+                "bit_rate": int(
+                    stream.get("bit_rate")
+                    or info.get("format", {}).get("bit_rate")
+                    or 0
+                ),
+            })
+            logger.info(
+                "Sending to %s: %sx%s @ %.1f Mbps (transcoded=%s)",
+                platform_name, quality_report.get("width"),
+                quality_report.get("height"),
+                (quality_report.get("bit_rate") or 0) / 1_000_000,
+                quality_report["transcoded"],
+            )
+        except Exception as e:
+            logger.debug("Quality probe skipped: %s", e)
+
         # Upload with retry and progress tracking
         self.shutdown_handler.update_phase("uploading")
         try:
@@ -297,6 +325,7 @@ class UploadService:
             tracker.complete()
 
             if upload_result.success:
+                upload_result.metadata.setdefault("quality", quality_report)
                 self.crash_recovery_clear(video_id, platform_name)
                 self.state.mark_video_posted(
                     video_id,

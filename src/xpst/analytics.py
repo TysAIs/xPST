@@ -344,7 +344,11 @@ class AnalyticsCollector:
                         "views": int(getattr(tweet, "view_count", 0) or 0),
                         "likes": getattr(tweet, "favorite_count", 0) or 0,
                         "comments": getattr(tweet, "reply_count", 0) or 0,
+                        # retweets stay under "shares" for schema compat;
+                        # reposts/quotes are the precise fields (ISC-123)
                         "shares": getattr(tweet, "retweet_count", 0) or 0,
+                        "reposts": getattr(tweet, "retweet_count", 0) or 0,
+                        "quotes": getattr(tweet, "quote_count", 0) or 0,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
                 except Exception as e:
@@ -362,9 +366,17 @@ class AnalyticsCollector:
         try:
             import yt_dlp
 
+            # Resolve the account's real handle — the @_ placeholder only
+            # works while TikTok tolerates it (ISC-124).
+            username = (
+                (self._config.get("tiktok") or {}).get("username")
+                or (self._config.get("accounts") or {}).get("tiktok", {}).get("username")
+                or "_"
+            )
+
             for video_id in video_ids:
                 try:
-                    url = f"https://www.tiktok.com/@_/video/{video_id}"
+                    url = f"https://www.tiktok.com/@{username}/video/{video_id}"
                     ydl_opts = {
                         "quiet": True,
                         "skip_download": True,

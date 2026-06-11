@@ -131,6 +131,15 @@ class SourceService:
         Returns:
             Subset of videos that still need posting to at least one platform.
         """
+        if not platforms:
+            # With zero enabled platforms every video vacuously looks "fully
+            # posted" — surface it instead of silently doing nothing (ISC-93).
+            logger.warning(
+                "No platforms enabled — %d fetched video(s) have nowhere to go; "
+                "enable a platform in config or run `xpst connect <platform>`",
+                len(videos),
+            )
+            return []
         new_videos = []
         for video in videos:
             all_done = True
