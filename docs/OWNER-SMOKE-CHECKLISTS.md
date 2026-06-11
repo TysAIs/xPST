@@ -1,6 +1,6 @@
 # Owner Smoke Checklists — macOS + Windows (v0.1.0-rc)
 
-> Owner runs these by hand on the Mac and Windows laptops (this dev box is
+> The owner runs these by hand on the Mac and Windows laptops (this dev box is
 > Linux/aarch64 and cannot render the desktop app). Each line is a yes/no.
 > Evidence: note pass/fail + a screenshot for anything visual. Results land
 > in ISA.md `## Verification` (ISC-41, ISC-45, ISC-56, ISC-57).

@@ -92,7 +92,7 @@ def test_contributing_uses_current_repository_and_no_mojibake():
     text = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
 
     assert "https://github.com/TysAIs/xPST" in text
-    assert "xPSTOwner" not in text
+    assert ("Owner" + "Doe") not in text  # personal-name guard, split so this file itself stays clean
     assert "ð" not in text
     assert "â" not in text
 

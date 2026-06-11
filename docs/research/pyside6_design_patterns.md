@@ -1598,7 +1598,7 @@ engine.rootContext().setContextProperty("backend", backend)
 Text { text: backend.userName }
 Button {
     text: "Update"
-    onClicked: backend.setUserName("Owner")
+    onClicked: backend.setUserName("Alice")
 }
 ```
 

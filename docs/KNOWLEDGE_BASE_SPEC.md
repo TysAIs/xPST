@@ -6,7 +6,7 @@
 
 **Architecture:** A walled-off subsystem (`src/xpst/knowledge/`) shipped as an optional dependency extra (`xpst[knowledge]`). The cross-poster core never imports it; it is wired into the CLI/MCP through lazy imports guarded by the extra, the same pattern xPST already uses for its `mcp`, `desktop`, and `dashboard` features. (xPST's sandboxed `PluginManager` is for untrusted third-party uploaders and blocks `os`/`subprocess`; the KB is first-party and needs those, so it does not ride that loader.) The organizing intelligence lives in the pipeline (embeddings route, clustering discovers areas, code sorts difficulty), so a small ~12B local model is sufficient. All volatile dependencies sit behind stable adapter interfaces.
 
-**Tech Stack:** Python (matches xPST), faster-whisper (transcription), LanceDB (embedded vector store), Graphify (area clustering — already in Owner's stack), an OpenAI-compatible LLM client (model-agnostic), a small local embedding model. No required cloud keys.
+**Tech Stack:** Python (matches xPST), faster-whisper (transcription), LanceDB (embedded vector store), Graphify (area clustering — already in the owner's stack), an OpenAI-compatible LLM client (model-agnostic), a small local embedding model. No required cloud keys.
 
 ---
 
@@ -101,7 +101,7 @@ Each workspace is a self-contained directory. Default workspace is `default`. No
   manifest.json       # ingested sources, content hashes, versions
 ```
 
-For Owner, the `default` workspace fills with his videos and the KB tailors to him. For anyone else, theirs. Identical code, isolated data.
+For the original author, the `default` workspace fills with their videos and the KB tailors to him. For anyone else, theirs. Identical code, isolated data.
 
 ---
 
@@ -230,7 +230,7 @@ Each phase produces working, testable software on its own and has a hard accepta
 - Every volatile library sits behind an adapter (`Transcriber`, `KnowledgeStore`, LLM/embedding clients). A breaking upstream change is contained to one file.
 - Pin everything via `uv.lock`. Add a per-adapter smoke test to CI so a bad dependency update is caught before it ships.
 - `LightRAG`, `VideoRAG`, and `Understand-Anything` are **pattern references, not runtime dependencies.** They are days-old / research-grade and would import their own storage + LLM orchestration. We borrow their approach (chunking, extraction, agent-queryable graph) and implement thin versions against stable primitives we control.
-- The graph/area layer reuses **Graphify** (Owner's own tool, controlled update cadence) rather than adopting an external KG framework.
+- The graph/area layer reuses **Graphify** (an in-house tool, controlled update cadence) rather than adopting an external KG framework.
 
 ---
 
@@ -238,7 +238,7 @@ Each phase produces working, testable software on its own and has a hard accepta
 
 1. **Embedding model — RESOLVED 2026-06-10.** `nomic-ai/nomic-embed-text-v1.5` (fastembed's canonical id; the bare `nomic-embed-text-v1.5` is not recognized by `TextEmbedding`), run in-process via `fastembed` (ONNX on CPU, no PyTorch). RAM-only, ~200–500MB while actively embedding, ~100MB on disk, 8192-token context for long transcript chunks. Loaded lazily by the ingestion worker only when embedding or querying — not always-on, never loaded by the core cross-poster. Power users can override to any OpenAI-compatible embedding endpoint via `embed_backend="endpoint"`. The model + dimension are recorded in `manifest.json`; changing the model triggers a full re-embed of the workspace.
 2. **Graph layer integration.** Graphify invoked as a subprocess on the nugget set, vs a light in-process clustering (e.g. HDBSCAN) with Graphify only for the human-facing graph view. Driver: keep it simple and small-model-independent. (Needed at Phase 3.)
-3. **Desktop "areas" UI scope.** CLI-first now and add the drag-a-link-into-an-area UI later, vs build a minimal desktop intake in Phase 5. Driver: how soon Owner wants the visual workflow vs proving the engine first.
+3. **Desktop "areas" UI scope.** CLI-first now and add the drag-a-link-into-an-area UI later, vs build a minimal desktop intake in Phase 5. Driver: how soon the owner wants the visual workflow vs proving the engine first.
 
 ---
 

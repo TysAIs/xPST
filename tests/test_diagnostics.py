@@ -33,7 +33,7 @@ def test_build_diagnostics_bundle_redacts_config_and_logs(tmp_path):
     log_file.parent.mkdir(parents=True)
     log_file.write_text(
         "upload failed token=super-secret-token\n"
-        "path=C:\\Users\\Owner\\.xpst\\credentials\\x_cookies.json\n",
+        "path=C:\\Users\\alice\\.xpst\\credentials\\x_cookies.json\n",
         encoding="utf-8",
     )
     output = tmp_path / "bundle.zip"
@@ -56,4 +56,4 @@ def test_build_diagnostics_bundle_redacts_config_and_logs(tmp_path):
     assert "private_creator" not in raw
     assert "super-secret-token" not in raw
     assert "discord.com/api/webhooks/private" not in raw
-    assert "C:\\Users\\Owner" not in raw
+    assert "C:\\Users\\alice" not in raw

@@ -128,7 +128,7 @@ class TestMcpSurface:
         config = XPSTConfig()
         config.monitoring.dashboard_password_hash = "scrypt$deadbeef"
         if hasattr(config.monitoring, "dashboard_username"):
-            config.monitoring.dashboard_username = "alice"
+            config.monitoring.dashboard_username = "admin"
 
         result = await _handle_config_show(config)
         text = result.content[0].text

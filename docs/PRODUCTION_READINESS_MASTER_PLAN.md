@@ -41,7 +41,7 @@ None of this is fatal. It's a finite, well-understood punch list. This plan sequ
 **Acceptance:** `pytest` green (or every skip/quarantine has a documented reason); CI green on all three OSes.
 
 ### W1 — macOS launch bug  ✅ DONE
-Splash sizing math extracted to `splash_sizing.py` (Qt-free, unit-tested), bounded to ≤480×360, `splash.finish()` + 120ms fallback. **Remaining:** Owner rebuilds `.app` to confirm visually (can't be reproduced on Linux). Follow-up (branding, W5): the splash still shows the "X" image — what it shows is a brand decision.
+Splash sizing math extracted to `splash_sizing.py` (Qt-free, unit-tested), bounded to ≤480×360, `splash.finish()` + 120ms fallback. **Remaining:** the owner rebuilds `.app` to confirm visually (can't be reproduced on Linux). Follow-up (branding, W5): the splash still shows the "X" image — what it shows is a brand decision.
 
 ### W2 — Security & enterprise hardening
 | Sev | Issue | Fix | Files |
@@ -100,7 +100,7 @@ Layered: unit (pure logic) → integration (boundaries, mocked providers/ffmpeg)
 
 1. **W0** (suite honest) — unblocks trustworthy iteration. *Starting now.*
 2. Then parallel: **W2** (security) + **W3** (cross-platform/frozen-paths) + **W6 Phase 2** (KB) + **W4** (UI design-system pass).
-3. **W5** (branding) gated on Owner's direction — it's the one workstream that needs taste, not just engineering.
+3. **W5** (branding) gated on the owner's direction — it's the one workstream that needs taste, not just engineering.
 4. **W7** continuously.
 
-Branding and the macOS rebuild-confirm are the two items that need Owner in the loop. Everything else is executable now.
+Branding and the macOS rebuild-confirm are the two items that need the owner in the loop. Everything else is executable now.

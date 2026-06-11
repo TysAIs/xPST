@@ -353,7 +353,7 @@ xPST at the tip of feat/knowledge-base merges to main as a release-grade product
 
 ## Verification
 
-ISC-61: owner review — Owner compiled the /goal from the spec+prompt and set it 2026-06-11 (goal stop-hook active); spec at docs/XPST-NORTH-STAR.md (445 lines).
+ISC-61: owner review — the owner compiled the /goal from the spec+prompt and set it 2026-06-11 (goal stop-hook active); spec at docs/XPST-NORTH-STAR.md (445 lines).
 ISC-62: goal set — /goal accepted ("Goal set: Ultracode ultracode — Ship xPST v0.1.0-rc..."); session Stop hook enforces the condition.
 ISC-174: probe — `rg -n "feat/knowledge-base" .github/workflows/ci.yml` → `5:    branches: ["main", "feat/knowledge-base", "codex/**"]` (commit 2ed15e6).
 ISC-95..98: greps — no `scale=-2:{resolution}` remains; build_scale_filter has `if(gt(a,1)`; `python -c` asserts IG resolution=1920 ≥1080 and profile='high' (commit b0bdbc2).

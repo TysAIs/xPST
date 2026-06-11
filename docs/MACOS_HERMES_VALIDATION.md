@@ -90,7 +90,7 @@ Expected result:
 
 ## Account-Owner Auth Tests
 
-These require Owner-owned credentials and should be run manually:
+These require owner-held credentials and should be run manually:
 
 ```bash
 xpst auth youtube
