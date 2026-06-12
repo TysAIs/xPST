@@ -25,6 +25,8 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from xpst.utils.platform import get_config_dir
+
 if TYPE_CHECKING:
     from fastapi import Request
 
@@ -46,7 +48,7 @@ def _load_dashboard_auth(config_dir: str) -> tuple[str, str]:
         return "", ""
 
 
-def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
+def _create_app(config_dir: str | None = None) -> FastAPI:
     """Create the FastAPI application with all endpoints.
 
     Args:
@@ -55,6 +57,7 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
     Returns:
         Configured FastAPI app instance.
     """
+    config_dir = str(Path(config_dir).expanduser() if config_dir is not None else get_config_dir())
     app = FastAPI(
         title="xPST Dashboard",
         description="xPST cross-posting analytics and health API",
@@ -182,7 +185,7 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 def start_dashboard(
     port: int = 8080,
     host: str = "127.0.0.1",
-    config_dir: str = "~/.xpst",
+    config_dir: str | None = None,
 ) -> None:
     """Start the xPST dashboard API server.
 
@@ -200,6 +203,7 @@ def start_dashboard(
             without configured authentication.
         config_dir: Path to xPST config directory for reading state.
     """
+    config_dir = str(Path(config_dir).expanduser() if config_dir is not None else get_config_dir())
     logger.info("Starting xPST API Dashboard on http://%s:%d", host, port)
 
     if host not in _LOOPBACK_HOSTS:

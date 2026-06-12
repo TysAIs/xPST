@@ -206,8 +206,7 @@ class AppController(QObject):
         self._health_timer.timeout.connect(self._run_health_check)
         self._health_timer.start(self._health_check_interval)
 
-        # Thumbnail cache dir (routed through get_config_dir so Windows uses
-        # %APPDATA% rather than ~/.xpst — W3-4).
+        # Thumbnail cache dir follows the platform config directory.
         self._thumb_dir = get_config_dir() / "thumbnails"
         self._thumb_dir.mkdir(parents=True, exist_ok=True)
 
@@ -907,7 +906,7 @@ class AppController(QObject):
 
             import yaml
 
-            config_path = Path(getattr(self._config, "config_dir", "~/.xpst")).expanduser() / "config.yaml"
+            config_path = Path(getattr(self._config, "config_dir", str(get_config_dir()))).expanduser() / "config.yaml"
             config_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Load existing YAML config
@@ -1503,7 +1502,7 @@ class AppController(QObject):
         # Fallback: scan translations dir
         try:
             from pathlib import Path as _Path
-            translations_dir = _Path("~/.xpst/translations").expanduser()
+            translations_dir = get_config_dir() / "translations"
             bundled_dir = _Path(__file__).resolve().parent.parent / "i18n"
 
             langs: list[str] = []

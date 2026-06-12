@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import get_config_dir
 
 logger = get_logger(__name__)
 
@@ -70,13 +71,13 @@ class AnalyticsCollector:
     asyncio.gather. Caches results for 15 minutes to avoid API rate limits.
 
     Usage:
-        collector = AnalyticsCollector(config_dir="~/.xpst")
+        collector = AnalyticsCollector()
         data = await collector.collect_all()
         # data = {"youtube": {"vid1": {views:..., likes:...}, ...}, ...}
     """
 
-    def __init__(self, config_dir: str = "~/.xpst", cache_ttl: int = CACHE_TTL) -> None:
-        self.config_dir = str(Path(config_dir).expanduser())
+    def __init__(self, config_dir: str | None = None, cache_ttl: int = CACHE_TTL) -> None:
+        self.config_dir = str(Path(config_dir).expanduser() if config_dir is not None else get_config_dir())
         self._cache: dict[str, Any] = {}
         self._cache_time: float = 0
         self._cache_ttl = cache_ttl
@@ -201,7 +202,7 @@ class AnalyticsCollector:
                 # Try config-specified path
                 token_path = Path(
                     self._config.get("accounts", {}).get("youtube", {}).get(
-                        "token_file", "~/.xpst/credentials/youtube_token.json"
+                        "token_file", str(Path(self.config_dir) / "credentials" / "youtube_token.json")
                     )
                 ).expanduser()
 

@@ -1,14 +1,12 @@
-"""Tests for CLI commands with JSON output (item 30).
+﻿"""Tests for CLI commands with JSON output (item 30).
 
 Uses Click's CliRunner to invoke commands and verify JSON output.
 """
 
 import json
 import logging
-import os
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import yaml
@@ -136,23 +134,18 @@ class TestConfigExportImport:
         with open(export_file, "w") as f:
             yaml.dump(exported, f)
 
-        # Import back — monkeypatch expanduser so import writes to tmp
-        real_config = tmp_path / "imported_config.yaml"
+        # Import back through XPST_CONFIG_DIR so default writes stay isolated.
+        import_dir = tmp_path / "imported"
+        real_config = import_dir / "config.yaml"
         # Copy original config to new location
         import shutil
+        import_dir.mkdir()
         shutil.copy(config_file, str(real_config))
 
-        orig_expanduser = os.path.expanduser
-        def fake_expanduser(path):
-            if path == "~/.xpst/config.yaml":
-                return str(real_config)
-            return orig_expanduser(path)
-        with patch("os.path.expanduser", side_effect=fake_expanduser):
-            with patch("pathlib.Path.expanduser", lambda self: real_config if str(self).endswith("config.yaml") and "~" in str(self) else self):
-                result = runner.invoke(main, [
-                    "--config", config_file,
-                    "config", "import", export_file, "--json",
-                ])
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "config", "import", export_file, "--json",
+        ], env={"XPST_CONFIG_DIR": str(import_dir)})
         assert result.exit_code == 0
         import_data = extract_json(result.output)
         assert import_data.get("ok") is True
@@ -341,3 +334,4 @@ class TestMcpCommand:
 
         assert result.exit_code == 0
         assert called["ok"] is True
+

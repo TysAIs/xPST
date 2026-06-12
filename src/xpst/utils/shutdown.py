@@ -28,6 +28,7 @@ from threading import Lock
 from typing import Any
 
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import get_config_dir
 
 logger = get_logger(__name__)
 
@@ -53,7 +54,7 @@ class ShutdownHandler:
     4. Temp files are removed
 
     Usage:
-        handler = ShutdownHandler(config_dir="~/.xpst")
+        handler = ShutdownHandler()
         handler.register()
 
         # In upload loop:
@@ -66,14 +67,14 @@ class ShutdownHandler:
             do_upload(...)
     """
 
-    def __init__(self, config_dir: str = "~/.xpst"):
+    def __init__(self, config_dir: str | None = None):
         """
         Initialize shutdown handler.
 
         Args:
             config_dir: Configuration directory for state persistence
         """
-        self.config_dir = Path(config_dir).expanduser()
+        self.config_dir = Path(config_dir).expanduser() if config_dir is not None else get_config_dir()
         self._shutdown_requested = False
         self._upload_state = UploadState()
         self._lock = Lock()

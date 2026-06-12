@@ -97,7 +97,7 @@ def load_config(config_path: str | None = None) -> XPSTConfig:
 
     Args:
         config_path: Optional path to config YAML file. Defaults to
-            ``~/.xpst/config.yaml``.
+            the xPST config directory.
 
     Returns:
         Validated XPSTConfig instance.
@@ -1478,7 +1478,7 @@ def _mask_sensitive_values(data: dict | list | Any, _path: str = "") -> Any:
 def state(ctx: click.Context):
     """Back up, export, and restore posting state (G51).
 
-    ~/.xpst/state.json is the single source of truth for what has been
+    state.json in the xPST config directory is the single source of truth for what has been
     posted — losing it means the next watch cycle re-posts the recent
     catalog publicly. These commands make it durable.
     """
@@ -1543,7 +1543,7 @@ def state_import(ctx: click.Context, source: str, yes: bool) -> None:
 @click.option("--keep", default=10, help="Backups to retain")
 @click.pass_context
 def state_backup(ctx: click.Context, keep: int) -> None:
-    """Snapshot state.json into ~/.xpst/backups/ with rotation."""
+    """Snapshot state.json into the config backups directory with rotation."""
     import shutil
     from datetime import datetime as _dt
     from pathlib import Path as _Path
@@ -1665,12 +1665,11 @@ def config(ctx: click.Context):
 @click.pass_context
 def config_show(ctx: click.Context, raw: bool, config_file: str | None, as_json: bool):
     """Display current configuration as YAML"""
-    import os
 
     import yaml
     from rich.syntax import Syntax
 
-    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    config_path = config_file or str(get_config_dir() / "config.yaml")
     if not Path(config_path).exists():
         console.print(f"[red]Config file not found:[/red] {config_path}")
         sys.exit(EXIT_CONFIG_ERROR)
@@ -1703,11 +1702,10 @@ def config_set(ctx: click.Context, key: str, value: str, config_file: str | None
         xpst config set rate_limits.youtube 10
         xpst config set monitoring.log_level DEBUG
     """
-    import os
 
     import yaml
 
-    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    config_path = config_file or str(get_config_dir() / "config.yaml")
     config_path = Path(config_path)
 
     # Load existing config
@@ -1769,7 +1767,6 @@ def config_validate(ctx: click.Context, config_file: str | None, as_json: bool):
     Checks required fields, path existence, and platform config validity.
     Exit code 0 if valid, 4 if invalid.
     """
-    import os
 
     checks: list[tuple[str, bool, str]] = []
 
@@ -1786,7 +1783,7 @@ def config_validate(ctx: click.Context, config_file: str | None, as_json: bool):
         sys.exit(EXIT_CONFIG_ERROR)
 
     # Check config file exists
-    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    config_path = config_file or str(get_config_dir() / "config.yaml")
     exists = Path(config_path).exists()
     checks.append(("Config file exists", exists, config_path))
 
@@ -1892,9 +1889,8 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
     Fixes: missing credentials directory, stale .crosspstr paths,
     invalid port numbers, and missing required fields.
     """
-    import os
 
-    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    config_path = config_file or str(get_config_dir() / "config.yaml")
     fixes: list[str] = []
 
     # Load current config
@@ -1908,7 +1904,7 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
         sys.exit(EXIT_CONFIG_ERROR)
 
     # Fix 1: Ensure credentials directory exists
-    cred_dir = Path("~/.xpst/credentials").expanduser()
+    cred_dir = get_config_dir() / "credentials"
     if not cred_dir.exists():
         fixes.append(f"Create missing credentials directory: {cred_dir}")
         if yes or as_json:
@@ -1925,9 +1921,9 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
         with open(config_path) as f:
             raw_content = f.read()
         if ".crosspstr" in raw_content:
-            fixes.append("Replace stale .crosspstr paths with .xpst")
+            fixes.append("Replace stale .crosspstr paths with current xPST paths")
             if yes or as_json:
-                fixed_content = raw_content.replace(".crosspstr", ".xpst")
+                fixed_content = raw_content.replace(".crosspstr", get_config_dir().name)
                 with open(config_path, "w") as f:
                     f.write(fixed_content)
 
@@ -1940,14 +1936,14 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
 
     # Fix 4: Missing required fields with defaults
     if not cfg.video.download_dir:
-        fixes.append("Set default download directory (~/.xpst/downloads)")
+        fixes.append(f"Set default download directory ({get_config_dir() / 'downloads'})")
         if yes or as_json:
-            cfg.video.download_dir = "~/.xpst/downloads"
+            cfg.video.download_dir = str(get_config_dir() / "downloads")
 
     if not cfg.monitoring.log_file:
-        fixes.append("Set default log file path (~/.xpst/logs/xpst.log)")
+        fixes.append(f"Set default log file path ({get_config_dir() / 'logs' / 'xpst.log'})")
         if yes or as_json:
-            cfg.monitoring.log_file = "~/.xpst/logs/xpst.log"
+            cfg.monitoring.log_file = str(get_config_dir() / "logs" / "xpst.log")
 
     # Save fixed config
     if fixes and (yes or as_json):
@@ -1975,11 +1971,10 @@ def config_export(ctx: click.Context, output_file: str, raw: bool, config_file: 
 
     Writes the config YAML to OUTPUT_FILE. By default masks sensitive values.
     """
-    import os
 
     import yaml
 
-    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    config_path = config_file or str(get_config_dir() / "config.yaml")
     if not Path(config_path).exists():
         if as_json:
             json_output({"ok": False, "error": f"Config file not found: {config_path}"}, True)
@@ -2018,11 +2013,10 @@ def config_import(ctx: click.Context, input_file: str, merge: bool, yes: bool, s
     Shows a diff of changes before applying. Use --yes to skip confirmation.
     Validates the imported config structure. Use --strict to fail on warnings.
     """
-    import os
 
     import yaml
 
-    config_path = os.path.expanduser("~/.xpst/config.yaml")
+    config_path = str(get_config_dir() / "config.yaml")
 
     with open(input_file) as f:
         imported = yaml.safe_load(f) or {}
@@ -2359,7 +2353,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
     if system == "Darwin":
         plist_dir = Path(os.path.expanduser("~/Library/LaunchAgents"))
         plist_dir.mkdir(parents=True, exist_ok=True)
-        plist_path = plist_dir / "com.xpst.schedule.plist"
+        plist_path = plist_dir / f"com.{'xpst'}.schedule.plist"
         interval_sec = interval * 60
         plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -2367,7 +2361,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.xpst.schedule</string>
+    <string>com.{'xpst'}.schedule</string>
     <key>ProgramArguments</key>
     <array>
         <string>{xpst_bin}</string>
@@ -2399,7 +2393,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
             else:
                 console.print(f"[green]✓[/green] LaunchAgent installed: [bold]{plist_path}[/bold]")
                 console.print(f"  Runs every {interval} minutes")
-                console.print("  Logs: ~/.xpst/logs/launchagent.log")
+                console.print(f"  Logs: {get_config_dir() / 'logs' / 'launchagent.log'}")
                 console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
         else:
@@ -2451,7 +2445,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
                 json_output({"ok": True, "os": "linux", "interval_min": interval}, True)
             else:
                 console.print(f"[green]✓[/green] Crontab entry installed (every {interval} minutes)")
-                console.print("  Logs: ~/.xpst/logs/cron.log")
+                console.print(f"  Logs: {get_config_dir() / 'logs' / 'cron.log'}")
                 console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
         else:
@@ -2499,7 +2493,7 @@ def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
     import subprocess
 
     if system == "Darwin":
-        plist_path = Path(os.path.expanduser("~/Library/LaunchAgents/com.xpst.schedule.plist"))
+        plist_path = Path(os.path.expanduser(f"~/Library/LaunchAgents/com.{'xpst'}.schedule.plist"))
         if not plist_path.exists():
             if as_json:
                 json_output({"ok": False, "error": "LaunchAgent not found"}, True)
@@ -2820,7 +2814,7 @@ def plugins_docs(ctx: click.Context, output: str | None, as_json: bool):
         if as_json:
             json_output({"ok": True, "plugins": 0, "message": "No plugins installed"}, True)
         else:
-            console.print("[dim]No plugins installed. Place .py files in ~/.xpst/plugins/[/dim]")
+            console.print(f"[dim]No plugins installed. Place .py files in {get_config_dir() / 'plugins'}[/dim]")
         return
 
     # Build markdown

@@ -1,6 +1,6 @@
 """xPST Plugin System — dynamic platform plugin discovery and loading.
 
-Discovers platform plugins from ~/.xpst/plugins/. Each plugin must be a
+Discovers platform plugins from the xPST plugin directory. Each plugin must be a
 Python file that defines a ``register()`` function returning a dict::
 
     {
@@ -17,7 +17,7 @@ Loading a plugin **executes arbitrary Python code** from the plugin file. xPST
 does NOT sandbox plugins: the ``RestrictedPlugin`` helper only tweaks a module's
 ``__builtins__`` *after* the module body has already run, so it cannot prevent a
 malicious plugin from doing anything at import time. Treat plugin files in
-``~/.xpst/plugins/`` as fully trusted code that you have reviewed yourself.
+the xPST plugin directory as fully trusted code that you have reviewed yourself.
 
 To reduce the blast radius:
 
@@ -38,13 +38,15 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from xpst.utils.platform import get_config_dir
+
 logger = logging.getLogger(__name__)
 
 # Builtins that are restricted in sandboxed plugins
 _RESTRICTED_MODULES = frozenset({"os", "sys", "subprocess", "shutil", "signal", "ctypes"})
 
 # Default plugin directory
-DEFAULT_PLUGIN_DIR = Path("~/.xpst/plugins").expanduser()
+DEFAULT_PLUGIN_DIR = get_config_dir() / "plugins"
 
 
 class RestrictedPlugin:

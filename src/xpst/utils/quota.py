@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import get_config_dir
 
 logger = get_logger(__name__)
 
@@ -132,14 +133,14 @@ class QuotaManager:
         "tiktok": {"daily_limit": 5, "hourly_limit": None},     # Conservative
     }
 
-    def __init__(self, state_dir: str = "~/.xpst"):
+    def __init__(self, state_dir: str | None = None):
         """
         Initialize quota manager.
 
         Args:
             state_dir: Directory to persist quota state
         """
-        self.state_dir = Path(state_dir).expanduser()
+        self.state_dir = Path(state_dir).expanduser() if state_dir is not None else get_config_dir()
         self.state_file = self.state_dir / "quotas.json"
 
         # Load or create quotas

@@ -10,6 +10,7 @@ from typing import Any
 
 from xpst.state_manager import StateManager as NewStateManager
 from xpst.state_store import StateStore
+from xpst.utils.platform import get_config_dir
 
 
 class StateManager:
@@ -25,7 +26,7 @@ class StateManager:
         if state_dir is not None:
             config_or_dir = state_dir
         if config_or_dir is None:
-            config_or_dir = Path.home() / ".xpst"
+            config_or_dir = get_config_dir()
         config_dir = config_or_dir.config_dir if hasattr(config_or_dir, 'config_dir') else config_or_dir
 
         self.config_dir = config_dir

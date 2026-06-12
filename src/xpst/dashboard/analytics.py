@@ -17,6 +17,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from xpst.utils.platform import get_config_dir
+
 logger = logging.getLogger(__name__)
 
 # Try to import CredentialStore
@@ -57,7 +59,7 @@ PLATFORM_BADGE_LABELS = {
 }
 
 
-def load_state(config_dir: str = "~/.xpst") -> dict[str, Any]:
+def load_state(config_dir: str | None = None) -> dict[str, Any]:
     """Load the current state.json and return the raw dict.
 
     Args:
@@ -68,7 +70,8 @@ def load_state(config_dir: str = "~/.xpst") -> dict[str, Any]:
         doesn't exist or is corrupted.
     """
 
-    state_path = Path(config_dir).expanduser() / "state.json"
+    root = Path(config_dir).expanduser() if config_dir is not None else get_config_dir()
+    state_path = root / "state.json"
     if not state_path.exists():
         return {"posted_videos": {}, "health": {"platforms": {}, "total_processed": 0}}
     try:
@@ -134,20 +137,20 @@ class AnalyticsCollector:
     Falls back to state.json data for basic post tracking.
     """
 
-    def __init__(self, config_dir: str = "~/.xpst") -> None:
+    def __init__(self, config_dir: str | None = None) -> None:
         """Initialize analytics collector and load xPST config.
 
         Args:
             config_dir: Path to xPST config directory.
         """
-        self.config_dir = config_dir
+        self.config_dir = str(Path(config_dir).expanduser() if config_dir is not None else get_config_dir())
         self._yt_service = None  # Cached YouTube Analytics service
         self._ig_client = None  # Cached instagrapi Client
         self._x_client = None  # Cached twikit Client
         self._cred_store = None
         if HAS_CREDENTIAL_STORE:
             try:
-                self._cred_store = CredentialStore(config_dir)
+                self._cred_store = CredentialStore(self.config_dir)
             except Exception as e:
                 logger.debug(f"Could not create CredentialStore: {e}")
         self._load_config()

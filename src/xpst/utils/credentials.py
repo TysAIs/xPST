@@ -23,6 +23,7 @@ import stat
 from pathlib import Path
 
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import get_config_dir
 
 logger = get_logger(__name__)
 
@@ -77,13 +78,13 @@ class CredentialStore:
 
     SERVICE_NAME = "xpst"
 
-    def __init__(self, config_dir: str = "~/.xpst"):
+    def __init__(self, config_dir: str | None = None):
         """Initialize credential store.
 
         Args:
             config_dir: Configuration directory for fallback storage
         """
-        self.config_dir = Path(config_dir).expanduser()
+        self.config_dir = Path(config_dir).expanduser() if config_dir is not None else get_config_dir()
         self.creds_dir = self.config_dir / "credentials"
         self.creds_dir.mkdir(parents=True, exist_ok=True)
         self._keyring_index_file = self.creds_dir / "_keyring_index.json"
