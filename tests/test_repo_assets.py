@@ -158,6 +158,8 @@ def test_release_workflow_preserves_required_ship_gates():
     assert "actions/attest@v4" in python_uses
     python_step_text = "\n".join(str(step) for step in workflow["jobs"]["build-python"]["steps"])
     assert "release/python/*" in python_step_text
+    assert "!release/python/SHA256SUMS" in python_step_text
+    assert "!release/python/SHA512SUMS" in python_step_text
 
     windows_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-windows"]["steps"])
     assert "pyinstaller --clean --noconfirm build_windows.spec" in windows_steps
@@ -172,6 +174,8 @@ def test_release_workflow_preserves_required_ship_gates():
     assert "actions/attest@v4" in windows_uses
     windows_step_text = "\n".join(str(step) for step in workflow["jobs"]["build-windows"]["steps"])
     assert "release/windows/*" in windows_step_text
+    assert "!release/windows/SHA256SUMS" in windows_step_text
+    assert "!release/windows/SHA512SUMS" in windows_step_text
 
     macos_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-macos"]["steps"])
     assert "bash scripts/verify_macos.sh" in macos_steps
@@ -182,10 +186,23 @@ def test_release_workflow_preserves_required_ship_gates():
     macos_uses = "\n".join(str(step.get("uses", "")) for step in workflow["jobs"]["build-macos"]["steps"])
     assert "actions/attest@v4" in macos_uses
     assert "release/*" in macos_step_text
+    assert "!release/SHA256SUMS" in macos_step_text
+    assert "!release/SHA512SUMS" in macos_step_text
     verify_macos = (ROOT / "scripts" / "verify_macos.sh").read_text(encoding="utf-8")
     assert "MACOS_CODESIGN_IDENTITY" in verify_macos
     assert "bash scripts/sign_macos.sh dist/xPST.app" in verify_macos
     assert "--require-developer-id --require-notarized" in verify_macos
+
+    linux_step_text = "\n".join(str(step) for step in workflow["jobs"]["build-linux"]["steps"])
+    assert "release/linux/*" in linux_step_text
+    assert "!release/linux/SHA256SUMS" in linux_step_text
+    assert "!release/linux/SHA512SUMS" in linux_step_text
+
+    release_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["github-release"]["steps"])
+    assert "cd release-artifacts" in release_steps
+    assert "rm -f SHA256SUMS SHA512SUMS" in release_steps
+    assert "sha256sum > SHA256SUMS" in release_steps
+    assert "sha512sum > SHA512SUMS" in release_steps
 
 
 def test_desktop_package_specs_include_runtime_assets_and_dynamic_imports():
