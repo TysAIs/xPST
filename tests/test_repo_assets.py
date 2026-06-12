@@ -133,6 +133,11 @@ def test_release_workflow_preserves_required_ship_gates():
     assert workflow["permissions"]["id-token"] == "write"
     assert workflow["permissions"]["attestations"] == "write"
     assert workflow["jobs"]["github-release"]["needs"] == ["build-python", "build-windows", "build-linux", "build-macos"]
+    release_step = next(
+        step for step in workflow["jobs"]["github-release"]["steps"]
+        if step.get("uses") == "softprops/action-gh-release@v2"
+    )
+    assert release_step["with"]["prerelease"] == "${{ contains(github.ref_name, '-rc') }}"
 
     # W3-2: the Linux desktop release lane must build, smoke, and attest a binary.
     linux_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-linux"]["steps"])
