@@ -3,6 +3,8 @@ core CLI can attach this group without loading faster-whisper / fastembed /
 lancedb."""
 from __future__ import annotations
 
+import json as _json
+
 import click
 from rich.console import Console
 
@@ -85,8 +87,6 @@ def kb_add(source: str, workspace: str) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
 def kb_query(text: str, workspace: str, limit: int, as_json: bool) -> None:
     """Semantic search over your content (substring fallback, cited)."""
-    import json as _json
-
     from xpst.knowledge.query import query_nuggets
 
     result = query_nuggets(text, workspace=workspace, k=limit)
@@ -201,7 +201,8 @@ def kb_organize(workspace: str, threshold: float | None) -> None:
 
 @kb.command("areas")
 @click.option("--workspace", "-w", default="default", help="Workspace name")
-def kb_areas(workspace: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+def kb_areas(workspace: str, as_json: bool) -> None:
     """List discovered areas in course order (beginner -> advanced)."""
     from xpst.knowledge.organize.difficulty import order_areas
     from xpst.knowledge.store.json_store import JsonKnowledgeStore
@@ -210,6 +211,13 @@ def kb_areas(workspace: str) -> None:
     ws = Workspace.resolve(workspace)
     store = JsonKnowledgeStore(ws.nuggets_path)
     areas = order_areas(store.areas())
+    if as_json:
+        console.print_json(_json.dumps({
+            "workspace": ws.name,
+            "area_count": len(areas),
+            "areas": [area.to_dict() for area in areas],
+        }))
+        return
     if not areas:
         console.print("[yellow]No areas yet. Run 'xpst kb organize'.[/yellow]")
         return
@@ -224,7 +232,8 @@ def kb_areas(workspace: str) -> None:
 @click.option("--workspace", "-w", default="default", help="Workspace name")
 @click.option("--area", "-a", "area_id", default=None,
               help="Assemble only this area (by id)")
-def kb_course(workspace: str, area_id: str | None) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+def kb_course(workspace: str, area_id: str | None, as_json: bool) -> None:
     """Emit the organized outline (areas -> ordered, cited nuggets) for an AI to
     write a course from. Pre-ordered beginner -> advanced."""
     from xpst.knowledge.course.assemble import assemble_course
@@ -234,6 +243,9 @@ def kb_course(workspace: str, area_id: str | None) -> None:
     ws = Workspace.resolve(workspace)
     store = JsonKnowledgeStore(ws.nuggets_path)
     course = assemble_course(store, workspace=ws.name, area_id=area_id)
+    if as_json:
+        console.print_json(_json.dumps(course.to_dict()))
+        return
     if not course.areas:
         console.print(
             "[yellow]Nothing to assemble. Ingest with 'xpst kb add' and "
@@ -255,7 +267,8 @@ def kb_course(workspace: str, area_id: str | None) -> None:
 
 @kb.command("doctor")
 @click.option("--workspace", "-w", default="default", help="Workspace name")
-def kb_doctor(workspace: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+def kb_doctor(workspace: str, as_json: bool) -> None:
     """Health-check the knowledge base (read-only): deps, store integrity,
     queue state, embedding consistency, orphaned areas/nuggets."""
     from xpst.knowledge.doctor import (
@@ -268,6 +281,11 @@ def kb_doctor(workspace: str) -> None:
 
     ws = Workspace.resolve(workspace)
     report = diagnose(ws)
+    if as_json:
+        console.print_json(_json.dumps(report.to_dict()))
+        if not report.ok:
+            raise SystemExit(1)
+        return
     style = {
         SEVERITY_OK: "green",
         SEVERITY_WARNING: "yellow",
