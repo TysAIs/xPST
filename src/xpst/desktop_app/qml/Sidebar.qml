@@ -59,17 +59,14 @@ Rectangle {
         Item { Layout.preferredHeight: theme.spacingXl }
 
         Repeater {
-            // Icons routed through the bundled Lucide icon font (W4-3/W4-5).
-            // The Analytics entry previously used a corrupted U+FFFD glyph; all
-            // nav icons now use real font glyphs so none render as tofu boxes.
             model: [
-                { label: "Dashboard", icon: Icons.dashboard, page: "dashboard" },
-                { label: "Content",   icon: Icons.content,   page: "content" },
-                { label: "Analytics", icon: Icons.analytics, page: "analytics" },
-                { label: "Connect",   icon: Icons.connect,   page: "connect" },
-                { label: "Schedule",  icon: Icons.schedule,  page: "schedule" },
-                { label: "Settings",  icon: Icons.settings,  page: "settings" },
-                { label: "About",     icon: Icons.about,     page: "about" }
+                { label: "Dashboard", icon: theme.iconDashboard, page: "dashboard" },
+                { label: "Content",   icon: theme.iconContent,   page: "content" },
+                { label: "Analytics", icon: theme.iconAnalytics, page: "analytics" },
+                { label: "Connect",   icon: theme.iconConnect,   page: "connect" },
+                { label: "Schedule",  icon: theme.iconSchedule,  page: "schedule" },
+                { label: "Settings",  icon: theme.iconSettings,  page: "settings" },
+                { label: "About",     icon: theme.iconAbout,     page: "about" }
             ]
 
             Rectangle {

@@ -48,6 +48,21 @@ def test_glyph_map_is_complete_and_pua():
     assert ig.glyph_map(), "glyph_map must return a fresh dict each call"
 
 
+def test_theme_provider_exposes_sidebar_nav_icons():
+    pytest.importorskip("PySide6")
+
+    from xpst.desktop_app.backend import ThemeProvider
+
+    theme = ThemeProvider()
+    assert theme.iconDashboard == ig.glyph("dashboard")
+    assert theme.iconContent == ig.glyph("content")
+    assert theme.iconAnalytics == ig.glyph("analytics")
+    assert theme.iconConnect == ig.glyph("connect")
+    assert theme.iconSchedule == ig.glyph("schedule")
+    assert theme.iconSettings == ig.glyph("settings")
+    assert theme.iconAbout == ig.glyph("about")
+
+
 def test_icon_glyphs_is_qt_free():
     code = (
         "import sys; from xpst.desktop_app import icon_glyphs as ig; "
