@@ -33,7 +33,7 @@ from xpst.engine import CrossPostEngine, CrossPostResult
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger, setup_logging
-from xpst.utils.platform import get_config_dir
+from xpst.utils.platform import ensure_ffmpeg, get_config_dir
 from xpst.utils.quota import QuotaManager
 
 console = Console()
@@ -47,6 +47,23 @@ EXIT_AUTH_FAILURE = 2
 EXIT_RATE_LIMIT = 3
 EXIT_CONFIG_ERROR = 4
 EXIT_PLATFORM_UNAVAILABLE = 10
+EXIT_FFMPEG_NOT_FOUND = 3
+
+FFMPEG_NOT_FOUND_ERROR = {
+    "ok": False,
+    "error": "ffmpeg_not_found",
+    "remedy": "install ffmpeg and ensure it is on PATH",
+}
+
+
+def _guard_ffmpeg(as_json: bool, quiet: bool = False) -> None:
+    if ensure_ffmpeg() is not None:
+        return
+    if as_json:
+        json_output(FFMPEG_NOT_FOUND_ERROR, True)
+    elif not quiet:
+        console.print("[red]FFmpeg not found.[/red] Install ffmpeg and ensure it is on PATH.")
+    raise click.exceptions.Exit(EXIT_FFMPEG_NOT_FOUND)
 
 
 def _session_health(config) -> dict[str, dict]:
@@ -244,6 +261,7 @@ def run(ctx: click.Context, bidirectional: bool, dry_run: bool, as_json: bool):
     """Check for new videos and post them"""
     config = load_config(ctx.obj.get("config_path"))
     quiet = ctx.obj.get("quiet", False)
+    _guard_ffmpeg(as_json, quiet)
     setup_logging(
         log_level=config.monitoring.log_level,
         log_file=config.monitoring.log_file,
@@ -630,6 +648,7 @@ def providers(ctx: click.Context, as_json: bool):
 def health(ctx: click.Context, as_json: bool):
     """Test connectivity to all platforms (no uploads)"""
     config = load_config(ctx.obj.get("config_path"))
+    _guard_ffmpeg(as_json, ctx.obj.get("quiet", False))
     setup_logging(
         log_level=config.monitoring.log_level,
         log_file=config.monitoring.log_file,
