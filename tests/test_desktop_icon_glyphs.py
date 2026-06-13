@@ -521,6 +521,29 @@ def test_connect_x_cookie_dialog_checks_save_result():
     assert 'showToast("X cookies saved", false)' in connect
 
 
+def test_connect_setup_loads_saved_choices_from_config():
+    from pathlib import Path
+
+    connect = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ConnectPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "function loadSavedChoices()" in connect
+    assert "connectPage.loadSavedChoices()" in connect
+    assert "var cfg = JSON.parse(controller.configData)" in connect
+    assert "connectPage.onboardingLocalPath = cfg.local.path || \"\"" in connect
+    assert "connectPage.onboardingTikTokUsername = cfg.tiktok.username || \"\"" in connect
+    assert "connectPage.onboardingYouTube = cfg.youtube.enabled" in connect
+    assert "connectPage.onboardingInstagram = cfg.instagram.enabled" in connect
+    assert "connectPage.onboardingX = cfg.x.enabled" in connect
+
+
 def test_toast_text_is_bounded_and_wrapped():
     from pathlib import Path
 

@@ -32,12 +32,14 @@ Page {
             try {
                 connectPage.healthData = JSON.parse(controller.platformHealth)
             } catch(e) {}
+            connectPage.loadSavedChoices()
             connectPage.loadProviders()
             connectPage.loadReadiness()
         }
     }
 
     Component.onCompleted: {
+        loadSavedChoices()
         loadProviders()
         loadReadiness()
     }
@@ -81,6 +83,24 @@ Page {
             var parsed = JSON.parse(raw)
             if (parsed.ok && parsed.readiness)
                 connectPage.readinessData = parsed.readiness
+        } catch(e) {}
+    }
+
+    function loadSavedChoices() {
+        if (typeof controller === "undefined" || !controller.configData)
+            return
+        try {
+            var cfg = JSON.parse(controller.configData)
+            if (cfg.local && cfg.local.path !== undefined)
+                connectPage.onboardingLocalPath = cfg.local.path || ""
+            if (cfg.tiktok && cfg.tiktok.username !== undefined)
+                connectPage.onboardingTikTokUsername = cfg.tiktok.username || ""
+            if (cfg.youtube && cfg.youtube.enabled !== undefined)
+                connectPage.onboardingYouTube = cfg.youtube.enabled
+            if (cfg.instagram && cfg.instagram.enabled !== undefined)
+                connectPage.onboardingInstagram = cfg.instagram.enabled
+            if (cfg.x && cfg.x.enabled !== undefined)
+                connectPage.onboardingX = cfg.x.enabled
         } catch(e) {}
     }
 
