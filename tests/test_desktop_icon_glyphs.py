@@ -459,6 +459,29 @@ def test_settings_download_dir_round_trips_as_video_config():
     assert "settings.download_dir = downloadDir" not in settings
 
 
+def test_settings_notification_switches_round_trip_config():
+    from pathlib import Path
+
+    settings = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "SettingsPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "property bool postCompletionAlerts" in settings
+    assert "property bool errorNotifications" in settings
+    assert "postCompletionAlerts = cfg.notifications.enabled !== false" in settings
+    assert "errorNotifications = cfg.notifications.enabled !== false" in settings
+    assert "notifications: {" in settings
+    assert "on_success: postCompletionAlerts" in settings
+    assert "on_failure: errorNotifications" in settings
+    assert "checked: true" not in settings
+
+
 def test_toast_text_is_bounded_and_wrapped():
     from pathlib import Path
 

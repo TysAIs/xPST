@@ -779,6 +779,14 @@ class AppController(QObject):
                     "path": getattr(self._config.local, "path", ""),
                 }
 
+            if hasattr(self._config, "notifications"):
+                notifications = self._config.notifications
+                cfg["notifications"] = {
+                    "enabled": getattr(notifications, "enabled", False),
+                    "on_success": getattr(notifications, "on_success", True),
+                    "on_failure": getattr(notifications, "on_failure", True),
+                }
+
             self._config_data = json.dumps(cfg, default=str)
         except Exception as exc:
             logger.warning("Config refresh error: %s", exc)

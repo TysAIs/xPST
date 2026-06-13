@@ -16,6 +16,8 @@ Page {
     property bool tiktokEnabled: true
     property int rateLimitPosts: 10
     property int rateLimitMinutes: 60
+    property bool postCompletionAlerts: true
+    property bool errorNotifications: true
     property bool mcpRunning: false
     property bool mcpReady: false
     property int mcpPid: 0
@@ -105,6 +107,10 @@ Page {
             if (cfg.video) {
                 downloadDir = cfg.video.download_dir || ""
             }
+            if (cfg.notifications) {
+                postCompletionAlerts = cfg.notifications.enabled !== false && cfg.notifications.on_success !== false
+                errorNotifications = cfg.notifications.enabled !== false && cfg.notifications.on_failure !== false
+            }
 
             // Load rate limits
             if (cfg.rate_limits) {
@@ -183,6 +189,11 @@ Page {
             },
             video: {
                 download_dir: downloadDir
+            },
+            notifications: {
+                enabled: postCompletionAlerts || errorNotifications,
+                on_success: postCompletionAlerts,
+                on_failure: errorNotifications
             },
             monitoring: {
                 log_level: "INFO"
@@ -527,7 +538,8 @@ Page {
                                 Layout.fillWidth: true
                             }
                             Switch {
-                                checked: true
+                                checked: settingsPage.postCompletionAlerts
+                                onCheckedChanged: settingsPage.postCompletionAlerts = checked
                                 indicator: Rectangle {
                                     implicitWidth: 44
                                     implicitHeight: 24
@@ -559,7 +571,8 @@ Page {
                                 Layout.fillWidth: true
                             }
                             Switch {
-                                checked: true
+                                checked: settingsPage.errorNotifications
+                                onCheckedChanged: settingsPage.errorNotifications = checked
                                 indicator: Rectangle {
                                     implicitWidth: 44
                                     implicitHeight: 24

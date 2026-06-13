@@ -158,6 +158,36 @@ def test_desktop_save_settings_persists_download_dir(tmp_path):
     assert controller._engine is None
 
 
+def test_desktop_save_settings_persists_notifications(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        refreshData=lambda: None,
+    )
+
+    raw = AppController.saveSettings(
+        controller,
+        json.dumps(
+            {
+                "notifications": {
+                    "enabled": True,
+                    "on_success": False,
+                    "on_failure": True,
+                },
+            }
+        ),
+    )
+    data = json.loads(raw)
+    reloaded = XPSTConfig.load(str(tmp_path / "config.yaml"))
+
+    assert data["ok"] is True
+    assert reloaded.notifications.enabled is True
+    assert reloaded.notifications.on_success is False
+    assert reloaded.notifications.on_failure is True
+
+
 def test_desktop_config_data_exposes_download_dir(tmp_path):
     config = XPSTConfig()
     config.video.download_dir = str(tmp_path / "downloads")
@@ -167,6 +197,23 @@ def test_desktop_config_data_exposes_download_dir(tmp_path):
     data = json.loads(controller._config_data)
 
     assert data["video"]["download_dir"] == str(tmp_path / "downloads")
+
+
+def test_desktop_config_data_exposes_notifications():
+    config = XPSTConfig()
+    config.notifications.enabled = True
+    config.notifications.on_success = False
+    config.notifications.on_failure = True
+    controller = SimpleNamespace(_config=config)
+
+    AppController._refresh_config(controller)
+    data = json.loads(controller._config_data)
+
+    assert data["notifications"] == {
+        "enabled": True,
+        "on_success": False,
+        "on_failure": True,
+    }
 
 
 @patch("xpst.readiness.check_yt_dlp", return_value="2026.1.1")
