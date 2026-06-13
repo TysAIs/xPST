@@ -1824,7 +1824,7 @@ Page {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                contentPage.editingPostId = modelData.postId || ""
+                                                contentPage.editingPostId = modelData.sourceId || modelData.postId || ""
                                                 // Build per-platform captions dict
                                                 var caps = {}
                                                 caps[modelData.platform || ""] = modelData.caption || ""

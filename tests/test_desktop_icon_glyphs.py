@@ -287,6 +287,24 @@ def test_content_delete_uses_source_id_and_row_selection_keys():
     assert "from all platforms" not in content
 
 
+def test_content_caption_editor_updates_source_id():
+    from pathlib import Path
+
+    content_page = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ContentPage.qml"
+    )
+    content = content_page.read_text(encoding="utf-8-sig")
+
+    assert "contentPage.editingPostId = modelData.sourceId || modelData.postId || \"\"" in content
+    assert "controller.updateCaption(contentPage.editingPostId, plat, caps[plat])" in content
+
+
 def test_content_video_preview_controls_use_theme_icons():
     from pathlib import Path
 

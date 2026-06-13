@@ -129,9 +129,10 @@ class PostListModel(QAbstractListModel):
                     ts = pinfo.get("timestamp") or downloaded_at
                     url = pinfo.get("url") or ""
                     pid = pinfo.get("id") or video_id
+                    platform_caption = pinfo.get("caption") or caption
                     new_posts.append({
                         "title": video_id,
-                        "caption": caption[:120],
+                        "caption": platform_caption[:120],
                         "platform": platform,
                         "status": "posted",
                         "timestamp": ts,
@@ -158,17 +159,18 @@ class PostListModel(QAbstractListModel):
         return json.dumps(self._posts, default=str)
 
     def get_post_captions(self, post_id: str) -> dict[str, str]:
-        """Return per-platform captions for a given postId."""
+        """Return per-platform captions for a given source or platform post id."""
         result: dict[str, str] = {}
         for p in self._posts:
-            if p.get("postId") == post_id:
+            if p.get("sourceId", p.get("postId")) == post_id or p.get("postId") == post_id:
                 result[p.get("platform", "")] = p.get("caption", "")
         return result
 
     def update_caption(self, post_id: str, platform: str, new_caption: str) -> None:
-        """Update caption for a specific post/platform entry in the model."""
+        """Update caption for a specific source/platform entry in the model."""
         for i, p in enumerate(self._posts):
-            if p.get("postId") == post_id and p.get("platform") == platform:
+            row_source_id = p.get("sourceId", p.get("postId"))
+            if (row_source_id == post_id or p.get("postId") == post_id) and p.get("platform") == platform:
                 p["caption"] = new_caption
                 idx = self.index(i)
                 self.dataChanged.emit(idx, idx, [self.CaptionRole])

@@ -684,9 +684,10 @@ class AppController(QObject):
                 thumbnail_path = vdata.get("thumbnail") or ""
 
                 for platform, pinfo in vdata.get("posted_to", {}).items():
+                    platform_caption = (pinfo.get("caption") or caption)[:120]
                     posts.append({
                         "title": video_id,
-                        "caption": caption,
+                        "caption": platform_caption,
                         "platform": platform,
                         "status": "posted",
                         "timestamp": pinfo.get("timestamp") or downloaded_at,
@@ -1686,17 +1687,48 @@ class AppController(QObject):
 
     @Slot(str, str, str)
     def updateCaption(self, post_id: str, platform: str, new_caption: str) -> None:
-        """Update caption for a specific post/platform in the post model.
+        """Update caption for a specific source/platform in state and the post model.
 
         Args:
-            post_id: The post identifier.
+            post_id: Source video identifier, with platform post id accepted as fallback.
             platform: The platform name.
             new_caption: The new caption text.
         """
-        # This is called from QML; the actual model update happens in main.py
-        # where we connect this signal.  Emit a notification on success.
-        self._pending_caption_update = (post_id, platform, new_caption)
-        self._captionUpdateReady.emit(post_id, platform, new_caption)
+        if self._state is None:
+            self.error.emit("StateManager not available")
+            return
+
+        try:
+            platform_key = platform.strip().lower()
+            posted = self._state._state.get("posted_videos", {})
+            source_id = post_id
+
+            if source_id not in posted:
+                for video_id, vdata in posted.items():
+                    pinfo = vdata.get("posted_to", {}).get(platform_key, {})
+                    if pinfo.get("id") == post_id:
+                        source_id = video_id
+                        break
+
+            if source_id not in posted:
+                self.notification.emit("Post was not found", True)
+                return
+
+            video = posted[source_id]
+            posted_to = video.get("posted_to", {})
+            if platform_key and platform_key in posted_to:
+                posted_to[platform_key]["caption"] = new_caption
+            else:
+                video["caption"] = new_caption
+
+            self._state.save()
+            self._pending_caption_update = (source_id, platform_key, new_caption)
+            self._captionUpdateReady.emit(source_id, platform_key, new_caption)
+            self.refreshData()
+            self.notification.emit("Caption saved", False)
+        except Exception as exc:
+            logger.error("updateCaption error: %s", exc)
+            self.error.emit(str(exc))
 
     _captionUpdateReady = Signal(str, str, str)
 
