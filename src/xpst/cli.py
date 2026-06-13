@@ -2117,6 +2117,14 @@ def schedule(ctx: click.Context):
     pass
 
 
+def _schedule_manager_for_context(ctx: click.Context):
+    """Return a schedule manager rooted at the active config directory."""
+    from xpst.schedule_manager import ScheduleManager
+
+    config = load_config(ctx.obj.get("config_path"))
+    return ScheduleManager(config_dir=config.config_dir)
+
+
 @schedule.command("add")
 @click.argument("file", type=click.Path())
 @click.option("--caption", "-c", required=True, help="Post caption text")
@@ -2134,8 +2142,6 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
         xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00' --repeat daily
     """
     from datetime import datetime
-
-    from xpst.schedule_manager import ScheduleManager
 
     video_path = Path(file)
     if not video_path.exists():
@@ -2157,7 +2163,7 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
 
     platform_list = [p.strip() for p in platforms.split(",")] if platforms else None
 
-    manager = ScheduleManager()
+    manager = _schedule_manager_for_context(ctx)
     effective_repeat = repeat_rule if repeat_rule and repeat_rule != "none" else None
     entry = manager.add(
         video_path=str(video_path.resolve()),
@@ -2185,9 +2191,7 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
 @click.pass_context
 def schedule_list(ctx: click.Context, as_json: bool):
     """List all scheduled posts"""
-    from xpst.schedule_manager import ScheduleManager
-
-    manager = ScheduleManager()
+    manager = _schedule_manager_for_context(ctx)
     entries = manager.list()
 
     if as_json:
@@ -2233,9 +2237,7 @@ def schedule_list(ctx: click.Context, as_json: bool):
 @click.pass_context
 def schedule_remove(ctx: click.Context, entry_id: str, as_json: bool):
     """Remove a scheduled post by ID"""
-    from xpst.schedule_manager import ScheduleManager
-
-    manager = ScheduleManager()
+    manager = _schedule_manager_for_context(ctx)
     if manager.remove(entry_id):
         if as_json:
             json_output({"ok": True, "removed": entry_id}, True)
@@ -2259,8 +2261,6 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
     Fetches posts where scheduled_time <= now and status is pending,
     then posts each one. Typically called by cron or manually.
     """
-    from xpst.schedule_manager import ScheduleManager
-
     as_json = as_json or bool(ctx.obj.get("json", False))
     config_obj = load_config(ctx.obj.get("config_path"))
     setup_logging(
@@ -2268,7 +2268,7 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
         log_file=config_obj.monitoring.log_file,
     )
 
-    manager = ScheduleManager()
+    manager = _schedule_manager_for_context(ctx)
     due = manager.get_due()
 
     if not due:

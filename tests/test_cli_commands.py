@@ -193,6 +193,34 @@ class TestScheduleAddJson:
         assert data["caption"] == "Test post"
         assert data["status"] == "pending"
 
+    def test_schedule_commands_use_active_config_dir(self, runner, tmp_path, monkeypatch, config_file):
+        """--config must route schedule storage to that config's directory."""
+        default_dir = tmp_path / "default-xpst"
+        default_dir.mkdir()
+        monkeypatch.setenv("XPST_CONFIG_DIR", str(default_dir))
+
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+        config_dir = Path(config_file).parent
+
+        add_result = runner.invoke(main, [
+            "--config", config_file,
+            "schedule", "add", str(video),
+            "--caption", "Custom config post",
+            "--at", "2026-12-25 10:00",
+            "--json",
+        ])
+        assert add_result.exit_code == 0, add_result.output
+        added = extract_json(add_result.output)
+
+        list_result = runner.invoke(main, ["--config", config_file, "schedule", "list", "--json"])
+        assert list_result.exit_code == 0, list_result.output
+        entries = extract_json(list_result.output)
+
+        assert [entry["id"] for entry in entries] == [added["id"]]
+        assert (config_dir / "schedule.json").exists()
+        assert not (default_dir / "schedule.json").exists()
+
 
 class TestScheduleListJson:
     """test_schedule_list_json: invoke `schedule list --json`, verify JSON."""
