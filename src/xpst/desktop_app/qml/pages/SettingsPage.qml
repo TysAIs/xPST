@@ -15,7 +15,6 @@ Page {
     property bool xEnabled: true
     property bool tiktokEnabled: true
     property int rateLimitPosts: 10
-    property int rateLimitMinutes: 60
     property bool postCompletionAlerts: true
     property bool errorNotifications: true
     property bool mcpRunning: false
@@ -28,7 +27,6 @@ Page {
     // ── Validation state ────────────────────────────────────────
     property bool hasErrors: false
     property string rateLimitPostsError: ""
-    property string rateLimitMinutesError: ""
     property string downloadDirError: ""
 
     function validateForm() {
@@ -40,14 +38,6 @@ Page {
             errors = true
         } else {
             rateLimitPostsError = ""
-        }
-
-        // Rate limit minutes: must be positive integer
-        if (rateLimitMinutes <= 0 || isNaN(rateLimitMinutes)) {
-            rateLimitMinutesError = "Must be a positive number"
-            errors = true
-        } else {
-            rateLimitMinutesError = ""
         }
 
         // Download directory: basic path validation
@@ -206,7 +196,6 @@ Page {
     function resetSettings() {
         loadFromConfig()
         rateLimitPostsError = ""
-        rateLimitMinutesError = ""
         downloadDirError = ""
         hasErrors = false
     }
@@ -428,7 +417,7 @@ Page {
                         ColumnLayout {
                             spacing: theme.spacingXs
                             Text {
-                                text: "Max Posts per Window"
+                                text: "Daily Upload Limit"
                                 font.pixelSize: 12
                                 color: theme.textSecondary
                             }
@@ -453,7 +442,7 @@ Page {
                                         if (!isNaN(v)) settingsPage.rateLimitPosts = v
                                         settingsPage.validateForm()
                                     }
-                                    Accessible.name: "Max Posts per Window input"
+                                    Accessible.name: "Daily Upload Limit input"
                                     Accessible.role: Accessible.EditableText
                                 }
                             }
@@ -465,44 +454,6 @@ Page {
                             }
                         }
 
-                        ColumnLayout {
-                            spacing: theme.spacingXs
-                            Text {
-                                text: "Window Duration (minutes)"
-                                font.pixelSize: 12
-                                color: theme.textSecondary
-                            }
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-                                radius: theme.radiusMd
-                                color: theme.surfaceAlt
-                                border.color: rateLimitMinutesError.length > 0 ? theme.error : theme.textMuted
-                                border.width: rateLimitMinutesError.length > 0 ? 2 : 1
-                                TextInput {
-                                    anchors.fill: parent
-                                    anchors.margins: theme.spacingMd
-                                    text: String(settingsPage.rateLimitMinutes)
-                                    color: theme.textPrimary
-                                    font.pixelSize: 13
-                                    inputMethodHints: Qt.ImhDigitsOnly
-                                    clip: true
-                                    onTextChanged: {
-                                        var v = parseInt(text)
-                                        if (!isNaN(v)) settingsPage.rateLimitMinutes = v
-                                        settingsPage.validateForm()
-                                    }
-                                    Accessible.name: "Window Duration input"
-                                    Accessible.role: Accessible.EditableText
-                                }
-                            }
-                            Text {
-                                text: rateLimitMinutesError
-                                font.pixelSize: 11
-                                color: theme.error
-                                visible: rateLimitMinutesError.length > 0
-                            }
-                        }
                     }
                 }
             }

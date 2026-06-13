@@ -482,6 +482,25 @@ def test_settings_notification_switches_round_trip_config():
     assert "checked: true" not in settings
 
 
+def test_settings_rate_limit_ui_matches_daily_config():
+    from pathlib import Path
+
+    settings = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "SettingsPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "Daily Upload Limit" in settings
+    assert "Window Duration" not in settings
+    assert "rateLimitMinutes" not in settings
+    assert "rateLimitMinutesError" not in settings
+
+
 def test_toast_text_is_bounded_and_wrapped():
     from pathlib import Path
 
