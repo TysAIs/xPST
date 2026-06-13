@@ -339,8 +339,10 @@ Rectangle {
                                 RowLayout {
                                     spacing: theme.spacingXs
                                     Text {
-                                        text: model.isError ? "!" : "OK"
-                                        font.pixelSize: 10
+                                        text: model.isError ? theme.iconError : theme.iconCheck
+                                        font.family: theme.iconFontFamily
+                                        font.pixelSize: 11
+                                        color: model.isError ? theme.error : theme.success
                                     }
                                     Text {
                                         text: model.message || ""

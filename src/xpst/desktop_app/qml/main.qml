@@ -14,6 +14,7 @@ ApplicationWindow {
     minimumHeight: 600
     title: "xPST - Cross-Posting Suite"
     color: theme.canvas
+    font.family: theme.fontFamily
 
     // Bind the Material style to the live ThemeProvider so native Material
     // controls follow the app theme instead of rendering default-purple (W4-6).
@@ -153,8 +154,10 @@ ApplicationWindow {
             spacing: 16
 
             Text {
-                text: "!"
+                text: theme.iconError
+                font.family: theme.iconFontFamily
                 font.pixelSize: 32
+                color: theme.error
                 Layout.alignment: Qt.AlignHCenter
             }
 
@@ -483,7 +486,8 @@ ApplicationWindow {
             spacing: 16
 
             Text {
-                text: "Video"
+                text: theme.iconVideo
+                font.family: theme.iconFontFamily
                 font.pixelSize: 28
                 font.weight: Font.DemiBold
                 color: "#ffffff"
@@ -540,7 +544,8 @@ ApplicationWindow {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "Video"
+                    text: theme.iconVideo
+                    font.family: theme.iconFontFamily
                     font.pixelSize: 36
                     color: theme.textMuted
                     visible: dropThumbnail.status !== Image.Ready
@@ -552,7 +557,7 @@ ApplicationWindow {
                 spacing: 4
                 Layout.fillWidth: true
                 Text {
-                    text: "Video " + (dropCaptionDialog.droppedPath ? dropCaptionDialog.droppedPath.split("/").pop() : "")
+                    text: "Video: " + (dropCaptionDialog.droppedPath ? dropCaptionDialog.droppedPath.split("/").pop() : "")
                     font.pixelSize: 14
                     font.weight: Font.DemiBold
                     color: theme.textPrimary

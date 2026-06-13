@@ -26,9 +26,11 @@ if TYPE_CHECKING:
 #: Family name the bundled Lucide TTF registers as. QML ``font.family`` bindings
 #: must use this exact string for the glyphs below to resolve.
 ICON_FONT_FAMILY = "lucide"
+UI_FONT_FAMILY = "Inter"
 
 #: Path segments (under the resource base) to the bundled icon font.
 ICON_FONT_RELATIVE_PARTS: tuple[str, ...] = ("assets", "fonts", "lucide.ttf")
+UI_FONT_RELATIVE_PARTS: tuple[str, ...] = ("assets", "fonts", "Inter.ttf")
 
 
 def icon_font_path() -> Path:
@@ -47,6 +49,13 @@ def icon_font_path() -> Path:
     from xpst.desktop_app.resource_path import resource_path
 
     return resource_path(*ICON_FONT_RELATIVE_PARTS)
+
+
+def ui_font_path() -> Path:
+    """Return the bundled Inter UI font path resolved against the project root."""
+    from xpst.desktop_app.resource_path import resource_path
+
+    return resource_path(*UI_FONT_RELATIVE_PARTS)
 
 #: Logical icon name -> codepoint (int) in the bundled Lucide font.
 #:

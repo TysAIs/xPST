@@ -950,8 +950,10 @@ Page {
                     spacing: theme.spacingSm
 
                     Text {
-                        text: "!"
+                        text: theme.iconError
+                        font.family: theme.iconFontFamily
                         font.pixelSize: 32
+                        color: theme.error
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
                     }
@@ -1409,6 +1411,60 @@ Page {
                     Layout.preferredWidth: 120
                     Accessible.name: "Sort content by"
                     Accessible.role: Accessible.ComboBox
+                    background: Rectangle {
+                        color: theme.surfaceCard
+                        radius: theme.radiusMd
+                        border.color: sortCombo.hovered || sortCombo.activeFocus ? theme.accent : theme.surfaceAlt
+                        border.width: 1
+                    }
+                    contentItem: Text {
+                        text: sortCombo.displayText
+                        color: theme.textPrimary
+                        font.pixelSize: 12
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: theme.spacingMd
+                        rightPadding: 28
+                        elide: Text.ElideRight
+                    }
+                    indicator: Text {
+                        anchors.right: parent.right
+                        anchors.rightMargin: theme.spacingMd
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "v"
+                        color: theme.textMuted
+                        font.pixelSize: 10
+                    }
+                    delegate: ItemDelegate {
+                        width: sortCombo.width
+                        height: 32
+                        contentItem: Text {
+                            text: modelData
+                            color: highlighted ? "#ffffff" : theme.textPrimary
+                            font.pixelSize: 12
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: highlighted ? theme.accent : theme.surfaceCard
+                        }
+                    }
+                    popup: Popup {
+                        y: sortCombo.height + 4
+                        width: sortCombo.width
+                        implicitHeight: contentItem.implicitHeight
+                        padding: 0
+                        contentItem: ListView {
+                            clip: true
+                            implicitHeight: contentHeight
+                            model: sortCombo.popup.visible ? sortCombo.delegateModel : null
+                            currentIndex: sortCombo.highlightedIndex
+                        }
+                        background: Rectangle {
+                            color: theme.surfaceCard
+                            radius: theme.radiusMd
+                            border.color: theme.surfaceAlt
+                            border.width: 1
+                        }
+                    }
                 }
 
                 Item { Layout.fillWidth: true }
@@ -1541,7 +1597,8 @@ Page {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "OK"
+                                    text: theme.iconCheck
+                                    font.family: theme.iconFontFamily
                                     font.pixelSize: 12
                                     font.weight: Font.DemiBold
                                     color: "#ffffff"
@@ -1592,7 +1649,8 @@ Page {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Video"
+                                    text: theme.iconVideo
+                                    font.family: theme.iconFontFamily
                                     font.pixelSize: contentPage.listViewMode ? 16 : 24
                                     color: theme.textMuted
                                     visible: thumbImage.status !== Image.Ready

@@ -154,12 +154,21 @@ Page {
                 Layout.preferredHeight: 36
                 radius: theme.radiusMd
                 color: theme.accent
-                Text {
+                RowLayout {
                     anchors.centerIn: parent
-                    text: "+ Schedule New"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#ffffff"
+                    spacing: theme.spacingXs
+                    Text {
+                        text: theme.iconPlus
+                        font.family: theme.iconFontFamily
+                        font.pixelSize: 12
+                        color: "#ffffff"
+                    }
+                    Text {
+                        text: "Schedule New"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        color: "#ffffff"
+                    }
                 }
                 MouseArea {
                     anchors.fill: parent
@@ -477,8 +486,10 @@ Page {
                         anchors.centerIn: parent
                         spacing: theme.spacingSm
                         Text {
-                            text: "Calendar"
+                            text: theme.iconCalendar
+                            font.family: theme.iconFontFamily
                             font.pixelSize: 24
+                            color: theme.textMuted
                             horizontalAlignment: Text.AlignHCenter
                             Layout.alignment: Qt.AlignHCenter
                         }

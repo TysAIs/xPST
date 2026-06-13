@@ -16,12 +16,19 @@ from xpst.desktop_app import icon_glyphs as ig
 
 def test_font_family_is_lucide():
     assert ig.ICON_FONT_FAMILY == "lucide"
+    assert ig.UI_FONT_FAMILY == "Inter"
 
 
 def test_icon_font_path_points_at_bundled_ttf():
     path = ig.icon_font_path()
     assert path.parts[-3:] == ("assets", "fonts", "lucide.ttf")
     assert path.exists(), f"bundled icon font missing at {path}"
+
+
+def test_ui_font_path_points_at_bundled_inter_ttf():
+    path = ig.ui_font_path()
+    assert path.parts[-3:] == ("assets", "fonts", "Inter.ttf")
+    assert path.exists(), f"bundled UI font missing at {path}"
 
 
 def test_glyph_returns_single_pua_char():
@@ -68,6 +75,7 @@ def test_theme_provider_exposes_sidebar_nav_icons():
     assert theme.iconCheck == ig.glyph("check")
     assert theme.iconError == ig.glyph("error")
     assert theme.iconEdit == ig.glyph("edit")
+    assert theme.iconPlus == ig.glyph("plus")
 
 
 def test_qml_does_not_use_emoji_or_fake_chart_history():
@@ -81,10 +89,27 @@ def test_qml_does_not_use_emoji_or_fake_chart_history():
     assert not offenders, "unpolished/fake UI tokens remain: " + ", ".join(offenders)
 
 
+def test_qml_avoids_text_as_icon_placeholders():
+    offenders = []
+    disallowed = (
+        'text: "!"',
+        'text: "OK"',
+        'text: "Video"',
+        'text: "Calendar"',
+        'text: "+ Schedule New"',
+    )
+    for path in _qml_files():
+        content = path.read_text(encoding="utf-8-sig")
+        for token in disallowed:
+            if token in content:
+                offenders.append(f"{path.name}:{token}")
+    assert not offenders, "text-as-icon placeholders remain: " + ", ".join(offenders)
+
+
 def test_icon_glyphs_is_qt_free():
     code = (
         "import sys; from xpst.desktop_app import icon_glyphs as ig; "
-        "ig.glyph('youtube'); ig.glyph_map(); ig.icon_font_path(); "
+        "ig.glyph('youtube'); ig.glyph_map(); ig.icon_font_path(); ig.ui_font_path(); "
         "assert not [n for n in sys.modules if n.split('.')[0] == 'PySide6']; "
         "print('ok')"
     )

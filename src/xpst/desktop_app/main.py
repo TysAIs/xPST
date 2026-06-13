@@ -269,6 +269,31 @@ def _load_icon_font() -> bool:
     return True
 
 
+def _load_ui_font() -> bool:
+    """Register the bundled Inter UI font before loading QML.
+
+    Headless/offscreen Qt environments can expose no system sans fonts. If the
+    Lucide icon font is the only registered TTF, normal labels fall back to it
+    and render as missing glyphs.
+    """
+    font_path = icon_glyphs.ui_font_path()
+    if not font_path.exists():
+        logger.warning("UI font not found at %s; text may use platform fallback.", font_path)
+        return False
+    font_id = QFontDatabase.addApplicationFont(str(font_path))
+    if font_id < 0:
+        logger.warning("Failed to register UI font %s with Qt.", font_path)
+        return False
+    families = QFontDatabase.applicationFontFamilies(font_id)
+    if icon_glyphs.UI_FONT_FAMILY not in families:
+        logger.warning(
+            "UI font registered as %s, expected %s; text metrics may drift.",
+            families,
+            icon_glyphs.UI_FONT_FAMILY,
+        )
+    return True
+
+
 def main(no_splash: bool = False) -> int:
     """Launch the xPST desktop application."""
     # Must use QApplication (not QGuiApplication) for system tray support
@@ -285,12 +310,13 @@ def main(no_splash: bool = False) -> int:
         import os
         os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Material")
 
-    # Register the bundled icon font so theme.icon* glyphs render (W4-5).
-    _load_icon_font()
-
     # Apply a platform-aware default UI font so text metrics don't drift on
     # macOS/Linux (W4-7). QML elements that don't set font.family inherit this.
+    _load_ui_font()
     app.setFont(QFont(_default_ui_font()))
+
+    # Register the bundled icon font so theme.icon* glyphs render (W4-5).
+    _load_icon_font()
 
     # ── Splash Screen ────────────────────────────────────────────────
     no_splash = "--no-splash" in sys.argv

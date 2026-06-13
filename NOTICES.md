@@ -40,6 +40,13 @@ xPST is dual licensed as `MIT OR Apache-2.0`. This file lists direct runtime and
 | fastembed | `knowledge` | `>=0.3` | Apache-2.0 | Knowledge base in-process embeddings |
 | lancedb | `knowledge` | `>=0.5` | Apache-2.0 | Knowledge base embedded vector store |
 
+## Bundled Desktop Assets
+
+| Asset | License | Role |
+|---|---|---|
+| Inter variable font | SIL Open Font License 1.1 | Native desktop UI text font |
+| Lucide icon font | ISC | Native desktop icon glyph font |
+
 ## License Compatibility Summary
 
 The direct dependency set is compatible with xPST's open-source distribution model when packaged carefully:

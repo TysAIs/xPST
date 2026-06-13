@@ -111,12 +111,28 @@ def _check_qt_lgpl_notice(root: Path) -> dict[str, Any]:
     return {"path": "NOTICES_QT_LGPL.md", "ok": not issues, "issues": issues}
 
 
+def _check_desktop_fonts(root: Path) -> dict[str, Any]:
+    issues: list[str] = []
+    required = [
+        root / "assets" / "fonts" / "Inter.ttf",
+        root / "assets" / "fonts" / "LICENSE-Inter.txt",
+        root / "assets" / "fonts" / "lucide.ttf",
+        root / "assets" / "fonts" / "LICENSE-lucide.txt",
+    ]
+    for path in required:
+        if not path.exists() or path.stat().st_size == 0:
+            issues.append(f"Missing bundled desktop font asset: {path.relative_to(root)}")
+
+    return {"path": "assets/fonts", "ok": not issues, "issues": issues}
+
+
 def verify_desktop_package(root: Path = ROOT) -> dict[str, Any]:
     """Return desktop package static verification results."""
     specs = [root / "build_windows.spec", root / "build_macos.spec"]
     results = [_check_spec(path) for path in specs]
 
     results.append(_check_qt_lgpl_notice(root))
+    results.append(_check_desktop_fonts(root))
 
     qml_pages = sorted((root / "src" / "xpst" / "desktop_app" / "qml" / "pages").glob("*.qml"))
     qml_issue = None if qml_pages else "No QML pages found"

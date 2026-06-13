@@ -1595,17 +1595,11 @@ class AppController(QObject):
 def _default_ui_font() -> str:
     """Return a sensible default UI font family for the current platform (W4-7).
 
-    The app previously hardcoded "Segoe UI", which only exists on Windows; on
-    macOS and Linux Qt silently substituted a different family, drifting the
-    text metrics the layout was tuned against. This returns the native UI font
-    per platform so each OS uses its intended family.
+    The app ships Inter so regular UI text never falls back to the bundled
+    Lucide icon font in headless, offscreen, or packaged environments where Qt
+    cannot see system sans fonts.
     """
-    if sys.platform == "darwin":
-        return "SF Pro Text"
-    if sys.platform.startswith("win"):
-        return "Segoe UI"
-    # Linux / other: a widely-installed, metrically-sane sans family.
-    return "Noto Sans"
+    return icon_glyphs.UI_FONT_FAMILY
 
 
 def _default_mono_font() -> str:
@@ -1815,6 +1809,10 @@ class ThemeProvider(QObject):
     def iconError(self): return icon_glyphs.glyph("error")
     @Property(str, constant=True)
     def iconEdit(self): return icon_glyphs.glyph("edit")
+
+    @Property(str, constant=True)
+    def iconPlus(self): return icon_glyphs.glyph("plus")
+
     @Property(str, constant=True)
     def iconDashboard(self): return icon_glyphs.glyph("dashboard")
     @Property(str, constant=True)

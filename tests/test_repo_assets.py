@@ -8,7 +8,11 @@ from urllib.parse import unquote
 
 import yaml
 
-from scripts.verify_desktop_package import _check_qt_lgpl_notice, verify_desktop_package
+from scripts.verify_desktop_package import (
+    _check_desktop_fonts,
+    _check_qt_lgpl_notice,
+    verify_desktop_package,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\((?!https?://)([^)]+)\)")
@@ -201,6 +205,21 @@ def test_desktop_package_gate_includes_qt_lgpl_notice():
     lgpl_checks = [check for check in result["checks"] if check["path"] == "NOTICES_QT_LGPL.md"]
     assert lgpl_checks, "verify gate must check the Qt/PySide6 LGPL notice"
     assert lgpl_checks[0]["ok"] is True
+
+
+def test_desktop_package_gate_includes_bundled_fonts():
+    result = verify_desktop_package(ROOT)
+
+    font_checks = [check for check in result["checks"] if check["path"] == "assets/fonts"]
+    assert font_checks, "verify gate must check bundled UI and icon fonts"
+    assert font_checks[0]["ok"] is True
+
+
+def test_desktop_font_gate_fails_when_fonts_missing(tmp_path):
+    check = _check_desktop_fonts(tmp_path)
+
+    assert check["ok"] is False
+    assert any("Inter.ttf" in issue for issue in check["issues"])
 
 
 def test_qt_lgpl_notice_gate_fails_when_notice_missing(tmp_path):
