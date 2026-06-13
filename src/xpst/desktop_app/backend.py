@@ -219,9 +219,7 @@ class AppController(QObject):
 
         # Wire error signal to notification signal
         self.error.connect(lambda msg: self.notification.emit(msg, True))
-        self.postComplete.connect(
-            lambda json_str: self.notification.emit("Post completed successfully", False)
-        )
+        self.postComplete.connect(self._notify_post_complete)
 
         # Initialise backends (best-effort)
         self._init_backends()
@@ -230,6 +228,50 @@ class AppController(QObject):
         self.refreshData()
 
     # ── Backend initialisation ───────────────────────────────────────
+
+    def _notify_post_complete(self, json_str: str) -> None:
+        """Emit a user-facing notification that matches the completed action."""
+        try:
+            payload = json.loads(json_str)
+        except (TypeError, json.JSONDecodeError):
+            self.notification.emit("Action completed", False)
+            return
+
+        if isinstance(payload, list):
+            if not payload:
+                self.notification.emit("No new posts were ready", False)
+                return
+            all_success = all(
+                item.get("all_success") for item in payload if isinstance(item, dict)
+            )
+            partial_success = any(
+                item.get("partial_success") for item in payload if isinstance(item, dict)
+            )
+            if all_success:
+                self.notification.emit("Post completed successfully", False)
+            elif partial_success:
+                self.notification.emit("Post partially completed", True)
+            else:
+                self.notification.emit("Post failed", True)
+            return
+
+        if not isinstance(payload, dict):
+            self.notification.emit("Action completed", False)
+            return
+
+        if payload.get("removed"):
+            if payload.get("platform_deleted"):
+                self.notification.emit("Post removed from platform and xPST", False)
+            else:
+                self.notification.emit("Post removed from xPST state only", False)
+            return
+
+        if payload.get("all_success"):
+            self.notification.emit("Post completed successfully", False)
+        elif payload.get("partial_success"):
+            self.notification.emit("Post partially completed", True)
+        else:
+            self.notification.emit("Post failed", True)
 
     def _init_backends(self) -> None:
         """Create backend objects, swallowing errors for missing deps."""

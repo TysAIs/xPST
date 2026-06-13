@@ -631,3 +631,50 @@ def test_desktop_update_caption_persists_platform_caption(tmp_path):
     idx = model.index(0, 0)
     role_names = {bytes(name).decode(): role for role, name in model.roleNames().items()}
     assert model.data(idx, role_names["caption"]) == "Edited YouTube caption"
+
+
+def test_desktop_post_complete_notifications_match_upload_result():
+    notifications = []
+    controller = AppController()
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.postComplete.emit(json.dumps({"all_success": True, "partial_success": False}))
+    controller.postComplete.emit(json.dumps({"all_success": False, "partial_success": True}))
+    controller.postComplete.emit(json.dumps({"all_success": False, "partial_success": False}))
+
+    assert notifications[-3:] == [
+        ("Post completed successfully", False),
+        ("Post partially completed", True),
+        ("Post failed", True),
+    ]
+
+
+def test_desktop_post_complete_notifications_match_delete_result():
+    notifications = []
+    controller = AppController()
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.postComplete.emit(json.dumps({"ok": True, "removed": "source/youtube", "platform_deleted": True}))
+    controller.postComplete.emit(json.dumps({"ok": True, "removed": "source/x", "platform_deleted": False}))
+
+    assert notifications[-2:] == [
+        ("Post removed from platform and xPST", False),
+        ("Post removed from xPST state only", False),
+    ]
+
+
+def test_desktop_post_complete_notifications_match_autoposter_result():
+    notifications = []
+    controller = AppController()
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.postComplete.emit(json.dumps([]))
+    controller.postComplete.emit(json.dumps([
+        {"all_success": False, "partial_success": True},
+        {"all_success": False, "partial_success": False},
+    ]))
+
+    assert notifications[-2:] == [
+        ("No new posts were ready", False),
+        ("Post partially completed", True),
+    ]
