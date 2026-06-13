@@ -773,7 +773,8 @@ def connect(ctx: click.Context, platform: str | None, test_only: bool):
     from xpst.connect import run_connect
 
     platforms = [platform] if platform else None
-    success = run_connect(platforms=platforms, test_only=test_only)
+    config = load_config(ctx.obj.get("config_path"))
+    success = run_connect(platforms=platforms, test_only=test_only, config=config)
     if not success:
         sys.exit(EXIT_AUTH_FAILURE)
 

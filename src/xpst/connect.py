@@ -593,18 +593,23 @@ async def test_connections(config: XPSTConfig) -> dict[str, bool]:
 # Main connect wizard
 # ──────────────────────────────────────────────
 
-def run_connect(platforms: list[str] | None = None, test_only: bool = False) -> bool:
+def run_connect(
+    platforms: list[str] | None = None,
+    test_only: bool = False,
+    config: XPSTConfig | None = None,
+) -> bool:
     """
     Run the connection wizard.
 
     Args:
         platforms: List of platforms to connect (None = all)
         test_only: If True, only test existing connections
+        config: Loaded config to use. Defaults to the standard config path.
 
     Returns:
         True if all selected platforms connected successfully
     """
-    config = XPSTConfig.load()
+    config = config or XPSTConfig.load()
     _get_creds_dir(config)
 
     console.print()

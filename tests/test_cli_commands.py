@@ -397,6 +397,30 @@ class TestProvidersJson:
         assert youtube["is_official_api"] is True
 
 
+class TestConnectCommand:
+    """Connect command should honor the global config path."""
+
+    def test_connect_uses_active_config(self, runner, config_file, monkeypatch):
+        captured = {}
+
+        def fake_run_connect(platforms=None, test_only=False, config=None):
+            captured["platforms"] = platforms
+            captured["test_only"] = test_only
+            captured["config_dir"] = config.config_dir
+            return True
+
+        monkeypatch.setattr("xpst.connect.run_connect", fake_run_connect)
+
+        result = runner.invoke(main, ["--config", config_file, "connect", "youtube", "--test"])
+
+        assert result.exit_code == 0, result.output
+        assert captured == {
+            "platforms": ["youtube"],
+            "test_only": True,
+            "config_dir": str(Path(config_file).parent),
+        }
+
+
 class TestDesktopCommand:
     """Desktop app command aliases should be discoverable."""
 
