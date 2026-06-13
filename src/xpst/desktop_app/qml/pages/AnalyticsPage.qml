@@ -52,6 +52,15 @@ Page {
         return theme.accent
     }
 
+    function platformIcon(platformName) {
+        var p = (platformName || "").toLowerCase()
+        if (p === "youtube") return theme.iconYouTube
+        if (p === "instagram") return theme.iconInstagram
+        if (p === "x") return theme.iconX
+        if (p === "tiktok") return theme.iconTikTok
+        return theme.iconAnalytics
+    }
+
     // Bar chart data: per-platform metrics for Canvas rendering
     property var chartPlatforms: {
         var result = []
@@ -587,17 +596,10 @@ Page {
                                 }
                                 Text {
                                     anchors.centerIn: parent
-                                    text: {
-                                        var p = (modelData.platform || "").toLowerCase()
-                                        if (p === "youtube") return "YT"
-                                        if (p === "instagram") return "IG"
-                                        if (p === "x") return "X"
-                                        if (p === "tiktok") return "TT"
-                                        return "P"
-                                    }
-                                    font.pixelSize: 12
-                                    font.weight: Font.DemiBold
-                                    color: theme.textSecondary
+                                    text: analyticsPage.platformIcon(modelData.platform)
+                                    font.family: theme.iconFontFamily
+                                    font.pixelSize: 16
+                                    color: analyticsPage.platformColor(modelData.platform)
                                 }
                             }
 

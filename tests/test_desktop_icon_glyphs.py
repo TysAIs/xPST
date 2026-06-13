@@ -105,6 +105,10 @@ def test_qml_avoids_text_as_icon_placeholders():
         'text: "Empty"',
         'text: "Edit"',
         'text: "+ Schedule New"',
+        'return "YT"',
+        'return "IG"',
+        'return "TT"',
+        'return "P"',
     )
     for path in _qml_files():
         content = path.read_text(encoding="utf-8-sig")
@@ -133,6 +137,9 @@ def test_analytics_uses_theme_icons_for_empty_state_and_metrics():
         assert token not in content
     for token in (
         "text: theme.iconAnalytics",
+        "function platformIcon",
+        "text: analyticsPage.platformIcon(modelData.platform)",
+        "font.family: theme.iconFontFamily",
         "icon: theme.iconViews",
         "icon: theme.iconLikes",
         "icon: theme.iconComments",
