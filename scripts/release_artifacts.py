@@ -258,7 +258,7 @@ def generate_release_evidence(dist_dir: Path, output_dir: Path, output: Path, ve
                 "python scripts/release_preflight.py --json",
                 "python scripts/release_preflight.py --public --live-evidence release/live-platforms.json --json",
                 "python scripts/public_release_check.py --json",
-                "python scripts/clean_install_smoke.py --dist dist --artifact both",
+                "python scripts/clean_install_smoke.py --dist dist --artifact both --install-timeout 600",
                 "python scripts/verify_desktop_package.py",
                 "python scripts/verify_qml_pages.py",
                 "Windows release job: python scripts/verify_windows_exe.py --path dist/xPST.exe --seconds 12 --json --clean-profile, plus --require-signed for tag/public releases",
