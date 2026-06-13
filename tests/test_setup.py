@@ -1,5 +1,6 @@
 """Tests for xPST setup wizard"""
 
+from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -42,9 +43,20 @@ class TestSetupPrerequisites:
 
     def test_check_yt_dlp_not_found(self):
         """Test yt-dlp check when not installed."""
-        with patch("subprocess.run", side_effect=FileNotFoundError):
+        with (
+            patch("subprocess.run", side_effect=FileNotFoundError),
+            patch("xpst.setup.package_version", side_effect=PackageNotFoundError),
+        ):
             ver = check_yt_dlp()
             assert ver is None
+
+    def test_check_yt_dlp_falls_back_to_installed_package(self):
+        """yt-dlp can be installed even when its console script is not on PATH."""
+        with (
+            patch("subprocess.run", side_effect=FileNotFoundError),
+            patch("xpst.setup.package_version", return_value="2026.03.17"),
+        ):
+            assert check_yt_dlp() == "2026.03.17"
 
 
 class TestDirectoryStructure:
