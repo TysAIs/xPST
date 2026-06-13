@@ -415,6 +415,10 @@ ApplicationWindow {
             showToast(ok ? msg : ("Save failed: " + msg), !ok)
         }
 
+        function onNotification(msg, isError) {
+            showToast(msg, isError)
+        }
+
         function onConnectResult(jsonStr) {
             var result = JSON.parse(jsonStr)
             if (result.ok) {

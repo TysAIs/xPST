@@ -136,6 +136,15 @@ def test_schedule_page_does_not_duplicate_success_notification():
     text = qml.read_text(encoding="utf-8")
 
     assert 'showToast("Post scheduled", false)' not in text
+    assert 'showToast("Could not schedule post", true)' not in text
+
+
+def test_desktop_shell_routes_backend_notifications_to_toasts():
+    qml = Path("src/xpst/desktop_app/qml/main.qml")
+    text = qml.read_text(encoding="utf-8")
+
+    assert "function onNotification(msg, isError)" in text
+    assert "showToast(msg, isError)" in text
 
 
 def test_schedule_new_dialog_uses_app_theme_controls():
