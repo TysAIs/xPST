@@ -60,6 +60,43 @@ def test_desktop_get_readiness_returns_report(tmp_path):
     assert "checks" in data["readiness"]
 
 
+def test_desktop_generate_encoding_sample_uses_ffmpeg_and_active_config_dir(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.video.encoding_youtube.resolution = 1920
+    config.video.encoding_youtube.fps = 60
+    controller = SimpleNamespace(_config=config)
+
+    with (
+        patch("xpst.desktop_app.backend.shutil.which", return_value="ffmpeg"),
+        patch("xpst.desktop_app.backend.subprocess.run") as run,
+    ):
+        run.return_value = SimpleNamespace(returncode=0, stderr="")
+        raw = AppController.generateEncodingSample(controller, "youtube", "")
+
+    data = json.loads(raw)
+    assert data["ok"] is True
+    assert data["path"] == str(tmp_path / "samples" / "xpst_sample_youtube.mp4")
+    assert data["resolution"] == "1080x1920"
+    assert data["fps"] == 60
+    cmd = run.call_args.args[0]
+    assert "testsrc2=size=1080x1920:rate=60" in cmd
+    assert str(tmp_path / "samples" / "xpst_sample_youtube.mp4") == cmd[-1]
+
+
+def test_desktop_generate_encoding_sample_reports_missing_ffmpeg(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    controller = SimpleNamespace(_config=config)
+
+    with patch("xpst.desktop_app.backend.shutil.which", return_value=None):
+        raw = AppController.generateEncodingSample(controller, "instagram", "")
+
+    data = json.loads(raw)
+    assert data["ok"] is False
+    assert "FFmpeg is required" in data["error"]
+
+
 def test_desktop_preview_post_accepts_ready_local_video(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)

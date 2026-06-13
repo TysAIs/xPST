@@ -707,17 +707,20 @@ Page {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                // Build ffmpeg command for this platform's encoding
-                                                var res = modelData.resolution.split(" ")[0].replace("×", "x")
-                                                var fps = parseInt(modelData.fps) || 30
-                                                var bitrate = modelData.bitrate.split("-")[0].trim().replace(" Mbps", "M")
-                                                var outDir = settingsPage.downloadDir.length > 0 ? settingsPage.downloadDir : "/tmp"
-                                                var outPath = outDir + "/xpst_sample_" + modelData.platform.toLowerCase() + ".mp4"
-                                                // Use controller to generate sample if available
-                                                if (typeof controller !== "undefined" && controller.generateEncodingSample) {
-                                                    controller.generateEncodingSample(modelData.platform.toLowerCase(), outPath)
+                                                var outPath = ""
+                                                if (settingsPage.downloadDir.length > 0) {
+                                                    outPath = settingsPage.downloadDir + "/xpst_sample_" + modelData.platform.toLowerCase() + ".mp4"
                                                 }
-                                                showToast("Generating sample for " + modelData.platform + "...", false)
+                                                if (typeof controller === "undefined" || !controller.generateEncodingSample) {
+                                                    showToast("Encoding sample generation is unavailable.", true)
+                                                    return
+                                                }
+                                                var result = JSON.parse(controller.generateEncodingSample(modelData.platform.toLowerCase(), outPath))
+                                                if (result.ok) {
+                                                    showToast("Sample saved to " + result.path, false)
+                                                } else {
+                                                    showToast(result.error || "Unable to generate sample.", true)
+                                                }
                                             }
                                             Accessible.name: "Generate encoding sample for " + modelData.platform
                                             Accessible.role: Accessible.Button

@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from xpst.utils.platform import get_config_dir
+from xpst.utils.platform import get_config_dir, get_ffmpeg_name
 
 # PySide6 is an optional ('desktop'/'pyside6') extra. Import it gracefully so
 # that importing this module does not hard-fail when the extra is absent. The
@@ -1961,6 +1961,88 @@ class AppController(QObject):
                 "warnings": warnings,
                 "errors": [str(exc)],
             })
+
+    @Slot(str, str, result=str)
+    def generateEncodingSample(self, platform: str, output_path: str = "") -> str:
+        """Generate a short local test video for a platform encoding profile."""
+        if self._config is None:
+            return json.dumps({"ok": False, "error": "Configuration not loaded"})
+
+        platform_key = (platform or "").strip().lower()
+        if platform_key not in {"youtube", "instagram", "x"}:
+            return json.dumps({"ok": False, "error": f"Unsupported platform: {platform}"})
+
+        ffmpeg = shutil.which(get_ffmpeg_name()) or shutil.which("ffmpeg")
+        if not ffmpeg:
+            return json.dumps({
+                "ok": False,
+                "error": "FFmpeg is required to generate encoding samples.",
+            })
+
+        enc = getattr(self._config.video, f"encoding_{platform_key}", None)
+        resolution = int(getattr(enc, "resolution", 1920) or 1920)
+        fps = int(getattr(enc, "fps", 30) or 30)
+        fps = max(1, min(fps, 60))
+        width = max(2, int(round(resolution * 9 / 16)))
+        width += width % 2
+        height = max(2, resolution + resolution % 2)
+
+        if output_path:
+            out_path = Path(output_path).expanduser()
+        else:
+            out_path = AppController._active_config_dir(self) / "samples" / f"xpst_sample_{platform_key}.mp4"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc2=size={width}x{height}:rate={fps}",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=1000:sample_rate=48000",
+            "-t",
+            "2",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "28",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-shortest",
+            str(out_path),
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+        except Exception as exc:
+            with contextlib.suppress(OSError):
+                out_path.unlink()
+            return json.dumps({"ok": False, "error": str(exc)})
+
+        if result.returncode != 0:
+            with contextlib.suppress(OSError):
+                out_path.unlink()
+            stderr = (result.stderr or "").strip().splitlines()
+            message = stderr[-1] if stderr else "FFmpeg failed to generate the sample."
+            return json.dumps({"ok": False, "error": message})
+
+        return json.dumps({
+            "ok": True,
+            "path": str(out_path),
+            "platform": platform_key,
+            "resolution": f"{width}x{height}",
+            "fps": fps,
+        })
 
 
 def _default_ui_font() -> str:

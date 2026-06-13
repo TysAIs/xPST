@@ -500,6 +500,26 @@ def test_settings_download_dir_round_trips_as_video_config():
     assert "settings.download_dir = downloadDir" not in settings
 
 
+def test_settings_generate_sample_uses_backend_result():
+    from pathlib import Path
+
+    settings = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "SettingsPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "controller.generateEncodingSample" in settings
+    assert "JSON.parse(controller.generateEncodingSample" in settings
+    assert "Sample saved to \" + result.path" in settings
+    assert "Generating sample for " not in settings
+    assert 'outPath = ""' in settings
+
+
 def test_settings_notification_switches_round_trip_config():
     from pathlib import Path
 
