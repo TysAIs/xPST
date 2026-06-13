@@ -89,3 +89,5 @@ def test_schedule_page_uses_backend_schedule_new():
     assert "Schedule New - coming soon" not in text
     assert "controller.scheduleNew" in text
     assert "controller.scheduledPosts" in text
+    assert "scheduleNewHeaderLabel" in text
+    assert "Schedule new post" in text

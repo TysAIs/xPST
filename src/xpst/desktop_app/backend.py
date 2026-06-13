@@ -1897,6 +1897,8 @@ class ThemeProvider(QObject):
     def iconSun(self): return icon_glyphs.glyph("sun")
     @Property(str, constant=True)
     def iconStats(self): return icon_glyphs.glyph("stats")
+    @Property(str, constant=True)
+    def iconPlus(self): return icon_glyphs.glyph("plus")
 
     # Dark mode toggle
     @Property(bool, notify=darkModeChanged)

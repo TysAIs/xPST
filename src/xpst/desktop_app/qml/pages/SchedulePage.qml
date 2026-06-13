@@ -332,20 +332,64 @@ Page {
             spacing: theme.spacingXl
 
             // Header
-            ColumnLayout {
-                spacing: theme.spacingXs
-                Text {
-                    text: "Schedule"
-                    font.pixelSize: 28
-                    font.weight: Font.DemiBold
-                    color: theme.textPrimary
-                    Accessible.name: "Schedule page title"
-                    Accessible.role: Accessible.Heading
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: theme.spacingMd
+
+                ColumnLayout {
+                    spacing: theme.spacingXs
+                    Layout.fillWidth: true
+                    Text {
+                        text: "Schedule"
+                        font.pixelSize: 28
+                        font.weight: Font.DemiBold
+                        color: theme.textPrimary
+                        Accessible.name: "Schedule page title"
+                        Accessible.role: Accessible.Heading
+                    }
+                    Text {
+                        text: "View your posting schedule"
+                        font.pixelSize: 13
+                        color: theme.textSecondary
+                    }
                 }
-                Text {
-                    text: "View your posting schedule"
-                    font.pixelSize: 13
-                    color: theme.textSecondary
+
+                Rectangle {
+                    Layout.preferredWidth: scheduleNewHeaderLabel.implicitWidth + 48
+                    Layout.preferredHeight: 40
+                    radius: theme.radiusMd
+                    color: headerScheduleMouse.containsMouse ? theme.accentHover : theme.accent
+                    RowLayout {
+                        anchors.centerIn: parent
+                        spacing: theme.spacingXs
+                        Text {
+                            text: theme.iconPlus
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#ffffff"
+                        }
+                        Text {
+                            id: scheduleNewHeaderLabel
+                            text: "Schedule New"
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                            color: "#ffffff"
+                        }
+                    }
+                    MouseArea {
+                        id: headerScheduleMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            var today = new Date()
+                            schedulePage.selectedDay = today.getDate()
+                            scheduleNewDialog.openForDay(schedulePage.selectedDay)
+                        }
+                        Accessible.name: "Schedule new post"
+                        Accessible.role: Accessible.Button
+                    }
                 }
             }
 
