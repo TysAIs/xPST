@@ -388,6 +388,59 @@ class AppController(QObject):
             self._mcp_process = None
 
     @Slot(result=str)
+    def testMcpServer(self) -> str:
+        """Verify that the MCP stdio entry point can start cleanly."""
+        proc = None
+        try:
+            startupinfo = None
+            creationflags = 0
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+            proc = subprocess.Popen(
+                AppController._mcp_command(self),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                startupinfo=startupinfo,
+                creationflags=creationflags,
+            )
+            try:
+                proc.wait(timeout=2)
+                stderr = (proc.stderr.read() if proc.stderr is not None else "").strip()
+                detail = stderr or f"MCP command exited with code {proc.returncode}"
+                self._mcp_last_error = detail
+                ok = False
+            except subprocess.TimeoutExpired:
+                ok = True
+                detail = "MCP command started and waited for stdio input"
+                self._mcp_last_error = ""
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+
+            self.mcpStatusChanged.emit()
+            return json.dumps({
+                "ok": ok,
+                "command": AppController._mcp_command_display(self),
+                "message": detail if ok else "",
+                "error": "" if ok else detail,
+            })
+        except Exception as exc:
+            self._mcp_last_error = str(exc)
+            logger.error("Failed to test MCP server: %s", exc)
+            self.mcpStatusChanged.emit()
+            return json.dumps({
+                "ok": False,
+                "command": AppController._mcp_command_display(self),
+                "error": str(exc),
+            })
+
+    @Slot(result=str)
     def startMcpServer(self) -> str:
         """Start the real stdio MCP server used by AI clients."""
         AppController._refresh_mcp_process_state(self)

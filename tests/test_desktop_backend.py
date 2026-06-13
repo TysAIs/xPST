@@ -274,6 +274,56 @@ def test_desktop_mcp_command_prefers_packaged_entrypoint(monkeypatch):
     assert command == [r"C:\Tools\xpst-mcp.exe"]
 
 
+def test_desktop_mcp_test_command_starts_and_stops_probe(monkeypatch):
+    popen_calls = []
+
+    class FakeStream:
+        def read(self):
+            return ""
+
+    class FakeProcess:
+        returncode = None
+        stderr = FakeStream()
+
+        def __init__(self) -> None:
+            self.killed = False
+
+        def wait(self, timeout=None):
+            if timeout == 2:
+                raise TimeoutError()
+            return self.returncode
+
+        def poll(self):
+            return None if not self.killed else -9
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+    fake_process = FakeProcess()
+
+    def fake_popen(command, **kwargs):
+        popen_calls.append((command, kwargs))
+        return fake_process
+
+    monkeypatch.setattr("xpst.desktop_app.backend.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("xpst.desktop_app.backend.shutil.which", lambda name: "xpst-mcp")
+    monkeypatch.setattr("xpst.desktop_app.backend.subprocess.TimeoutExpired", TimeoutError)
+    controller = SimpleNamespace(
+        _mcp_process=None,
+        _mcp_last_error="",
+        mcpStatusChanged=SimpleNamespace(emit=lambda: None),
+    )
+
+    result = json.loads(AppController.testMcpServer(controller))
+
+    assert result["ok"] is True
+    assert result["command"] == "xpst-mcp"
+    assert "waited for stdio input" in result["message"]
+    assert fake_process.killed is True
+    assert popen_calls[0][0] == ["xpst-mcp"]
+
+
 def test_settings_mcp_controls_are_not_fake_toggle():
     qml = (
         Path(__file__).parent.parent
@@ -285,8 +335,10 @@ def test_settings_mcp_controls_are_not_fake_toggle():
         / "SettingsPage.qml"
     ).read_text(encoding="utf-8-sig")
 
-    assert "controller.startMcpServer()" in qml
-    assert "controller.stopMcpServer()" in qml
+    assert "controller.testMcpServer()" in qml
+    assert "Connect via stdio: " in qml
+    assert "controller.startMcpServer()" not in qml
+    assert "controller.stopMcpServer()" not in qml
     assert "mcpRunning = !mcpRunning" not in qml
     assert "post_video" not in qml
     assert "crosspost_new" not in qml

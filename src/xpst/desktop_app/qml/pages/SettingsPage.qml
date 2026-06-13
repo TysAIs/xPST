@@ -17,6 +17,7 @@ Page {
     property int rateLimitPosts: 10
     property int rateLimitMinutes: 60
     property bool mcpRunning: false
+    property bool mcpReady: false
     property int mcpPid: 0
     property string mcpCommand: "xpst-mcp"
     property string mcpError: ""
@@ -126,7 +127,7 @@ Page {
         if (typeof controller === "undefined") return
         try {
             var status = JSON.parse(controller.mcpStatus)
-            mcpRunning = status.running === true
+            mcpRunning = false
             mcpPid = status.pid || 0
             mcpCommand = status.command || "xpst-mcp"
             mcpError = status.error || ""
@@ -142,20 +143,23 @@ Page {
         }
     }
 
-    function toggleMcpServer() {
+    function testMcpServer() {
         if (typeof controller === "undefined") return
         try {
-            var raw = mcpRunning ? controller.stopMcpServer() : controller.startMcpServer()
+            var raw = controller.testMcpServer()
             var result = JSON.parse(raw)
             refreshMcpStatus()
+            mcpReady = result.ok === true
             if (result.ok) {
-                showToast(result.message || (mcpRunning ? "MCP server running" : "MCP server stopped"), false)
+                showToast(result.message || "MCP command is ready", false)
             } else {
-                showToast(result.error || "MCP server action failed", true)
+                mcpError = result.error || "MCP command check failed"
+                showToast(mcpError, true)
             }
         } catch(e) {
             refreshMcpStatus()
-            showToast("MCP server action failed", true)
+            mcpReady = false
+            showToast("MCP command check failed", true)
         }
     }
 
@@ -916,10 +920,10 @@ Page {
                             spacing: theme.spacingMd
                             Rectangle {
                                 width: 8; height: 8; radius: 4
-                                color: mcpRunning ? theme.success : theme.error
+                                color: mcpReady ? theme.success : (mcpError.length > 0 ? theme.error : theme.warning)
                             }
                             Text {
-                                text: mcpRunning ? "Running" : "Stopped"
+                                text: mcpReady ? "Ready" : (mcpError.length > 0 ? "Needs attention" : "Not tested")
                                 font.pixelSize: 13
                                 color: theme.textSecondary
                             }
@@ -929,13 +933,13 @@ Page {
                                 width: mcpBtnLabel.implicitWidth + theme.spacingXxl
                                 height: 32
                                 radius: theme.radiusMd
-                                color: mcpRunning ? theme.error : theme.accent
+                                color: theme.accent
                                 opacity: mcpBtnMouse.containsMouse ? 0.85 : 1.0
 
                                 Text {
                                     id: mcpBtnLabel
                                     anchors.centerIn: parent
-                                    text: mcpRunning ? "Stop" : "Start"
+                                    text: "Test"
                                     font.pixelSize: 12
                                     font.weight: Font.DemiBold
                                     color: "#ffffff"
@@ -946,8 +950,8 @@ Page {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: settingsPage.toggleMcpServer()
-                                    Accessible.name: mcpRunning ? "Stop MCP server" : "Start MCP server"
+                                    onClicked: settingsPage.testMcpServer()
+                                    Accessible.name: "Test MCP command"
                                     Accessible.role: Accessible.Button
                                 }
                             }
@@ -958,12 +962,12 @@ Page {
                             text: "Available Tools"
                             font.pixelSize: 12
                             color: theme.textMuted
-                            visible: mcpRunning
+                            visible: mcpReady
                         }
 
                         ColumnLayout {
                             spacing: theme.spacingXs
-                            visible: mcpRunning
+                            visible: mcpReady
 
                             Repeater {
                                 model: settingsPage.mcpTools
@@ -992,13 +996,10 @@ Page {
                         }
 
                         Text {
-                            text: mcpRunning && mcpPid > 0
-                                  ? "Connect via stdio: " + mcpCommand + " (pid " + mcpPid + ")"
-                                  : "Connect via stdio: " + mcpCommand
+                            text: "Connect via stdio: " + mcpCommand
                             font.pixelSize: 11
                             font.family: theme.monoFontFamily
                             color: theme.textMuted
-                            visible: mcpRunning
                         }
 
                         Text {
@@ -1007,7 +1008,7 @@ Page {
                             color: theme.error
                             wrapMode: Text.WordWrap
                             Layout.fillWidth: true
-                            visible: mcpError.length > 0 && !mcpRunning
+                            visible: mcpError.length > 0 && !mcpReady
                         }
                     }
                 }
