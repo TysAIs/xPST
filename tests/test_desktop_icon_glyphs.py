@@ -645,6 +645,25 @@ def test_toast_text_is_bounded_and_wrapped():
     assert "elide: Text.ElideRight" in main_qml
 
 
+def test_drop_post_preflights_before_posting():
+    from pathlib import Path
+
+    main_qml = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "main.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "function confirmDroppedPost()" in main_qml
+    assert "controller.previewPost(dropCaptionDialog.droppedPath, captionInput.text, \"\")" in main_qml
+    assert "if (!preview.ready)" in main_qml
+    assert "showToast(blocking[0], true)" in main_qml
+    assert "onClicked: root.confirmDroppedPost()" in main_qml
+
+
 def test_icon_glyphs_is_qt_free():
     code = (
         "import sys; from xpst.desktop_app import icon_glyphs as ig; "

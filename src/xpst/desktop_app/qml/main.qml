@@ -350,6 +350,29 @@ ApplicationWindow {
         toast.show(msg, isError)
     }
 
+    function confirmDroppedPost() {
+        if (dropCaptionDialog.droppedPath.length === 0 || typeof controller === "undefined")
+            return
+        if (controller.previewPost) {
+            try {
+                var raw = controller.previewPost(dropCaptionDialog.droppedPath, captionInput.text, "")
+                var preview = JSON.parse(raw)
+                if (!preview.ready) {
+                    var blocking = preview.blocking || [preview.error || "Post is not ready"]
+                    showToast(blocking[0], true)
+                    return
+                }
+            } catch(e) {
+                showToast("Could not preview dropped video", true)
+                return
+            }
+        }
+        controller.postVideo(dropCaptionDialog.droppedPath, captionInput.text)
+        showToast("Posting: " + dropCaptionDialog.droppedPath.split("/").pop(), false)
+        captionInput.text = ""
+        dropCaptionDialog.close()
+    }
+
     // ── Keyboard Shortcuts ──────────────────────────────────────
     Shortcut { sequence: "Meta+1"; onActivated: navigateTo("dashboard") }
     Shortcut { sequence: "Meta+2"; onActivated: navigateTo("content") }
@@ -655,14 +678,7 @@ ApplicationWindow {
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (dropCaptionDialog.droppedPath.length > 0 && typeof controller !== "undefined") {
-                                controller.postVideo(dropCaptionDialog.droppedPath, captionInput.text)
-                                showToast("Posting: " + dropCaptionDialog.droppedPath.split("/").pop(), false)
-                            }
-                            captionInput.text = ""
-                            dropCaptionDialog.close()
-                        }
+                        onClicked: root.confirmDroppedPost()
                     }
                 }
             }
