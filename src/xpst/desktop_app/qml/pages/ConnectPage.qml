@@ -483,6 +483,25 @@ Page {
                             text: "YouTube"
                             checked: connectPage.onboardingYouTube
                             onToggled: connectPage.onboardingYouTube = checked
+                            indicator: Rectangle {
+                                implicitWidth: 18
+                                implicitHeight: 18
+                                x: 0
+                                y: parent.height / 2 - height / 2
+                                radius: theme.radiusSm
+                                color: parent.checked ? theme.youtube : theme.surfaceAlt
+                                border.color: parent.checked ? theme.youtube : theme.textMuted
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: theme.iconCheck
+                                    font.family: theme.iconFontFamily
+                                    font.pixelSize: 12
+                                    color: "#ffffff"
+                                    visible: parent.parent.checked
+                                }
+                            }
                             contentItem: Text {
                                 text: parent.text
                                 color: theme.textPrimary
@@ -495,6 +514,25 @@ Page {
                             text: "Instagram"
                             checked: connectPage.onboardingInstagram
                             onToggled: connectPage.onboardingInstagram = checked
+                            indicator: Rectangle {
+                                implicitWidth: 18
+                                implicitHeight: 18
+                                x: 0
+                                y: parent.height / 2 - height / 2
+                                radius: theme.radiusSm
+                                color: parent.checked ? theme.instagram : theme.surfaceAlt
+                                border.color: parent.checked ? theme.instagram : theme.textMuted
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: theme.iconCheck
+                                    font.family: theme.iconFontFamily
+                                    font.pixelSize: 12
+                                    color: "#ffffff"
+                                    visible: parent.parent.checked
+                                }
+                            }
                             contentItem: Text {
                                 text: parent.text
                                 color: theme.textPrimary
@@ -507,6 +545,25 @@ Page {
                             text: "X"
                             checked: connectPage.onboardingX
                             onToggled: connectPage.onboardingX = checked
+                            indicator: Rectangle {
+                                implicitWidth: 18
+                                implicitHeight: 18
+                                x: 0
+                                y: parent.height / 2 - height / 2
+                                radius: theme.radiusSm
+                                color: parent.checked ? theme.xtwitter : theme.surfaceAlt
+                                border.color: parent.checked ? theme.xtwitter : theme.textMuted
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: theme.iconCheck
+                                    font.family: theme.iconFontFamily
+                                    font.pixelSize: 12
+                                    color: "#ffffff"
+                                    visible: parent.parent.checked
+                                }
+                            }
                             contentItem: Text {
                                 text: parent.text
                                 color: theme.textPrimary

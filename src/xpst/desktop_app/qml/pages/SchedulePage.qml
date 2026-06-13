@@ -220,6 +220,25 @@ Page {
                 CheckBox {
                     id: youtubeCheck
                     text: "YouTube"
+                    indicator: Rectangle {
+                        implicitWidth: 18
+                        implicitHeight: 18
+                        x: 0
+                        y: parent.height / 2 - height / 2
+                        radius: theme.radiusSm
+                        color: parent.checked ? theme.youtube : theme.surfaceAlt
+                        border.color: parent.checked ? theme.youtube : theme.textMuted
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: theme.iconCheck
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            color: "#ffffff"
+                            visible: parent.parent.checked
+                        }
+                    }
                     contentItem: Text {
                         text: parent.text
                         color: theme.textPrimary
@@ -231,6 +250,25 @@ Page {
                 CheckBox {
                     id: instagramCheck
                     text: "Instagram"
+                    indicator: Rectangle {
+                        implicitWidth: 18
+                        implicitHeight: 18
+                        x: 0
+                        y: parent.height / 2 - height / 2
+                        radius: theme.radiusSm
+                        color: parent.checked ? theme.instagram : theme.surfaceAlt
+                        border.color: parent.checked ? theme.instagram : theme.textMuted
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: theme.iconCheck
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            color: "#ffffff"
+                            visible: parent.parent.checked
+                        }
+                    }
                     contentItem: Text {
                         text: parent.text
                         color: theme.textPrimary
@@ -242,6 +280,25 @@ Page {
                 CheckBox {
                     id: xCheck
                     text: "X"
+                    indicator: Rectangle {
+                        implicitWidth: 18
+                        implicitHeight: 18
+                        x: 0
+                        y: parent.height / 2 - height / 2
+                        radius: theme.radiusSm
+                        color: parent.checked ? theme.xtwitter : theme.surfaceAlt
+                        border.color: parent.checked ? theme.xtwitter : theme.textMuted
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: theme.iconCheck
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            color: "#ffffff"
+                            visible: parent.parent.checked
+                        }
+                    }
                     contentItem: Text {
                         text: parent.text
                         color: theme.textPrimary

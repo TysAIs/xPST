@@ -107,6 +107,7 @@ def test_qml_avoids_text_as_icon_placeholders():
     disallowed = (
         'text: "!"',
         'text: "OK"',
+        'text: "v"',
         'text: "Video"',
         'text: "Calendar"',
         'text: "Empty"',
@@ -196,8 +197,11 @@ def test_content_view_toggle_uses_theme_icons():
 
     assert 'text: "⊞"' not in content
     assert 'text: "List"' not in content
+    assert 'text: "v"' not in content
     assert "text: theme.iconViewGrid" in content
     assert "text: theme.iconViewList" in content
+    assert "text: theme.iconChevronRight" in content
+    assert "rotation: 90" in content
 
 
 def test_content_empty_and_edit_controls_use_theme_icons():
@@ -302,8 +306,32 @@ def test_connect_onboarding_checkboxes_use_theme_text():
 
     assert connect.count("contentItem: Text") >= 3
     assert connect.count("color: theme.textPrimary") >= 3
+    assert connect.count("indicator: Rectangle") >= 3
+    assert connect.count("text: theme.iconCheck") >= 3
+    for color in ("theme.youtube", "theme.instagram", "theme.xtwitter"):
+        assert f"color: parent.checked ? {color} : theme.surfaceAlt" in connect
     for label in ('text: "YouTube"', 'text: "Instagram"', 'text: "X"'):
         assert label in connect
+
+
+def test_schedule_platform_checkboxes_use_themed_indicators():
+    from pathlib import Path
+
+    schedule = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "SchedulePage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert schedule.count("CheckBox {") == 3
+    assert schedule.count("indicator: Rectangle") >= 3
+    assert schedule.count("text: theme.iconCheck") >= 3
+    for color in ("theme.youtube", "theme.instagram", "theme.xtwitter"):
+        assert f"color: parent.checked ? {color} : theme.surfaceAlt" in schedule
 
 
 def test_settings_switches_use_themed_indicators():

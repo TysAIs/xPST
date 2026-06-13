@@ -1432,9 +1432,11 @@ Page {
                         anchors.right: parent.right
                         anchors.rightMargin: theme.spacingMd
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "v"
+                        text: theme.iconChevronRight
+                        rotation: 90
                         color: theme.textMuted
-                        font.pixelSize: 10
+                        font.family: theme.iconFontFamily
+                        font.pixelSize: 12
                     }
                     delegate: ItemDelegate {
                         width: sortCombo.width
