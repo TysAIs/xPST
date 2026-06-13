@@ -448,3 +448,28 @@ class TestMcpCommand:
 
         assert result.exit_code == 0
         assert captured["config_dir"] == str(Path(config_file).parent)
+
+
+class TestPluginsCommand:
+    """Plugin commands should honor the global config path."""
+
+    def test_plugins_list_uses_active_config_dir(self, runner, tmp_path, monkeypatch, config_file):
+        default_dir = tmp_path / "default-xpst"
+        default_dir.mkdir()
+        monkeypatch.setenv("XPST_CONFIG_DIR", str(default_dir))
+
+        plugin_dir = Path(config_file).parent / "plugins"
+        plugin_dir.mkdir()
+        (plugin_dir / "custom_plugin.py").write_text(
+            "def register():\n"
+            "    return {'name': 'custom_plugin', 'version': '1.0', 'description': 'custom'}\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(main, ["--config", config_file, "plugins", "list", "--json"])
+
+        assert result.exit_code == 0, result.output
+        data = extract_json(result.output)
+        assert data["count"] == 1
+        assert data["plugins"][0]["name"] == "custom_plugin"
+        assert not (default_dir / "plugins").exists()

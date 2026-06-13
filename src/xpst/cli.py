@@ -2854,6 +2854,14 @@ def plugins(ctx: click.Context):
     pass
 
 
+def _plugin_manager_for_context(ctx: click.Context):
+    """Return a plugin manager rooted at the active config directory."""
+    from xpst.plugins import PluginManager
+
+    config = load_config(ctx.obj.get("config_path"))
+    return PluginManager(plugin_dir=Path(config.config_dir).expanduser() / "plugins")
+
+
 @plugins.command("docs")
 @click.option("--output", "-o", default=None, type=click.Path(), help="Output file (default: stdout)")
 @json_option
@@ -2865,9 +2873,7 @@ def plugins_docs(ctx: click.Context, output: str | None, as_json: bool):
     documenting each plugin's name, description, capabilities, and
     configuration options.
     """
-    from xpst.plugins import PluginManager
-
-    pm = PluginManager()
+    pm = _plugin_manager_for_context(ctx)
     pm.discover()
     plugin_list = pm.list_plugins()
 
@@ -2875,7 +2881,7 @@ def plugins_docs(ctx: click.Context, output: str | None, as_json: bool):
         if as_json:
             json_output({"ok": True, "plugins": 0, "message": "No plugins installed"}, True)
         else:
-            console.print("[dim]No plugins installed. Place .py files in ~/.xpst/plugins/[/dim]")
+            console.print(f"[dim]No plugins installed. Place .py files in {pm.plugin_dir}[/dim]")
         return
 
     # Build markdown
@@ -2938,9 +2944,7 @@ def plugins_docs(ctx: click.Context, output: str | None, as_json: bool):
 @click.pass_context
 def plugins_list(ctx: click.Context, as_json: bool):
     """List installed plugins."""
-    from xpst.plugins import PluginManager
-
-    pm = PluginManager()
+    pm = _plugin_manager_for_context(ctx)
     pm.discover()
     plugin_list = pm.list_plugins()
 
