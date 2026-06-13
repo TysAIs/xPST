@@ -151,6 +151,23 @@ def test_sidebar_icon_glyphs_use_theme_colors():
     )
 
 
+def test_sidebar_notification_popup_uses_capped_height_for_position():
+    from pathlib import Path
+
+    sidebar = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "Sidebar.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "height: Math.min(360, notifPopupContent.implicitHeight + theme.spacingXl)" in sidebar
+    assert "y: -height - 8" in sidebar
+    assert "y: -notifPopupContent.implicitHeight - 8" not in sidebar
+
+
 def test_analytics_uses_theme_icons_for_empty_state_and_metrics():
     from pathlib import Path
 

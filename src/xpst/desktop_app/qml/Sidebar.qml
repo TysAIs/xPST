@@ -270,7 +270,7 @@ Rectangle {
             // Notification popup
             Popup {
                 id: notifPopup
-                y: -notifPopupContent.implicitHeight - 8
+                y: -height - 8
                 x: sidebar.expanded ? 0 : 64
                 width: 280
                 height: Math.min(360, notifPopupContent.implicitHeight + theme.spacingXl)
