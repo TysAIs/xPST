@@ -1221,10 +1221,15 @@ main.add_command(app, name="desktop")
 # ──────────────────────────────────────────────
 
 @main.command()
-def mcp():
+@click.pass_context
+def mcp(ctx: click.Context):
     """Start MCP (Model Context Protocol) server over stdio"""
-    from xpst.mcp import cli_main
-    cli_main()
+    import asyncio
+
+    from xpst.mcp import main as mcp_main
+
+    config = load_config(ctx.obj.get("config_path"))
+    asyncio.run(mcp_main(config))
 
 
 # ──────────────────────────────────────────────

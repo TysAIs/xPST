@@ -435,16 +435,16 @@ class TestDesktopCommand:
 class TestMcpCommand:
     """test_mcp_command: invoke `mcp` without starting a real stdio server."""
 
-    def test_mcp_command_uses_packaged_entrypoint(self, runner, monkeypatch):
-        """mcp command delegates to xpst.mcp.cli_main."""
+    def test_mcp_command_uses_active_config(self, runner, config_file, monkeypatch):
+        """mcp command delegates to the server with the active config."""
         pytest.importorskip("mcp", reason="mcp extra not installed")
-        called = {}
+        captured = {}
 
-        def fake_cli_main():
-            called["ok"] = True
+        async def fake_mcp_main(config):
+            captured["config_dir"] = config.config_dir
 
-        monkeypatch.setattr("xpst.mcp.cli_main", fake_cli_main)
-        result = runner.invoke(main, ["mcp"])
+        monkeypatch.setattr("xpst.mcp.main", fake_mcp_main)
+        result = runner.invoke(main, ["--config", config_file, "mcp"])
 
         assert result.exit_code == 0
-        assert called["ok"] is True
+        assert captured["config_dir"] == str(Path(config_file).parent)
