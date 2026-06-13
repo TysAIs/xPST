@@ -1,7 +1,7 @@
 """MCP server provider catalog tests."""
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -62,3 +62,29 @@ async def test_mcp_providers_tool_returns_catalog_without_engine_init(tmp_path):
     assert "destinations" in data
     assert {item["name"] for item in data["destinations"]} >= {"youtube", "instagram", "x"}
     initialize.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mcp_main_starts_stdio_without_engine_init(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    fake_server = mcp_server.XPSTMCPServer(config)
+
+    class FakeStdio:
+        async def __aenter__(self):
+            return object(), object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    with (
+        patch.object(mcp_server, "get_server", new=AsyncMock(return_value=fake_server)) as get_server,
+        patch.object(mcp_server, "stdio_server", return_value=FakeStdio()),
+        patch.object(mcp_server.app, "run", new=AsyncMock()) as run,
+        patch.object(mcp_server.app, "create_initialization_options", new=Mock(return_value="opts")),
+    ):
+        await mcp_server.main(config)
+
+    get_server.assert_awaited_once_with(config, initialize=False)
+    run.assert_awaited_once()
+    assert fake_server.engine is None

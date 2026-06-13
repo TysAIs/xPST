@@ -355,6 +355,7 @@ def main(no_splash: bool = False) -> int:
 
     # Connect controller refresh to model reload
     controller.dataChanged.connect(lambda: post_model.load_from_state())
+    app.aboutToQuit.connect(controller.stopMcpServer)
 
     # Expose to QML
     engine.rootContext().setContextProperty("controller", controller)

@@ -17,6 +17,10 @@ Page {
     property int rateLimitPosts: 10
     property int rateLimitMinutes: 60
     property bool mcpRunning: false
+    property int mcpPid: 0
+    property string mcpCommand: "xpst-mcp"
+    property string mcpError: ""
+    property var mcpTools: []
 
     // ── Validation state ────────────────────────────────────────
     property bool hasErrors: false
@@ -62,12 +66,18 @@ Page {
     }
 
     // ── Load from controller on creation ────────────────────────
-    Component.onCompleted: loadFromConfig()
+    Component.onCompleted: {
+        loadFromConfig()
+        refreshMcpStatus()
+    }
 
     Connections {
         target: typeof controller !== "undefined" ? controller : null
         function onDataChanged() {
             loadFromConfig()
+        }
+        function onMcpStatusChanged() {
+            refreshMcpStatus()
         }
     }
 
@@ -109,6 +119,43 @@ Page {
             }
         } catch(e) {
             console.log("Settings load error:", e)
+        }
+    }
+
+    function refreshMcpStatus() {
+        if (typeof controller === "undefined") return
+        try {
+            var status = JSON.parse(controller.mcpStatus)
+            mcpRunning = status.running === true
+            mcpPid = status.pid || 0
+            mcpCommand = status.command || "xpst-mcp"
+            mcpError = status.error || ""
+        } catch(e) {
+            mcpRunning = false
+            mcpError = "Could not read MCP status"
+        }
+
+        try {
+            mcpTools = JSON.parse(controller.mcpTools)
+        } catch(e2) {
+            mcpTools = []
+        }
+    }
+
+    function toggleMcpServer() {
+        if (typeof controller === "undefined") return
+        try {
+            var raw = mcpRunning ? controller.stopMcpServer() : controller.startMcpServer()
+            var result = JSON.parse(raw)
+            refreshMcpStatus()
+            if (result.ok) {
+                showToast(result.message || (mcpRunning ? "MCP server running" : "MCP server stopped"), false)
+            } else {
+                showToast(result.error || "MCP server action failed", true)
+            }
+        } catch(e) {
+            refreshMcpStatus()
+            showToast("MCP server action failed", true)
         }
     }
 
@@ -899,10 +946,7 @@ Page {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        mcpRunning = !mcpRunning
-                                        showToast(mcpRunning ? "MCP server started" : "MCP server stopped", false)
-                                    }
+                                    onClicked: settingsPage.toggleMcpServer()
                                     Accessible.name: mcpRunning ? "Stop MCP server" : "Start MCP server"
                                     Accessible.role: Accessible.Button
                                 }
@@ -922,16 +966,7 @@ Page {
                             visible: mcpRunning
 
                             Repeater {
-                                model: [
-                                    { name: "post_video", desc: "Post video to platforms" },
-                                    { name: "crosspost_new", desc: "Cross-post new content" },
-                                    { name: "check_status", desc: "Check system status" },
-                                    { name: "list_platforms", desc: "List configured platforms" },
-                                    { name: "get_analytics", desc: "Get engagement analytics" },
-                                    { name: "delete_post", desc: "Delete a post" },
-                                    { name: "health_check", desc: "Run health check" },
-                                    { name: "get_logs", desc: "Retrieve log entries" }
-                                ]
+                                model: settingsPage.mcpTools
 
                                 RowLayout {
                                     spacing: theme.spacingSm
@@ -946,20 +981,33 @@ Page {
                                         color: theme.textPrimary
                                     }
                                     Text {
-                                        text: "- " + modelData.desc
+                                        text: "- " + (modelData.description || "")
                                         font.pixelSize: 11
                                         color: theme.textSecondary
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
                                     }
                                 }
                             }
                         }
 
                         Text {
-                            text: "Connect via stdio: xpst-mcp"
+                            text: mcpRunning && mcpPid > 0
+                                  ? "Connect via stdio: " + mcpCommand + " (pid " + mcpPid + ")"
+                                  : "Connect via stdio: " + mcpCommand
                             font.pixelSize: 11
                             font.family: theme.monoFontFamily
                             color: theme.textMuted
                             visible: mcpRunning
+                        }
+
+                        Text {
+                            text: mcpError
+                            font.pixelSize: 11
+                            color: theme.error
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                            visible: mcpError.length > 0 && !mcpRunning
                         }
                     }
                 }

@@ -993,7 +993,7 @@ async def main(config: XPSTConfig | None = None) -> None:
         ModuleNotFoundError: with an install hint if the 'mcp' extra is missing.
     """
     _require_mcp()
-    await get_server(config)
+    await get_server(config, initialize=False)
 
     # Run the MCP server
     async with stdio_server() as (read_stream, write_stream):

@@ -1,6 +1,8 @@
 """Desktop backend smoke tests."""
 
 import json
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -182,3 +184,121 @@ def test_desktop_repair_readiness_creates_local_folders(_which, _ffmpeg, _ytdlp,
     assert data["ok"] is True
     assert (tmp_path / "downloads").exists()
     assert controller._engine is None
+
+
+def test_desktop_mcp_tools_are_real_server_tools():
+    controller = SimpleNamespace()
+
+    data = json.loads(AppController._get_mcp_tools(controller))
+    names = {item["name"] for item in data}
+
+    assert "xpst_run" in names
+    assert "xpst_post" in names
+    assert "xpst_providers" in names
+    assert "post_video" not in names
+    assert "crosspost_new" not in names
+
+
+def test_desktop_mcp_start_stop_manages_process(monkeypatch, tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    emissions = []
+    popen_calls = []
+
+    class FakeProcess:
+        pid = 4242
+        returncode = None
+
+        def __init__(self) -> None:
+            self.terminated = False
+            self.killed = False
+
+        def poll(self):
+            return None if not self.terminated else 0
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+    fake_process = FakeProcess()
+
+    def fake_popen(command, **kwargs):
+        popen_calls.append((command, kwargs))
+        return fake_process
+
+    monkeypatch.setattr("xpst.desktop_app.backend.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("xpst.desktop_app.backend.shutil.which", lambda name: None)
+    controller = SimpleNamespace(
+        _config=config,
+        _mcp_process=None,
+        _mcp_last_error="",
+        mcpStatusChanged=SimpleNamespace(emit=lambda: emissions.append("status")),
+    )
+
+    start = json.loads(AppController.startMcpServer(controller))
+    status = json.loads(AppController._get_mcp_status(controller))
+    stop = json.loads(AppController.stopMcpServer(controller))
+
+    assert start == {
+        "ok": True,
+        "running": True,
+        "pid": 4242,
+        "message": "MCP server started",
+    }
+    assert status["running"] is True
+    assert status["pid"] == 4242
+    assert popen_calls[0][0] == [sys.executable, "-m", "xpst.mcp.server"]
+    assert popen_calls[0][1]["env"]["XPST_CONFIG_DIR"] == str(tmp_path)
+    assert stop["ok"] is True
+    assert stop["running"] is False
+    assert fake_process.terminated is True
+    assert controller._mcp_process is None
+    assert emissions == ["status", "status"]
+
+
+def test_desktop_mcp_command_prefers_packaged_entrypoint(monkeypatch):
+    monkeypatch.setattr(
+        "xpst.desktop_app.backend.shutil.which",
+        lambda name: r"C:\Tools\xpst-mcp.exe" if name == "xpst-mcp" else None,
+    )
+
+    command = AppController._mcp_command(SimpleNamespace())
+
+    assert command == [r"C:\Tools\xpst-mcp.exe"]
+
+
+def test_settings_mcp_controls_are_not_fake_toggle():
+    qml = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "SettingsPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "controller.startMcpServer()" in qml
+    assert "controller.stopMcpServer()" in qml
+    assert "mcpRunning = !mcpRunning" not in qml
+    assert "post_video" not in qml
+    assert "crosspost_new" not in qml
+
+
+def test_desktop_app_stops_mcp_server_on_quit():
+    main_py = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "main.py"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "app.aboutToQuit.connect(controller.stopMcpServer)" in main_py

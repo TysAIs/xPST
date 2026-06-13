@@ -8,6 +8,7 @@ data is serialised as JSON strings so QML can parse with JSON.parse().
 import asyncio
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import threading
@@ -173,6 +174,7 @@ class AppController(QObject):
     settingsSaved = Signal(bool, str)  # success, message
     progressChanged = Signal(str, float)  # platform, percentage 0-100
     notification = Signal(str, bool)   # message, isError
+    mcpStatusChanged = Signal()
 
     # ── Init ─────────────────────────────────────────────────────────
 
@@ -194,6 +196,8 @@ class AppController(QObject):
         self._config_data: str = "{}"
         self._analytics_data: str = "{}"
         self._quota_data: str = "{}"
+        self._mcp_process: subprocess.Popen | None = None
+        self._mcp_last_error: str = ""
 
         # Auto-refresh timer (30s)
         self._refresh_timer = QTimer(self)
@@ -339,6 +343,137 @@ class AppController(QObject):
         return self._quota_data
 
     quotaData = Property(str, _get_quota_data, notify=dataChanged)
+
+    def _get_mcp_status(self) -> str:
+        AppController._refresh_mcp_process_state(self)
+        return json.dumps({
+            "running": self._mcp_process is not None,
+            "pid": self._mcp_process.pid if self._mcp_process is not None else None,
+            "command": AppController._mcp_command_display(self),
+            "error": self._mcp_last_error,
+        })
+
+    mcpStatus = Property(str, _get_mcp_status, notify=mcpStatusChanged)
+
+    def _get_mcp_tools(self) -> str:
+        try:
+            from xpst.mcp import server as mcp_server
+
+            tools = [
+                {"name": tool.name, "description": tool.description}
+                for tool in getattr(mcp_server, "TOOLS", [])
+            ]
+        except Exception as exc:
+            tools = []
+            logger.warning("Failed to list MCP tools: %s", exc)
+        return json.dumps(tools, default=str)
+
+    mcpTools = Property(str, _get_mcp_tools, notify=mcpStatusChanged)
+
+    def _mcp_command(self) -> list[str]:
+        entrypoint = shutil.which("xpst-mcp")
+        if entrypoint:
+            return [entrypoint]
+        if getattr(sys, "frozen", False):
+            return ["xpst-mcp"]
+        return [sys.executable, "-m", "xpst.mcp.server"]
+
+    def _mcp_command_display(self) -> str:
+        return " ".join(AppController._mcp_command(self))
+
+    def _refresh_mcp_process_state(self) -> None:
+        proc = getattr(self, "_mcp_process", None)
+        if proc is not None and proc.poll() is not None:
+            self._mcp_last_error = f"MCP server exited with code {proc.returncode}"
+            self._mcp_process = None
+
+    @Slot(result=str)
+    def startMcpServer(self) -> str:
+        """Start the real stdio MCP server used by AI clients."""
+        AppController._refresh_mcp_process_state(self)
+        if self._mcp_process is not None:
+            return json.dumps({
+                "ok": True,
+                "running": True,
+                "pid": self._mcp_process.pid,
+                "message": "MCP server is already running",
+            })
+
+        try:
+            env = None
+            if self._config is not None:
+                config_dir = getattr(self._config, "config_dir", None)
+                if config_dir:
+                    import os
+
+                    env = os.environ.copy()
+                    env["XPST_CONFIG_DIR"] = str(config_dir)
+
+            startupinfo = None
+            creationflags = 0
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+            self._mcp_process = subprocess.Popen(
+                AppController._mcp_command(self),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+                startupinfo=startupinfo,
+                creationflags=creationflags,
+            )
+            self._mcp_last_error = ""
+            self.mcpStatusChanged.emit()
+            return json.dumps({
+                "ok": True,
+                "running": True,
+                "pid": self._mcp_process.pid,
+                "message": "MCP server started",
+            })
+        except Exception as exc:
+            self._mcp_process = None
+            self._mcp_last_error = str(exc)
+            logger.error("Failed to start MCP server: %s", exc)
+            self.mcpStatusChanged.emit()
+            return json.dumps({"ok": False, "running": False, "error": str(exc)})
+
+    @Slot(result=str)
+    def stopMcpServer(self) -> str:
+        """Stop the desktop-managed MCP server process."""
+        AppController._refresh_mcp_process_state(self)
+        proc = self._mcp_process
+        if proc is None:
+            self.mcpStatusChanged.emit()
+            return json.dumps({
+                "ok": True,
+                "running": False,
+                "message": "MCP server is already stopped",
+            })
+
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+            self._mcp_process = None
+            self._mcp_last_error = ""
+            self.mcpStatusChanged.emit()
+            return json.dumps({
+                "ok": True,
+                "running": False,
+                "message": "MCP server stopped",
+            })
+        except Exception as exc:
+            self._mcp_last_error = str(exc)
+            logger.error("Failed to stop MCP server: %s", exc)
+            self.mcpStatusChanged.emit()
+            return json.dumps({"ok": False, "running": True, "error": str(exc)})
 
     # ── Data refresh ─────────────────────────────────────────────────
 
