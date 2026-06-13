@@ -1010,11 +1010,36 @@ Page {
                 Slider {
                     id: seekSlider
                     Layout.fillWidth: true
+                    implicitHeight: 24
                     from: 0
                     to: videoPlayer.duration > 0 ? videoPlayer.duration : 1
                     value: videoPlayer.position || 0
                     onMoved: videoPlayer.seek(value)
                     enabled: videoPlayer.duration > 0
+                    background: Rectangle {
+                        x: seekSlider.leftPadding
+                        y: seekSlider.topPadding + seekSlider.availableHeight / 2 - height / 2
+                        width: seekSlider.availableWidth
+                        height: 4
+                        radius: 2
+                        color: theme.surfaceAlt
+                        Rectangle {
+                            width: seekSlider.visualPosition * parent.width
+                            height: parent.height
+                            radius: 2
+                            color: seekSlider.enabled ? theme.accent : theme.border
+                        }
+                    }
+                    handle: Rectangle {
+                        x: seekSlider.leftPadding + seekSlider.visualPosition * (seekSlider.availableWidth - width)
+                        y: seekSlider.topPadding + seekSlider.availableHeight / 2 - height / 2
+                        width: 14
+                        height: 14
+                        radius: 7
+                        color: seekSlider.enabled ? theme.accent : theme.textMuted
+                        border.color: theme.surfaceCard
+                        border.width: 2
+                    }
                 }
 
                 Text {

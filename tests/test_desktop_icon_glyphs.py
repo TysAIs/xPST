@@ -331,6 +331,27 @@ def test_content_video_preview_controls_use_theme_icons():
         assert token in content
 
 
+def test_content_video_preview_slider_is_themed():
+    from pathlib import Path
+
+    content_page = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ContentPage.qml"
+    )
+    content = content_page.read_text(encoding="utf-8-sig")
+
+    assert "id: seekSlider" in content
+    assert "background: Rectangle" in content
+    assert "handle: Rectangle" in content
+    assert "color: seekSlider.enabled ? theme.accent : theme.border" in content
+    assert "border.color: theme.surfaceCard" in content
+
+
 def test_navigation_arrows_use_theme_icons():
     from pathlib import Path
 
