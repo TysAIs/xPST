@@ -4,6 +4,7 @@ Creates QApplication, sets Material style, registers backend
 controllers with QML engine, sets up system tray, and runs the event loop.
 """
 
+import json
 import logging
 import sys
 from pathlib import Path
@@ -203,6 +204,16 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
             controller_obj = engine.rootContext().contextProperty("controller")
             if controller_obj:
                 caption = Path(file_path).stem
+                if hasattr(controller_obj, "previewPost"):
+                    try:
+                        preview = json.loads(controller_obj.previewPost(file_path, caption, ""))
+                        if not preview.get("ready"):
+                            blocking = preview.get("blocking") or [preview.get("error") or "Post is not ready"]
+                            tray.showMessage("xPST", str(blocking[0]), QSystemTrayIcon.Warning, 5000)
+                            return
+                    except Exception as exc:
+                        tray.showMessage("xPST", f"Post preview failed: {exc}", QSystemTrayIcon.Warning, 5000)
+                        return
                 controller_obj.postVideo(file_path, caption)
                 tray.showMessage("xPST", f"Posting: {Path(file_path).name}", QSystemTrayIcon.Information, 3000)
 

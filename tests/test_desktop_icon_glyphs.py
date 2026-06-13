@@ -664,6 +664,24 @@ def test_drop_post_preflights_before_posting():
     assert "onClicked: root.confirmDroppedPost()" in main_qml
 
 
+def test_tray_post_now_preflights_before_posting():
+    from pathlib import Path
+
+    main_py = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "main.py"
+    ).read_text(encoding="utf-8-sig")
+
+    preview_idx = main_py.index('previewPost(file_path, caption, "")')
+    post_idx = main_py.index("controller_obj.postVideo(file_path, caption)")
+    assert preview_idx < post_idx
+    assert "QSystemTrayIcon.Warning" in main_py
+    assert "Post preview failed:" in main_py
+
+
 def test_icon_glyphs_is_qt_free():
     code = (
         "import sys; from xpst.desktop_app import icon_glyphs as ig; "
