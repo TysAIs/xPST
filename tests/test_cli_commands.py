@@ -5,10 +5,8 @@ Uses Click's CliRunner to invoke commands and verify JSON output.
 
 import json
 import logging
-import os
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import yaml
@@ -137,30 +135,59 @@ class TestConfigExportImport:
             yaml.dump(exported, f)
 
         # Import back — monkeypatch expanduser so import writes to tmp
-        real_config = tmp_path / "imported_config.yaml"
-        # Copy original config to new location
-        import shutil
-        shutil.copy(config_file, str(real_config))
-
-        orig_expanduser = os.path.expanduser
-        def fake_expanduser(path):
-            if path == "~/.xpst/config.yaml":
-                return str(real_config)
-            return orig_expanduser(path)
-        with patch("os.path.expanduser", side_effect=fake_expanduser):
-            with patch("pathlib.Path.expanduser", lambda self: real_config if str(self).endswith("config.yaml") and "~" in str(self) else self):
-                result = runner.invoke(main, [
-                    "--config", config_file,
-                    "config", "import", export_file, "--json",
-                ])
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "config", "import", export_file, "--json",
+        ])
         assert result.exit_code == 0
         import_data = extract_json(result.output)
         assert import_data.get("ok") is True
 
         # Verify imported config has the modification
-        with open(str(real_config)) as f:
+        with open(config_file) as f:
             final = yaml.safe_load(f)
         assert final.get("monitoring", {}).get("log_level") == "DEBUG"
+
+    def test_config_import_uses_global_config_path(self, runner, config_file, tmp_path, monkeypatch):
+        """config import writes to --config instead of the default profile."""
+        default_dir = tmp_path / "default-profile"
+        monkeypatch.setenv("XPST_CONFIG_DIR", str(default_dir))
+
+        export_file = tmp_path / "import.yaml"
+        with open(config_file) as f:
+            exported = yaml.safe_load(f)
+        exported.setdefault("monitoring", {})["log_level"] = "DEBUG"
+        with open(export_file, "w") as f:
+            yaml.dump(exported, f)
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "config", "import", str(export_file), "--json",
+        ])
+
+        assert result.exit_code == 0
+        assert extract_json(result.output).get("ok") is True
+        with open(config_file) as f:
+            final = yaml.safe_load(f)
+        assert final.get("monitoring", {}).get("log_level") == "DEBUG"
+        assert not (default_dir / "config.yaml").exists()
+
+    def test_config_fix_uses_global_config_path(self, runner, config_file, tmp_path, monkeypatch):
+        """config fix creates support dirs under --config's profile."""
+        default_dir = tmp_path / "default-profile"
+        monkeypatch.setenv("XPST_CONFIG_DIR", str(default_dir))
+        custom_dir = Path(config_file).parent
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "config", "fix", "--yes", "--json",
+        ])
+
+        assert result.exit_code == 0
+        data = extract_json(result.output)
+        assert data.get("ok") is True
+        assert custom_dir.joinpath("credentials").exists()
+        assert not default_dir.joinpath("credentials").exists()
 
 
 class TestScheduleAddJson:

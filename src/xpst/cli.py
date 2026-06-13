@@ -117,6 +117,11 @@ def load_config(config_path: str | None = None) -> XPSTConfig:
         sys.exit(EXIT_CONFIG_ERROR)
 
 
+def _active_config_path(ctx: click.Context, config_file: str | None = None) -> str:
+    """Return the command-specific config path, honoring global --config."""
+    return config_file or ctx.obj.get("config_path") or str(get_config_dir() / "config.yaml")
+
+
 @click.group()
 @click.option("--config", "-c", help="Path to config file")
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
@@ -1675,12 +1680,10 @@ def config(ctx: click.Context):
 @click.pass_context
 def config_show(ctx: click.Context, raw: bool, config_file: str | None, as_json: bool):
     """Display current configuration as YAML"""
-    import os
-
     import yaml
     from rich.syntax import Syntax
 
-    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    config_path = _active_config_path(ctx, config_file)
     if not Path(config_path).exists():
         console.print(f"[red]Config file not found:[/red] {config_path}")
         sys.exit(EXIT_CONFIG_ERROR)
@@ -1713,11 +1716,9 @@ def config_set(ctx: click.Context, key: str, value: str, config_file: str | None
         xpst config set rate_limits.youtube 10
         xpst config set monitoring.log_level DEBUG
     """
-    import os
-
     import yaml
 
-    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    config_path = _active_config_path(ctx, config_file)
     config_path = Path(config_path)
 
     # Load existing config
@@ -1779,13 +1780,12 @@ def config_validate(ctx: click.Context, config_file: str | None, as_json: bool):
     Checks required fields, path existence, and platform config validity.
     Exit code 0 if valid, 4 if invalid.
     """
-    import os
-
     checks: list[tuple[str, bool, str]] = []
+    config_path = _active_config_path(ctx, config_file)
 
     # Load config
     try:
-        cfg = load_config(config_file)
+        cfg = load_config(config_path)
         checks.append(("Config file loaded", True, "OK"))
     except SystemExit:
         checks.append(("Config file loaded", False, "Failed to load config"))
@@ -1796,7 +1796,6 @@ def config_validate(ctx: click.Context, config_file: str | None, as_json: bool):
         sys.exit(EXIT_CONFIG_ERROR)
 
     # Check config file exists
-    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
     exists = Path(config_path).exists()
     checks.append(("Config file exists", exists, config_path))
 
@@ -1902,14 +1901,12 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
     Fixes: missing credentials directory, stale .crosspstr paths,
     invalid port numbers, and missing required fields.
     """
-    import os
-
-    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    config_path = _active_config_path(ctx, config_file)
     fixes: list[str] = []
 
     # Load current config
     try:
-        cfg = load_config(config_file)
+        cfg = load_config(config_path)
     except Exception as e:
         if as_json:
             json_output({"ok": False, "error": str(e)}, True)
@@ -1918,7 +1915,8 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
         sys.exit(EXIT_CONFIG_ERROR)
 
     # Fix 1: Ensure credentials directory exists
-    cred_dir = Path("~/.xpst/credentials").expanduser()
+    active_config_dir = Path(cfg.config_dir).expanduser()
+    cred_dir = active_config_dir / "credentials"
     if not cred_dir.exists():
         fixes.append(f"Create missing credentials directory: {cred_dir}")
         if yes or as_json:
@@ -1937,7 +1935,7 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
         if ".crosspstr" in raw_content:
             fixes.append("Replace stale .crosspstr paths with .xpst")
             if yes or as_json:
-                fixed_content = raw_content.replace(".crosspstr", ".xpst")
+                fixed_content = raw_content.replace(".crosspstr", active_config_dir.name)
                 with open(config_path, "w") as f:
                     f.write(fixed_content)
 
@@ -1950,14 +1948,14 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
 
     # Fix 4: Missing required fields with defaults
     if not cfg.video.download_dir:
-        fixes.append("Set default download directory (~/.xpst/downloads)")
+        fixes.append(f"Set default download directory ({active_config_dir / 'downloads'})")
         if yes or as_json:
-            cfg.video.download_dir = "~/.xpst/downloads"
+            cfg.video.download_dir = str(active_config_dir / "downloads")
 
     if not cfg.monitoring.log_file:
-        fixes.append("Set default log file path (~/.xpst/logs/xpst.log)")
+        fixes.append(f"Set default log file path ({active_config_dir / 'logs' / 'xpst.log'})")
         if yes or as_json:
-            cfg.monitoring.log_file = "~/.xpst/logs/xpst.log"
+            cfg.monitoring.log_file = str(active_config_dir / "logs" / "xpst.log")
 
     # Save fixed config
     if fixes and (yes or as_json):
@@ -1985,11 +1983,9 @@ def config_export(ctx: click.Context, output_file: str, raw: bool, config_file: 
 
     Writes the config YAML to OUTPUT_FILE. By default masks sensitive values.
     """
-    import os
-
     import yaml
 
-    config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
+    config_path = _active_config_path(ctx, config_file)
     if not Path(config_path).exists():
         if as_json:
             json_output({"ok": False, "error": f"Config file not found: {config_path}"}, True)
@@ -2028,11 +2024,9 @@ def config_import(ctx: click.Context, input_file: str, merge: bool, yes: bool, s
     Shows a diff of changes before applying. Use --yes to skip confirmation.
     Validates the imported config structure. Use --strict to fail on warnings.
     """
-    import os
-
     import yaml
 
-    config_path = os.path.expanduser("~/.xpst/config.yaml")
+    config_path = _active_config_path(ctx)
 
     with open(input_file) as f:
         imported = yaml.safe_load(f) or {}
