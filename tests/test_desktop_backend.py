@@ -262,6 +262,43 @@ def test_desktop_config_data_exposes_notifications():
     }
 
 
+def test_desktop_lazy_analytics_uses_active_config_dir(monkeypatch, tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path / "active-profile")
+    captured = {}
+
+    class FakeAnalytics:
+        def __init__(self, config_dir):
+            captured["config_dir"] = config_dir
+
+    monkeypatch.setattr("xpst.desktop_app.backend.AnalyticsCollector", FakeAnalytics)
+    controller = SimpleNamespace(
+        _config=config,
+        _analytics=None,
+        _analytics_initialized=False,
+    )
+
+    analytics = AppController._get_analytics(controller)
+
+    assert isinstance(analytics, FakeAnalytics)
+    assert captured["config_dir"] == str(tmp_path / "active-profile")
+
+
+def test_desktop_available_languages_uses_active_config_dir(monkeypatch, tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path / "active-profile")
+    translations = tmp_path / "active-profile" / "translations"
+    translations.mkdir(parents=True)
+    (translations / "zz.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr("xpst.desktop_app.backend._get_available_langs", None)
+    controller = SimpleNamespace(_config=config)
+
+    data = json.loads(AppController.getAvailableLanguages(controller))
+
+    assert "zz" in data
+
+
 @patch("xpst.readiness.check_yt_dlp", return_value="2026.1.1")
 @patch("xpst.readiness.check_ffmpeg", return_value=True)
 @patch("xpst.readiness.shutil.which", return_value="ffmpeg")

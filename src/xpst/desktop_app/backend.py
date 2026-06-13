@@ -217,10 +217,6 @@ class AppController(QObject):
         self._health_timer.timeout.connect(self._run_health_check)
         self._health_timer.start(self._health_check_interval)
 
-        # Thumbnail cache dir follows the platform config directory.
-        self._thumb_dir = get_config_dir() / "thumbnails"
-        self._thumb_dir.mkdir(parents=True, exist_ok=True)
-
         # Wire error signal to notification signal
         self.error.connect(lambda msg: self.notification.emit(msg, True))
         self.postComplete.connect(
@@ -229,6 +225,8 @@ class AppController(QObject):
 
         # Initialise backends (best-effort)
         self._init_backends()
+        self._thumb_dir = AppController._active_config_dir(self) / "thumbnails"
+        self._thumb_dir.mkdir(parents=True, exist_ok=True)
         self.refreshData()
 
     # ── Backend initialisation ───────────────────────────────────────
@@ -243,13 +241,13 @@ class AppController(QObject):
 
         try:
             if StateManager is not None:
-                self._state = StateManager()
+                self._state = StateManager(AppController._active_config_dir(self))
         except Exception as exc:
             logger.warning("Failed to create StateManager: %s", exc)
 
         try:
             if QuotaManager is not None:
-                self._quota = QuotaManager()
+                self._quota = QuotaManager(AppController._active_config_dir(self))
         except Exception as exc:
             logger.warning("Failed to create QuotaManager: %s", exc)
 
@@ -266,10 +264,18 @@ class AppController(QObject):
             self._analytics_initialized = True
             if AnalyticsCollector is not None:
                 try:
-                    self._analytics = AnalyticsCollector()
+                    self._analytics = AnalyticsCollector(str(AppController._active_config_dir(self)))
                 except Exception as exc:
                     logger.warning("Failed to create AnalyticsCollector: %s", exc)
         return self._analytics
+
+    def _active_config_dir(self) -> Path:
+        config = getattr(self, "_config", None)
+        if config is not None:
+            config_dir = getattr(config, "config_dir", None)
+            if config_dir:
+                return Path(config_dir).expanduser()
+        return get_config_dir()
 
     def _ensure_engine(self) -> bool:
         """Lazily initialize the CrossPostEngine. Returns True if ready."""
@@ -1863,7 +1869,7 @@ class AppController(QObject):
         # Fallback: scan translations dir
         try:
             from pathlib import Path as _Path
-            translations_dir = get_config_dir() / "translations"
+            translations_dir = AppController._active_config_dir(self) / "translations"
             bundled_dir = _Path(__file__).resolve().parent.parent / "i18n"
 
             langs: list[str] = []
