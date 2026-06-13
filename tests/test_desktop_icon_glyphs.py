@@ -61,6 +61,24 @@ def test_theme_provider_exposes_sidebar_nav_icons():
     assert theme.iconSchedule == ig.glyph("schedule")
     assert theme.iconSettings == ig.glyph("settings")
     assert theme.iconAbout == ig.glyph("about")
+    assert theme.iconUsers == ig.glyph("users")
+    assert theme.iconTrophy == ig.glyph("trophy")
+    assert theme.iconCalendar == ig.glyph("calendar")
+    assert theme.iconVideo == ig.glyph("video")
+    assert theme.iconCheck == ig.glyph("check")
+    assert theme.iconError == ig.glyph("error")
+    assert theme.iconEdit == ig.glyph("edit")
+
+
+def test_qml_does_not_use_emoji_or_fake_chart_history():
+    offenders = []
+    disallowed = ("📊", "👥", "🏆", "📅", "Math.random", "simulated")
+    for path in _qml_files():
+        content = path.read_text(encoding="utf-8-sig")
+        for token in disallowed:
+            if token in content:
+                offenders.append(f"{path.name}:{token}")
+    assert not offenders, "unpolished/fake UI tokens remain: " + ", ".join(offenders)
 
 
 def test_icon_glyphs_is_qt_free():

@@ -246,10 +246,10 @@ Page {
 
                 Repeater {
                     model: [
-                        { label: "Total Posts",     value: typeof controller !== "undefined" ? controller.totalPosts : "0",   icon: "📊" },
-                        { label: "Total Reach",     value: typeof controller !== "undefined" ? controller.totalReach : "0",   icon: "👥" },
-                        { label: "Best Platform",   value: typeof controller !== "undefined" ? controller.bestPlatform : "—", icon: "🏆" },
-                        { label: "Posts This Week",  value: typeof controller !== "undefined" ? controller.postsThisWeek : "0", icon: "📅" }
+                        { label: "Total Posts",     value: typeof controller !== "undefined" ? controller.totalPosts : "0",   icon: theme.iconStats },
+                        { label: "Total Reach",     value: typeof controller !== "undefined" ? controller.totalReach : "0",   icon: theme.iconUsers },
+                        { label: "Best Platform",   value: typeof controller !== "undefined" ? controller.bestPlatform : "-", icon: theme.iconTrophy },
+                        { label: "Posts This Week", value: typeof controller !== "undefined" ? controller.postsThisWeek : "0", icon: theme.iconCalendar }
                     ]
 
                     Rectangle {
