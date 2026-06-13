@@ -129,6 +129,15 @@ def test_schedule_page_uses_backend_schedule_new():
     assert "Schedule new post" in text
 
 
+def test_schedule_page_does_not_duplicate_success_notification():
+    qml = Path(
+        "src/xpst/desktop_app/qml/pages/SchedulePage.qml"
+    )
+    text = qml.read_text(encoding="utf-8")
+
+    assert 'showToast("Post scheduled", false)' not in text
+
+
 def test_schedule_new_dialog_uses_app_theme_controls():
     qml = Path(
         "src/xpst/desktop_app/qml/pages/SchedulePage.qml"

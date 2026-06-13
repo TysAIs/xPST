@@ -123,7 +123,6 @@ Page {
                 controller.refreshData()
                 schedulePage.selectedDayPosts = schedulePage.getPostsForDay(schedulePage.selectedDay)
                 close()
-                showToast("Post scheduled", false)
             } else {
                 showToast("Could not schedule post", true)
             }
