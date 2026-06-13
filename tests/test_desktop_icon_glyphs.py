@@ -188,6 +188,26 @@ def test_content_empty_and_edit_controls_use_theme_icons():
     assert "text: theme.iconEdit" in content
 
 
+def test_content_grid_uses_responsive_columns_and_fixed_thumbnail():
+    from pathlib import Path
+
+    content_page = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ContentPage.qml"
+    )
+    content = content_page.read_text(encoding="utf-8-sig")
+
+    assert "contentPage.width < 900 ? 2 : 3" in content
+    assert "Layout.preferredWidth: contentPage.listViewMode ? 56 : 72" in content
+    assert "Layout.fillWidth: false" in content
+    assert "Layout.alignment: Qt.AlignTop" in content
+
+
 def test_icon_glyphs_is_qt_free():
     code = (
         "import sys; from xpst.desktop_app import icon_glyphs as ig; "

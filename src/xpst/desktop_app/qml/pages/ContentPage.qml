@@ -1569,7 +1569,7 @@ Page {
             // Content grid view - using pageItems (filtered + sorted + paginated)
             GridLayout {
                 Layout.fillWidth: true
-                columns: contentPage.listViewMode ? 1 : 3
+                columns: contentPage.listViewMode ? 1 : (contentPage.width < 900 ? 2 : 3)
                 columnSpacing: theme.spacingXl
                 rowSpacing: theme.spacingXl
 
@@ -1618,10 +1618,11 @@ Page {
 
                             // Thumbnail area (hidden in list mode)
                             Rectangle {
-                                Layout.preferredWidth: contentPage.listViewMode ? 56 : -1
+                                Layout.preferredWidth: contentPage.listViewMode ? 56 : 72
                                 Layout.preferredHeight: contentPage.listViewMode ? 56 : 100
-                                Layout.fillWidth: !contentPage.listViewMode
+                                Layout.fillWidth: false
                                 Layout.fillHeight: false
+                                Layout.alignment: Qt.AlignTop
                                 radius: theme.radiusMd
                                 color: theme.surfaceAlt
                                 clip: true
@@ -1673,6 +1674,7 @@ Page {
                             // Text content
                             ColumnLayout {
                                 Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignTop
                                 spacing: theme.spacingXs
 
                                 RowLayout {
