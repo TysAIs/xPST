@@ -87,7 +87,16 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build Docker image
-        run: docker build -t xpst:ci .
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if docker build -t xpst:ci .; then
+              exit 0
+            fi
+            echo "Docker build attempt ${attempt} failed; retrying after registry backoff..."
+            sleep $((attempt * 20))
+          done
+          docker build -t xpst:ci .
 
       - name: Smoke Docker CLI
         run: docker run --rm xpst:ci version --json
