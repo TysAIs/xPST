@@ -443,6 +443,8 @@ def test_desktop_mcp_command_prefers_packaged_entrypoint(monkeypatch):
 
 
 def test_desktop_mcp_test_command_starts_and_stops_probe(monkeypatch):
+    config = XPSTConfig()
+    config.config_dir = r"C:\Profiles\creator"
     popen_calls = []
 
     class FakeStream:
@@ -478,6 +480,7 @@ def test_desktop_mcp_test_command_starts_and_stops_probe(monkeypatch):
     monkeypatch.setattr("xpst.desktop_app.backend.shutil.which", lambda name: "xpst-mcp")
     monkeypatch.setattr("xpst.desktop_app.backend.subprocess.TimeoutExpired", TimeoutError)
     controller = SimpleNamespace(
+        _config=config,
         _mcp_process=None,
         _mcp_last_error="",
         mcpStatusChanged=SimpleNamespace(emit=lambda: None),
@@ -490,6 +493,7 @@ def test_desktop_mcp_test_command_starts_and_stops_probe(monkeypatch):
     assert "waited for stdio input" in result["message"]
     assert fake_process.killed is True
     assert popen_calls[0][0] == ["xpst-mcp"]
+    assert popen_calls[0][1]["env"]["XPST_CONFIG_DIR"] == r"C:\Profiles\creator"
 
 
 def test_settings_mcp_controls_are_not_fake_toggle():

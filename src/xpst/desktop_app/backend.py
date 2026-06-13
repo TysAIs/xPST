@@ -399,6 +399,19 @@ class AppController(QObject):
     def _mcp_command_display(self) -> str:
         return " ".join(AppController._mcp_command(self))
 
+    def _mcp_env(self) -> dict[str, str] | None:
+        config = getattr(self, "_config", None)
+        if config is None:
+            return None
+        config_dir = getattr(config, "config_dir", None)
+        if not config_dir:
+            return None
+        import os
+
+        env = os.environ.copy()
+        env["XPST_CONFIG_DIR"] = str(config_dir)
+        return env
+
     def _refresh_mcp_process_state(self) -> None:
         proc = getattr(self, "_mcp_process", None)
         if proc is not None and proc.poll() is not None:
@@ -423,6 +436,7 @@ class AppController(QObject):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                env=AppController._mcp_env(self),
                 startupinfo=startupinfo,
                 creationflags=creationflags,
             )
@@ -471,15 +485,6 @@ class AppController(QObject):
             })
 
         try:
-            env = None
-            if self._config is not None:
-                config_dir = getattr(self._config, "config_dir", None)
-                if config_dir:
-                    import os
-
-                    env = os.environ.copy()
-                    env["XPST_CONFIG_DIR"] = str(config_dir)
-
             startupinfo = None
             creationflags = 0
             if sys.platform == "win32":
@@ -493,7 +498,7 @@ class AppController(QObject):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                env=env,
+                env=AppController._mcp_env(self),
                 startupinfo=startupinfo,
                 creationflags=creationflags,
             )
