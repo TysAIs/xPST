@@ -264,8 +264,9 @@ Page {
                             color: theme.surfaceAlt
                             Text {
                                 anchors.centerIn: parent
-                                text: "<"
-                                font.pixelSize: 14
+                                text: theme.iconChevronLeft
+                                font.family: theme.iconFontFamily
+                                font.pixelSize: 15
                                 color: theme.textPrimary
                             }
                             MouseArea {
@@ -290,8 +291,9 @@ Page {
                             color: theme.surfaceAlt
                             Text {
                                 anchors.centerIn: parent
-                                text: ">"
-                                font.pixelSize: 14
+                                text: theme.iconChevronRight
+                                font.family: theme.iconFontFamily
+                                font.pixelSize: 15
                                 color: theme.textPrimary
                             }
                             MouseArea {

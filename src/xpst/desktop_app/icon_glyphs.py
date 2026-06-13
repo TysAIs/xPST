@@ -81,6 +81,8 @@ ICON_CODEPOINTS: dict[str, int] = {
     "shares": 0xE156,     # share-2
     "view_grid": 0xE0FF,  # layout-grid
     "view_list": 0xE1D9,  # layout-list
+    "chevron_left": 0xE06E,   # chevron-left
+    "chevron_right": 0xE06F,  # chevron-right
     # Navigation
     "dashboard": 0xE1C1,  # layout-dashboard
     "content": 0xE0FF,    # layout-grid
@@ -96,6 +98,10 @@ ICON_CODEPOINTS: dict[str, int] = {
     "close": 0xE1B2,      # x
     "edit": 0xE1F9,       # pencil
     "web": 0xE0E8,        # globe
+    "repo": 0xE0CC,       # file-text
+    "docs": 0xE05F,       # book-open
+    "issue": 0xE20C,      # bug
+    "changelog": 0xE45F,  # scroll-text
     "users": 0xE1A4,      # users
     "trophy": 0xE373,     # trophy
     "calendar": 0xE063,   # calendar

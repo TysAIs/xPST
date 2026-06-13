@@ -70,6 +70,8 @@ def test_theme_provider_exposes_sidebar_nav_icons():
     assert theme.iconShares == ig.glyph("shares")
     assert theme.iconViewGrid == ig.glyph("view_grid")
     assert theme.iconViewList == ig.glyph("view_list")
+    assert theme.iconChevronLeft == ig.glyph("chevron_left")
+    assert theme.iconChevronRight == ig.glyph("chevron_right")
     assert theme.iconConnect == ig.glyph("connect")
     assert theme.iconSchedule == ig.glyph("schedule")
     assert theme.iconSettings == ig.glyph("settings")
@@ -81,6 +83,11 @@ def test_theme_provider_exposes_sidebar_nav_icons():
     assert theme.iconCheck == ig.glyph("check")
     assert theme.iconError == ig.glyph("error")
     assert theme.iconEdit == ig.glyph("edit")
+    assert theme.iconWeb == ig.glyph("web")
+    assert theme.iconRepo == ig.glyph("repo")
+    assert theme.iconDocs == ig.glyph("docs")
+    assert theme.iconIssue == ig.glyph("issue")
+    assert theme.iconChangelog == ig.glyph("changelog")
     assert theme.iconPlus == ig.glyph("plus")
 
 
@@ -105,6 +112,10 @@ def test_qml_avoids_text_as_icon_placeholders():
         'text: "Empty"',
         'text: "Edit"',
         'text: "+ Schedule New"',
+        'text: "<"',
+        'text: ">"',
+        'text: "< Previous"',
+        'text: "Next >"',
         'return "YT"',
         'return "IG"',
         'return "TT"',
@@ -206,6 +217,53 @@ def test_content_grid_uses_responsive_columns_and_fixed_thumbnail():
     assert "Layout.preferredWidth: contentPage.listViewMode ? 56 : 72" in content
     assert "Layout.fillWidth: false" in content
     assert "Layout.alignment: Qt.AlignTop" in content
+
+
+def test_navigation_arrows_use_theme_icons():
+    from pathlib import Path
+
+    qml_root = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+    )
+    content = (qml_root / "ContentPage.qml").read_text(encoding="utf-8-sig")
+    schedule = (qml_root / "SchedulePage.qml").read_text(encoding="utf-8-sig")
+    about = (qml_root / "AboutPage.qml").read_text(encoding="utf-8-sig")
+
+    assert "text: theme.iconChevronLeft" in content
+    assert "text: theme.iconChevronRight" in content
+    assert "text: theme.iconChevronLeft" in schedule
+    assert "text: theme.iconChevronRight" in schedule
+    assert "text: theme.iconChevronRight" in about
+
+
+def test_about_links_use_theme_icons():
+    from pathlib import Path
+
+    about = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "AboutPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    for token in ("Web", "Repo", "Docs", "Issue", "Log"):
+        assert f'icon: "{token}"' not in about
+    for token in (
+        "icon: theme.iconWeb",
+        "icon: theme.iconRepo",
+        "icon: theme.iconDocs",
+        "icon: theme.iconIssue",
+        "icon: theme.iconChangelog",
+    ):
+        assert token in about
 
 
 def test_icon_glyphs_is_qt_free():

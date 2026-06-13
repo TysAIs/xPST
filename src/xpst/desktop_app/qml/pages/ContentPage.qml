@@ -1843,12 +1843,23 @@ Page {
                     color: contentPage.currentPage > 1 ? theme.surfaceCard : theme.surfaceAlt
                     opacity: contentPage.currentPage > 1 ? 1.0 : 0.5
 
-                    Text {
+                    Row {
                         id: prevLabel
                         anchors.centerIn: parent
-                        text: "< Previous"
-                        font.pixelSize: 12
-                        color: contentPage.currentPage > 1 ? theme.textPrimary : theme.textMuted
+                        spacing: 4
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: theme.iconChevronLeft
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            color: contentPage.currentPage > 1 ? theme.textPrimary : theme.textMuted
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Previous"
+                            font.pixelSize: 12
+                            color: contentPage.currentPage > 1 ? theme.textPrimary : theme.textMuted
+                        }
                     }
 
                     MouseArea {
@@ -1874,12 +1885,23 @@ Page {
                     color: contentPage.currentPage < contentPage.totalPages ? theme.surfaceCard : theme.surfaceAlt
                     opacity: contentPage.currentPage < contentPage.totalPages ? 1.0 : 0.5
 
-                    Text {
+                    Row {
                         id: nextLabel
                         anchors.centerIn: parent
-                        text: "Next >"
-                        font.pixelSize: 12
-                        color: contentPage.currentPage < contentPage.totalPages ? theme.textPrimary : theme.textMuted
+                        spacing: 4
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Next"
+                            font.pixelSize: 12
+                            color: contentPage.currentPage < contentPage.totalPages ? theme.textPrimary : theme.textMuted
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: theme.iconChevronRight
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            color: contentPage.currentPage < contentPage.totalPages ? theme.textPrimary : theme.textMuted
+                        }
                     }
 
                     MouseArea {
