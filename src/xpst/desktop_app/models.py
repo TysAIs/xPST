@@ -26,7 +26,7 @@ class PostListModel(QAbstractListModel):
     """ListModel exposing posted videos to QML.
 
     Roles map to QML role names for delegate bindings:
-        title, caption, platform, status, timestamp, thumbnail, postId, sourceId
+        title, caption, platform, status, timestamp, thumbnail, postId, sourceId, videoPath
     """
 
     # Custom roles starting at Qt.UserRole + 1
@@ -38,6 +38,7 @@ class PostListModel(QAbstractListModel):
     ThumbnailRole = Qt.UserRole + 6
     PostIdRole = Qt.UserRole + 7
     SourceIdRole = Qt.UserRole + 8
+    VideoPathRole = Qt.UserRole + 9
 
     _ROLE_NAMES: dict[int, QByteArray] = {}
 
@@ -53,6 +54,7 @@ class PostListModel(QAbstractListModel):
             self.ThumbnailRole: QByteArray(b"thumbnail"),
             self.PostIdRole: QByteArray(b"postId"),
             self.SourceIdRole: QByteArray(b"sourceId"),
+            self.VideoPathRole: QByteArray(b"videoPath"),
         }
 
     # ── QAbstractListModel interface ─────────────────────────────────
@@ -82,6 +84,8 @@ class PostListModel(QAbstractListModel):
             return post.get("postId", "")
         if role == self.SourceIdRole:
             return post.get("sourceId", post.get("postId", ""))
+        if role == self.VideoPathRole:
+            return post.get("videoPath", "")
 
         return None
 
@@ -109,6 +113,9 @@ class PostListModel(QAbstractListModel):
         for video_id, video_data in posted.items():
             caption = video_data.get("caption") or ""
             downloaded_at = video_data.get("downloaded_at") or ""
+            video_path = video_data.get("video_path") or ""
+            if not video_path and video_data.get("source_platform") == "local":
+                video_path = video_data.get("source_url") or ""
 
             # Create a row per platform this video was posted to
             posted_to = video_data.get("posted_to", {})
@@ -123,6 +130,7 @@ class PostListModel(QAbstractListModel):
                     "thumbnail": "",
                     "postId": video_id,
                     "sourceId": video_id,
+                    "videoPath": video_path,
                 })
             else:
                 for platform, pinfo in posted_to.items():
@@ -139,6 +147,7 @@ class PostListModel(QAbstractListModel):
                         "thumbnail": url,
                         "postId": pid,
                         "sourceId": video_id,
+                        "videoPath": video_path,
                     })
 
         # Sort newest first

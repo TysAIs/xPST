@@ -281,11 +281,31 @@ def test_content_delete_uses_source_id_and_row_selection_keys():
     content = content_page.read_text(encoding="utf-8-sig")
 
     assert "readonly property int sourceIdRole: 264" in content
+    assert "readonly property int videoPathRole: 265" in content
     assert "sourceId: sourceId" in content
+    assert "videoPath: videoPath" in content
     assert 'rowKey: sourceId + "::" + platform + "::" + postId' in content
     assert "controller.deletePost(posts[i].sourceId || posts[i].postId" in content
     assert "toggleSelection(modelData.rowKey || \"\")" in content
     assert "from all platforms" not in content
+
+
+def test_content_post_preview_uses_video_path_not_thumbnail():
+    from pathlib import Path
+
+    content_page = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ContentPage.qml"
+    )
+    content = content_page.read_text(encoding="utf-8-sig")
+
+    assert "var videoPath = post.videoPath || \"\"" in content
+    assert "var videoPath = post.thumbnail || \"\"" not in content
 
 
 def test_content_caption_editor_updates_source_id():

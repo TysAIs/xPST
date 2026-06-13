@@ -259,8 +259,8 @@ class TestChokepointDedup:
         uploader.upload.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_success_records_hash_and_source(self, tmp_path):
-        """G03 end-to-end: the chokepoint records hash + source platform."""
+    async def test_success_records_hash_source_and_video_path(self, tmp_path):
+        """G03 end-to-end: the chokepoint records hash, source, and local file."""
         video = tmp_path / "clip3.mp4"
         video.write_bytes(b"record me" * 1024)
         state = StateManager(str(tmp_path))
@@ -277,6 +277,7 @@ class TestChokepointDedup:
         record = state.get_video("vid9")
         assert record is not None
         assert record.get("source_platform") == "instagram"
+        assert record.get("video_path") == str(video)
 
 
 # ---------------------------------------------------------------------------

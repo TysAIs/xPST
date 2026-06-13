@@ -335,6 +335,7 @@ class UploadService:
                     caption=caption,
                     content_hash=content_hash,
                     source_platform=source_platform,
+                    video_path=str(video_path),
                 )
                 self.circuit_breakers.record_success(platform_name)
                 self.state.update_platform_health(platform_name, True)

@@ -31,6 +31,7 @@ Page {
     readonly property int thumbnailRole: 262
     readonly property int postIdRole: 263
     readonly property int sourceIdRole: 264
+    readonly property int videoPathRole: 265
 
     // Settings persistence for sort option (#21)
     Settings {
@@ -108,6 +109,7 @@ Page {
             if (matchesFilter(platform) && matchesSearch(title, caption)) {
                 var postId = postModel.data(idx, postIdRole) || ""
                 var sourceId = postModel.data(idx, sourceIdRole) || postId
+                var videoPath = postModel.data(idx, videoPathRole) || ""
                 posts.push({
                     title: title,
                     caption: caption,
@@ -117,6 +119,7 @@ Page {
                     thumbnail: postModel.data(idx, thumbnailRole) || "",
                     postId: postId,
                     sourceId: sourceId,
+                    videoPath: videoPath,
                     rowKey: sourceId + "::" + platform + "::" + postId
                 })
             }
@@ -192,7 +195,7 @@ Page {
     }
 
     function preparePostPreview(post) {
-        var videoPath = post.thumbnail || ""
+        var videoPath = post.videoPath || ""
         var caption = post.caption || ""
         pendingPost = { videoPath: videoPath, caption: caption }
         if (typeof controller !== "undefined" && controller.previewPost) {
@@ -238,7 +241,7 @@ Page {
         var warnings = []
         for (var i = 0; i < posts.length; i++) {
             var post = posts[i]
-            var videoPath = post.thumbnail || ""
+            var videoPath = post.videoPath || ""
             var caption = post.caption || ""
             var preview = { ready: false, blocking: ["Posting preview is unavailable"], warnings: [], platforms: [], video: {} }
             if (typeof controller !== "undefined" && controller.previewPost) {

@@ -155,6 +155,7 @@ class StateManager:
         caption: str | None = "",
         tiktok_url: str | None = None,
         source_platform: str = "",
+        video_path: str | None = None,
     ) -> None:
         """Legacy method for marking a video as posted."""
         from datetime import datetime, timezone
@@ -176,6 +177,8 @@ class StateManager:
                 caption=caption,
                 content_hash=content_hash,
             )
+            if video_path:
+                self._state["posted_videos"][video_id]["video_path"] = video_path
 
     def clear_dead_letter_queue(self, video_id: str | None = None) -> int:
         """Clear dead-letter queue entries, optionally for one video."""

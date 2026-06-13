@@ -566,6 +566,8 @@ def test_desktop_app_stops_mcp_server_on_quit():
 
 
 def test_post_list_model_keeps_source_id_separate_from_platform_post_id(tmp_path):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"video bytes")
     state = StateManager(state_dir=str(tmp_path))
     state.add_posted_video(
         "source-video-1",
@@ -580,6 +582,8 @@ def test_post_list_model_keeps_source_id_separate_from_platform_post_id(tmp_path
         },
         caption="Published caption",
     )
+    state._state["posted_videos"]["source-video-1"]["video_path"] = str(video)
+    state.save()
     model = PostListModel()
 
     model.load_from_state(str(tmp_path))
@@ -588,8 +592,11 @@ def test_post_list_model_keeps_source_id_separate_from_platform_post_id(tmp_path
     idx = model.index(0, 0)
     role_names = {bytes(name).decode(): role for role, name in model.roleNames().items()}
     assert "sourceId" in role_names
+    assert "videoPath" in role_names
     assert model.data(idx, role_names["postId"]) == "youtube-platform-post-99"
     assert model.data(idx, role_names["sourceId"]) == "source-video-1"
+    assert model.data(idx, role_names["thumbnail"]) == "https://youtu.be/youtube-platform-post-99"
+    assert model.data(idx, role_names["videoPath"]) == str(video)
 
 
 def test_desktop_update_caption_persists_platform_caption(tmp_path):

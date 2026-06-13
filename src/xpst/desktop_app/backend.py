@@ -694,6 +694,9 @@ class AppController(QObject):
                 caption = (vdata.get("caption") or "")[:120]
                 downloaded_at = vdata.get("downloaded_at") or ""
                 thumbnail_path = vdata.get("thumbnail") or ""
+                video_path = vdata.get("video_path") or ""
+                if not video_path and vdata.get("source_platform") == "local":
+                    video_path = vdata.get("source_url") or ""
 
                 for platform, pinfo in vdata.get("posted_to", {}).items():
                     platform_caption = (pinfo.get("caption") or caption)[:120]
@@ -706,6 +709,7 @@ class AppController(QObject):
                         "postId": pinfo.get("id") or video_id,
                         "url": pinfo.get("url", ""),
                         "thumbnail": thumbnail_path,
+                        "videoPath": video_path,
                     })
 
             # Sort newest first, limit to 50
