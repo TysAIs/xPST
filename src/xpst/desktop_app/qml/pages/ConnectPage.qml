@@ -121,8 +121,8 @@ Page {
         if (p === "instagram") return theme.iconInstagram
         if (p === "x") return theme.iconX
         if (p === "tiktok") return theme.iconTikTok
-        if (p === "local") return "..."
-        return "+"
+        if (p === "local") return theme.iconRepo
+        return theme.iconPlus
     }
 
     function providerColor(providerName) {

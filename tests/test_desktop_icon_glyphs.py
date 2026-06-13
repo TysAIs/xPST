@@ -462,6 +462,25 @@ def test_connect_onboarding_checkboxes_use_theme_text():
         assert label in connect
 
 
+def test_connect_provider_icons_use_theme_glyphs():
+    from pathlib import Path
+
+    connect = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ConnectPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert 'if (p === "local") return theme.iconRepo' in connect
+    assert "return theme.iconPlus" in connect
+    assert 'return "..."' not in connect
+    assert 'return "+"' not in connect
+
+
 def test_schedule_platform_checkboxes_use_themed_indicators():
     from pathlib import Path
 
