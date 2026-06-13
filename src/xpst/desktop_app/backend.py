@@ -2195,6 +2195,8 @@ class ThemeProvider(QObject):
     @Property(str, constant=True)
     def iconError(self): return icon_glyphs.glyph("error")
     @Property(str, constant=True)
+    def iconClose(self): return icon_glyphs.glyph("close")
+    @Property(str, constant=True)
     def iconEdit(self): return icon_glyphs.glyph("edit")
     @Property(str, constant=True)
     def iconWeb(self): return icon_glyphs.glyph("web")

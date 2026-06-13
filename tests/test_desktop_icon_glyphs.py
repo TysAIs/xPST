@@ -82,6 +82,7 @@ def test_theme_provider_exposes_sidebar_nav_icons():
     assert theme.iconVideo == ig.glyph("video")
     assert theme.iconCheck == ig.glyph("check")
     assert theme.iconError == ig.glyph("error")
+    assert theme.iconClose == ig.glyph("close")
     assert theme.iconEdit == ig.glyph("edit")
     assert theme.iconWeb == ig.glyph("web")
     assert theme.iconRepo == ig.glyph("repo")
@@ -350,6 +351,25 @@ def test_content_video_preview_slider_is_themed():
     assert "handle: Rectangle" in content
     assert "color: seekSlider.enabled ? theme.accent : theme.border" in content
     assert "border.color: theme.surfaceCard" in content
+
+
+def test_content_search_clear_uses_theme_icon():
+    from pathlib import Path
+
+    content_page = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ContentPage.qml"
+    )
+    content = content_page.read_text(encoding="utf-8-sig")
+
+    assert "text: theme.iconClose" in content
+    assert "font.family: theme.iconFontFamily" in content
+    assert 'text: "Clear"\n                            font.pixelSize: 10' not in content
 
 
 def test_navigation_arrows_use_theme_icons():

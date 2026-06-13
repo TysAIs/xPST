@@ -1409,8 +1409,9 @@ Page {
                         visible: searchField.text.length > 0
                         Text {
                             anchors.centerIn: parent
-                            text: "Clear"
-                            font.pixelSize: 10
+                            text: theme.iconClose
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
                             color: theme.textMuted
                         }
                         MouseArea {
