@@ -75,6 +75,10 @@ ICON_CODEPOINTS: dict[str, int] = {
     "moon": 0xE11E,       # moon
     "sun": 0xE178,        # sun
     "stats": 0xE2A3,      # chart-column
+    "views": 0xE0BA,      # eye
+    "likes": 0xE0F2,      # heart
+    "comments": 0xE116,   # message-circle
+    "shares": 0xE156,     # share-2
     # Navigation
     "dashboard": 0xE1C1,  # layout-dashboard
     "content": 0xE0FF,    # layout-grid

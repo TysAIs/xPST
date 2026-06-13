@@ -250,9 +250,9 @@ Page {
                     anchors.centerIn: parent
                     spacing: theme.spacingMd
                     Text {
-                        text: "A"
+                        text: theme.iconAnalytics
+                        font.family: theme.iconFontFamily
                         font.pixelSize: 30
-                        font.weight: Font.DemiBold
                         color: theme.accent
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
@@ -296,7 +296,7 @@ Page {
                                    ? (analyticsPage.analyticsJson.summary.prev_totals.views !== undefined
                                       ? analyticsPage.analyticsJson.summary.prev_totals.views : -1)
                                    : -1,
-                            icon: "V",
+                            icon: theme.iconViews,
                             color: "#6366f1"
                         },
                         {
@@ -312,7 +312,7 @@ Page {
                                    ? (analyticsPage.analyticsJson.summary.prev_totals.likes !== undefined
                                       ? analyticsPage.analyticsJson.summary.prev_totals.likes : -1)
                                    : -1,
-                            icon: "L",
+                            icon: theme.iconLikes,
                             color: "#ef4444"
                         },
                         {
@@ -328,7 +328,7 @@ Page {
                                    ? (analyticsPage.analyticsJson.summary.prev_totals.comments !== undefined
                                       ? analyticsPage.analyticsJson.summary.prev_totals.comments : -1)
                                    : -1,
-                            icon: "C",
+                            icon: theme.iconComments,
                             color: "#f59e0b"
                         },
                         {
@@ -344,7 +344,7 @@ Page {
                                    ? (analyticsPage.analyticsJson.summary.prev_totals.shares !== undefined
                                       ? analyticsPage.analyticsJson.summary.prev_totals.shares : -1)
                                    : -1,
-                            icon: "S",
+                            icon: theme.iconShares,
                             color: "#22c55e"
                         }
                     ]

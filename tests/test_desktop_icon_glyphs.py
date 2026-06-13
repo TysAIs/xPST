@@ -64,6 +64,10 @@ def test_theme_provider_exposes_sidebar_nav_icons():
     assert theme.iconDashboard == ig.glyph("dashboard")
     assert theme.iconContent == ig.glyph("content")
     assert theme.iconAnalytics == ig.glyph("analytics")
+    assert theme.iconViews == ig.glyph("views")
+    assert theme.iconLikes == ig.glyph("likes")
+    assert theme.iconComments == ig.glyph("comments")
+    assert theme.iconShares == ig.glyph("shares")
     assert theme.iconConnect == ig.glyph("connect")
     assert theme.iconSchedule == ig.glyph("schedule")
     assert theme.iconSettings == ig.glyph("settings")
@@ -104,6 +108,33 @@ def test_qml_avoids_text_as_icon_placeholders():
             if token in content:
                 offenders.append(f"{path.name}:{token}")
     assert not offenders, "text-as-icon placeholders remain: " + ", ".join(offenders)
+
+
+def test_analytics_uses_theme_icons_for_empty_state_and_metrics():
+    from pathlib import Path
+
+    analytics = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "AnalyticsPage.qml"
+    )
+    content = analytics.read_text(encoding="utf-8-sig")
+
+    assert 'text: "A"' not in content
+    for token in ('icon: "V"', 'icon: "L"', 'icon: "C"', 'icon: "S"'):
+        assert token not in content
+    for token in (
+        "text: theme.iconAnalytics",
+        "icon: theme.iconViews",
+        "icon: theme.iconLikes",
+        "icon: theme.iconComments",
+        "icon: theme.iconShares",
+    ):
+        assert token in content
 
 
 def test_icon_glyphs_is_qt_free():
