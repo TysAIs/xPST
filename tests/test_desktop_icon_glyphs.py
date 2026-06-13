@@ -129,6 +129,27 @@ def test_qml_avoids_text_as_icon_placeholders():
     assert not offenders, "text-as-icon placeholders remain: " + ", ".join(offenders)
 
 
+def test_sidebar_icon_glyphs_use_theme_colors():
+    from pathlib import Path
+
+    sidebar = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "Sidebar.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "text: theme.iconLogo" in sidebar
+    assert "color: theme.textPrimary" in sidebar
+    assert "text: modelData.icon" in sidebar
+    assert (
+        "color: sidebar.currentPage === modelData.page ? theme.accent : theme.textSecondary"
+        in sidebar
+    )
+
+
 def test_analytics_uses_theme_icons_for_empty_state_and_metrics():
     from pathlib import Path
 

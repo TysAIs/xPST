@@ -42,6 +42,7 @@ Rectangle {
                     text: theme.iconLogo
                     font.family: theme.iconFontFamily
                     font.pixelSize: 20
+                    color: theme.textPrimary
                 }
                 Text {
                     text: "xPST"
@@ -89,6 +90,7 @@ Rectangle {
                         text: modelData.icon
                         font.family: theme.iconFontFamily
                         font.pixelSize: 14
+                        color: sidebar.currentPage === modelData.page ? theme.accent : theme.textSecondary
                         Layout.preferredWidth: 24
                         horizontalAlignment: Text.AlignHCenter
                     }
