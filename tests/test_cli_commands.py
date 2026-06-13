@@ -369,6 +369,17 @@ class TestProvidersJson:
         assert youtube["is_official_api"] is True
 
 
+class TestDesktopCommand:
+    """Desktop app command aliases should be discoverable."""
+
+    def test_desktop_alias_help_points_to_native_app(self, runner):
+        result = runner.invoke(main, ["desktop", "--help"])
+
+        assert result.exit_code == 0
+        assert "Launch xPST as a native desktop app" in result.output
+        assert "--no-splash" in result.output
+
+
 class TestMcpCommand:
     """test_mcp_command: invoke `mcp` without starting a real stdio server."""
 

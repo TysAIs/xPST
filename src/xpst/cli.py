@@ -1212,6 +1212,9 @@ def app(ctx: click.Context, port: int | None, no_splash: bool):
             sys.exit(EXIT_PLATFORM_UNAVAILABLE)
 
 
+main.add_command(app, name="desktop")
+
+
 # ──────────────────────────────────────────────
 # MCP Server Command
 # ──────────────────────────────────────────────
