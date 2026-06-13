@@ -79,6 +79,8 @@ ICON_CODEPOINTS: dict[str, int] = {
     "likes": 0xE0F2,      # heart
     "comments": 0xE116,   # message-circle
     "shares": 0xE156,     # share-2
+    "view_grid": 0xE0FF,  # layout-grid
+    "view_list": 0xE1D9,  # layout-list
     # Navigation
     "dashboard": 0xE1C1,  # layout-dashboard
     "content": 0xE0FF,    # layout-grid

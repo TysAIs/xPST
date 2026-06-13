@@ -1284,7 +1284,8 @@ Page {
                         color: !contentPage.listViewMode ? theme.accentMuted : "transparent"
                         Text {
                             anchors.centerIn: parent
-                            text: "⊞"
+                            text: theme.iconViewGrid
+                            font.family: theme.iconFontFamily
                             font.pixelSize: 16
                             color: !contentPage.listViewMode ? theme.accent : theme.textMuted
                         }
@@ -1302,8 +1303,9 @@ Page {
                         color: contentPage.listViewMode ? theme.accentMuted : "transparent"
                         Text {
                             anchors.centerIn: parent
-                            text: "List"
-                            font.pixelSize: 11
+                            text: theme.iconViewList
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 16
                             color: contentPage.listViewMode ? theme.accent : theme.textMuted
                         }
                         MouseArea {

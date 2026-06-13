@@ -68,6 +68,8 @@ def test_theme_provider_exposes_sidebar_nav_icons():
     assert theme.iconLikes == ig.glyph("likes")
     assert theme.iconComments == ig.glyph("comments")
     assert theme.iconShares == ig.glyph("shares")
+    assert theme.iconViewGrid == ig.glyph("view_grid")
+    assert theme.iconViewList == ig.glyph("view_list")
     assert theme.iconConnect == ig.glyph("connect")
     assert theme.iconSchedule == ig.glyph("schedule")
     assert theme.iconSettings == ig.glyph("settings")
@@ -135,6 +137,26 @@ def test_analytics_uses_theme_icons_for_empty_state_and_metrics():
         "icon: theme.iconShares",
     ):
         assert token in content
+
+
+def test_content_view_toggle_uses_theme_icons():
+    from pathlib import Path
+
+    content_page = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ContentPage.qml"
+    )
+    content = content_page.read_text(encoding="utf-8-sig")
+
+    assert 'text: "⊞"' not in content
+    assert 'text: "List"' not in content
+    assert "text: theme.iconViewGrid" in content
+    assert "text: theme.iconViewList" in content
 
 
 def test_icon_glyphs_is_qt_free():
