@@ -768,6 +768,17 @@ class AppController(QObject):
                     "log_level": getattr(mon, "log_level", "INFO"),
                 }
 
+            if hasattr(self._config, "video"):
+                video = self._config.video
+                cfg["video"] = {
+                    "download_dir": getattr(video, "download_dir", ""),
+                }
+
+            if hasattr(self._config, "local"):
+                cfg["local"] = {
+                    "path": getattr(self._config.local, "path", ""),
+                }
+
             self._config_data = json.dumps(cfg, default=str)
         except Exception as exc:
             logger.warning("Config refresh error: %s", exc)
@@ -1225,6 +1236,9 @@ class AppController(QObject):
 
             if "video" in settings:
                 existing.setdefault("video", {}).update(settings["video"])
+
+            if "download_dir" in settings:
+                existing.setdefault("video", {})["download_dir"] = settings["download_dir"]
 
             if "reliability" in settings:
                 existing.setdefault("reliability", {}).update(settings["reliability"])

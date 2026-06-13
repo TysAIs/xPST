@@ -133,6 +133,42 @@ def test_desktop_save_settings_uses_active_config_dir_and_local_source(tmp_path)
     assert controller._engine is None
 
 
+def test_desktop_save_settings_persists_download_dir(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        refreshData=lambda: None,
+    )
+
+    raw = AppController.saveSettings(
+        controller,
+        json.dumps(
+            {
+                "video": {"download_dir": str(tmp_path / "downloads")},
+            }
+        ),
+    )
+    data = json.loads(raw)
+    reloaded = XPSTConfig.load(str(tmp_path / "config.yaml"))
+
+    assert data["ok"] is True
+    assert reloaded.video.download_dir == str(tmp_path / "downloads")
+    assert controller._engine is None
+
+
+def test_desktop_config_data_exposes_download_dir(tmp_path):
+    config = XPSTConfig()
+    config.video.download_dir = str(tmp_path / "downloads")
+    controller = SimpleNamespace(_config=config)
+
+    AppController._refresh_config(controller)
+    data = json.loads(controller._config_data)
+
+    assert data["video"]["download_dir"] == str(tmp_path / "downloads")
+
+
 @patch("xpst.readiness.check_yt_dlp", return_value="2026.1.1")
 @patch("xpst.readiness.check_ffmpeg", return_value=True)
 @patch("xpst.readiness.shutil.which", return_value="ffmpeg")

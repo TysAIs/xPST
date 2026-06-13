@@ -102,6 +102,9 @@ Page {
                 tiktokEnabled = cfg.tiktok.enabled !== false
                 tiktokUsername = cfg.tiktok.username || ""
             }
+            if (cfg.video) {
+                downloadDir = cfg.video.download_dir || ""
+            }
 
             // Load rate limits
             if (cfg.rate_limits) {
@@ -178,13 +181,12 @@ Page {
                 x: rateLimitPosts,
                 tiktok: rateLimitPosts
             },
+            video: {
+                download_dir: downloadDir
+            },
             monitoring: {
                 log_level: "INFO"
             }
-        }
-
-        if (downloadDir.length > 0) {
-            settings.download_dir = downloadDir
         }
 
         controller.saveSettings(JSON.stringify(settings))

@@ -440,6 +440,25 @@ def test_settings_switches_use_themed_indicators():
     assert "color: parent.checked ? modelData.color : theme.surfaceAlt" in settings
 
 
+def test_settings_download_dir_round_trips_as_video_config():
+    from pathlib import Path
+
+    settings = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "SettingsPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "downloadDir = cfg.video.download_dir || \"\"" in settings
+    assert "video: {" in settings
+    assert "download_dir: downloadDir" in settings
+    assert "settings.download_dir = downloadDir" not in settings
+
+
 def test_toast_text_is_bounded_and_wrapped():
     from pathlib import Path
 
