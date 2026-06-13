@@ -2125,6 +2125,36 @@ def _schedule_manager_for_context(ctx: click.Context):
     return ScheduleManager(config_dir=config.config_dir)
 
 
+def _valid_schedule_platforms(config: Any) -> set[str]:
+    try:
+        from xpst.platforms.base import PlatformRegistry
+
+        PlatformRegistry.auto_discover()
+        platforms = {str(name).lower() for name in PlatformRegistry.list_platforms()}
+        return platforms or {"youtube", "instagram", "x"}
+    except Exception:
+        return {"youtube", "instagram", "x"}
+
+
+def _parse_schedule_platforms(platforms: str | None, config: Any) -> list[str] | None:
+    if not platforms:
+        return None
+    platform_list = [p.strip().lower() for p in platforms.split(",") if p.strip()]
+    if not platform_list:
+        raise click.ClickException("Select at least one platform.")
+
+    valid_platforms = _valid_schedule_platforms(config)
+    invalid = sorted(set(platform_list) - valid_platforms)
+    if invalid:
+        raise click.ClickException(
+            "Invalid platform(s): "
+            + ", ".join(invalid)
+            + ". Valid: "
+            + ", ".join(sorted(valid_platforms))
+        )
+    return platform_list
+
+
 @schedule.command("add")
 @click.argument("file", type=click.Path())
 @click.option("--caption", "-c", required=True, help="Post caption text")
@@ -2161,7 +2191,8 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
         console.print("[dim]Use: 'YYYY-MM-DD HH:MM' or ISO format[/dim]")
         sys.exit(EXIT_CONFIG_ERROR)
 
-    platform_list = [p.strip() for p in platforms.split(",")] if platforms else None
+    config = load_config(ctx.obj.get("config_path"))
+    platform_list = _parse_schedule_platforms(platforms, config)
 
     manager = _schedule_manager_for_context(ctx)
     effective_repeat = repeat_rule if repeat_rule and repeat_rule != "none" else None
@@ -2314,6 +2345,15 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
         video_path = Path(entry["video_path"])
         caption = entry["caption"]
         platforms = entry.get("platforms") or None
+        if platforms:
+            invalid = sorted(set(str(p).lower() for p in platforms) - _valid_schedule_platforms(config_obj))
+            if invalid:
+                error_msg = "Invalid platform(s): " + ", ".join(invalid)
+                manager.mark_complete(entry_id, success=False, error=error_msg)
+                processed.append({"id": entry_id, "status": "failed", "error": error_msg})
+                if not as_json:
+                    console.print(f"  [red]✗[/red] {entry_id}: {error_msg}")
+                continue
 
         if not video_path.exists():
             if not as_json:

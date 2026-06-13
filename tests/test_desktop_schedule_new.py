@@ -98,6 +98,24 @@ def test_schedule_new_rejects_empty_platforms(tmp_path):
     assert controller.notification.emitted[-1] == ("Select at least one platform", True)
 
 
+def test_schedule_new_rejects_invalid_platform(tmp_path):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake video")
+    controller = _controller(tmp_path)
+
+    ok = AppController.scheduleNew(
+        controller,
+        str(video),
+        "Caption",
+        "2026-06-12T09:30:00",
+        '["youtube", "youtbe"]',
+    )
+
+    assert ok is False
+    assert not (tmp_path / "schedule.json").exists()
+    assert controller.notification.emitted[-1] == ("Invalid platform: youtbe", True)
+
+
 def test_schedule_page_uses_backend_schedule_new():
     qml = Path(
         "src/xpst/desktop_app/qml/pages/SchedulePage.qml"

@@ -1008,6 +1008,16 @@ class AppController(QObject):
             return str(getattr(account, "session_file", "") or "")
         return ""
 
+    @staticmethod
+    def _valid_destination_platforms(config: Any) -> set[str]:
+        try:
+            from xpst.platforms.base import PlatformRegistry
+
+            PlatformRegistry.auto_discover()
+            return {str(name).lower() for name in PlatformRegistry.list_platforms()}
+        except Exception:
+            return {"youtube", "instagram", "x"}
+
     @Slot(str, str)
     def postVideo(self, video_path: str, caption: str) -> None:
         """Post a video file to all enabled platforms.
@@ -1119,6 +1129,14 @@ class AppController(QObject):
 
             if not selected_platforms:
                 self.notification.emit("Select at least one platform", True)
+                return False
+            valid_platforms = AppController._valid_destination_platforms(self._config)
+            invalid_platforms = sorted(set(selected_platforms) - valid_platforms)
+            if invalid_platforms:
+                self.notification.emit(
+                    "Invalid platform: " + ", ".join(invalid_platforms),
+                    True,
+                )
                 return False
 
             manager.add(

@@ -248,6 +248,30 @@ class TestScheduleAddJson:
         assert (config_dir / "schedule.json").exists()
         assert not (default_dir / "schedule.json").exists()
 
+    def test_schedule_add_rejects_invalid_platform(self, runner, tmp_path, monkeypatch):
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+
+        from xpst.schedule_manager import ScheduleManager
+        orig_init = ScheduleManager.__init__
+        sched_dir = str(tmp_path / ".xpst_schedule")
+
+        def patched_init(self, config_dir="~/.xpst"):
+            orig_init(self, config_dir=sched_dir)
+
+        monkeypatch.setattr(ScheduleManager, "__init__", patched_init)
+
+        result = runner.invoke(main, [
+            "schedule", "add", str(video),
+            "--caption", "Bad target",
+            "--at", "2026-12-25 10:00",
+            "--platforms", "youtube,youtbe",
+        ])
+
+        assert result.exit_code != 0
+        assert "Invalid platform(s): youtbe" in result.output
+        assert not (Path(sched_dir) / "schedule.json").exists()
+
 
 class TestScheduleListJson:
     """test_schedule_list_json: invoke `schedule list --json`, verify JSON."""
@@ -341,6 +365,46 @@ class TestScheduleRunJson:
         reloaded = ScheduleManager(config_dir=sched_dir).list()[0]
         assert reloaded["status"] == "failed"
         assert "File not found" in reloaded["error"]
+
+    def test_schedule_run_json_marks_invalid_platform_failed(self, runner, tmp_path, monkeypatch):
+        from datetime import datetime, timedelta
+
+        from xpst.schedule_manager import ScheduleManager
+
+        orig_init = ScheduleManager.__init__
+        sched_dir = str(tmp_path / ".xpst_schedule")
+
+        def patched_init(self, config_dir="~/.xpst"):
+            orig_init(self, config_dir=sched_dir)
+
+        monkeypatch.setattr(ScheduleManager, "__init__", patched_init)
+
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+        mgr = ScheduleManager(config_dir=sched_dir)
+        entry = mgr.add(
+            str(video),
+            "run me",
+            datetime.now() - timedelta(minutes=1),
+            platforms=["youtube", "youtbe"],
+        )
+
+        result = runner.invoke(main, ["schedule", "run", "--json"])
+        assert result.exit_code == 0, result.output
+        data = extract_json(result.output)
+
+        assert data["status"] == "processed"
+        assert data["posts"] == [
+            {
+                "id": entry["id"],
+                "status": "failed",
+                "error": "Invalid platform(s): youtbe",
+            }
+        ]
+
+        reloaded = ScheduleManager(config_dir=sched_dir).list()[0]
+        assert reloaded["status"] == "failed"
+        assert reloaded["error"] == "Invalid platform(s): youtbe"
 
 
 class TestVersionJson:
