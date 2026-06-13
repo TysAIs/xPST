@@ -67,7 +67,8 @@ def _session_health(config) -> dict[str, dict]:
         info: dict = {"present": path.exists(), "age_days": None}
         if info["present"]:
             try:
-                info["age_days"] = int((time.time() - path.stat().st_mtime) // 86400)
+                age_seconds = max(0.0, time.time() - path.stat().st_mtime)
+                info["age_days"] = int(age_seconds // 86400)
             except OSError:
                 pass
         sessions[name] = info
