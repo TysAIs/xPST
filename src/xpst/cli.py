@@ -2374,17 +2374,32 @@ def schedule_install(ctx: click.Context, interval: int, uninstall: bool, as_json
     system = _platform.system()
     exe_name = "xpst.exe" if _platform.system() == "Windows" else "xpst"
     xpst_bin = os.path.realpath(os.path.join(os.path.dirname(sys.executable), exe_name))
+    config_path = ctx.obj.get("config_path")
 
     if uninstall:
         result = _uninstall_os_scheduler(system, xpst_bin, as_json)
     else:
-        result = _install_os_scheduler(system, xpst_bin, interval, as_json)
+        result = _install_os_scheduler(system, xpst_bin, interval, as_json, config_path=config_path)
 
     if not result:
         sys.exit(EXIT_GENERAL)
 
 
-def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bool) -> bool:
+def _schedule_run_args(config_path: str | None = None) -> list[str]:
+    args = ["--quiet"]
+    if config_path:
+        args.extend(["--config", str(Path(config_path).expanduser())])
+    args.extend(["schedule", "run"])
+    return args
+
+
+def _install_os_scheduler(
+    system: str,
+    xpst_bin: str,
+    interval: int,
+    as_json: bool,
+    config_path: str | None = None,
+) -> bool:
     """Install OS-specific scheduler entry. Returns True on success."""
     import os
 
@@ -2403,9 +2418,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
     <key>ProgramArguments</key>
     <array>
         <string>{xpst_bin}</string>
-        <string>--quiet</string>
-        <string>schedule</string>
-        <string>run</string>
+        {"".join(f"<string>{arg}</string>" for arg in _schedule_run_args(config_path))}
     </array>
     <key>StartInterval</key>
     <integer>{interval_sec}</integer>
@@ -2452,8 +2465,11 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
             )
 
         # cron does NOT expand '~', so the log path must be fully resolved.
+        import shlex
+
         cron_log = get_config_dir() / "logs" / "cron.log"
-        cron_line = f"*/{interval} * * * * {xpst_bin} --quiet schedule run >> {cron_log} 2>&1"
+        command = " ".join([shlex.quote(xpst_bin), *[shlex.quote(arg) for arg in _schedule_run_args(config_path)]])
+        cron_line = f"*/{interval} * * * * {command} >> {cron_log} 2>&1"
 
         # Read existing crontab
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
@@ -2496,7 +2512,8 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
     elif system == "Windows":
         import subprocess
         task_name = "XpstScheduleRun"
-        cmd = f'"{xpst_bin}" --quiet schedule run'
+        args = " ".join(f'"{arg}"' if " " in arg else arg for arg in _schedule_run_args(config_path))
+        cmd = f'"{xpst_bin}" {args}'
 
         result = subprocess.run(
             ["schtasks", "/Create", "/TN", task_name, "/TR", cmd,

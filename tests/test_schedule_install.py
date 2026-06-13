@@ -85,6 +85,31 @@ def test_install_with_crontab_present_succeeds(monkeypatch, fake_home):
     assert cli._install_os_scheduler("Linux", "/usr/bin/xpst", 30, as_json=True) is True
 
 
+def test_linux_scheduler_preserves_config_path(monkeypatch, fake_home):
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["crontab", "-l"]:
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
+        if args == ["crontab", "-"]:
+            captured["input"] = kwargs.get("input", "")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/crontab")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    config_path = str(fake_home / "configs" / "creator one.yaml")
+    assert cli._install_os_scheduler(
+        "Linux", "/usr/bin/xpst", 15, as_json=True, config_path=config_path,
+    )
+
+    written = captured["input"]
+    assert "/usr/bin/xpst --quiet --config" in written
+    assert f"--config '{config_path}'" in written
+    assert "schedule run" in written
+
+
 def test_windows_task_uses_global_quiet_before_subcommand(monkeypatch):
     captured = {}
 
@@ -97,6 +122,23 @@ def test_windows_task_uses_global_quiet_before_subcommand(monkeypatch):
     assert cli._install_os_scheduler("Windows", r"C:\Tools\xpst.exe", 15, as_json=True)
     task_command = captured["args"][captured["args"].index("/TR") + 1]
     assert task_command == r'"C:\Tools\xpst.exe" --quiet schedule run'
+
+
+def test_windows_task_preserves_config_path(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    config_path = str(tmp_path / "creator config.yaml")
+    assert cli._install_os_scheduler(
+        "Windows", r"C:\Tools\xpst.exe", 15, as_json=True, config_path=config_path,
+    )
+    task_command = captured["args"][captured["args"].index("/TR") + 1]
+    assert task_command == rf'"C:\Tools\xpst.exe" --quiet --config "{config_path}" schedule run'
 
 
 def test_uninstall_removes_old_and_new_cron_command_forms(monkeypatch):
