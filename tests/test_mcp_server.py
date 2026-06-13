@@ -88,3 +88,43 @@ async def test_mcp_main_starts_stdio_without_engine_init(tmp_path):
     get_server.assert_awaited_once_with(config, initialize=False)
     run.assert_awaited_once()
     assert fake_server.engine is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_analytics_uses_active_config_dir(tmp_path, monkeypatch):
+    config_dir = tmp_path / "active-profile"
+    default_dir = tmp_path / "default-profile"
+    monkeypatch.setenv("XPST_CONFIG_DIR", str(default_dir))
+
+    from xpst.analytics_store import AnalyticsStore
+
+    store = AnalyticsStore(config_dir / "analytics.db")
+    store.record_snapshots([{
+        "platform": "youtube",
+        "post_id": "video-1",
+        "timestamp": "2026-06-13T00:00:00+00:00",
+        "views": 42,
+        "likes": 7,
+        "comments": 3,
+        "shares": 2,
+    }])
+
+    config = XPSTConfig()
+    config.config_dir = str(config_dir)
+    fake_server = mcp_server.XPSTMCPServer(config)
+
+    with patch.object(mcp_server, "_server", fake_server):
+        result = await mcp_server.handle_call_tool("xpst_analytics", {})
+
+    data = _text_payload(result)
+
+    assert result.isError is not True
+    assert data["snapshot_count"] == 1
+    assert data["platforms"]["youtube"] == {
+        "posts": 1,
+        "views": 42,
+        "likes": 7,
+        "comments": 3,
+        "shares": 2,
+    }
+    assert not (default_dir / "analytics.db").exists()

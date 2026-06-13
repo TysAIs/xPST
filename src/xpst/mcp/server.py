@@ -538,7 +538,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             engine = server.get_engine()
             return await _handle_backfill(engine, arguments)
         elif name == "xpst_analytics":
-            return await _handle_analytics(arguments)
+            return await _handle_analytics(server.config, arguments)
         elif name == "xpst_schedule_list":
             return await _handle_schedule_list(server.config)
         elif name == "xpst_schedule_add":
@@ -767,7 +767,7 @@ async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) ->
     )
 
 
-async def _handle_analytics(arguments: dict[str, Any]) -> CallToolResult:
+async def _handle_analytics(config: XPSTConfig, arguments: dict[str, Any]) -> CallToolResult:
     """Handle xpst_analytics (G27): expose the same numbers the UI shows.
 
     Reads the persisted snapshot store by default; live=true runs a real
@@ -778,7 +778,7 @@ async def _handle_analytics(arguments: dict[str, Any]) -> CallToolResult:
     platform = arguments.get("platform")
     live = bool(arguments.get("live", False))
 
-    collector = AnalyticsCollector()
+    collector = AnalyticsCollector(config.config_dir)
     if live:
         await collector.collect_all()
 
