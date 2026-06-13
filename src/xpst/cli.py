@@ -2393,6 +2393,12 @@ def _schedule_run_args(config_path: str | None = None) -> list[str]:
     return args
 
 
+def _schedule_log_dir(config_path: str | None = None) -> Path:
+    if config_path:
+        return Path(config_path).expanduser().parent / "logs"
+    return get_config_dir() / "logs"
+
+
 def _install_os_scheduler(
     system: str,
     xpst_bin: str,
@@ -2408,6 +2414,7 @@ def _install_os_scheduler(
         plist_dir.mkdir(parents=True, exist_ok=True)
         plist_path = plist_dir / "com.xpst.schedule.plist"
         interval_sec = interval * 60
+        log_dir = _schedule_log_dir(config_path)
         plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -2425,9 +2432,9 @@ def _install_os_scheduler(
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>{get_config_dir() / "logs" / "launchagent.log"}</string>
+    <string>{log_dir / "launchagent.log"}</string>
     <key>StandardErrorPath</key>
-    <string>{get_config_dir() / "logs" / "launchagent.err"}</string>
+    <string>{log_dir / "launchagent.err"}</string>
 </dict>
 </plist>"""
         with open(plist_path, "w") as f:
@@ -2444,7 +2451,7 @@ def _install_os_scheduler(
             else:
                 console.print(f"[green]✓[/green] LaunchAgent installed: [bold]{plist_path}[/bold]")
                 console.print(f"  Runs every {interval} minutes")
-                console.print("  Logs: ~/.xpst/logs/launchagent.log")
+                console.print(f"  Logs: {log_dir / 'launchagent.log'}")
                 console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
         else:
@@ -2467,7 +2474,7 @@ def _install_os_scheduler(
         # cron does NOT expand '~', so the log path must be fully resolved.
         import shlex
 
-        cron_log = get_config_dir() / "logs" / "cron.log"
+        cron_log = _schedule_log_dir(config_path) / "cron.log"
         command = " ".join([shlex.quote(xpst_bin), *[shlex.quote(arg) for arg in _schedule_run_args(config_path)]])
         cron_line = f"*/{interval} * * * * {command} >> {cron_log} 2>&1"
 
@@ -2499,7 +2506,7 @@ def _install_os_scheduler(
                 json_output({"ok": True, "os": "linux", "interval_min": interval}, True)
             else:
                 console.print(f"[green]✓[/green] Crontab entry installed (every {interval} minutes)")
-                console.print("  Logs: ~/.xpst/logs/cron.log")
+                console.print(f"  Logs: {cron_log}")
                 console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
         else:
