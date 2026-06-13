@@ -361,6 +361,25 @@ Page {
                                 Switch {
                                     checked: settingsPage[modelData.prop]
                                     onCheckedChanged: settingsPage[modelData.prop] = checked
+                                    indicator: Rectangle {
+                                        implicitWidth: 44
+                                        implicitHeight: 24
+                                        x: parent.width - width
+                                        y: parent.height / 2 - height / 2
+                                        radius: height / 2
+                                        color: parent.checked ? modelData.color : theme.surfaceAlt
+                                        border.color: parent.checked ? modelData.color : theme.textMuted
+                                        border.width: 1
+
+                                        Rectangle {
+                                            width: 18
+                                            height: 18
+                                            radius: 9
+                                            x: parent.parent.checked ? parent.width - width - 3 : 3
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            color: parent.parent.checked ? "#ffffff" : theme.textSecondary
+                                        }
+                                    }
                                     Accessible.name: "Enable " + modelData.label
                                     Accessible.role: Accessible.CheckBox
                                 }
@@ -507,6 +526,25 @@ Page {
                             }
                             Switch {
                                 checked: true
+                                indicator: Rectangle {
+                                    implicitWidth: 44
+                                    implicitHeight: 24
+                                    x: parent.width - width
+                                    y: parent.height / 2 - height / 2
+                                    radius: height / 2
+                                    color: parent.checked ? theme.accent : theme.surfaceAlt
+                                    border.color: parent.checked ? theme.accent : theme.textMuted
+                                    border.width: 1
+
+                                    Rectangle {
+                                        width: 18
+                                        height: 18
+                                        radius: 9
+                                        x: parent.parent.checked ? parent.width - width - 3 : 3
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: parent.parent.checked ? "#ffffff" : theme.textSecondary
+                                    }
+                                }
                                 Accessible.name: "Toggle post completion alerts"
                                 Accessible.role: Accessible.CheckBox
                             }
@@ -520,6 +558,25 @@ Page {
                             }
                             Switch {
                                 checked: true
+                                indicator: Rectangle {
+                                    implicitWidth: 44
+                                    implicitHeight: 24
+                                    x: parent.width - width
+                                    y: parent.height / 2 - height / 2
+                                    radius: height / 2
+                                    color: parent.checked ? theme.accent : theme.surfaceAlt
+                                    border.color: parent.checked ? theme.accent : theme.textMuted
+                                    border.width: 1
+
+                                    Rectangle {
+                                        width: 18
+                                        height: 18
+                                        radius: 9
+                                        x: parent.parent.checked ? parent.width - width - 3 : 3
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: parent.parent.checked ? "#ffffff" : theme.textSecondary
+                                    }
+                                }
                                 Accessible.name: "Toggle error notifications"
                                 Accessible.role: Accessible.CheckBox
                             }

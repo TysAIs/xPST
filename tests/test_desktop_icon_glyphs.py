@@ -306,6 +306,25 @@ def test_connect_onboarding_checkboxes_use_theme_text():
         assert label in connect
 
 
+def test_settings_switches_use_themed_indicators():
+    from pathlib import Path
+
+    settings = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "SettingsPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert settings.count("Switch {") == 3
+    assert settings.count("indicator: Rectangle") >= 3
+    assert settings.count("color: parent.checked ? theme.accent : theme.surfaceAlt") >= 2
+    assert "color: parent.checked ? modelData.color : theme.surfaceAlt" in settings
+
+
 def test_icon_glyphs_is_qt_free():
     code = (
         "import sys; from xpst.desktop_app import icon_glyphs as ig; "
