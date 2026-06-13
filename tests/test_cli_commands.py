@@ -244,6 +244,50 @@ class TestScheduleRemoveJson:
         assert data.get("removed") == entry["id"]
 
 
+class TestScheduleRunJson:
+    """schedule run --json should report final processing results."""
+
+    def test_schedule_run_json_marks_missing_due_file_failed(self, runner, tmp_path, monkeypatch):
+        from datetime import datetime, timedelta
+
+        from xpst.schedule_manager import ScheduleManager
+
+        orig_init = ScheduleManager.__init__
+        sched_dir = str(tmp_path / ".xpst_schedule")
+
+        def patched_init(self, config_dir="~/.xpst"):
+            orig_init(self, config_dir=sched_dir)
+
+        monkeypatch.setattr(ScheduleManager, "__init__", patched_init)
+
+        mgr = ScheduleManager(config_dir=sched_dir)
+        entry = mgr.add(
+            str(tmp_path / "missing.mp4"),
+            "run me",
+            datetime.now() - timedelta(minutes=1),
+        )
+
+        result = runner.invoke(main, ["schedule", "run", "--json"])
+        assert result.exit_code == 0
+        assert result.output.lstrip().startswith("{")
+        assert "Found 1 due post" not in result.output
+        data = extract_json(result.output)
+
+        assert data["status"] == "processed"
+        assert data["count"] == 1
+        assert data["posts"] == [
+            {
+                "id": entry["id"],
+                "status": "failed",
+                "error": f"File not found: {tmp_path / 'missing.mp4'}",
+            }
+        ]
+
+        reloaded = ScheduleManager(config_dir=sched_dir).list()[0]
+        assert reloaded["status"] == "failed"
+        assert "File not found" in reloaded["error"]
+
+
 class TestVersionJson:
     """test_version_json: invoke `version --json`, verify JSON with xpst key."""
 

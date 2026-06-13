@@ -51,6 +51,8 @@ def test_cron_line_uses_expanded_path(monkeypatch, fake_home):
     assert str(fake_home / ".xpst" / "logs" / "cron.log") in written
     # And it must still be a valid cron schedule line.
     assert "*/15 * * * *" in written
+    assert "/usr/bin/xpst --quiet schedule run" in written
+    assert "/usr/bin/xpst schedule run --quiet" not in written
 
 
 def test_missing_crontab_binary_raises_clear_error(monkeypatch, fake_home):
@@ -81,3 +83,50 @@ def test_install_with_crontab_present_succeeds(monkeypatch, fake_home):
     monkeypatch.setattr("subprocess.run", fake_run)
 
     assert cli._install_os_scheduler("Linux", "/usr/bin/xpst", 30, as_json=True) is True
+
+
+def test_windows_task_uses_global_quiet_before_subcommand(monkeypatch):
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    assert cli._install_os_scheduler("Windows", r"C:\Tools\xpst.exe", 15, as_json=True)
+    task_command = captured["args"][captured["args"].index("/TR") + 1]
+    assert task_command == r'"C:\Tools\xpst.exe" --quiet schedule run'
+
+
+def test_uninstall_removes_old_and_new_cron_command_forms(monkeypatch):
+    written = {}
+    old_line = "/usr/bin/xpst schedule run --quiet"
+    new_line = "/usr/bin/xpst --quiet schedule run"
+
+    def fake_run(args, **kwargs):
+        if args[:2] == ["crontab", "-l"]:
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=(
+                    "# keep\n"
+                    "0 0 * * * echo keep\n"
+                    "# xPST schedule runner\n"
+                    f"*/15 * * * * {old_line}\n"
+                    "# xPST schedule runner\n"
+                    f"*/30 * * * * {new_line}\n"
+                ),
+                stderr="",
+            )
+        if args == ["crontab", "-"]:
+            written["input"] = kwargs.get("input", "")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/crontab")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    assert cli._uninstall_os_scheduler("Linux", "/usr/bin/xpst", as_json=True)
+    assert "echo keep" in written["input"]
+    assert old_line not in written["input"]
+    assert new_line not in written["input"]

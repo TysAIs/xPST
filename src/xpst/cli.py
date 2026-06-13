@@ -2258,6 +2258,7 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
     """
     from xpst.schedule_manager import ScheduleManager
 
+    as_json = as_json or bool(ctx.obj.get("json", False))
     config_obj = load_config(ctx.obj.get("config_path"))
     setup_logging(
         log_level=config_obj.monitoring.log_level,
@@ -2274,22 +2275,37 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
             console.print("[dim]No scheduled posts are due.[/dim]")
         return
 
-    if as_json:
+    if as_json and dry_run:
         results = []
         for entry in due:
-            results.append({"id": entry["id"], "status": "would_post" if dry_run else "pending"})
-        json_output({"status": "dry_run" if dry_run else "processing", "count": len(due), "posts": results}, True)
-        if dry_run:
-            return
-    else:
+            results.append({"id": entry["id"], "status": "would_post"})
+        json_output({"status": "dry_run", "count": len(due), "posts": results}, True)
+        return
+    if not as_json:
         console.print(f"[bold blue]Found {len(due)} due post(s)[/bold blue]")
         if dry_run:
             for entry in due:
                 console.print(f"  Would post: {entry['id']} — {Path(entry['video_path']).name} → {', '.join(entry.get('platforms', ['all']))}")
             return
 
-    engine = CrossPostEngine(config_obj)
+    existing_due = [entry for entry in due if Path(entry["video_path"]).exists()]
+    engine = None
+    if existing_due:
+        try:
+            engine = CrossPostEngine(config_obj)
+        except Exception as exc:
+            if as_json:
+                json_output({
+                    "status": "error",
+                    "count": len(due),
+                    "error": str(exc),
+                    "posts": [{"id": entry["id"], "status": "pending"} for entry in due],
+                }, True)
+            else:
+                console.print(f"[red]Could not start posting engine:[/red] {exc}")
+            raise click.exceptions.Exit(EXIT_GENERAL) from exc
 
+    processed: list[dict[str, Any]] = []
     for entry in due:
         entry_id = entry["id"]
         video_path = Path(entry["video_path"])
@@ -2299,10 +2315,14 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
         if not video_path.exists():
             if not as_json:
                 console.print(f"  [red]✗[/red] {entry_id}: file not found — {video_path}")
-            manager.mark_complete(entry_id, success=False, error=f"File not found: {video_path}")
+            error_msg = f"File not found: {video_path}"
+            manager.mark_complete(entry_id, success=False, error=error_msg)
+            processed.append({"id": entry_id, "status": "failed", "error": error_msg})
             continue
 
         try:
+            if engine is None:
+                raise RuntimeError("Posting engine is unavailable")
             result = asyncio.run(engine.post_manual(video_path, caption, platforms))
             success = result.all_success
             error_msg = None
@@ -2311,6 +2331,11 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
                 error_msg = "; ".join(failed)
 
             manager.mark_complete(entry_id, success=success, error=error_msg)
+            processed.append({
+                "id": entry_id,
+                "status": "completed" if success else "failed",
+                "error": error_msg,
+            })
 
             if not as_json:
                 if success:
@@ -2319,10 +2344,13 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
                     console.print(f"  [yellow]⚠[/yellow] {entry_id}: partial — {error_msg}")
         except Exception as e:
             manager.mark_complete(entry_id, success=False, error=str(e))
+            processed.append({"id": entry_id, "status": "failed", "error": str(e)})
             if not as_json:
                 console.print(f"  [red]✗[/red] {entry_id}: {e}")
 
-    if not as_json:
+    if as_json:
+        json_output({"status": "processed", "count": len(due), "posts": processed}, True)
+    else:
         console.print(f"\n[green]Processed {len(due)} scheduled post(s)[/green]")
 
 
@@ -2372,9 +2400,9 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
     <key>ProgramArguments</key>
     <array>
         <string>{xpst_bin}</string>
+        <string>--quiet</string>
         <string>schedule</string>
         <string>run</string>
-        <string>--quiet</string>
     </array>
     <key>StartInterval</key>
     <integer>{interval_sec}</integer>
@@ -2422,7 +2450,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
 
         # cron does NOT expand '~', so the log path must be fully resolved.
         cron_log = get_config_dir() / "logs" / "cron.log"
-        cron_line = f"*/{interval} * * * * {xpst_bin} schedule run --quiet >> {cron_log} 2>&1"
+        cron_line = f"*/{interval} * * * * {xpst_bin} --quiet schedule run >> {cron_log} 2>&1"
 
         # Read existing crontab
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
@@ -2436,7 +2464,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
             if marker in line:
                 skip_next = True
                 continue
-            if skip_next and "xpst schedule run" in line:
+            if skip_next and "xpst" in line and "schedule run" in line:
                 skip_next = False
                 continue
             skip_next = False
@@ -2465,7 +2493,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
     elif system == "Windows":
         import subprocess
         task_name = "XpstScheduleRun"
-        cmd = f'"{xpst_bin}" schedule run --quiet'
+        cmd = f'"{xpst_bin}" --quiet schedule run'
 
         result = subprocess.run(
             ["schtasks", "/Create", "/TN", task_name, "/TR", cmd,
@@ -2537,7 +2565,7 @@ def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
             if "# xPST schedule runner" in line:
                 skip_next = True
                 continue
-            if skip_next and "xpst schedule run" in line:
+            if skip_next and "xpst" in line and "schedule run" in line:
                 skip_next = False
                 continue
             skip_next = False
