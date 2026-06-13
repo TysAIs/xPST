@@ -103,8 +103,8 @@ ApplicationWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 32
-        width: toastText.implicitWidth + 48
-        height: 44
+        width: Math.min(toastText.implicitWidth + 48, root.width - 64)
+        height: Math.max(44, toastText.implicitHeight + 20)
         radius: theme.radiusMd
         color: toast.isError ? theme.error : theme.success
         opacity: 0
@@ -116,10 +116,15 @@ ApplicationWindow {
         Text {
             id: toastText
             anchors.centerIn: parent
+            width: parent.width - 32
             text: toast.message
             font.pixelSize: 13
             font.weight: Font.DemiBold
             color: "#ffffff"
+            wrapMode: Text.WordWrap
+            maximumLineCount: 3
+            elide: Text.ElideRight
+            horizontalAlignment: Text.AlignHCenter
         }
 
         function show(msg, error) {

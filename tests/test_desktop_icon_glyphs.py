@@ -353,6 +353,26 @@ def test_settings_switches_use_themed_indicators():
     assert "color: parent.checked ? modelData.color : theme.surfaceAlt" in settings
 
 
+def test_toast_text_is_bounded_and_wrapped():
+    from pathlib import Path
+
+    main_qml = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "main.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "width: Math.min(toastText.implicitWidth + 48, root.width - 64)" in main_qml
+    assert "height: Math.max(44, toastText.implicitHeight + 20)" in main_qml
+    assert "width: parent.width - 32" in main_qml
+    assert "wrapMode: Text.WordWrap" in main_qml
+    assert "maximumLineCount: 3" in main_qml
+    assert "elide: Text.ElideRight" in main_qml
+
+
 def test_icon_glyphs_is_qt_free():
     code = (
         "import sys; from xpst.desktop_app import icon_glyphs as ig; "
