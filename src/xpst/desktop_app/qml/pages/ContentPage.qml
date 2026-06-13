@@ -1777,8 +1777,10 @@ Page {
                                         color: editMouseArea.containsMouse ? theme.surfaceAlt : "transparent"
                                         Text {
                                             anchors.centerIn: parent
-                                            text: "Edit"
-                                            font.pixelSize: 10
+                                            text: theme.iconEdit
+                                            font.family: theme.iconFontFamily
+                                            font.pixelSize: 12
+                                            color: theme.textSecondary
                                         }
                                         MouseArea {
                                             id: editMouseArea
@@ -1901,8 +1903,10 @@ Page {
                     spacing: theme.spacingMd
 
                     Text {
-                        text: "Empty"
-                        font.pixelSize: 24
+                        text: theme.iconVideo
+                        font.family: theme.iconFontFamily
+                        font.pixelSize: 30
+                        color: theme.accent
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
                     }

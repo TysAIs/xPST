@@ -102,6 +102,8 @@ def test_qml_avoids_text_as_icon_placeholders():
         'text: "OK"',
         'text: "Video"',
         'text: "Calendar"',
+        'text: "Empty"',
+        'text: "Edit"',
         'text: "+ Schedule New"',
     )
     for path in _qml_files():
@@ -157,6 +159,26 @@ def test_content_view_toggle_uses_theme_icons():
     assert 'text: "List"' not in content
     assert "text: theme.iconViewGrid" in content
     assert "text: theme.iconViewList" in content
+
+
+def test_content_empty_and_edit_controls_use_theme_icons():
+    from pathlib import Path
+
+    content_page = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ContentPage.qml"
+    )
+    content = content_page.read_text(encoding="utf-8-sig")
+
+    assert 'text: "Empty"' not in content
+    assert 'text: "Edit"' not in content
+    assert "text: theme.iconVideo" in content
+    assert "text: theme.iconEdit" in content
 
 
 def test_icon_glyphs_is_qt_free():
