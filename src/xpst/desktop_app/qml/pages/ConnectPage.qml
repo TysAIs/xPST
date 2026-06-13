@@ -311,11 +311,22 @@ Page {
                         onClicked: {
                             if (cookieInput.text.length > 0 && typeof controller !== "undefined") {
                                 var settings = { x_cookies: cookieInput.text }
-                                controller.saveSettings(JSON.stringify(settings))
-                                if (typeof showToast !== "undefined") showToast("X cookies saved", false)
+                                try {
+                                    var raw = controller.saveSettings(JSON.stringify(settings))
+                                    var result = JSON.parse(raw)
+                                    if (result.ok) {
+                                        if (typeof showToast !== "undefined") showToast("X cookies saved", false)
+                                        cookieInput.text = ""
+                                        xCookieDialog.close()
+                                    } else {
+                                        if (typeof showToast !== "undefined") showToast(result.error || "Could not save X cookies", true)
+                                    }
+                                } catch(e) {
+                                    if (typeof showToast !== "undefined") showToast("Could not save X cookies", true)
+                                }
+                            } else {
+                                xCookieDialog.close()
                             }
-                            cookieInput.text = ""
-                            xCookieDialog.close()
                         }
                     }
                 }

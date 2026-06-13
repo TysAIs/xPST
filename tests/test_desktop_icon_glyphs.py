@@ -501,6 +501,26 @@ def test_settings_rate_limit_ui_matches_daily_config():
     assert "rateLimitMinutesError" not in settings
 
 
+def test_connect_x_cookie_dialog_checks_save_result():
+    from pathlib import Path
+
+    connect = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ConnectPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "var settings = { x_cookies: cookieInput.text }" in connect
+    assert "var result = JSON.parse(raw)" in connect
+    assert "if (result.ok)" in connect
+    assert "result.error || \"Could not save X cookies\"" in connect
+    assert 'showToast("X cookies saved", false)' in connect
+
+
 def test_toast_text_is_bounded_and_wrapped():
     from pathlib import Path
 

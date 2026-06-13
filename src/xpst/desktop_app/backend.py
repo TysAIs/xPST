@@ -6,6 +6,7 @@ data is serialised as JSON strings so QML can parse with JSON.parse().
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import shutil
@@ -1235,6 +1236,24 @@ class AppController(QObject):
                     if isinstance(plat_settings, dict):
                         for k, v in plat_settings.items():
                             existing["accounts"][plat][k] = v
+
+            if "x_cookies" in settings:
+                cookies_raw = settings["x_cookies"]
+                cookies_data = json.loads(cookies_raw) if isinstance(cookies_raw, str) else cookies_raw
+                if not isinstance(cookies_data, list | dict):
+                    raise ValueError("X cookies must be a JSON object or array")
+                cookies_path = config_path.parent / "credentials" / "x_cookies.json"
+                cookies_path.parent.mkdir(parents=True, exist_ok=True)
+                cookies_path.write_text(json.dumps(cookies_data, indent=2), encoding="utf-8")
+                with contextlib.suppress(OSError):
+                    cookies_path.chmod(0o600)
+                existing["accounts"].setdefault("x", {})["cookies_file"] = str(cookies_path)
+                try:
+                    from xpst.utils.credentials import CredentialStore
+
+                    CredentialStore(str(config_path.parent)).store("x_cookies", json.dumps(cookies_data))
+                except Exception as exc:
+                    logger.debug("Encrypted X cookie store skipped: %s", exc)
 
             if "rate_limits" in settings:
                 existing["rate_limits"] = settings["rate_limits"]

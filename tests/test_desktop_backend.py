@@ -188,6 +188,52 @@ def test_desktop_save_settings_persists_notifications(tmp_path):
     assert reloaded.notifications.on_failure is True
 
 
+def test_desktop_save_settings_persists_x_cookies(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        refreshData=lambda: None,
+    )
+
+    raw = AppController.saveSettings(
+        controller,
+        json.dumps(
+            {
+                "x_cookies": json.dumps([
+                    {"name": "ct0", "value": "token"},
+                    {"name": "auth_token", "value": "secret"},
+                ]),
+            }
+        ),
+    )
+    data = json.loads(raw)
+    reloaded = XPSTConfig.load(str(tmp_path / "config.yaml"))
+    cookies_path = tmp_path / "credentials" / "x_cookies.json"
+
+    assert data["ok"] is True
+    assert reloaded.x.cookies_file == str(cookies_path)
+    assert json.loads(cookies_path.read_text(encoding="utf-8"))[0]["name"] == "ct0"
+    assert controller._engine is None
+
+
+def test_desktop_save_settings_rejects_invalid_x_cookies(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        refreshData=lambda: None,
+    )
+
+    raw = AppController.saveSettings(controller, json.dumps({"x_cookies": "not json"}))
+    data = json.loads(raw)
+
+    assert data["ok"] is False
+    assert not (tmp_path / "credentials" / "x_cookies.json").exists()
+
+
 def test_desktop_config_data_exposes_download_dir(tmp_path):
     config = XPSTConfig()
     config.video.download_dir = str(tmp_path / "downloads")
