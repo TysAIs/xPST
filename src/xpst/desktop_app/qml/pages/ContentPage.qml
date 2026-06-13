@@ -1039,17 +1039,28 @@ Page {
 
                 // Play/Pause button
                 Rectangle {
-                    width: playPauseLabel.implicitWidth + 24
+                    width: playPauseRow.implicitWidth + 24
                     height: 32
                     radius: theme.radiusMd
                     color: theme.accent
-                    Text {
-                        id: playPauseLabel
+
+                    Row {
+                        id: playPauseRow
                         anchors.centerIn: parent
-                        text: videoPlayer.playbackState === MediaPlayer.PlayingState ? "⏸ Pause" : "▶ Play"
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
-                        color: "#ffffff"
+                        spacing: theme.spacingXs
+
+                        Text {
+                            text: videoPlayer.playbackState === MediaPlayer.PlayingState ? theme.iconPause : theme.iconPlay
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 13
+                            color: "#ffffff"
+                        }
+                        Text {
+                            text: videoPlayer.playbackState === MediaPlayer.PlayingState ? "Pause" : "Play"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#ffffff"
+                        }
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -1066,16 +1077,27 @@ Page {
 
                 // Stop button
                 Rectangle {
-                    width: stopLabel.implicitWidth + 24
+                    width: stopRow.implicitWidth + 24
                     height: 32
                     radius: theme.radiusMd
                     color: theme.surfaceAlt
-                    Text {
-                        id: stopLabel
+
+                    Row {
+                        id: stopRow
                         anchors.centerIn: parent
-                        text: "⏹ Stop"
-                        font.pixelSize: 12
-                        color: theme.textSecondary
+                        spacing: theme.spacingXs
+
+                        Text {
+                            text: theme.iconStop
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 13
+                            color: theme.textSecondary
+                        }
+                        Text {
+                            text: "Stop"
+                            font.pixelSize: 12
+                            color: theme.textSecondary
+                        }
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -1088,16 +1110,27 @@ Page {
 
                 // Open externally button
                 Rectangle {
-                    width: openExtLabel.implicitWidth + 24
+                    width: openExtRow.implicitWidth + 24
                     height: 32
                     radius: theme.radiusMd
                     color: theme.surfaceAlt
-                    Text {
-                        id: openExtLabel
+
+                    Row {
+                        id: openExtRow
                         anchors.centerIn: parent
-                        text: "↗ System Player"
-                        font.pixelSize: 11
-                        color: theme.textSecondary
+                        spacing: theme.spacingXs
+
+                        Text {
+                            text: theme.iconExternal
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 13
+                            color: theme.textSecondary
+                        }
+                        Text {
+                            text: "System Player"
+                            font.pixelSize: 11
+                            color: theme.textSecondary
+                        }
                     }
                     MouseArea {
                         anchors.fill: parent

@@ -2125,6 +2125,14 @@ class ThemeProvider(QObject):
 
     @Property(str, constant=True)
     def iconPlus(self): return icon_glyphs.glyph("plus")
+    @Property(str, constant=True)
+    def iconPlay(self): return icon_glyphs.glyph("play")
+    @Property(str, constant=True)
+    def iconPause(self): return icon_glyphs.glyph("pause")
+    @Property(str, constant=True)
+    def iconStop(self): return icon_glyphs.glyph("stop")
+    @Property(str, constant=True)
+    def iconExternal(self): return icon_glyphs.glyph("external")
 
     @Property(str, constant=True)
     def iconDashboard(self): return icon_glyphs.glyph("dashboard")

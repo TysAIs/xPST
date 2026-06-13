@@ -89,6 +89,10 @@ def test_theme_provider_exposes_sidebar_nav_icons():
     assert theme.iconIssue == ig.glyph("issue")
     assert theme.iconChangelog == ig.glyph("changelog")
     assert theme.iconPlus == ig.glyph("plus")
+    assert theme.iconPlay == ig.glyph("play")
+    assert theme.iconPause == ig.glyph("pause")
+    assert theme.iconStop == ig.glyph("stop")
+    assert theme.iconExternal == ig.glyph("external")
 
 
 def test_qml_does_not_use_emoji_or_fake_chart_history():
@@ -281,6 +285,32 @@ def test_content_delete_uses_source_id_and_row_selection_keys():
     assert "controller.deletePost(posts[i].sourceId || posts[i].postId" in content
     assert "toggleSelection(modelData.rowKey || \"\")" in content
     assert "from all platforms" not in content
+
+
+def test_content_video_preview_controls_use_theme_icons():
+    from pathlib import Path
+
+    content_page = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ContentPage.qml"
+    )
+    content = content_page.read_text(encoding="utf-8-sig")
+
+    for token in ("⏸", "▶", "⏹", "↗"):
+        assert token not in content
+    for token in (
+        "theme.iconPause",
+        "theme.iconPlay",
+        "theme.iconStop",
+        "theme.iconExternal",
+        "font.family: theme.iconFontFamily",
+    ):
+        assert token in content
 
 
 def test_navigation_arrows_use_theme_icons():

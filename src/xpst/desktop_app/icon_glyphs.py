@@ -110,6 +110,10 @@ ICON_CODEPOINTS: dict[str, int] = {
     "retry": 0xE149,      # rotate-cw
     "plus": 0xE13D,       # plus
     "search": 0xE151,     # search
+    "play": 0xE080,       # circle-play
+    "pause": 0xE07F,      # circle-pause
+    "stop": 0xE083,       # circle-stop
+    "external": 0xE0B9,   # external-link
 }
 
 

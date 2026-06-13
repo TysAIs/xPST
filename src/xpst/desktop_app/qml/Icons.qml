@@ -62,4 +62,8 @@ QtObject {
     readonly property string retry: ""       // rotate-cw
     readonly property string plus: ""        // plus
     readonly property string search: ""      // search
+    readonly property string play: "\uE080"     // circle-play
+    readonly property string pause: "\uE07F"    // circle-pause
+    readonly property string stop: "\uE083"     // circle-stop
+    readonly property string external: "\uE0B9" // external-link
 }
