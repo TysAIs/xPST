@@ -266,6 +266,25 @@ def test_about_links_use_theme_icons():
         assert token in about
 
 
+def test_connect_onboarding_checkboxes_use_theme_text():
+    from pathlib import Path
+
+    connect = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ConnectPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert connect.count("contentItem: Text") >= 3
+    assert connect.count("color: theme.textPrimary") >= 3
+    for label in ('text: "YouTube"', 'text: "Instagram"', 'text: "X"'):
+        assert label in connect
+
+
 def test_icon_glyphs_is_qt_free():
     code = (
         "import sys; from xpst.desktop_app import icon_glyphs as ig; "

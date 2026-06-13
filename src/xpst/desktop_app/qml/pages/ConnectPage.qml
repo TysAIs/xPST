@@ -483,16 +483,37 @@ Page {
                             text: "YouTube"
                             checked: connectPage.onboardingYouTube
                             onToggled: connectPage.onboardingYouTube = checked
+                            contentItem: Text {
+                                text: parent.text
+                                color: theme.textPrimary
+                                font.pixelSize: 13
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
                         }
                         CheckBox {
                             text: "Instagram"
                             checked: connectPage.onboardingInstagram
                             onToggled: connectPage.onboardingInstagram = checked
+                            contentItem: Text {
+                                text: parent.text
+                                color: theme.textPrimary
+                                font.pixelSize: 13
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
                         }
                         CheckBox {
                             text: "X"
                             checked: connectPage.onboardingX
                             onToggled: connectPage.onboardingX = checked
+                            contentItem: Text {
+                                text: parent.text
+                                color: theme.textPrimary
+                                font.pixelSize: 13
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
                         }
                         Item { Layout.fillWidth: true }
                     }
