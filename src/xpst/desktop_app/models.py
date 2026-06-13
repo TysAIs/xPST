@@ -26,7 +26,7 @@ class PostListModel(QAbstractListModel):
     """ListModel exposing posted videos to QML.
 
     Roles map to QML role names for delegate bindings:
-        title, caption, platform, status, timestamp, thumbnail, postId
+        title, caption, platform, status, timestamp, thumbnail, postId, sourceId
     """
 
     # Custom roles starting at Qt.UserRole + 1
@@ -37,6 +37,7 @@ class PostListModel(QAbstractListModel):
     TimestampRole = Qt.UserRole + 5
     ThumbnailRole = Qt.UserRole + 6
     PostIdRole = Qt.UserRole + 7
+    SourceIdRole = Qt.UserRole + 8
 
     _ROLE_NAMES: dict[int, QByteArray] = {}
 
@@ -51,6 +52,7 @@ class PostListModel(QAbstractListModel):
             self.TimestampRole: QByteArray(b"timestamp"),
             self.ThumbnailRole: QByteArray(b"thumbnail"),
             self.PostIdRole: QByteArray(b"postId"),
+            self.SourceIdRole: QByteArray(b"sourceId"),
         }
 
     # ── QAbstractListModel interface ─────────────────────────────────
@@ -78,6 +80,8 @@ class PostListModel(QAbstractListModel):
             return post.get("thumbnail", "")
         if role == self.PostIdRole:
             return post.get("postId", "")
+        if role == self.SourceIdRole:
+            return post.get("sourceId", post.get("postId", ""))
 
         return None
 
@@ -118,6 +122,7 @@ class PostListModel(QAbstractListModel):
                     "timestamp": downloaded_at,
                     "thumbnail": "",
                     "postId": video_id,
+                    "sourceId": video_id,
                 })
             else:
                 for platform, pinfo in posted_to.items():
@@ -132,6 +137,7 @@ class PostListModel(QAbstractListModel):
                         "timestamp": ts,
                         "thumbnail": url,
                         "postId": pid,
+                        "sourceId": video_id,
                     })
 
         # Sort newest first

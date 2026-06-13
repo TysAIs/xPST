@@ -13,6 +13,8 @@ pytest.importorskip("PySide6", reason="desktop extra not installed")
 
 from xpst.config import XPSTConfig
 from xpst.desktop_app.backend import AppController
+from xpst.desktop_app.models import PostListModel
+from xpst.state import StateManager
 
 
 def test_desktop_check_for_updates_returns_component_status():
@@ -354,3 +356,30 @@ def test_desktop_app_stops_mcp_server_on_quit():
     ).read_text(encoding="utf-8-sig")
 
     assert "app.aboutToQuit.connect(controller.stopMcpServer)" in main_py
+
+
+def test_post_list_model_keeps_source_id_separate_from_platform_post_id(tmp_path):
+    state = StateManager(state_dir=str(tmp_path))
+    state.add_posted_video(
+        "source-video-1",
+        source_url="https://www.tiktok.com/@source/video/1",
+        source_platform="tiktok",
+        posted_to={
+            "youtube": {
+                "id": "youtube-platform-post-99",
+                "url": "https://youtu.be/youtube-platform-post-99",
+                "timestamp": "2026-06-13T10:00:00",
+            }
+        },
+        caption="Published caption",
+    )
+    model = PostListModel()
+
+    model.load_from_state(str(tmp_path))
+
+    assert model.rowCount() == 1
+    idx = model.index(0, 0)
+    role_names = {bytes(name).decode(): role for role, name in model.roleNames().items()}
+    assert "sourceId" in role_names
+    assert model.data(idx, role_names["postId"]) == "youtube-platform-post-99"
+    assert model.data(idx, role_names["sourceId"]) == "source-video-1"

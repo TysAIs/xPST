@@ -261,6 +261,28 @@ def test_content_grid_uses_responsive_columns_and_fixed_thumbnail():
     assert "Layout.alignment: Qt.AlignTop" in content
 
 
+def test_content_delete_uses_source_id_and_row_selection_keys():
+    from pathlib import Path
+
+    content_page = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ContentPage.qml"
+    )
+    content = content_page.read_text(encoding="utf-8-sig")
+
+    assert "readonly property int sourceIdRole: 264" in content
+    assert "sourceId: sourceId" in content
+    assert 'rowKey: sourceId + "::" + platform + "::" + postId' in content
+    assert "controller.deletePost(posts[i].sourceId || posts[i].postId" in content
+    assert "toggleSelection(modelData.rowKey || \"\")" in content
+    assert "from all platforms" not in content
+
+
 def test_navigation_arrows_use_theme_icons():
     from pathlib import Path
 

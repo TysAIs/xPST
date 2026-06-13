@@ -30,6 +30,7 @@ Page {
     readonly property int timestampRole: 261
     readonly property int thumbnailRole: 262
     readonly property int postIdRole: 263
+    readonly property int sourceIdRole: 264
 
     // Settings persistence for sort option (#21)
     Settings {
@@ -105,6 +106,8 @@ Page {
             var title = postModel.data(idx, titleRole) || ""
             var caption = postModel.data(idx, captionRole) || ""
             if (matchesFilter(platform) && matchesSearch(title, caption)) {
+                var postId = postModel.data(idx, postIdRole) || ""
+                var sourceId = postModel.data(idx, sourceIdRole) || postId
                 posts.push({
                     title: title,
                     caption: caption,
@@ -112,7 +115,9 @@ Page {
                     status: postModel.data(idx, statusRole) || "posted",
                     timestamp: postModel.data(idx, timestampRole) || "",
                     thumbnail: postModel.data(idx, thumbnailRole) || "",
-                    postId: postModel.data(idx, postIdRole) || ""
+                    postId: postId,
+                    sourceId: sourceId,
+                    rowKey: sourceId + "::" + platform + "::" + postId
                 })
             }
         }
@@ -151,19 +156,19 @@ Page {
     }
 
     // Selection helpers (Item 8 - batch post)
-    function toggleSelection(postId) {
+    function toggleSelection(rowKey) {
         var items = selectedItems.slice()
-        var idx = items.indexOf(postId)
+        var idx = items.indexOf(rowKey)
         if (idx >= 0) {
             items.splice(idx, 1)
         } else {
-            items.push(postId)
+            items.push(rowKey)
         }
         selectedItems = items
     }
 
-    function isSelected(postId) {
-        return selectedItems.indexOf(postId) >= 0
+    function isSelected(rowKey) {
+        return selectedItems.indexOf(rowKey) >= 0
     }
 
     function clearSelection() {
@@ -175,7 +180,7 @@ Page {
         if (selectedItems.length === 0) return
         if (selectedItems.length === 1) {
             for (var i = 0; i < filteredPosts.length; i++) {
-                if (filteredPosts[i].postId === selectedItems[0]) {
+                if (filteredPosts[i].rowKey === selectedItems[0]) {
                     preparePostPreview(filteredPosts[i])
                     break
                 }
@@ -217,7 +222,7 @@ Page {
         var posts = []
         for (var i = 0; i < selectedItems.length; i++) {
             for (var j = 0; j < filteredPosts.length; j++) {
-                if (filteredPosts[j].postId === selectedItems[i]) {
+                if (filteredPosts[j].rowKey === selectedItems[i]) {
                     posts.push(filteredPosts[j])
                     break
                 }
@@ -284,16 +289,10 @@ Page {
     // Batch delete selected items (#10)
     function deleteSelected() {
         if (selectedItems.length === 0) return
-        for (var i = 0; i < selectedItems.length; i++) {
-            var postId = selectedItems[i]
-            // Find platform for this postId
-            for (var j = 0; j < filteredPosts.length; j++) {
-                if (filteredPosts[j].postId === postId) {
-                    if (typeof controller !== "undefined") {
-                        controller.deletePost(postId, filteredPosts[j].platform || "")
-                    }
-                    break
-                }
+        var posts = selectedPostObjects()
+        for (var i = 0; i < posts.length; i++) {
+            if (typeof controller !== "undefined") {
+                controller.deletePost(posts[i].sourceId || posts[i].postId, posts[i].platform || "")
             }
         }
         var count = selectedItems.length
@@ -519,7 +518,7 @@ Page {
             spacing: theme.spacingXl
 
             Text {
-                text: "Delete " + contentPage.selectedItems.length + " items from all platforms?"
+                text: "Delete " + contentPage.selectedItems.length + " selected platform post(s)?"
                 font.pixelSize: 13
                 color: theme.textPrimary
                 wrapMode: Text.WordWrap
@@ -1594,8 +1593,8 @@ Page {
                             Rectangle {
                                 width: 20; height: 20
                                 radius: 4
-                                color: contentPage.isSelected(modelData.postId) ? theme.accent : "transparent"
-                                border.color: contentPage.isSelected(modelData.postId) ? theme.accent : theme.textMuted
+                                color: contentPage.isSelected(modelData.rowKey) ? theme.accent : "transparent"
+                                border.color: contentPage.isSelected(modelData.rowKey) ? theme.accent : theme.textMuted
                                 border.width: 1.5
                                 Layout.alignment: Qt.AlignTop
 
@@ -1606,13 +1605,13 @@ Page {
                                     font.pixelSize: 12
                                     font.weight: Font.DemiBold
                                     color: "#ffffff"
-                                    visible: contentPage.isSelected(modelData.postId)
+                                    visible: contentPage.isSelected(modelData.rowKey)
                                 }
 
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: contentPage.toggleSelection(modelData.postId || "")
+                                    onClicked: contentPage.toggleSelection(modelData.rowKey || "")
                                     Accessible.name: "Select " + (modelData.title || "item")
                                     Accessible.role: Accessible.CheckBox
                                 }
