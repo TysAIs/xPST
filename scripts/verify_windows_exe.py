@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import platform
+import shutil
 import subprocess
 import tempfile
 import time
@@ -56,6 +57,10 @@ def _stop_process_tree(process: subprocess.Popen[str]) -> None:
             timeout=15,
             check=False,
         )
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
         return
 
     process.terminate()
@@ -86,6 +91,21 @@ def _clean_profile_env(base_env: dict[str, str], profile_dir: Path) -> dict[str,
     return env
 
 
+def _remove_tree_best_effort(path: str) -> None:
+    """Remove a temp tree without failing a passed smoke on late Windows locks."""
+    if not path:
+        return
+    for _attempt in range(3):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            time.sleep(0.5)
+    shutil.rmtree(path, ignore_errors=True)
+
+
 def verify_windows_exe(
     path: Path,
     seconds: int = 12,
@@ -107,9 +127,9 @@ def verify_windows_exe(
             "error": "Windows executable smoke tests must run on Windows.",
         }
 
-    profile_dir = ""
-    with tempfile.TemporaryDirectory(prefix="xpst-clean-profile-") as temp_profile:
-        profile_dir = temp_profile if clean_profile else ""
+    temp_profile = tempfile.mkdtemp(prefix="xpst-clean-profile-") if clean_profile else ""
+    profile_dir = temp_profile
+    try:
         env = os.environ.copy()
         if clean_profile:
             env = _clean_profile_env(env, Path(temp_profile))
@@ -126,6 +146,8 @@ def verify_windows_exe(
 
         if exit_code is None:
             _stop_process_tree(process)
+    finally:
+        _remove_tree_best_effort(temp_profile)
 
     signature = _authenticode_status(path)
     stayed_alive = exit_code is None
