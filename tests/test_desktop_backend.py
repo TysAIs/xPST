@@ -321,6 +321,60 @@ def test_desktop_get_file_info_formats_local_file_size(tmp_path):
     assert AppController.getFileInfo(controller, str(tmp_path / "missing.mp4")) == ""
 
 
+def test_desktop_platform_health_requires_credentials_even_with_prior_success(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.youtube.enabled = True
+    config.youtube.client_secrets = str(tmp_path / "credentials" / "youtube_client_secrets.json")
+    config.youtube.token_file = str(tmp_path / "credentials" / "youtube_token.json")
+
+    class FakeState:
+        def get_platform_health(self, _platform):
+            return {
+                "status": "ok",
+                "failures": 0,
+                "circuit_breaker_open": False,
+                "last_success": "2026-06-14T00:00:00",
+            }
+
+    controller = SimpleNamespace(
+        _config=config,
+        _state=FakeState(),
+        _quota=None,
+        _platform_health="{}",
+    )
+
+    AppController._refresh_platform_health(controller)
+    data = json.loads(controller._platform_health)
+
+    assert data["youtube"]["status"] == "missing_credentials"
+    assert data["youtube"]["credential_ready"] is False
+
+
+def test_desktop_preview_requires_youtube_token_file(tmp_path):
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"fake")
+    secrets = tmp_path / "credentials" / "youtube_client_secrets.json"
+    secrets.parent.mkdir()
+    secrets.write_text("{}", encoding="utf-8")
+
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.youtube.enabled = True
+    config.youtube.client_secrets = str(secrets)
+    config.youtube.token_file = str(tmp_path / "credentials" / "youtube_token.json")
+    config.instagram.enabled = False
+    config.x.enabled = False
+
+    controller = SimpleNamespace(_config=config)
+
+    raw = AppController.previewPost(controller, str(video), "Caption", '["youtube"]')
+    data = json.loads(raw)
+
+    assert data["ready"] is False
+    assert any("YouTube Shorts is not connected." in item for item in data["blocking"])
+
+
 def test_desktop_generate_encoding_sample_uses_ffmpeg_and_active_config_dir(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)

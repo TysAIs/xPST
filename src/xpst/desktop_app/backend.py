@@ -723,6 +723,16 @@ class AppController(QObject):
                         info["enabled"] = True
                 except Exception:
                     info["enabled"] = True
+                credential_paths = AppController._credential_paths_for_platform(self._config, plat)
+                missing_credentials = [
+                    str(path)
+                    for path in credential_paths
+                    if not Path(path).expanduser().exists()
+                ]
+                info["credential_ready"] = not missing_credentials
+                if info.get("enabled") and missing_credentials:
+                    info["status"] = "missing_credentials"
+                    info["credential_error"] = "Missing credential file(s): " + ", ".join(missing_credentials)
 
             health[plat] = info
 
@@ -986,8 +996,11 @@ class AppController(QObject):
                 if not enabled:
                     platform_blocking.append(f"{manifest.display_name} is disabled.")
 
-                credential_path = AppController._credential_path_for_platform(config, platform_name)
-                if credential_path and not Path(credential_path).expanduser().exists():
+                credential_paths = AppController._credential_paths_for_platform(config, platform_name)
+                if credential_paths and any(
+                    not Path(credential_path).expanduser().exists()
+                    for credential_path in credential_paths
+                ):
                     platform_blocking.append(f"{manifest.display_name} is not connected.")
 
                 max_caption = extra.get("max_caption_length")
@@ -1045,16 +1058,30 @@ class AppController(QObject):
 
     @staticmethod
     def _credential_path_for_platform(config: Any, platform_name: str) -> str:
+        paths = AppController._credential_paths_for_platform(config, platform_name)
+        return paths[0] if paths else ""
+
+    @staticmethod
+    def _credential_paths_for_platform(config: Any, platform_name: str) -> list[str]:
         account = getattr(config, platform_name, None)
         if account is None:
-            return ""
+            return []
         if platform_name == "youtube":
-            return str(getattr(account, "client_secrets", "") or "")
+            return [
+                str(path)
+                for path in (
+                    getattr(account, "client_secrets", "") or "",
+                    getattr(account, "token_file", "") or "",
+                )
+                if path
+            ]
         if platform_name == "x":
-            return str(getattr(account, "cookies_file", "") or "")
+            path = str(getattr(account, "cookies_file", "") or "")
+            return [path] if path else []
         if platform_name == "instagram":
-            return str(getattr(account, "session_file", "") or "")
-        return ""
+            path = str(getattr(account, "session_file", "") or "")
+            return [path] if path else []
+        return []
 
     @staticmethod
     def _valid_destination_platforms(config: Any) -> set[str]:
