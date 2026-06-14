@@ -48,6 +48,13 @@ def test_glyph_map_is_complete_and_pua():
     assert ig.glyph_map(), "glyph_map must return a fresh dict each call"
 
 
+def test_theme_provider_exposes_plus_icon():
+    pytest.importorskip("PySide6")
+    from xpst.desktop_app.backend import ThemeProvider
+
+    assert ThemeProvider().iconPlus == ig.glyph("plus")
+
+
 def test_icon_glyphs_is_qt_free():
     code = (
         "import sys; from xpst.desktop_app import icon_glyphs as ig; "

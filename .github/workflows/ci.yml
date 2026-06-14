@@ -33,6 +33,7 @@ jobs:
       - name: Install FFmpeg
         if: runner.os == 'Windows'
         uses: FedericoCarboni/setup-ffmpeg@v3
+
       - name: Install FFmpeg (macOS arm64)
         if: runner.os == 'macOS'
         run: brew install ffmpeg

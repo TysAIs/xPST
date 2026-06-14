@@ -15,6 +15,22 @@ Page {
 
     function closeDialog() { if (dayPostsPopup.visible) dayPostsPopup.close() }
 
+    function scheduledModel() {
+        try {
+            if (typeof controller !== "undefined")
+                return JSON.parse(controller.scheduledPosts || "[]")
+        } catch(e) {}
+        return []
+    }
+
+    function dateForDay(dayNum) {
+        var d = new Date(displayedYear, displayedMonth, dayNum)
+        var y = d.getFullYear()
+        var m = String(d.getMonth() + 1).padStart(2, "0")
+        var day = String(d.getDate()).padStart(2, "0")
+        return y + "-" + m + "-" + day
+    }
+
     // Build calendar data
     property int firstDayOfMonth: new Date(displayedYear, displayedMonth, 1).getDay()
     property int daysInMonth: new Date(displayedYear, displayedMonth + 1, 0).getDate()
@@ -28,15 +44,13 @@ Page {
     property var scheduledDays: {
         var days = {}
         try {
-            if (typeof controller !== "undefined") {
-                var posts = JSON.parse(controller.recentPosts || "[]")
-                for (var i = 0; i < posts.length; i++) {
-                    var ts = posts[i].timestamp || ""
-                    if (ts) {
-                        var d = new Date(ts)
-                        if (d.getMonth() === displayedMonth && d.getFullYear() === displayedYear) {
-                            days[d.getDate()] = true
-                        }
+            var posts = schedulePage.scheduledModel()
+            for (var i = 0; i < posts.length; i++) {
+                var ts = posts[i].scheduled_time || posts[i].timestamp || ""
+                if (ts) {
+                    var d = new Date(ts)
+                    if (d.getMonth() === displayedMonth && d.getFullYear() === displayedYear) {
+                        days[d.getDate()] = true
                     }
                 }
             }
@@ -48,15 +62,13 @@ Page {
     function getPostsForDay(dayNum) {
         var result = []
         try {
-            if (typeof controller !== "undefined") {
-                var posts = JSON.parse(controller.recentPosts || "[]")
-                for (var i = 0; i < posts.length; i++) {
-                    var ts = posts[i].timestamp || ""
-                    if (ts) {
-                        var d = new Date(ts)
-                        if (d.getDate() === dayNum && d.getMonth() === displayedMonth && d.getFullYear() === displayedYear) {
-                            result.push(posts[i])
-                        }
+            var posts = schedulePage.scheduledModel()
+            for (var i = 0; i < posts.length; i++) {
+                var ts = posts[i].scheduled_time || posts[i].timestamp || ""
+                if (ts) {
+                    var d = new Date(ts)
+                    if (d.getDate() === dayNum && d.getMonth() === displayedMonth && d.getFullYear() === displayedYear) {
+                        result.push(posts[i])
                     }
                 }
             }
@@ -67,6 +79,116 @@ Page {
     // Selected day for popup
     property int selectedDay: 0
     property var selectedDayPosts: []
+
+    Dialog {
+        id: scheduleNewDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(460, parent.width - 48)
+        title: "Schedule New"
+
+        function openForDay(dayNum) {
+            scheduleDateField.text = schedulePage.dateForDay(dayNum)
+            scheduleTimeField.text = "09:00"
+            schedulePathField.text = ""
+            scheduleCaptionField.text = ""
+            youtubeCheck.checked = true
+            instagramCheck.checked = true
+            xCheck.checked = true
+            open()
+        }
+
+        function selectedPlatforms() {
+            var platforms = []
+            if (youtubeCheck.checked) platforms.push("youtube")
+            if (instagramCheck.checked) platforms.push("instagram")
+            if (xCheck.checked) platforms.push("x")
+            return platforms
+        }
+
+        function submit() {
+            var platforms = selectedPlatforms()
+            if (platforms.length === 0) {
+                showToast("Select at least one platform", true)
+                return
+            }
+            var whenIso = scheduleDateField.text.trim() + "T" + scheduleTimeField.text.trim() + ":00"
+            var ok = controller.scheduleNew(
+                schedulePathField.text.trim(),
+                scheduleCaptionField.text,
+                whenIso,
+                JSON.stringify(platforms)
+            )
+            if (ok) {
+                controller.refreshData()
+                schedulePage.selectedDayPosts = schedulePage.getPostsForDay(schedulePage.selectedDay)
+                close()
+                showToast("Post scheduled", false)
+            } else {
+                showToast("Could not schedule post", true)
+            }
+        }
+
+        background: Rectangle {
+            color: theme.surfaceCard
+            radius: theme.radiusLg
+        }
+
+        contentItem: ColumnLayout {
+            spacing: theme.spacingMd
+
+            TextField {
+                id: schedulePathField
+                Layout.fillWidth: true
+                placeholderText: "Video file path"
+            }
+
+            TextArea {
+                id: scheduleCaptionField
+                Layout.fillWidth: true
+                Layout.preferredHeight: 96
+                placeholderText: "Caption"
+                wrapMode: TextEdit.Wrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: theme.spacingSm
+                TextField {
+                    id: scheduleDateField
+                    Layout.fillWidth: true
+                    placeholderText: "YYYY-MM-DD"
+                }
+                TextField {
+                    id: scheduleTimeField
+                    Layout.preferredWidth: 110
+                    placeholderText: "HH:MM"
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: theme.spacingLg
+                CheckBox { id: youtubeCheck; text: "YouTube" }
+                CheckBox { id: instagramCheck; text: "Instagram" }
+                CheckBox { id: xCheck; text: "X" }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: theme.spacingSm
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: "Cancel"
+                    onClicked: scheduleNewDialog.close()
+                }
+                Button {
+                    text: "Schedule"
+                    onClicked: scheduleNewDialog.submit()
+                }
+            }
+        }
+    }
 
     // Day posts popup (#5)
     Dialog {
@@ -166,11 +288,7 @@ Page {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         dayPostsPopup.close()
-                        // Navigate to content page for scheduling
-                        if (typeof navigateTo === "function") {
-                            // Try calling parent navigateTo
-                        }
-                        showToast("Schedule New - coming soon", false)
+                        scheduleNewDialog.openForDay(schedulePage.selectedDay)
                     }
                 }
             }
@@ -214,20 +332,64 @@ Page {
             spacing: theme.spacingXl
 
             // Header
-            ColumnLayout {
-                spacing: theme.spacingXs
-                Text {
-                    text: "Schedule"
-                    font.pixelSize: 28
-                    font.weight: Font.DemiBold
-                    color: theme.textPrimary
-                    Accessible.name: "Schedule page title"
-                    Accessible.role: Accessible.Heading
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: theme.spacingMd
+
+                ColumnLayout {
+                    spacing: theme.spacingXs
+                    Layout.fillWidth: true
+                    Text {
+                        text: "Schedule"
+                        font.pixelSize: 28
+                        font.weight: Font.DemiBold
+                        color: theme.textPrimary
+                        Accessible.name: "Schedule page title"
+                        Accessible.role: Accessible.Heading
+                    }
+                    Text {
+                        text: "View your posting schedule"
+                        font.pixelSize: 13
+                        color: theme.textSecondary
+                    }
                 }
-                Text {
-                    text: "View your posting schedule"
-                    font.pixelSize: 13
-                    color: theme.textSecondary
+
+                Rectangle {
+                    Layout.preferredWidth: scheduleNewHeaderLabel.implicitWidth + 48
+                    Layout.preferredHeight: 40
+                    radius: theme.radiusMd
+                    color: headerScheduleMouse.containsMouse ? theme.accentHover : theme.accent
+                    RowLayout {
+                        anchors.centerIn: parent
+                        spacing: theme.spacingXs
+                        Text {
+                            text: theme.iconPlus
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#ffffff"
+                        }
+                        Text {
+                            id: scheduleNewHeaderLabel
+                            text: "Schedule New"
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                            color: "#ffffff"
+                        }
+                    }
+                    MouseArea {
+                        id: headerScheduleMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            var today = new Date()
+                            schedulePage.selectedDay = today.getDate()
+                            scheduleNewDialog.openForDay(schedulePage.selectedDay)
+                        }
+                        Accessible.name: "Schedule new post"
+                        Accessible.role: Accessible.Button
+                    }
                 }
             }
 
@@ -392,14 +554,12 @@ Page {
                 Repeater {
                     model: {
                         try {
-                            if (typeof controller !== "undefined") {
-                                var posts = JSON.parse(controller.recentPosts || "[]")
-                                var filtered = []
-                                for (var i = 0; i < Math.min(posts.length, 10); i++) {
-                                    filtered.push(posts[i])
-                                }
-                                return filtered
+                            var posts = schedulePage.scheduledModel()
+                            var filtered = []
+                            for (var i = 0; i < Math.min(posts.length, 10); i++) {
+                                filtered.push(posts[i])
                             }
+                            return filtered
                         } catch(e) {}
                         return []
                     }
@@ -468,7 +628,7 @@ Page {
                     color: "transparent"
                     visible: {
                         try {
-                            var posts = JSON.parse(controller.recentPosts || "[]")
+                            var posts = schedulePage.scheduledModel()
                             return posts.length === 0
                         } catch(e) { return true }
                     }

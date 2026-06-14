@@ -123,6 +123,11 @@ except ImportError:
     StateManager = None  # type: ignore[assignment,misc]
 
 try:
+    from xpst.schedule_manager import ScheduleManager
+except ImportError:
+    ScheduleManager = None  # type: ignore[assignment,misc]
+
+try:
     from xpst.engine import CrossPostEngine
 except ImportError:
     CrossPostEngine = None  # type: ignore[assignment,misc]
@@ -191,6 +196,7 @@ class AppController(QObject):
         self._posts_this_week: int = 0
         self._platform_health: str = "{}"
         self._recent_posts: str = "[]"
+        self._scheduled_posts: str = "[]"
         self._config_data: str = "{}"
         self._analytics_data: str = "{}"
         self._quota_data: str = "{}"
@@ -322,6 +328,12 @@ class AppController(QObject):
 
     recentPosts = Property(str, _get_recent_posts, notify=dataChanged)
 
+    # scheduledPosts(JSON str)
+    def _get_scheduled_posts(self) -> str:
+        return self._scheduled_posts
+
+    scheduledPosts = Property(str, _get_scheduled_posts, notify=dataChanged)
+
     # configData(JSON str)
     def _get_config_data(self) -> str:
         return self._config_data
@@ -349,6 +361,7 @@ class AppController(QObject):
             self._refresh_state()
             self._refresh_platform_health()
             self._refresh_recent_posts()
+            self._refresh_scheduled_posts()
             self._refresh_config()
             self._refresh_analytics()
             self._refresh_quota()
@@ -501,6 +514,38 @@ class AppController(QObject):
         except Exception as exc:
             logger.warning("Recent posts refresh error: %s", exc)
             self._recent_posts = "[]"
+
+    def _schedule_manager(self):
+        if ScheduleManager is None:
+            return None
+        config_dir = getattr(self._config, "config_dir", None) if self._config is not None else None
+        return ScheduleManager(config_dir=str(config_dir or get_config_dir()))
+
+    def _refresh_scheduled_posts(self) -> None:
+        """Build scheduled posts list from ScheduleManager."""
+        try:
+            manager = AppController._schedule_manager(self)
+            if manager is None:
+                self._scheduled_posts = "[]"
+                return
+            posts = []
+            for entry in manager.list():
+                posts.append({
+                    "id": entry.get("id", ""),
+                    "title": Path(str(entry.get("video_path", ""))).name or "Scheduled post",
+                    "caption": entry.get("caption", ""),
+                    "platform": ", ".join(entry.get("platforms") or []),
+                    "platforms": entry.get("platforms") or [],
+                    "status": entry.get("status", "pending"),
+                    "timestamp": entry.get("scheduled_time", ""),
+                    "scheduled_time": entry.get("scheduled_time", ""),
+                    "postId": entry.get("id", ""),
+                    "video_path": entry.get("video_path", ""),
+                })
+            self._scheduled_posts = json.dumps(posts, default=str)
+        except Exception as exc:
+            logger.warning("Scheduled posts refresh error: %s", exc)
+            self._scheduled_posts = "[]"
 
     def _refresh_config(self) -> None:
         """Serialize current config to JSON for QML settings panel."""
@@ -811,6 +856,57 @@ class AppController(QObject):
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
+
+    @Slot(str, str, str, str, result=bool)
+    def scheduleNew(self, content_path: str, caption: str, when_iso: str, platforms: str) -> bool:
+        """Schedule a new desktop post through ScheduleManager."""
+        try:
+            manager = AppController._schedule_manager(self)
+            if manager is None:
+                self.notification.emit("Schedule manager is not available", True)
+                return False
+
+            path = Path(content_path).expanduser()
+            if not path.exists() or not path.is_file():
+                self.notification.emit(f"Video file not found: {content_path}", True)
+                return False
+
+            try:
+                scheduled_time = datetime.fromisoformat(when_iso)
+            except ValueError:
+                self.notification.emit("Schedule time is invalid", True)
+                return False
+
+            selected_platforms: list[str] = []
+            if platforms.strip():
+                try:
+                    parsed = json.loads(platforms)
+                    if isinstance(parsed, list):
+                        selected_platforms = [
+                            str(item).lower()
+                            for item in parsed
+                            if str(item).strip()
+                        ]
+                except json.JSONDecodeError:
+                    selected_platforms = [
+                        item.strip().lower()
+                        for item in platforms.split(",")
+                        if item.strip()
+                    ]
+
+            manager.add(
+                video_path=str(path),
+                caption=caption,
+                scheduled_time=scheduled_time,
+                platforms=selected_platforms,
+            )
+            self.refreshData()
+            self.notification.emit("Post scheduled", False)
+            return True
+        except Exception as exc:
+            logger.error("scheduleNew error: %s", exc)
+            self.notification.emit(str(exc), True)
+            return False
 
     @Slot(str, str)
     def deletePost(self, post_id: str, platform: str) -> None:
@@ -1801,6 +1897,8 @@ class ThemeProvider(QObject):
     def iconSun(self): return icon_glyphs.glyph("sun")
     @Property(str, constant=True)
     def iconStats(self): return icon_glyphs.glyph("stats")
+    @Property(str, constant=True)
+    def iconPlus(self): return icon_glyphs.glyph("plus")
 
     # Dark mode toggle
     @Property(bool, notify=darkModeChanged)
