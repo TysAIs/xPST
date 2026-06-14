@@ -2,7 +2,7 @@
 
 The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, run posting workflows, and query the personal content knowledge base without scraping CLI text.
 
-This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **16 tools total: 9 `xpst_*` + 4 `kb_*`.**
+This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **17 tools total: 12 `xpst_*` + 5 `kb_*`.**
 
 ## Setup
 
@@ -41,6 +41,9 @@ Metadata-only tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) n
 | `xpst_auth_status` | Credential storage status and quota remaining | No | None |
 | `xpst_status` | Local state statistics and health | Yes | None (read-only) |
 | `xpst_health` | Live source/platform connectivity checks | Yes | Touches credentials, no uploads |
+| `xpst_analytics` | Per-post and per-platform engagement metrics | No by default | `live: true` touches platform APIs |
+| `xpst_schedule_list` | List scheduled posts | No | None (read-only) |
+| `xpst_schedule_add` | Schedule a local video for later posting | No | Mutates local schedule |
 | `xpst_run` | Fetch new content and cross-post it | Yes | **POSTS TO REAL ACCOUNTS** |
 | `xpst_post` | Manually post a local video or carousel | Yes | **POSTS TO REAL ACCOUNTS** |
 | `xpst_backfill` | Retry failed or incomplete posts | Yes | **POSTS TO REAL ACCOUNTS** |
@@ -49,6 +52,7 @@ Metadata-only tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) n
 | `kb_query` | Search stored knowledge nuggets | No | None (read-only) |
 | `kb_organize` | Cluster nuggets into areas, tag difficulty | No | Rewrites KB area assignments |
 | `kb_areas` | List knowledge areas in course order | No | None (read-only) |
+| `kb_course` | Assemble organized areas into a cited course outline | No | None (read-only) |
 
 ---
 
@@ -160,6 +164,74 @@ Example call:
 ```
 
 Response shape: a per-provider health dict (`ok`/error detail for each configured source and destination).
+
+## xpst_analytics
+
+Returns per-post and per-platform engagement metrics from the local analytics snapshot store. By default this is offline and fast; set `live: true` only when the user wants a fresh platform API refresh.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `platform` | string | no | all | Optional platform filter: `youtube`, `x`, `instagram`, or `tiktok`. |
+| `live` | boolean | no | `false` | Refresh from platform APIs before reading snapshots. |
+
+Example call:
+
+```json
+{ "name": "xpst_analytics", "arguments": { "platform": "youtube", "live": false } }
+```
+
+Response shape: an analytics snapshot with totals, platform summaries, and recent per-post metrics.
+
+## xpst_schedule_list
+
+Lists scheduled posts from the active profile's schedule store. Read-only.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_schedule_list", "arguments": {} }
+```
+
+Example response shape:
+
+```json
+{ "schedules": [] }
+```
+
+## xpst_schedule_add
+
+Schedules a local video file for later posting through the active profile's scheduler. This mutates local scheduler state but does not upload immediately.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `confirm` | boolean | conditional | `false` | Required when `XPST_MCP_REQUIRE_CONFIRM=1`. |
+| `video_path` | string | yes | - | Local video file path. |
+| `caption` | string | yes | - | Post caption. |
+| `scheduled_time` | string | yes | - | ISO-8601 local datetime, for example `2026-06-12T09:30:00`. |
+| `platforms` | string[] | no | all enabled | Target platforms. |
+| `repeat_rule` | string | no | none | One of `daily`, `weekly`, or `monthly`. |
+
+Example call:
+
+```json
+{
+  "name": "xpst_schedule_add",
+  "arguments": {
+    "video_path": "/home/user/clips/demo.mp4",
+    "caption": "Scheduled demo",
+    "scheduled_time": "2026-06-12T09:30:00",
+    "platforms": ["youtube"]
+  }
+}
+```
+
+Example response shape:
+
+```json
+{ "scheduled": { "id": "abc123", "status": "pending" } }
+```
 
 ## xpst_run
 
@@ -393,7 +465,40 @@ Example response shape:
 }
 ```
 
-Note: `kb course` and `kb doctor` exist as CLI commands only (`xpst kb course`, `xpst kb doctor`) and are not exposed over MCP yet.
+## kb_course
+
+Assembles organized areas and cited nuggets into a course outline that an agent can turn into prose without inventing the structure. Read-only.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `workspace` | string | no | `"default"` | Workspace name. |
+| `area_id` | string | no | all areas | Optional area id to assemble only one area. |
+
+Example call:
+
+```json
+{ "name": "kb_course", "arguments": { "workspace": "default" } }
+```
+
+Example response shape:
+
+```json
+{
+  "workspace": "default",
+  "area_count": 1,
+  "nugget_count": 3,
+  "areas": [
+    {
+      "label": "Hooks and openers",
+      "nuggets": [
+        { "point": "Open with the result first.", "citation": "https://example.com/v" }
+      ]
+    }
+  ]
+}
+```
+
+Note: `kb doctor` exists as a CLI command only (`xpst kb doctor`) and is not exposed over MCP yet.
 
 ---
 
@@ -404,7 +509,7 @@ Note: `kb course` and `kb doctor` exist as CLI commands only (`xpst kb course`, 
 3. `xpst_health` before real uploads when the user asks for a safety check.
 4. `xpst_run` / `xpst_post` with `dry_run: true` for previews.
 5. Live `xpst_run` / `xpst_post` only after the user explicitly confirms.
-6. `kb_add` / `kb_query` / `kb_organize` / `kb_areas` to build and mine the user's content knowledge base.
+6. `kb_add` / `kb_query` / `kb_organize` / `kb_areas` / `kb_course` to build, mine, and assemble the user's content knowledge base.
 
 ## Error handling
 

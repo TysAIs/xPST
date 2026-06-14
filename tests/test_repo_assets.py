@@ -139,6 +139,25 @@ def test_local_markdown_links_point_to_existing_files():
     assert broken_links == []
 
 
+def test_mcp_docs_match_live_tool_registry():
+    from xpst.mcp import server as mcp_server
+
+    names = [tool.name for tool in mcp_server.TOOLS]
+    xpst_count = sum(name.startswith("xpst_") for name in names)
+    kb_count = sum(name.startswith("kb_") for name in names)
+    total = len(names)
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    mcp_docs = (ROOT / "docs" / "MCP_TOOLS.md").read_text(encoding="utf-8")
+    combined = readme + "\n" + mcp_docs
+
+    assert f"{total} tools" in readme
+    assert f"{total} tools total: {xpst_count} `xpst_*` + {kb_count} `kb_*`" in mcp_docs
+    for name in names:
+        assert name in combined
+    assert "kb_course` is not exposed over MCP yet" not in mcp_docs
+
+
 def test_release_workflow_preserves_required_ship_gates():
     workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8"))
 
