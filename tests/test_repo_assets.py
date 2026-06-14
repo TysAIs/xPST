@@ -172,7 +172,7 @@ def test_release_workflow_preserves_required_ship_gates():
         "python scripts/clean_install_smoke.py --dist dist --artifact both",
         "python scripts/verify_desktop_package.py",
         "QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py",
-        "python scripts/release_artifacts.py --dist dist --output-dir release/python --skip-checks",
+        "python scripts/release_artifacts.py --dist dist --output-dir release/python --metadata-label python --skip-checks",
     ]:
         assert required in python_steps
     python_uses = "\n".join(str(step.get("uses", "")) for step in workflow["jobs"]["build-python"]["steps"])
@@ -188,7 +188,10 @@ def test_release_workflow_preserves_required_ship_gates():
     assert '${{ github.event_name }}" -eq "push"' in windows_steps
     assert '$smokeArgs += "--require-signed"' in windows_steps
     assert "python scripts/verify_windows_exe.py @smokeArgs" in windows_steps
-    assert "python scripts/release_artifacts.py --dist dist --output-dir release/windows --skip-checks" in windows_steps
+    assert (
+        "python scripts/release_artifacts.py --dist dist --output-dir release/windows --metadata-label windows --skip-checks"
+        in windows_steps
+    )
     windows_uses = "\n".join(str(step.get("uses", "")) for step in workflow["jobs"]["build-windows"]["steps"])
     assert "actions/attest@v4" in windows_uses
     windows_step_text = "\n".join(str(step) for step in workflow["jobs"]["build-windows"]["steps"])
@@ -207,7 +210,22 @@ def test_release_workflow_preserves_required_ship_gates():
     assert "MACOS_CODESIGN_IDENTITY" in verify_macos
     assert "bash scripts/sign_macos.sh dist/xPST.app" in verify_macos
     assert "--require-developer-id --require-notarized" in verify_macos
+    assert "scripts/release_artifacts.py --dist dist --output-dir release --metadata-label macos --skip-checks" in verify_macos
 
+    linux_step_text = "\n".join(str(step) for step in workflow["jobs"]["build-linux"]["steps"])
+    assert (
+        "python scripts/release_artifacts.py --dist dist --output-dir release/linux --metadata-label linux --skip-checks"
+        in linux_step_text
+    )
+    assert "release/linux/*" in linux_step_text
+    assert "!release/linux/SHA256SUMS" in linux_step_text
+    assert "!release/linux/SHA512SUMS" in linux_step_text
+
+    release_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["github-release"]["steps"])
+    assert "cd release-artifacts" in release_steps
+    assert "rm -f SHA256SUMS SHA512SUMS" in release_steps
+    assert "sha256sum > SHA256SUMS" in release_steps
+    assert "sha512sum > SHA512SUMS" in release_steps
 
 def test_desktop_package_specs_include_runtime_assets_and_dynamic_imports():
     result = verify_desktop_package(ROOT)

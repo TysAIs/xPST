@@ -42,13 +42,16 @@ jobs:
           python scripts/clean_install_smoke.py --dist dist --artifact both
           python scripts/verify_desktop_package.py
           QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py
-          python scripts/release_artifacts.py --dist dist --output-dir release/python --skip-checks
+          python scripts/release_artifacts.py --dist dist --output-dir release/python --metadata-label python --skip-checks
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: python-release
-          path: release/python/*
+          path: |
+            release/python/*
+            !release/python/SHA256SUMS
+            !release/python/SHA512SUMS
 
       - name: Attest Python artifacts
         uses: actions/attest@v4
@@ -114,13 +117,16 @@ jobs:
       - name: Release metadata
         shell: pwsh
         run: |
-          python scripts/release_artifacts.py --dist dist --output-dir release/windows --skip-checks
+          python scripts/release_artifacts.py --dist dist --output-dir release/windows --metadata-label windows --skip-checks
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-release
-          path: release/windows/*
+          path: |
+            release/windows/*
+            !release/windows/SHA256SUMS
+            !release/windows/SHA512SUMS
 
       - name: Attest Windows artifacts
         uses: actions/attest@v4
@@ -156,13 +162,16 @@ jobs:
 
       - name: Release metadata
         run: |
-          python scripts/release_artifacts.py --dist dist --output-dir release/linux --skip-checks
+          python scripts/release_artifacts.py --dist dist --output-dir release/linux --metadata-label linux --skip-checks
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-release
-          path: release/linux/*
+          path: |
+            release/linux/*
+            !release/linux/SHA256SUMS
+            !release/linux/SHA512SUMS
 
       - name: Attest Linux artifacts
         uses: actions/attest@v4
@@ -200,7 +209,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-release
-          path: release/*
+          path: |
+            release/*
+            !release/SHA256SUMS
+            !release/SHA512SUMS
 
       - name: Attest macOS artifacts
         uses: actions/attest@v4

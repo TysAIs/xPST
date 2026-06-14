@@ -239,6 +239,44 @@ def test_generate_release_evidence_includes_artifacts_and_manual_gates(tmp_path)
     assert data["known_limitations"]
 
 
+def test_generate_release_evidence_supports_labeled_metadata(tmp_path):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    exe = dist / "xPST.exe"
+    exe.write_bytes(b"binary")
+    output_dir = tmp_path / "release"
+    output_dir.mkdir()
+    for name in [
+        "SHA256SUMS",
+        "SHA512SUMS",
+        "windows-xpst-sbom.cdx.json",
+        "windows-RELEASE_NOTES.md",
+        "LICENSE",
+        "NOTICES.md",
+        "NOTICES_QT_LGPL.md",
+        "LICENSING_REPORT.md",
+        "CHANGELOG.md",
+    ]:
+        (output_dir / name).write_text(name, encoding="utf-8")
+    output = output_dir / "windows-RELEASE_EVIDENCE.json"
+
+    generate_release_evidence(
+        dist,
+        output_dir,
+        output,
+        "0.1.0",
+        checks_run=False,
+        metadata_label="windows",
+    )
+    data = json.loads(output.read_text(encoding="utf-8"))
+    generated = {item["filename"]: item["present"] for item in data["generated_files"]}
+
+    assert generated["windows-xpst-sbom.cdx.json"] is True
+    assert generated["windows-RELEASE_NOTES.md"] is True
+    assert "xpst-sbom.cdx.json" not in generated
+    assert "RELEASE_NOTES.md" not in generated
+
+
 def test_release_preflight_local_mode_warns_for_desktop_gates(tmp_path, monkeypatch):
     dist = tmp_path / "dist"
     dist.mkdir()

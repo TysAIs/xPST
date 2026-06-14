@@ -84,6 +84,10 @@ def generate_checksum_files(dist_dir: Path, sha256_output: Path, sha512_output: 
     print(f"Generated: {sha512_output}")
 
 
+def _metadata_name(filename: str, label: str | None) -> str:
+    return f"{label}-{filename}" if label else filename
+
+
 def generate_pypi_json(dist_dir: Path, output: Path, version: str) -> None:
     """Generate PyPI metadata JSON for release."""
     files = find_dist_files(dist_dir)
@@ -226,15 +230,22 @@ def copy_project_documents(output_dir: Path) -> None:
         print(f"Copied: {target}")
 
 
-def generate_release_evidence(dist_dir: Path, output_dir: Path, output: Path, version: str, checks_run: bool) -> None:
+def generate_release_evidence(
+    dist_dir: Path,
+    output_dir: Path,
+    output: Path,
+    version: str,
+    checks_run: bool,
+    metadata_label: str | None = None,
+) -> None:
     """Generate machine-readable release evidence for shipped artifacts."""
     files = find_dist_files(dist_dir)
     generated_files = [
         "SHA256SUMS",
         "SHA512SUMS",
-        "pypi.json",
-        "xpst-sbom.cdx.json",
-        "RELEASE_NOTES.md",
+        _metadata_name("pypi.json", metadata_label),
+        _metadata_name("xpst-sbom.cdx.json", metadata_label),
+        _metadata_name("RELEASE_NOTES.md", metadata_label),
         "LICENSE",
         "NOTICES.md",
         "NOTICES_QT_LGPL.md",
@@ -391,6 +402,11 @@ def main() -> int:
     parser.add_argument("--version", default=None, help="Version string (defaults to pyproject.toml)")
     parser.add_argument("--output-dir", default="release", help="Output directory")
     parser.add_argument("--skip-checks", action="store_true", help="Skip quality checks")
+    parser.add_argument(
+        "--metadata-label",
+        default=None,
+        help="Optional platform label prefix for generated metadata files",
+    )
     args = parser.parse_args()
 
     dist_dir = Path(args.dist)
@@ -430,15 +446,15 @@ def main() -> int:
     generate_checksum_files(dist_dir, sha256_file, sha512_file)
 
     # Generate PyPI JSON
-    pypi_json = output_dir / "pypi.json"
+    pypi_json = output_dir / _metadata_name("pypi.json", args.metadata_label)
     generate_pypi_json(dist_dir, pypi_json, version)
 
     # Generate SBOM
-    sbom_file = output_dir / "xpst-sbom.cdx.json"
+    sbom_file = output_dir / _metadata_name("xpst-sbom.cdx.json", args.metadata_label)
     generate_sbom(dist_dir, sbom_file, version)
 
     # Generate release notes
-    release_notes = output_dir / "RELEASE_NOTES.md"
+    release_notes = output_dir / _metadata_name("RELEASE_NOTES.md", args.metadata_label)
     notes = extract_changelog(version)
     release_notes.write_text(f"# xPST {version}\n\n{notes}\n", encoding="utf-8")
     print(f"Generated: {release_notes}")
@@ -453,8 +469,15 @@ def main() -> int:
         print(f"Copied: {target}")
 
     # Generate release evidence after all expected files are present
-    evidence_file = output_dir / "RELEASE_EVIDENCE.json"
-    generate_release_evidence(dist_dir, output_dir, evidence_file, version, checks_run=not args.skip_checks)
+    evidence_file = output_dir / _metadata_name("RELEASE_EVIDENCE.json", args.metadata_label)
+    generate_release_evidence(
+        dist_dir,
+        output_dir,
+        evidence_file,
+        version,
+        checks_run=not args.skip_checks,
+        metadata_label=args.metadata_label,
+    )
 
     print(f"\nRelease artifacts generated in {output_dir}/")
     print(f"   SHA256SUMS: {sha256_file.read_text().strip()}")

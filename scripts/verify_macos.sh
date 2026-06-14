@@ -46,6 +46,6 @@ if [[ "$PUBLIC_RELEASE" == "1" ]]; then
   VERIFY_ARGS+=(--require-developer-id --require-notarized)
 fi
 "$VENV_DIR/bin/python" scripts/verify_macos_artifact.py "${VERIFY_ARGS[@]}"
-"$VENV_DIR/bin/python" scripts/release_artifacts.py --dist dist --output-dir release --skip-checks
+"$VENV_DIR/bin/python" scripts/release_artifacts.py --dist dist --output-dir release --metadata-label macos --skip-checks
 
 echo "macOS validation complete"
