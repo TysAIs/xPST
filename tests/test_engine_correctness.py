@@ -398,6 +398,30 @@ class TestDurationLimits:
         uploader.upload.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_duration_limit_reads_property_manifest(self, tmp_path):
+        from types import SimpleNamespace
+
+        video = tmp_path / "long_property.mp4"
+        video.write_bytes(b"v" * 2048)
+        service = self._service_with_duration(tmp_path, 90.0)
+
+        class PropertyManifestUploader:
+            @property
+            def manifest(self):
+                return SimpleNamespace(extra={"max_duration_seconds": 60})
+
+            async def upload(self, *_args, **_kwargs):
+                raise AssertionError("upload should be skipped by duration preflight")
+
+        result = await service.upload_to_platform(
+            uploader=PropertyManifestUploader(), video_path=video, caption="c",
+            platform_name="youtube", video_id="long_property",
+        )
+        assert result.success is False
+        assert "60" in (result.error or "")
+        assert result.metadata.get("preflight") is True
+
+    @pytest.mark.asyncio
     async def test_under_limit_proceeds(self, tmp_path):
         video = tmp_path / "ok.mp4"
         video.write_bytes(b"v" * 2048)
