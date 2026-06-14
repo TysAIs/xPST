@@ -114,6 +114,7 @@ def test_concrete_platform_manifests_expose_real_capabilities():
         assert ProviderCapability.DELETE in manifests["youtube"].capabilities
         assert ProviderCapability.CAROUSEL in manifests["instagram"].capabilities
         assert manifests["instagram"].auth_mode == AuthMode.SESSION
+        assert manifests["instagram"].extra["max_duration_seconds"] == 90
         assert ProviderCapability.CAROUSEL in manifests["x"].capabilities
         assert manifests["x"].auth_mode == AuthMode.COOKIES
     finally:

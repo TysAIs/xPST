@@ -42,6 +42,7 @@ Rectangle {
                     text: theme.iconLogo
                     font.family: theme.iconFontFamily
                     font.pixelSize: 20
+                    color: theme.textPrimary
                 }
                 Text {
                     text: "xPST"
@@ -59,17 +60,14 @@ Rectangle {
         Item { Layout.preferredHeight: theme.spacingXl }
 
         Repeater {
-            // Icons routed through the bundled Lucide icon font (W4-3/W4-5).
-            // The Analytics entry previously used a corrupted U+FFFD glyph; all
-            // nav icons now use real font glyphs so none render as tofu boxes.
             model: [
-                { label: "Dashboard", icon: Icons.dashboard, page: "dashboard" },
-                { label: "Content",   icon: Icons.content,   page: "content" },
-                { label: "Analytics", icon: Icons.analytics, page: "analytics" },
-                { label: "Connect",   icon: Icons.connect,   page: "connect" },
-                { label: "Schedule",  icon: Icons.schedule,  page: "schedule" },
-                { label: "Settings",  icon: Icons.settings,  page: "settings" },
-                { label: "About",     icon: Icons.about,     page: "about" }
+                { label: "Dashboard", icon: theme.iconDashboard, page: "dashboard" },
+                { label: "Content",   icon: theme.iconContent,   page: "content" },
+                { label: "Analytics", icon: theme.iconAnalytics, page: "analytics" },
+                { label: "Connect",   icon: theme.iconConnect,   page: "connect" },
+                { label: "Schedule",  icon: theme.iconSchedule,  page: "schedule" },
+                { label: "Settings",  icon: theme.iconSettings,  page: "settings" },
+                { label: "About",     icon: theme.iconAbout,     page: "about" }
             ]
 
             Rectangle {
@@ -92,6 +90,7 @@ Rectangle {
                         text: modelData.icon
                         font.family: theme.iconFontFamily
                         font.pixelSize: 14
+                        color: sidebar.currentPage === modelData.page ? theme.accent : theme.textSecondary
                         Layout.preferredWidth: 24
                         horizontalAlignment: Text.AlignHCenter
                     }
@@ -271,7 +270,7 @@ Rectangle {
             // Notification popup
             Popup {
                 id: notifPopup
-                y: -notifPopupContent.implicitHeight - 8
+                y: -height - 8
                 x: sidebar.expanded ? 0 : 64
                 width: 280
                 height: Math.min(360, notifPopupContent.implicitHeight + theme.spacingXl)
@@ -342,8 +341,10 @@ Rectangle {
                                 RowLayout {
                                     spacing: theme.spacingXs
                                     Text {
-                                        text: model.isError ? "!" : "OK"
-                                        font.pixelSize: 10
+                                        text: model.isError ? theme.iconError : theme.iconCheck
+                                        font.family: theme.iconFontFamily
+                                        font.pixelSize: 11
+                                        color: model.isError ? theme.error : theme.success
                                     }
                                     Text {
                                         text: model.message || ""

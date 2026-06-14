@@ -4,7 +4,9 @@ Creates QApplication, sets Material style, registers backend
 controllers with QML engine, sets up system tray, and runs the event loop.
 """
 
+import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -42,7 +44,7 @@ from xpst.desktop_app.backend import (
     ThemeProvider,
     _default_ui_font,
 )
-from xpst.desktop_app.models import PostListModel
+from xpst.desktop_app.models import NotificationListModel, PostListModel
 
 
 def _find_qml_path() -> Path:
@@ -188,6 +190,10 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
                     obj.requestActivate()
 
     def _refresh() -> None:
+        controller_obj = engine.rootContext().contextProperty("controller")
+        if controller_obj and hasattr(controller_obj, "refreshData"):
+            controller_obj.refreshData()
+            return
         root_objects = engine.rootObjects()
         for obj in root_objects:
             if hasattr(obj, "refreshData"):
@@ -203,6 +209,16 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
             controller_obj = engine.rootContext().contextProperty("controller")
             if controller_obj:
                 caption = Path(file_path).stem
+                if hasattr(controller_obj, "previewPost"):
+                    try:
+                        preview = json.loads(controller_obj.previewPost(file_path, caption, ""))
+                        if not preview.get("ready"):
+                            blocking = preview.get("blocking") or [preview.get("error") or "Post is not ready"]
+                            tray.showMessage("xPST", str(blocking[0]), QSystemTrayIcon.Warning, 5000)
+                            return
+                    except Exception as exc:
+                        tray.showMessage("xPST", f"Post preview failed: {exc}", QSystemTrayIcon.Warning, 5000)
+                        return
                 controller_obj.postVideo(file_path, caption)
                 tray.showMessage("xPST", f"Posting: {Path(file_path).name}", QSystemTrayIcon.Information, 3000)
 
@@ -213,11 +229,15 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
             try:
                 import json
                 health = json.loads(health_json)
+                platform_health = health.get("platforms") if isinstance(health, dict) else None
+                if not isinstance(platform_health, dict):
+                    platform_health = health if isinstance(health, dict) else {}
                 healthy_count = sum(
-                    1 for p in health.values()
-                    if p.get("status") in ("ok", "healthy", "connected")
+                    1 for p in platform_health.values()
+                    if isinstance(p, dict)
+                    and p.get("status") in ("ok", "healthy", "connected")
                 )
-                total = len(health)
+                total = len(platform_health)
                 tray.showMessage(
                     "xPST Health",
                     f"{healthy_count}/{total} platforms healthy",
@@ -269,8 +289,36 @@ def _load_icon_font() -> bool:
     return True
 
 
-def main(no_splash: bool = False) -> int:
+def _load_ui_font() -> bool:
+    """Register the bundled Inter UI font before loading QML.
+
+    Headless/offscreen Qt environments can expose no system sans fonts. If the
+    Lucide icon font is the only registered TTF, normal labels fall back to it
+    and render as missing glyphs.
+    """
+    font_path = icon_glyphs.ui_font_path()
+    if not font_path.exists():
+        logger.warning("UI font not found at %s; text may use platform fallback.", font_path)
+        return False
+    font_id = QFontDatabase.addApplicationFont(str(font_path))
+    if font_id < 0:
+        logger.warning("Failed to register UI font %s with Qt.", font_path)
+        return False
+    families = QFontDatabase.applicationFontFamilies(font_id)
+    if icon_glyphs.UI_FONT_FAMILY not in families:
+        logger.warning(
+            "UI font registered as %s, expected %s; text metrics may drift.",
+            families,
+            icon_glyphs.UI_FONT_FAMILY,
+        )
+    return True
+
+
+def main(no_splash: bool = False, config_dir: str | None = None) -> int:
     """Launch the xPST desktop application."""
+    if config_dir:
+        os.environ["XPST_CONFIG_DIR"] = str(Path(config_dir).expanduser())
+
     # Must use QApplication (not QGuiApplication) for system tray support
     app = QApplication(sys.argv)
     app.setApplicationName("xPST")
@@ -282,18 +330,18 @@ def main(no_splash: bool = False) -> int:
     if QQuickStyle is not None:
         QQuickStyle.setStyle("Material")
     else:
-        import os
         os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Material")
+
+    # Apply a platform-aware default UI font so text metrics don't drift on
+    # macOS/Linux (W4-7). QML elements that don't set font.family inherit this.
+    _load_ui_font()
+    app.setFont(QFont(_default_ui_font()))
 
     # Register the bundled icon font so theme.icon* glyphs render (W4-5).
     _load_icon_font()
 
-    # Apply a platform-aware default UI font so text metrics don't drift on
-    # macOS/Linux (W4-7). QML elements that don't set font.family inherit this.
-    app.setFont(QFont(_default_ui_font()))
-
     # ── Splash Screen ────────────────────────────────────────────────
-    no_splash = "--no-splash" in sys.argv
+    no_splash = no_splash or "--no-splash" in sys.argv
     splash = None
     if not no_splash:
         splash = _create_splash()
@@ -320,21 +368,28 @@ def main(no_splash: bool = False) -> int:
     engine.addImportPath(str(qml_main.parents[3]))
 
     # Create backend objects (lightweight - defer heavy init)
-    controller = AppController()
+    controller = AppController(config_dir=config_dir)
     post_model = PostListModel()
-    post_model.load_from_state()
+    active_config_dir = str(AppController._active_config_dir(controller))
+    post_model.load_from_state(active_config_dir)
+    notif_model = NotificationListModel()
     if splash:
         splash.showMessage("Loading plugins...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
     app.processEvents()
 
     # Connect controller refresh to model reload
-    controller.dataChanged.connect(lambda: post_model.load_from_state())
+    controller.dataChanged.connect(
+        lambda: post_model.load_from_state(str(AppController._active_config_dir(controller)))
+    )
+    controller.notification.connect(notif_model.add_notification)
+    app.aboutToQuit.connect(controller.stopMcpServer)
 
     # Expose to QML
     engine.rootContext().setContextProperty("controller", controller)
     theme_provider = ThemeProvider()
     engine.rootContext().setContextProperty("theme", theme_provider)
     engine.rootContext().setContextProperty("postModel", post_model)
+    engine.rootContext().setContextProperty("notifModel", notif_model)
     # Named xpstNoSplash because a root QML property of the same name would
     # shadow the context property and self-bind (G40).
     engine.rootContext().setContextProperty("xpstNoSplash", no_splash)

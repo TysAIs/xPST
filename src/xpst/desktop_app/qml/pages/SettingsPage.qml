@@ -15,13 +15,20 @@ Page {
     property bool xEnabled: true
     property bool tiktokEnabled: true
     property int rateLimitPosts: 10
-    property int rateLimitMinutes: 60
+    property int originalRateLimitPosts: 10
+    property bool rateLimitDirty: false
+    property bool postCompletionAlerts: true
+    property bool errorNotifications: true
     property bool mcpRunning: false
+    property bool mcpReady: false
+    property int mcpPid: 0
+    property string mcpCommand: "xpst-mcp"
+    property string mcpError: ""
+    property var mcpTools: []
 
     // ── Validation state ────────────────────────────────────────
     property bool hasErrors: false
     property string rateLimitPostsError: ""
-    property string rateLimitMinutesError: ""
     property string downloadDirError: ""
 
     function validateForm() {
@@ -33,14 +40,6 @@ Page {
             errors = true
         } else {
             rateLimitPostsError = ""
-        }
-
-        // Rate limit minutes: must be positive integer
-        if (rateLimitMinutes <= 0 || isNaN(rateLimitMinutes)) {
-            rateLimitMinutesError = "Must be a positive number"
-            errors = true
-        } else {
-            rateLimitMinutesError = ""
         }
 
         // Download directory: basic path validation
@@ -62,12 +61,18 @@ Page {
     }
 
     // ── Load from controller on creation ────────────────────────
-    Component.onCompleted: loadFromConfig()
+    Component.onCompleted: {
+        loadFromConfig()
+        refreshMcpStatus()
+    }
 
     Connections {
         target: typeof controller !== "undefined" ? controller : null
         function onDataChanged() {
             loadFromConfig()
+        }
+        function onMcpStatusChanged() {
+            refreshMcpStatus()
         }
     }
 
@@ -91,6 +96,13 @@ Page {
                 tiktokEnabled = cfg.tiktok.enabled !== false
                 tiktokUsername = cfg.tiktok.username || ""
             }
+            if (cfg.video) {
+                downloadDir = cfg.video.download_dir || ""
+            }
+            if (cfg.notifications) {
+                postCompletionAlerts = cfg.notifications.enabled !== false && cfg.notifications.on_success !== false
+                errorNotifications = cfg.notifications.enabled !== false && cfg.notifications.on_failure !== false
+            }
 
             // Load rate limits
             if (cfg.rate_limits) {
@@ -101,6 +113,8 @@ Page {
                     if (typeof v === "number" && v > 0) maxRate = Math.max(maxRate, v)
                 }
                 rateLimitPosts = maxRate
+                originalRateLimitPosts = maxRate
+                rateLimitDirty = false
             }
 
             // Load monitoring
@@ -109,6 +123,46 @@ Page {
             }
         } catch(e) {
             console.log("Settings load error:", e)
+        }
+    }
+
+    function refreshMcpStatus() {
+        if (typeof controller === "undefined") return
+        try {
+            var status = JSON.parse(controller.mcpStatus)
+            mcpRunning = !!status.running
+            mcpPid = status.pid || 0
+            mcpCommand = status.command || "xpst-mcp"
+            mcpError = status.error || ""
+        } catch(e) {
+            mcpRunning = false
+            mcpError = "Could not read MCP status"
+        }
+
+        try {
+            mcpTools = JSON.parse(controller.mcpTools)
+        } catch(e2) {
+            mcpTools = []
+        }
+    }
+
+    function testMcpServer() {
+        if (typeof controller === "undefined") return
+        try {
+            var raw = controller.testMcpServer()
+            var result = JSON.parse(raw)
+            refreshMcpStatus()
+            mcpReady = result.ok === true
+            if (result.ok) {
+                showToast(result.message || "MCP command is ready", false)
+            } else {
+                mcpError = result.error || "MCP command check failed"
+                showToast(mcpError, true)
+            }
+        } catch(e) {
+            refreshMcpStatus()
+            mcpReady = false
+            showToast("MCP command check failed", true)
         }
     }
 
@@ -121,19 +175,25 @@ Page {
             instagram: { enabled: instagramEnabled },
             x: { enabled: xEnabled },
             tiktok: { enabled: tiktokEnabled, username: tiktokUsername },
-            rate_limits: {
-                youtube: rateLimitPosts,
-                instagram: rateLimitPosts,
-                x: rateLimitPosts,
-                tiktok: rateLimitPosts
+            video: {
+                download_dir: downloadDir
+            },
+            notifications: {
+                enabled: postCompletionAlerts || errorNotifications,
+                on_success: postCompletionAlerts,
+                on_failure: errorNotifications
             },
             monitoring: {
                 log_level: "INFO"
             }
         }
-
-        if (downloadDir.length > 0) {
-            settings.download_dir = downloadDir
+        if (rateLimitDirty) {
+            settings.rate_limits = {
+                youtube: rateLimitPosts,
+                instagram: rateLimitPosts,
+                x: rateLimitPosts,
+                tiktok: rateLimitPosts
+            }
         }
 
         controller.saveSettings(JSON.stringify(settings))
@@ -142,7 +202,6 @@ Page {
     function resetSettings() {
         loadFromConfig()
         rateLimitPostsError = ""
-        rateLimitMinutesError = ""
         downloadDirError = ""
         hasErrors = false
     }
@@ -310,6 +369,25 @@ Page {
                                 Switch {
                                     checked: settingsPage[modelData.prop]
                                     onCheckedChanged: settingsPage[modelData.prop] = checked
+                                    indicator: Rectangle {
+                                        implicitWidth: 44
+                                        implicitHeight: 24
+                                        x: parent.width - width
+                                        y: parent.height / 2 - height / 2
+                                        radius: height / 2
+                                        color: parent.checked ? modelData.color : theme.surfaceAlt
+                                        border.color: parent.checked ? modelData.color : theme.textMuted
+                                        border.width: 1
+
+                                        Rectangle {
+                                            width: 18
+                                            height: 18
+                                            radius: 9
+                                            x: parent.parent.checked ? parent.width - width - 3 : 3
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            color: parent.parent.checked ? "#ffffff" : theme.textSecondary
+                                        }
+                                    }
                                     Accessible.name: "Enable " + modelData.label
                                     Accessible.role: Accessible.CheckBox
                                 }
@@ -345,7 +423,7 @@ Page {
                         ColumnLayout {
                             spacing: theme.spacingXs
                             Text {
-                                text: "Max Posts per Window"
+                                text: "Daily Upload Limit"
                                 font.pixelSize: 12
                                 color: theme.textSecondary
                             }
@@ -367,10 +445,13 @@ Page {
                                     clip: true
                                     onTextChanged: {
                                         var v = parseInt(text)
-                                        if (!isNaN(v)) settingsPage.rateLimitPosts = v
+                                        if (!isNaN(v)) {
+                                            settingsPage.rateLimitPosts = v
+                                            settingsPage.rateLimitDirty = v !== settingsPage.originalRateLimitPosts
+                                        }
                                         settingsPage.validateForm()
                                     }
-                                    Accessible.name: "Max Posts per Window input"
+                                    Accessible.name: "Daily Upload Limit input"
                                     Accessible.role: Accessible.EditableText
                                 }
                             }
@@ -382,44 +463,6 @@ Page {
                             }
                         }
 
-                        ColumnLayout {
-                            spacing: theme.spacingXs
-                            Text {
-                                text: "Window Duration (minutes)"
-                                font.pixelSize: 12
-                                color: theme.textSecondary
-                            }
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 40
-                                radius: theme.radiusMd
-                                color: theme.surfaceAlt
-                                border.color: rateLimitMinutesError.length > 0 ? theme.error : theme.textMuted
-                                border.width: rateLimitMinutesError.length > 0 ? 2 : 1
-                                TextInput {
-                                    anchors.fill: parent
-                                    anchors.margins: theme.spacingMd
-                                    text: String(settingsPage.rateLimitMinutes)
-                                    color: theme.textPrimary
-                                    font.pixelSize: 13
-                                    inputMethodHints: Qt.ImhDigitsOnly
-                                    clip: true
-                                    onTextChanged: {
-                                        var v = parseInt(text)
-                                        if (!isNaN(v)) settingsPage.rateLimitMinutes = v
-                                        settingsPage.validateForm()
-                                    }
-                                    Accessible.name: "Window Duration input"
-                                    Accessible.role: Accessible.EditableText
-                                }
-                            }
-                            Text {
-                                text: rateLimitMinutesError
-                                font.pixelSize: 11
-                                color: theme.error
-                                visible: rateLimitMinutesError.length > 0
-                            }
-                        }
                     }
                 }
             }
@@ -455,7 +498,27 @@ Page {
                                 Layout.fillWidth: true
                             }
                             Switch {
-                                checked: true
+                                checked: settingsPage.postCompletionAlerts
+                                onCheckedChanged: settingsPage.postCompletionAlerts = checked
+                                indicator: Rectangle {
+                                    implicitWidth: 44
+                                    implicitHeight: 24
+                                    x: parent.width - width
+                                    y: parent.height / 2 - height / 2
+                                    radius: height / 2
+                                    color: parent.checked ? theme.accent : theme.surfaceAlt
+                                    border.color: parent.checked ? theme.accent : theme.textMuted
+                                    border.width: 1
+
+                                    Rectangle {
+                                        width: 18
+                                        height: 18
+                                        radius: 9
+                                        x: parent.parent.checked ? parent.width - width - 3 : 3
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: parent.parent.checked ? "#ffffff" : theme.textSecondary
+                                    }
+                                }
                                 Accessible.name: "Toggle post completion alerts"
                                 Accessible.role: Accessible.CheckBox
                             }
@@ -468,7 +531,27 @@ Page {
                                 Layout.fillWidth: true
                             }
                             Switch {
-                                checked: true
+                                checked: settingsPage.errorNotifications
+                                onCheckedChanged: settingsPage.errorNotifications = checked
+                                indicator: Rectangle {
+                                    implicitWidth: 44
+                                    implicitHeight: 24
+                                    x: parent.width - width
+                                    y: parent.height / 2 - height / 2
+                                    radius: height / 2
+                                    color: parent.checked ? theme.accent : theme.surfaceAlt
+                                    border.color: parent.checked ? theme.accent : theme.textMuted
+                                    border.width: 1
+
+                                    Rectangle {
+                                        width: 18
+                                        height: 18
+                                        radius: 9
+                                        x: parent.parent.checked ? parent.width - width - 3 : 3
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: parent.parent.checked ? "#ffffff" : theme.textSecondary
+                                    }
+                                }
                                 Accessible.name: "Toggle error notifications"
                                 Accessible.role: Accessible.CheckBox
                             }
@@ -633,17 +716,20 @@ Page {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                // Build ffmpeg command for this platform's encoding
-                                                var res = modelData.resolution.split(" ")[0].replace("×", "x")
-                                                var fps = parseInt(modelData.fps) || 30
-                                                var bitrate = modelData.bitrate.split("-")[0].trim().replace(" Mbps", "M")
-                                                var outDir = settingsPage.downloadDir.length > 0 ? settingsPage.downloadDir : "/tmp"
-                                                var outPath = outDir + "/xpst_sample_" + modelData.platform.toLowerCase() + ".mp4"
-                                                // Use controller to generate sample if available
-                                                if (typeof controller !== "undefined" && controller.generateEncodingSample) {
-                                                    controller.generateEncodingSample(modelData.platform.toLowerCase(), outPath)
+                                                var outPath = ""
+                                                if (settingsPage.downloadDir.length > 0) {
+                                                    outPath = settingsPage.downloadDir + "/xpst_sample_" + modelData.platform.toLowerCase() + ".mp4"
                                                 }
-                                                showToast("Generating sample for " + modelData.platform + "...", false)
+                                                if (typeof controller === "undefined" || !controller.generateEncodingSample) {
+                                                    showToast("Encoding sample generation is unavailable.", true)
+                                                    return
+                                                }
+                                                var result = JSON.parse(controller.generateEncodingSample(modelData.platform.toLowerCase(), outPath))
+                                                if (result.ok) {
+                                                    showToast("Sample saved to " + result.path, false)
+                                                } else {
+                                                    showToast(result.error || "Unable to generate sample.", true)
+                                                }
                                             }
                                             Accessible.name: "Generate encoding sample for " + modelData.platform
                                             Accessible.role: Accessible.Button
@@ -869,10 +955,10 @@ Page {
                             spacing: theme.spacingMd
                             Rectangle {
                                 width: 8; height: 8; radius: 4
-                                color: mcpRunning ? theme.success : theme.error
+                                color: mcpReady ? theme.success : (mcpError.length > 0 ? theme.error : theme.warning)
                             }
                             Text {
-                                text: mcpRunning ? "Running" : "Stopped"
+                                text: mcpReady ? "Ready" : (mcpError.length > 0 ? "Needs attention" : "Not tested")
                                 font.pixelSize: 13
                                 color: theme.textSecondary
                             }
@@ -882,13 +968,13 @@ Page {
                                 width: mcpBtnLabel.implicitWidth + theme.spacingXxl
                                 height: 32
                                 radius: theme.radiusMd
-                                color: mcpRunning ? theme.error : theme.accent
+                                color: theme.accent
                                 opacity: mcpBtnMouse.containsMouse ? 0.85 : 1.0
 
                                 Text {
                                     id: mcpBtnLabel
                                     anchors.centerIn: parent
-                                    text: mcpRunning ? "Stop" : "Start"
+                                    text: "Test"
                                     font.pixelSize: 12
                                     font.weight: Font.DemiBold
                                     color: "#ffffff"
@@ -899,11 +985,8 @@ Page {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        mcpRunning = !mcpRunning
-                                        showToast(mcpRunning ? "MCP server started" : "MCP server stopped", false)
-                                    }
-                                    Accessible.name: mcpRunning ? "Stop MCP server" : "Start MCP server"
+                                    onClicked: settingsPage.testMcpServer()
+                                    Accessible.name: "Test MCP command"
                                     Accessible.role: Accessible.Button
                                 }
                             }
@@ -914,24 +997,15 @@ Page {
                             text: "Available Tools"
                             font.pixelSize: 12
                             color: theme.textMuted
-                            visible: mcpRunning
+                            visible: mcpReady
                         }
 
                         ColumnLayout {
                             spacing: theme.spacingXs
-                            visible: mcpRunning
+                            visible: mcpReady
 
                             Repeater {
-                                model: [
-                                    { name: "post_video", desc: "Post video to platforms" },
-                                    { name: "crosspost_new", desc: "Cross-post new content" },
-                                    { name: "check_status", desc: "Check system status" },
-                                    { name: "list_platforms", desc: "List configured platforms" },
-                                    { name: "get_analytics", desc: "Get engagement analytics" },
-                                    { name: "delete_post", desc: "Delete a post" },
-                                    { name: "health_check", desc: "Run health check" },
-                                    { name: "get_logs", desc: "Retrieve log entries" }
-                                ]
+                                model: settingsPage.mcpTools
 
                                 RowLayout {
                                     spacing: theme.spacingSm
@@ -946,20 +1020,30 @@ Page {
                                         color: theme.textPrimary
                                     }
                                     Text {
-                                        text: "- " + modelData.desc
+                                        text: "- " + (modelData.description || "")
                                         font.pixelSize: 11
                                         color: theme.textSecondary
+                                        Layout.fillWidth: true
+                                        wrapMode: Text.WordWrap
                                     }
                                 }
                             }
                         }
 
                         Text {
-                            text: "Connect via stdio: xpst-mcp"
+                            text: "Connect via stdio: " + mcpCommand
                             font.pixelSize: 11
                             font.family: theme.monoFontFamily
                             color: theme.textMuted
-                            visible: mcpRunning
+                        }
+
+                        Text {
+                            text: mcpError
+                            font.pixelSize: 11
+                            color: theme.error
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                            visible: mcpError.length > 0 && !mcpReady
                         }
                     }
                 }

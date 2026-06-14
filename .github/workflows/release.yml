@@ -36,12 +36,13 @@ jobs:
           mypy src/xpst
           pip-audit
           python scripts/scan_public_safety.py --json
+          python scripts/release_version_guard.py --tag "${GITHUB_REF_NAME}" --allow-untagged
           python scripts/build_package.py
           python scripts/release_preflight.py --json
-          python scripts/clean_install_smoke.py --dist dist --artifact both
+          python scripts/clean_install_smoke.py --dist dist --artifact both --install-timeout 600
           python scripts/verify_desktop_package.py
           QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py
-          python scripts/release_artifacts.py --dist dist --output-dir release/python --skip-checks
+          python scripts/release_artifacts.py --dist dist --output-dir release/python --metadata-label python --skip-checks
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -58,7 +59,7 @@ jobs:
           subject-path: release/python/*
 
       - name: Publish to PyPI
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && !contains(github.ref_name, '-rc')
         # Non-blocking until PyPI trusted publishing is configured for this
         # repo (owner + PyPI side) — the GitHub release must not be held
         # hostage by the registry step.
@@ -116,7 +117,7 @@ jobs:
       - name: Release metadata
         shell: pwsh
         run: |
-          python scripts/release_artifacts.py --dist dist --output-dir release/windows --skip-checks
+          python scripts/release_artifacts.py --dist dist --output-dir release/windows --metadata-label windows --skip-checks
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -161,7 +162,7 @@ jobs:
 
       - name: Release metadata
         run: |
-          python scripts/release_artifacts.py --dist dist --output-dir release/linux --skip-checks
+          python scripts/release_artifacts.py --dist dist --output-dir release/linux --metadata-label linux --skip-checks
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -223,10 +224,45 @@ jobs:
     needs: [build-python, build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install release gate dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e ".[full]"
+
       - uses: actions/download-artifact@v4
         with:
           path: release-artifacts
           merge-multiple: true
+
+      - name: Public release gate
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          python scripts/public_release_check.py --dist release-artifacts --output-dir release-public --json
+
+      - name: Upload public release evidence
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-release-evidence
+          path: release-public/*
+
+      - name: Stage public release evidence
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        run: |
+          cp release-public/* release-artifacts/
 
       - name: Aggregate checksums
         run: |

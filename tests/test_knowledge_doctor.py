@@ -68,6 +68,31 @@ def test_healthy_organized_workspace_ok(tmp_path, monkeypatch):
     assert report.error_count == 0
 
 
+def test_diagnose_uses_active_store_backend(tmp_path, monkeypatch):
+    ws = _ws(tmp_path, monkeypatch)
+    nugget = _nugget("active backend point", embedding=(0.1, 0.2))
+    area = Area.create(label="A", nugget_ids=[nugget.id], order_index=0)
+    captured = {}
+
+    class FakeStore:
+        def all_nuggets(self):
+            return [nugget]
+
+        def areas(self):
+            return [area]
+
+    def fake_open_default_store(workspace):
+        captured["workspace"] = workspace
+        return FakeStore()
+
+    monkeypatch.setattr("xpst.knowledge.doctor.open_default_store", fake_open_default_store)
+
+    report = diagnose(ws)
+
+    assert captured["workspace"] is ws
+    assert report.ok
+
+
 def test_mixed_embedding_widths_is_error(tmp_path, monkeypatch):
     ws = _ws(tmp_path, monkeypatch)
     store = JsonKnowledgeStore(ws.nuggets_path)

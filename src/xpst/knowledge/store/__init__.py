@@ -2,21 +2,23 @@
 
 
 def open_default_store(workspace):
-    """Open the right store for a workspace (G32).
+    """Open the active store for a workspace.
 
-    LanceDB is the default when the ``knowledge`` extra is installed AND
-    either a LanceDB table already exists or no JSON data exists yet — an
-    existing JSON store is never silently stranded (data-coupled deps break
-    on UPDATE, so migration is explicit via ``xpst kb migrate-store``).
+    JSON remains the default until a LanceDB workspace exists. Migration is
+    explicit via ``xpst kb migrate-store``; once that creates ``lancedb/``,
+    all CLI/MCP read and write paths use the migrated backend.
     """
-    json_has_data = workspace.nuggets_path.exists()
-    try:
-        import lancedb  # noqa: F401 — probe for the optional extra
-    except ImportError:
-        from xpst.knowledge.store.json_store import JsonKnowledgeStore
-        return JsonKnowledgeStore(workspace.nuggets_path)
-    if workspace.lancedb_path.exists() or not json_has_data:
+    if workspace.lancedb_path.exists():
+        try:
+            import lancedb  # noqa: F401 - probe for the optional extra
+        except ImportError:
+            from xpst.knowledge.store.json_store import JsonKnowledgeStore
+
+            return JsonKnowledgeStore(workspace.nuggets_path)
         from xpst.knowledge.store.vector_lancedb import LanceDBStore
+
         return LanceDBStore(workspace.lancedb_path)
+
     from xpst.knowledge.store.json_store import JsonKnowledgeStore
+
     return JsonKnowledgeStore(workspace.nuggets_path)

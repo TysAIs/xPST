@@ -22,7 +22,10 @@ Each entry:
 
 import calendar
 import json
+import os
+import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -31,6 +34,16 @@ from xpst.utils.logger import get_logger
 from xpst.utils.platform import get_config_dir
 
 logger = get_logger(__name__)
+
+try:
+    import fcntl  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - exercised on Windows
+    fcntl = None  # type: ignore[assignment]
+
+try:
+    import msvcrt  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - exercised on POSIX
+    msvcrt = None  # type: ignore[assignment]
 
 
 def _clamp_day(day: int, year: int, month: int) -> int:
@@ -64,8 +77,39 @@ class ScheduleManager:
         self.config_dir = Path(config_dir).expanduser() if config_dir is not None else get_config_dir()
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.schedule_file = self.config_dir / "schedule.json"
+        self.lock_path = self.config_dir / ".schedule.lock"
+        self._thread_lock = threading.RLock()
         self._entries: list[dict[str, Any]] = []
         self._load()
+
+    @contextmanager
+    def _file_lock(self):
+        """Synchronize schedule.json across local processes."""
+        self.lock_path.touch(exist_ok=True)
+        with open(self.lock_path, "w", encoding="utf-8") as lock_file:
+            try:
+                self._lock_file(lock_file)
+                yield
+            finally:
+                self._unlock_file(lock_file)
+
+    def _lock_file(self, lock_file) -> None:
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            return
+        if msvcrt is not None:
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+
+    def _unlock_file(self, lock_file) -> None:
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        elif msvcrt is not None:
+            lock_file.seek(0)
+            try:
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
 
     def _load(self) -> None:
         """Load schedule entries from disk."""
@@ -86,8 +130,13 @@ class ScheduleManager:
     def _save(self) -> None:
         """Persist schedule entries to disk."""
         self.schedule_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.schedule_file, "w", encoding="utf-8") as f:
+        tmp_path = self.schedule_file.with_name(
+            f".{self.schedule_file.name}.{uuid.uuid4().hex}.tmp"
+        )
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self._entries, f, indent=2, ensure_ascii=False, default=str)
+            f.write("\n")
+        os.replace(tmp_path, self.schedule_file)
 
     def add(
         self,
@@ -124,8 +173,11 @@ class ScheduleManager:
             "error": None,
             "repeat_rule": repeat_rule,
         }
-        self._entries.append(entry)
-        self._save()
+        with self._thread_lock:
+            with self._file_lock():
+                self._load()
+                self._entries.append(entry)
+                self._save()
         logger.info(f"Scheduled post {entry['id']} for {scheduled_time}")
         return entry
 
@@ -135,7 +187,10 @@ class ScheduleManager:
         Returns:
             List of schedule entries.
         """
-        return sorted(self._entries, key=lambda e: e.get("scheduled_time", ""))
+        with self._thread_lock:
+            with self._file_lock():
+                self._load()
+                return sorted(self._entries, key=lambda e: e.get("scheduled_time", ""))
 
     def remove(self, entry_id: str) -> bool:
         """Remove a scheduled post by ID.
@@ -146,13 +201,16 @@ class ScheduleManager:
         Returns:
             True if removed, False if not found.
         """
-        original_count = len(self._entries)
-        self._entries = [e for e in self._entries if e.get("id") != entry_id]
-        if len(self._entries) < original_count:
-            self._save()
-            logger.info(f"Removed scheduled post {entry_id}")
-            return True
-        return False
+        with self._thread_lock:
+            with self._file_lock():
+                self._load()
+                original_count = len(self._entries)
+                self._entries = [e for e in self._entries if e.get("id") != entry_id]
+                if len(self._entries) < original_count:
+                    self._save()
+                    logger.info(f"Removed scheduled post {entry_id}")
+                    return True
+                return False
 
     def get_due(self) -> list[dict[str, Any]]:
         """Get posts that are due for publishing.
@@ -162,18 +220,21 @@ class ScheduleManager:
         Returns:
             List of due schedule entries.
         """
-        now = datetime.now()
-        due = []
-        for entry in self._entries:
-            if entry.get("status") != "pending":
-                continue
-            try:
-                scheduled = datetime.fromisoformat(entry["scheduled_time"])
-                if scheduled <= now:
-                    due.append(entry)
-            except (ValueError, KeyError):
-                continue
-        return due
+        with self._thread_lock:
+            with self._file_lock():
+                self._load()
+                due = []
+                for entry in self._entries:
+                    if entry.get("status") != "pending":
+                        continue
+                    try:
+                        scheduled = datetime.fromisoformat(entry["scheduled_time"])
+                        now = datetime.now(scheduled.tzinfo) if scheduled.tzinfo else datetime.now()
+                        if scheduled <= now:
+                            due.append(dict(entry))
+                    except (ValueError, KeyError):
+                        continue
+                return due
 
     def mark_complete(self, entry_id: str, success: bool = True, error: str | None = None) -> None:
         """Mark a scheduled post as completed or failed.
@@ -183,17 +244,34 @@ class ScheduleManager:
             success: Whether the post succeeded.
             error: Error message if failed.
         """
-        for entry in self._entries:
-            if entry.get("id") == entry_id:
-                entry["status"] = "completed" if success else "failed"
-                entry["completed_at"] = datetime.now().isoformat()
-                if error:
-                    entry["error"] = error
-                # Auto-create next occurrence for recurring entries
-                if success and entry.get("repeat_rule"):
-                    self._create_next_occurrence(entry)
-                break
-        self._save()
+        with self._thread_lock:
+            with self._file_lock():
+                self._load()
+                for entry in self._entries:
+                    if entry.get("id") == entry_id:
+                        entry["status"] = "completed" if success else "failed"
+                        entry["completed_at"] = datetime.now().isoformat()
+                        if error:
+                            entry["error"] = error
+                        # Auto-create next occurrence for recurring entries
+                        if success and entry.get("repeat_rule"):
+                            self._create_next_occurrence(entry)
+                        break
+                self._save()
+
+    def mark_deferred(self, entry_id: str, error: str | None = None) -> None:
+        """Keep a scheduled post pending after a temporary posting deferral."""
+        with self._thread_lock:
+            with self._file_lock():
+                self._load()
+                for entry in self._entries:
+                    if entry.get("id") == entry_id:
+                        entry["status"] = "pending"
+                        entry["completed_at"] = None
+                        if error:
+                            entry["error"] = error
+                        break
+                self._save()
 
     def _create_next_occurrence(self, entry: dict[str, Any]) -> None:
         """Create the next occurrence of a recurring schedule entry.

@@ -259,8 +259,8 @@ class TestChokepointDedup:
         uploader.upload.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_success_records_hash_and_source(self, tmp_path):
-        """G03 end-to-end: the chokepoint records hash + source platform."""
+    async def test_success_records_hash_source_and_video_path(self, tmp_path):
+        """G03 end-to-end: the chokepoint records hash, source, and local file."""
         video = tmp_path / "clip3.mp4"
         video.write_bytes(b"record me" * 1024)
         state = StateManager(str(tmp_path))
@@ -277,6 +277,7 @@ class TestChokepointDedup:
         record = state.get_video("vid9")
         assert record is not None
         assert record.get("source_platform") == "instagram"
+        assert record.get("video_path") == str(video)
 
 
 # ---------------------------------------------------------------------------
@@ -395,6 +396,50 @@ class TestDurationLimits:
         assert result.success is False
         assert "60" in (result.error or "")
         uploader.upload.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_duration_limit_instagram_reels_manifest(self, tmp_path):
+        from xpst.config import XPSTConfig
+        from xpst.platforms.instagram import InstagramUploader
+
+        video = tmp_path / "long_instagram.mp4"
+        video.write_bytes(b"v" * 2048)
+        service = self._service_with_duration(tmp_path, 91.0)
+        uploader = InstagramUploader(XPSTConfig())
+        uploader.upload = AsyncMock(side_effect=AssertionError("upload should be skipped"))
+
+        result = await service.upload_to_platform(
+            uploader=uploader, video_path=video, caption="c",
+            platform_name="instagram", video_id="long_instagram",
+        )
+        assert result.success is False
+        assert "90" in (result.error or "")
+        assert result.metadata.get("preflight") is True
+        uploader.upload.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_duration_limit_reads_property_manifest(self, tmp_path):
+        from types import SimpleNamespace
+
+        video = tmp_path / "long_property.mp4"
+        video.write_bytes(b"v" * 2048)
+        service = self._service_with_duration(tmp_path, 90.0)
+
+        class PropertyManifestUploader:
+            @property
+            def manifest(self):
+                return SimpleNamespace(extra={"max_duration_seconds": 60})
+
+            async def upload(self, *_args, **_kwargs):
+                raise AssertionError("upload should be skipped by duration preflight")
+
+        result = await service.upload_to_platform(
+            uploader=PropertyManifestUploader(), video_path=video, caption="c",
+            platform_name="youtube", video_id="long_property",
+        )
+        assert result.success is False
+        assert "60" in (result.error or "")
+        assert result.metadata.get("preflight") is True
 
     @pytest.mark.asyncio
     async def test_under_limit_proceeds(self, tmp_path):

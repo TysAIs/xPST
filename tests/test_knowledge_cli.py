@@ -134,6 +134,17 @@ def test_kb_areas_empty_is_friendly(tmp_path, monkeypatch):
     assert "No areas" in out.output
 
 
+def test_kb_areas_missing_workspace_does_not_create(tmp_path, monkeypatch):
+    monkeypatch.setenv("XPST_HOME", str(tmp_path))
+    runner = CliRunner()
+
+    out = runner.invoke(main, ["kb", "areas", "--workspace", "ghost"])
+
+    assert out.exit_code == 0, out.output
+    assert "No areas" in out.output
+    assert not (tmp_path / "knowledge" / "ghost").exists()
+
+
 def test_kb_course_emits_ordered_cited_outline(tmp_path, monkeypatch):
     monkeypatch.setenv("XPST_HOME", str(tmp_path))
     _patch_kb(monkeypatch)

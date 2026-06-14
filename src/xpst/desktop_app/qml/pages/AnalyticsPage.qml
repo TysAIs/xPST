@@ -52,6 +52,15 @@ Page {
         return theme.accent
     }
 
+    function platformIcon(platformName) {
+        var p = (platformName || "").toLowerCase()
+        if (p === "youtube") return theme.iconYouTube
+        if (p === "instagram") return theme.iconInstagram
+        if (p === "x") return theme.iconX
+        if (p === "tiktok") return theme.iconTikTok
+        return theme.iconAnalytics
+    }
+
     // Bar chart data: per-platform metrics for Canvas rendering
     property var chartPlatforms: {
         var result = []
@@ -250,9 +259,9 @@ Page {
                     anchors.centerIn: parent
                     spacing: theme.spacingMd
                     Text {
-                        text: "A"
+                        text: theme.iconAnalytics
+                        font.family: theme.iconFontFamily
                         font.pixelSize: 30
-                        font.weight: Font.DemiBold
                         color: theme.accent
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
@@ -296,7 +305,7 @@ Page {
                                    ? (analyticsPage.analyticsJson.summary.prev_totals.views !== undefined
                                       ? analyticsPage.analyticsJson.summary.prev_totals.views : -1)
                                    : -1,
-                            icon: "V",
+                            icon: theme.iconViews,
                             color: "#6366f1"
                         },
                         {
@@ -312,7 +321,7 @@ Page {
                                    ? (analyticsPage.analyticsJson.summary.prev_totals.likes !== undefined
                                       ? analyticsPage.analyticsJson.summary.prev_totals.likes : -1)
                                    : -1,
-                            icon: "L",
+                            icon: theme.iconLikes,
                             color: "#ef4444"
                         },
                         {
@@ -328,7 +337,7 @@ Page {
                                    ? (analyticsPage.analyticsJson.summary.prev_totals.comments !== undefined
                                       ? analyticsPage.analyticsJson.summary.prev_totals.comments : -1)
                                    : -1,
-                            icon: "C",
+                            icon: theme.iconComments,
                             color: "#f59e0b"
                         },
                         {
@@ -344,7 +353,7 @@ Page {
                                    ? (analyticsPage.analyticsJson.summary.prev_totals.shares !== undefined
                                       ? analyticsPage.analyticsJson.summary.prev_totals.shares : -1)
                                    : -1,
-                            icon: "S",
+                            icon: theme.iconShares,
                             color: "#22c55e"
                         }
                     ]
@@ -447,17 +456,6 @@ Page {
                             }
                         }
                     }
-                    // Compare legend
-                    RowLayout {
-                        spacing: theme.spacingXs
-                        visible: analyticsPage.compareMode
-                        Rectangle { width: 10; height: 10; radius: 2; color: theme.textMuted; opacity: 0.5 }
-                        Text {
-                            text: "Last Week"
-                            font.pixelSize: 11
-                            color: theme.textMuted
-                        }
-                    }
                 }
 
                 Rectangle {
@@ -489,11 +487,6 @@ Page {
                             for (var i = 0; i < data.length; i++) {
                                 maxVal = Math.max(maxVal, data[i].views, data[i].likes, data[i].comments, data[i].shares)
                             }
-                            // Account for comparison bars
-                            if (analyticsPage.compareMode) {
-                                maxVal = maxVal * 1.2
-                            }
-
                             var padding = { left: 50, right: 20, top: 20, bottom: 40 }
                             var chartW = width - padding.left - padding.right
                             var chartH = height - padding.top - padding.bottom
@@ -523,9 +516,7 @@ Page {
                             var colors = ["#6366f1", "#ef4444", "#f59e0b", "#22c55e"]
                             var barCount = metrics.length
                             var groupWidth = chartW / groupCount
-                            var barWidth = analyticsPage.compareMode
-                                ? Math.min(12, (groupWidth - 20) / (barCount * 2 + 1))
-                                : Math.min(16, (groupWidth - 20) / barCount)
+                            var barWidth = Math.min(16, (groupWidth - 20) / barCount)
                             var groupGap = 20
 
                             for (var i = 0; i < data.length; i++) {
@@ -548,29 +539,6 @@ Page {
                                     ctx.roundRect(bx, by, barWidth, barH, [2, 2, 0, 0])
                                     ctx.fill()
 
-                                    // Comparison bars (last week simulated as 60-80% of current)
-                                    if (analyticsPage.compareMode) {
-                                        var lastWeekVal = Math.round(val * (0.6 + Math.random() * 0.2))
-                                        var lwBarH = maxVal > 0 ? (lastWeekVal / maxVal) * chartH : 0
-                                        var lwBx = groupX + m * (barWidth + 2) + barWidth + 1
-                                        var lwBy = padding.top + chartH - lwBarH
-
-                                        ctx.fillStyle = colors[m]
-                                        ctx.globalAlpha = 0.35
-                                        // Draw striped pattern for last week
-                                        ctx.fillRect(lwBx, lwBy, barWidth, lwBarH)
-                                        // Draw horizontal stripes
-                                        ctx.globalAlpha = 0.15
-                                        ctx.strokeStyle = "#ffffff"
-                                        ctx.lineWidth = 1
-                                        for (var s = 0; s < lwBarH; s += 4) {
-                                            ctx.beginPath()
-                                            ctx.moveTo(lwBx, lwBy + s)
-                                            ctx.lineTo(lwBx + barWidth, lwBy + s)
-                                            ctx.stroke()
-                                        }
-                                        ctx.globalAlpha = 1.0
-                                    }
                                 }
                             }
                         }
@@ -628,17 +596,10 @@ Page {
                                 }
                                 Text {
                                     anchors.centerIn: parent
-                                    text: {
-                                        var p = (modelData.platform || "").toLowerCase()
-                                        if (p === "youtube") return "YT"
-                                        if (p === "instagram") return "IG"
-                                        if (p === "x") return "X"
-                                        if (p === "tiktok") return "TT"
-                                        return "P"
-                                    }
-                                    font.pixelSize: 12
-                                    font.weight: Font.DemiBold
-                                    color: theme.textSecondary
+                                    text: analyticsPage.platformIcon(modelData.platform)
+                                    font.family: theme.iconFontFamily
+                                    font.pixelSize: 16
+                                    color: analyticsPage.platformColor(modelData.platform)
                                 }
                             }
 

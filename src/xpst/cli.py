@@ -30,9 +30,11 @@ from rich.table import Table
 
 from xpst.config import XPSTConfig
 from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.post_preflight import build_post_preflight
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger, setup_logging
+from xpst.utils.pidfile import PidfileLockError
 from xpst.utils.platform import ensure_ffmpeg, get_config_dir
 from xpst.utils.quota import QuotaManager
 
@@ -104,9 +106,28 @@ def json_output(data: object, as_json: bool) -> None:
         click.echo(_json.dumps(data, default=str, ensure_ascii=False))
 
 
+def _json_error(message: str, exit_code: int) -> None:
+    json_output({"ok": False, "error": message}, True)
+    sys.exit(exit_code)
+
+
+def _exit_for_engine_lock(exc: PidfileLockError, as_json: bool) -> None:
+    """Report an active engine lock without mutating posting state."""
+    if as_json:
+        json_output({"ok": False, "status": "locked", "error": str(exc)}, True)
+    else:
+        console.print(f"[red]Another xPST posting run is already active:[/red] {exc}")
+    raise click.exceptions.Exit(EXIT_GENERAL) from exc
+
+
+def _json_option_value(ctx: click.Context, _param: click.Parameter, value: bool) -> bool:
+    """Honor either command-level ``--json`` or the top-level ``xpst --json`` flag."""
+    return bool(value or (ctx.obj or {}).get("json", False))
+
+
 # Shared Click decorator that adds ``--json`` to every command
 json_option = click.option(
-    "--json", "as_json", is_flag=True, help="Machine-readable JSON output"
+    "--json", "as_json", is_flag=True, callback=_json_option_value, help="Machine-readable JSON output"
 )
 
 
@@ -115,7 +136,7 @@ def load_config(config_path: str | None = None) -> XPSTConfig:
 
     Args:
         config_path: Optional path to config YAML file. Defaults to
-            the xPST config directory.
+            ``~/.xpst/config.yaml``.
 
     Returns:
         Validated XPSTConfig instance.
@@ -132,6 +153,11 @@ def load_config(config_path: str | None = None) -> XPSTConfig:
     except Exception as e:
         console.print(f"[red]Failed to load config:[/red] {e}")
         sys.exit(EXIT_CONFIG_ERROR)
+
+
+def _active_config_path(ctx: click.Context, config_file: str | None = None) -> str:
+    """Return the command-specific config path, honoring global --config."""
+    return config_file or ctx.obj.get("config_path") or str(get_config_dir() / "config.yaml")
 
 
 @click.group()
@@ -302,11 +328,25 @@ def run(ctx: click.Context, bidirectional: bool, dry_run: bool, as_json: bool):
     if bidirectional:
         if not as_json and not quiet:
             console.print("[bold blue]xPST - Bidirectional cross-posting check...[/bold blue]")
-        results = asyncio.run(engine.check_and_post_bidirectional())
+        try:
+            engine.acquire_pidfile()
+        except PidfileLockError as exc:
+            _exit_for_engine_lock(exc, as_json)
+        try:
+            results = asyncio.run(engine.check_and_post_bidirectional())
+        finally:
+            engine.release_pidfile()
     else:
         if not as_json and not quiet:
             console.print("[bold blue]xPST - Checking for new videos...[/bold blue]")
-        results = asyncio.run(engine.check_and_post())
+        try:
+            engine.acquire_pidfile()
+        except PidfileLockError as exc:
+            _exit_for_engine_lock(exc, as_json)
+        try:
+            results = asyncio.run(engine.check_and_post())
+        finally:
+            engine.release_pidfile()
 
     if not results:
         if as_json:
@@ -321,6 +361,8 @@ def run(ctx: click.Context, bidirectional: bool, dry_run: bool, as_json: bool):
     else:
         for result in results:
             _display_result(result)
+    if any(not result.all_success for result in results):
+        sys.exit(EXIT_GENERAL)
 
 
 @main.command()
@@ -342,6 +384,10 @@ def watch(ctx: click.Context, interval: int | None, bidirectional: bool):
     console.print(f"[bold blue]xPST - {mode_label} watching every {check_interval}s (Ctrl+C to stop)[/bold blue]")
 
     engine = CrossPostEngine(config)
+    try:
+        engine.acquire_pidfile()
+    except PidfileLockError as exc:
+        _exit_for_engine_lock(exc, False)
 
     # Crash recovery check on startup
     _check_crash_recovery(engine)
@@ -381,10 +427,11 @@ def watch(ctx: click.Context, interval: int | None, bidirectional: bool):
             logger.error(f"Error in watch loop: {e}")
             console.print(f"[red]Error:[/red] {e}")
             _time.sleep(60)
+    engine.release_pidfile()
 
 
 @main.command()
-@click.option("--video", "-v", required=True, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
+@click.option("--video", "-v", required=True, multiple=True, type=click.Path(), help="Video/image file path (use multiple times for carousel)")
 @click.option("--caption", "-c", required=True, help="Video caption")
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
@@ -400,18 +447,26 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
     )
 
     media_paths = [Path(v) for v in video]
-    platform_list = platforms.split(",") if platforms else None
+    try:
+        platform_list = _parse_destination_platforms(platforms, config)
+    except click.ClickException as exc:
+        if as_json:
+            json_output({"ok": False, "error": exc.message}, True)
+            sys.exit(EXIT_CONFIG_ERROR)
+        raise
+
+    preflight = build_post_preflight(
+        config=config,
+        video_path=media_paths[0],
+        caption=caption,
+        platforms=platform_list,
+        carousel_paths=media_paths[1:],
+    )
 
     if dry_run:
-        engine = CrossPostEngine(config)
-        targets = platform_list or list(engine._platforms.keys())
         info = {
             "dry_run": True,
-            "video": str(media_paths[0]),
-            "caption": caption[:80],
-            "carousel": len(media_paths) > 1,
-            "items": len(media_paths),
-            "targets": targets,
+            **preflight,
         }
         if as_json:
             json_output(info, True)
@@ -422,8 +477,24 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
             if len(media_paths) > 1:
                 console.print(f"  Carousel: {len(media_paths)} items")
             console.print(f"  Caption: {caption[:80]}")
-            console.print(f"  Targets: {', '.join(targets)}")
+            console.print(f"  Targets: {', '.join(preflight['targets'])}")
+            for item in preflight["blocking"]:
+                console.print(f"  [red]Blocking:[/red] {item}")
+            for item in preflight["warnings"]:
+                console.print(f"  [yellow]Warning:[/yellow] {item}")
         return
+
+    if not preflight["ready"]:
+        first_blocking = preflight["blocking"][0] if preflight["blocking"] else "Post is not ready."
+        if as_json:
+            json_output({"ok": False, "error": first_blocking, "preflight": preflight}, True)
+        else:
+            console.print(f"[red]Post is not ready:[/red] {first_blocking}")
+            for item in preflight["blocking"][1:]:
+                console.print(f"  [red]Blocking:[/red] {item}")
+            for item in preflight["warnings"]:
+                console.print(f"  [yellow]Warning:[/yellow] {item}")
+        sys.exit(EXIT_CONFIG_ERROR)
 
     if not as_json and not quiet:
         if len(media_paths) > 1:
@@ -433,15 +504,24 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
 
     engine = CrossPostEngine(config)
 
-    if len(media_paths) > 1:
-        result = asyncio.run(engine.post_manual_carousel(media_paths, caption, platform_list))
-    else:
-        result = asyncio.run(engine.post_manual(media_paths[0], caption, platform_list))
+    try:
+        engine.acquire_pidfile()
+    except PidfileLockError as exc:
+        _exit_for_engine_lock(exc, as_json)
+    try:
+        if len(media_paths) > 1:
+            result = asyncio.run(engine.post_manual_carousel(media_paths, caption, platform_list))
+        else:
+            result = asyncio.run(engine.post_manual(media_paths[0], caption, platform_list))
+    finally:
+        engine.release_pidfile()
 
     if as_json:
         json_output(_result_to_dict(result), True)
     else:
         _display_result(result)
+    if not result.all_success:
+        sys.exit(EXIT_GENERAL)
 
 
 @main.command()
@@ -483,7 +563,14 @@ def backfill(ctx: click.Context, platforms: str | None, limit: int, dry_run: boo
     if not as_json and not quiet:
         console.print(f"[bold blue]Backfilling (limit: {limit})...[/bold blue]")
 
-    results = asyncio.run(engine.backfill(platform_list, limit))
+    try:
+        engine.acquire_pidfile()
+    except PidfileLockError as exc:
+        _exit_for_engine_lock(exc, as_json)
+    try:
+        results = asyncio.run(engine.backfill(platform_list, limit))
+    finally:
+        engine.release_pidfile()
 
     if as_json:
         out = [_result_to_dict(r) for r in results]
@@ -792,7 +879,8 @@ def connect(ctx: click.Context, platform: str | None, test_only: bool):
     from xpst.connect import run_connect
 
     platforms = [platform] if platform else None
-    success = run_connect(platforms=platforms, test_only=test_only)
+    config = load_config(ctx.obj.get("config_path"))
+    success = run_connect(platforms=platforms, test_only=test_only, config=config)
     if not success:
         sys.exit(EXIT_AUTH_FAILURE)
 
@@ -1215,7 +1303,7 @@ def app(ctx: click.Context, port: int | None, no_splash: bool):
     try:
         from xpst.desktop_app.main import main as pyside_main
         console.print("[bold blue]Launching xPST desktop app…[/bold blue]")
-        sys.exit(pyside_main(no_splash=no_splash))
+        sys.exit(pyside_main(no_splash=no_splash, config_dir=config_dir))
     except ImportError:
         console.print("[yellow]PySide6 not installed — trying pywebview fallback.[/yellow]")
         console.print("[dim]Install with: pip install PySide6[/dim]\n")
@@ -1231,15 +1319,23 @@ def app(ctx: click.Context, port: int | None, no_splash: bool):
             sys.exit(EXIT_PLATFORM_UNAVAILABLE)
 
 
+main.add_command(app, name="desktop")
+
+
 # ──────────────────────────────────────────────
 # MCP Server Command
 # ──────────────────────────────────────────────
 
 @main.command()
-def mcp():
+@click.pass_context
+def mcp(ctx: click.Context):
     """Start MCP (Model Context Protocol) server over stdio"""
-    from xpst.mcp import cli_main
-    cli_main()
+    import asyncio
+
+    from xpst.mcp import main as mcp_main
+
+    config = load_config(ctx.obj.get("config_path"))
+    asyncio.run(mcp_main(config))
 
 
 # ──────────────────────────────────────────────
@@ -1498,7 +1594,7 @@ def _mask_sensitive_values(data: dict | list | Any, _path: str = "") -> Any:
 def state(ctx: click.Context):
     """Back up, export, and restore posting state (G51).
 
-    state.json in the xPST config directory is the single source of truth for what has been
+    ~/.xpst/state.json is the single source of truth for what has been
     posted — losing it means the next watch cycle re-posts the recent
     catalog publicly. These commands make it durable.
     """
@@ -1563,7 +1659,7 @@ def state_import(ctx: click.Context, source: str, yes: bool) -> None:
 @click.option("--keep", default=10, help="Backups to retain")
 @click.pass_context
 def state_backup(ctx: click.Context, keep: int) -> None:
-    """Snapshot state.json into the config backups directory with rotation."""
+    """Snapshot state.json into ~/.xpst/backups/ with rotation."""
     import shutil
     from datetime import datetime as _dt
     from pathlib import Path as _Path
@@ -1594,7 +1690,7 @@ def failures(ctx: click.Context):
 
 
 @failures.command("list")
-@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@json_option
 @click.pass_context
 def failures_list(ctx: click.Context, as_json: bool) -> None:
     """List failed uploads recorded in the dead-letter queue."""
@@ -1685,11 +1781,10 @@ def config(ctx: click.Context):
 @click.pass_context
 def config_show(ctx: click.Context, raw: bool, config_file: str | None, as_json: bool):
     """Display current configuration as YAML"""
-
     import yaml
     from rich.syntax import Syntax
 
-    config_path = config_file or str(get_config_dir() / "config.yaml")
+    config_path = _active_config_path(ctx, config_file)
     if not Path(config_path).exists():
         console.print(f"[red]Config file not found:[/red] {config_path}")
         sys.exit(EXIT_CONFIG_ERROR)
@@ -1722,10 +1817,9 @@ def config_set(ctx: click.Context, key: str, value: str, config_file: str | None
         xpst config set rate_limits.youtube 10
         xpst config set monitoring.log_level DEBUG
     """
-
     import yaml
 
-    config_path = config_file or str(get_config_dir() / "config.yaml")
+    config_path = _active_config_path(ctx, config_file)
     config_path = Path(config_path)
 
     # Load existing config
@@ -1787,12 +1881,12 @@ def config_validate(ctx: click.Context, config_file: str | None, as_json: bool):
     Checks required fields, path existence, and platform config validity.
     Exit code 0 if valid, 4 if invalid.
     """
-
     checks: list[tuple[str, bool, str]] = []
+    config_path = _active_config_path(ctx, config_file)
 
     # Load config
     try:
-        cfg = load_config(config_file)
+        cfg = load_config(config_path)
         checks.append(("Config file loaded", True, "OK"))
     except SystemExit:
         checks.append(("Config file loaded", False, "Failed to load config"))
@@ -1803,7 +1897,6 @@ def config_validate(ctx: click.Context, config_file: str | None, as_json: bool):
         sys.exit(EXIT_CONFIG_ERROR)
 
     # Check config file exists
-    config_path = config_file or str(get_config_dir() / "config.yaml")
     exists = Path(config_path).exists()
     checks.append(("Config file exists", exists, config_path))
 
@@ -1909,13 +2002,12 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
     Fixes: missing credentials directory, stale .crosspstr paths,
     invalid port numbers, and missing required fields.
     """
-
-    config_path = config_file or str(get_config_dir() / "config.yaml")
+    config_path = _active_config_path(ctx, config_file)
     fixes: list[str] = []
 
     # Load current config
     try:
-        cfg = load_config(config_file)
+        cfg = load_config(config_path)
     except Exception as e:
         if as_json:
             json_output({"ok": False, "error": str(e)}, True)
@@ -1924,7 +2016,8 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
         sys.exit(EXIT_CONFIG_ERROR)
 
     # Fix 1: Ensure credentials directory exists
-    cred_dir = get_config_dir() / "credentials"
+    active_config_dir = Path(cfg.config_dir).expanduser()
+    cred_dir = active_config_dir / "credentials"
     if not cred_dir.exists():
         fixes.append(f"Create missing credentials directory: {cred_dir}")
         if yes or as_json:
@@ -1941,9 +2034,9 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
         with open(config_path) as f:
             raw_content = f.read()
         if ".crosspstr" in raw_content:
-            fixes.append("Replace stale .crosspstr paths with current xPST paths")
+            fixes.append("Replace stale .crosspstr paths with .xpst")
             if yes or as_json:
-                fixed_content = raw_content.replace(".crosspstr", get_config_dir().name)
+                fixed_content = raw_content.replace(".crosspstr", active_config_dir.name)
                 with open(config_path, "w") as f:
                     f.write(fixed_content)
 
@@ -1956,14 +2049,14 @@ def config_fix(ctx: click.Context, config_file: str | None, yes: bool, as_json: 
 
     # Fix 4: Missing required fields with defaults
     if not cfg.video.download_dir:
-        fixes.append(f"Set default download directory ({get_config_dir() / 'downloads'})")
+        fixes.append(f"Set default download directory ({active_config_dir / 'downloads'})")
         if yes or as_json:
-            cfg.video.download_dir = str(get_config_dir() / "downloads")
+            cfg.video.download_dir = str(active_config_dir / "downloads")
 
     if not cfg.monitoring.log_file:
-        fixes.append(f"Set default log file path ({get_config_dir() / 'logs' / 'xpst.log'})")
+        fixes.append(f"Set default log file path ({active_config_dir / 'logs' / 'xpst.log'})")
         if yes or as_json:
-            cfg.monitoring.log_file = str(get_config_dir() / "logs" / "xpst.log")
+            cfg.monitoring.log_file = str(active_config_dir / "logs" / "xpst.log")
 
     # Save fixed config
     if fixes and (yes or as_json):
@@ -1991,10 +2084,9 @@ def config_export(ctx: click.Context, output_file: str, raw: bool, config_file: 
 
     Writes the config YAML to OUTPUT_FILE. By default masks sensitive values.
     """
-
     import yaml
 
-    config_path = config_file or str(get_config_dir() / "config.yaml")
+    config_path = _active_config_path(ctx, config_file)
     if not Path(config_path).exists():
         if as_json:
             json_output({"ok": False, "error": f"Config file not found: {config_path}"}, True)
@@ -2033,10 +2125,9 @@ def config_import(ctx: click.Context, input_file: str, merge: bool, yes: bool, s
     Shows a diff of changes before applying. Use --yes to skip confirmation.
     Validates the imported config structure. Use --strict to fail on warnings.
     """
-
     import yaml
 
-    config_path = str(get_config_dir() / "config.yaml")
+    config_path = _active_config_path(ctx)
 
     with open(input_file) as f:
         imported = yaml.safe_load(f) or {}
@@ -2127,6 +2218,83 @@ def schedule(ctx: click.Context):
     pass
 
 
+def _schedule_manager_for_context(ctx: click.Context):
+    """Return a schedule manager rooted at the active config directory."""
+    from xpst.schedule_manager import ScheduleManager
+
+    config = load_config(ctx.obj.get("config_path"))
+    return ScheduleManager(config_dir=config.config_dir)
+
+
+def _valid_schedule_platforms(config: Any) -> set[str]:
+    try:
+        from xpst.platforms.base import PlatformRegistry
+
+        PlatformRegistry.auto_discover()
+        registered = [str(name).lower() for name in PlatformRegistry.list_platforms()]
+        if not registered:
+            return {"youtube", "instagram", "x"}
+        return {
+            str(name).lower()
+            for name in registered
+            if getattr(getattr(config, str(name).lower(), None), "enabled", False)
+        }
+    except Exception:
+        return {"youtube", "instagram", "x"}
+
+
+def _parse_schedule_platforms(platforms: str | None, config: Any) -> list[str] | None:
+    if not platforms:
+        return None
+    platform_list = [p.strip().lower() for p in platforms.split(",") if p.strip()]
+    if not platform_list:
+        raise click.ClickException("Select at least one platform.")
+
+    valid_platforms = _valid_schedule_platforms(config)
+    invalid = sorted(set(platform_list) - valid_platforms)
+    if invalid:
+        raise click.ClickException(
+            "Invalid platform(s): "
+            + ", ".join(invalid)
+            + ". Valid: "
+            + ", ".join(sorted(valid_platforms))
+        )
+    return platform_list
+
+
+def _parse_destination_platforms(platforms: str | None, config: Any) -> list[str] | None:
+    """Parse and validate comma-separated destination platform names."""
+    if not platforms:
+        return None
+    platform_list = [p.strip().lower() for p in platforms.split(",") if p.strip()]
+    if not platform_list:
+        raise click.ClickException("Select at least one platform.")
+
+    valid_platforms = _valid_schedule_platforms(config)
+    invalid = sorted(set(platform_list) - valid_platforms)
+    if invalid:
+        raise click.ClickException(
+            "Invalid platform(s): "
+            + ", ".join(invalid)
+            + ". Valid: "
+            + ", ".join(sorted(valid_platforms))
+        )
+    return platform_list
+
+
+def _scheduled_post_deferred(result: Any) -> bool:
+    """Return True when only anti-bot deferrals are blocking completion."""
+    upload_results = list(getattr(result, "results", {}).values())
+    if not upload_results:
+        return False
+    return any(
+        getattr(ur, "metadata", {}).get("deferred") for ur in upload_results
+    ) and all(
+        getattr(ur, "success", False) or getattr(ur, "metadata", {}).get("deferred")
+        for ur in upload_results
+    )
+
+
 @schedule.command("add")
 @click.argument("file", type=click.Path())
 @click.option("--caption", "-c", required=True, help="Post caption text")
@@ -2145,29 +2313,46 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
     """
     from datetime import datetime
 
-    from xpst.schedule_manager import ScheduleManager
-
     video_path = Path(file)
     if not video_path.exists():
+        if as_json:
+            _json_error(f"File not found: {file}", EXIT_GENERAL)
         console.print(f"[red]File not found:[/red] {file}")
         sys.exit(EXIT_GENERAL)
 
     # Parse scheduled time
     dt = None
+    try:
+        dt = datetime.fromisoformat(scheduled_time)
+    except ValueError:
+        pass
     for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        if dt is not None:
+            break
         try:
             dt = datetime.strptime(scheduled_time, fmt)
             break
         except ValueError:
             continue
     if dt is None:
+        if as_json:
+            _json_error(
+                f"Invalid date format: {scheduled_time}. Use 'YYYY-MM-DD HH:MM' or ISO format.",
+                EXIT_CONFIG_ERROR,
+            )
         console.print(f"[red]Invalid date format:[/red] {scheduled_time}")
         console.print("[dim]Use: 'YYYY-MM-DD HH:MM' or ISO format[/dim]")
         sys.exit(EXIT_CONFIG_ERROR)
 
-    platform_list = [p.strip() for p in platforms.split(",")] if platforms else None
+    config = load_config(ctx.obj.get("config_path"))
+    try:
+        platform_list = _parse_schedule_platforms(platforms, config)
+    except click.ClickException as exc:
+        if as_json:
+            _json_error(str(exc), EXIT_CONFIG_ERROR)
+        raise
 
-    manager = ScheduleManager()
+    manager = _schedule_manager_for_context(ctx)
     effective_repeat = repeat_rule if repeat_rule and repeat_rule != "none" else None
     entry = manager.add(
         video_path=str(video_path.resolve()),
@@ -2195,9 +2380,7 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
 @click.pass_context
 def schedule_list(ctx: click.Context, as_json: bool):
     """List all scheduled posts"""
-    from xpst.schedule_manager import ScheduleManager
-
-    manager = ScheduleManager()
+    manager = _schedule_manager_for_context(ctx)
     entries = manager.list()
 
     if as_json:
@@ -2243,9 +2426,7 @@ def schedule_list(ctx: click.Context, as_json: bool):
 @click.pass_context
 def schedule_remove(ctx: click.Context, entry_id: str, as_json: bool):
     """Remove a scheduled post by ID"""
-    from xpst.schedule_manager import ScheduleManager
-
-    manager = ScheduleManager()
+    manager = _schedule_manager_for_context(ctx)
     if manager.remove(entry_id):
         if as_json:
             json_output({"ok": True, "removed": entry_id}, True)
@@ -2269,15 +2450,14 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
     Fetches posts where scheduled_time <= now and status is pending,
     then posts each one. Typically called by cron or manually.
     """
-    from xpst.schedule_manager import ScheduleManager
-
+    as_json = as_json or bool(ctx.obj.get("json", False))
     config_obj = load_config(ctx.obj.get("config_path"))
     setup_logging(
         log_level=config_obj.monitoring.log_level,
         log_file=config_obj.monitoring.log_file,
     )
 
-    manager = ScheduleManager()
+    manager = _schedule_manager_for_context(ctx)
     due = manager.get_due()
 
     if not due:
@@ -2287,35 +2467,98 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
             console.print("[dim]No scheduled posts are due.[/dim]")
         return
 
-    if as_json:
+    if as_json and dry_run:
         results = []
         for entry in due:
-            results.append({"id": entry["id"], "status": "would_post" if dry_run else "pending"})
-        json_output({"status": "dry_run" if dry_run else "processing", "count": len(due), "posts": results}, True)
-        if dry_run:
-            return
-    else:
+            results.append({"id": entry["id"], "status": "would_post"})
+        json_output({"status": "dry_run", "count": len(due), "posts": results}, True)
+        return
+    if not as_json:
         console.print(f"[bold blue]Found {len(due)} due post(s)[/bold blue]")
         if dry_run:
             for entry in due:
                 console.print(f"  Would post: {entry['id']} — {Path(entry['video_path']).name} → {', '.join(entry.get('platforms', ['all']))}")
             return
 
-    engine = CrossPostEngine(config_obj)
+    existing_due = [entry for entry in due if Path(entry["video_path"]).exists()]
+    engine = None
+    engine_locked = False
+    if existing_due:
+        try:
+            engine = CrossPostEngine(config_obj)
+            engine.acquire_pidfile()
+            engine_locked = True
+        except Exception as exc:
+            if isinstance(exc, PidfileLockError):
+                if as_json:
+                    json_output({
+                        "status": "locked",
+                        "count": len(due),
+                        "error": str(exc),
+                        "posts": [{"id": entry["id"], "status": "pending"} for entry in due],
+                    }, True)
+                else:
+                    console.print(f"[red]Another xPST posting run is already active:[/red] {exc}")
+                raise click.exceptions.Exit(EXIT_GENERAL) from exc
+            if as_json:
+                json_output({
+                    "status": "error",
+                    "count": len(due),
+                    "error": str(exc),
+                    "posts": [{"id": entry["id"], "status": "pending"} for entry in due],
+                }, True)
+            else:
+                console.print(f"[red]Could not start posting engine:[/red] {exc}")
+            raise click.exceptions.Exit(EXIT_GENERAL) from exc
+
+    processed: list[dict[str, Any]] = []
+
+    def release_engine_lock() -> None:
+        nonlocal engine_locked
+        if engine is not None and engine_locked:
+            engine.release_pidfile()
+            engine_locked = False
+
+    def mark_complete(entry_id: str, success: bool, error: str | None) -> None:
+        try:
+            manager.mark_complete(entry_id, success=success, error=error)
+        except Exception:
+            release_engine_lock()
+            raise
+
+    def mark_deferred(entry_id: str, error: str | None) -> None:
+        try:
+            manager.mark_deferred(entry_id, error=error)
+        except Exception:
+            release_engine_lock()
+            raise
 
     for entry in due:
         entry_id = entry["id"]
         video_path = Path(entry["video_path"])
         caption = entry["caption"]
         platforms = entry.get("platforms") or None
+        if platforms:
+            invalid = sorted(set(str(p).lower() for p in platforms) - _valid_schedule_platforms(config_obj))
+            if invalid:
+                error_msg = "Invalid platform(s): " + ", ".join(invalid)
+                mark_complete(entry_id, success=False, error=error_msg)
+                processed.append({"id": entry_id, "status": "failed", "error": error_msg})
+                if not as_json:
+                    console.print(f"  [red]✗[/red] {entry_id}: {error_msg}")
+                continue
 
         if not video_path.exists():
             if not as_json:
                 console.print(f"  [red]✗[/red] {entry_id}: file not found — {video_path}")
-            manager.mark_complete(entry_id, success=False, error=f"File not found: {video_path}")
+            error_msg = f"File not found: {video_path}"
+            mark_complete(entry_id, success=False, error=error_msg)
+            processed.append({"id": entry_id, "status": "failed", "error": error_msg})
             continue
 
         try:
+            if engine is None:
+                raise RuntimeError("Posting engine is unavailable")
             result = asyncio.run(engine.post_manual(video_path, caption, platforms))
             success = result.all_success
             error_msg = None
@@ -2323,20 +2566,42 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
                 failed = [f"{p}: {ur.error}" for p, ur in result.results.items() if not ur.success]
                 error_msg = "; ".join(failed)
 
-            manager.mark_complete(entry_id, success=success, error=error_msg)
+            deferred = _scheduled_post_deferred(result)
+            if deferred:
+                mark_deferred(entry_id, error=error_msg)
+                processed.append({
+                    "id": entry_id,
+                    "status": "deferred",
+                    "error": error_msg,
+                })
+            else:
+                mark_complete(entry_id, success=success, error=error_msg)
+                processed.append({
+                    "id": entry_id,
+                    "status": "completed" if success else "failed",
+                    "error": error_msg,
+                })
 
             if not as_json:
                 if success:
                     console.print(f"  [green]✓[/green] {entry_id}: posted successfully")
+                elif deferred:
+                    console.print(f"  [yellow]deferred[/yellow] {entry_id}: {error_msg}")
                 else:
                     console.print(f"  [yellow]⚠[/yellow] {entry_id}: partial — {error_msg}")
         except Exception as e:
-            manager.mark_complete(entry_id, success=False, error=str(e))
+            mark_complete(entry_id, success=False, error=str(e))
+            processed.append({"id": entry_id, "status": "failed", "error": str(e)})
             if not as_json:
                 console.print(f"  [red]✗[/red] {entry_id}: {e}")
 
-    if not as_json:
+    if as_json:
+        json_output({"status": "processed", "count": len(due), "posts": processed}, True)
+    else:
         console.print(f"\n[green]Processed {len(due)} scheduled post(s)[/green]")
+    release_engine_lock()
+    if any(item.get("status") == "failed" for item in processed):
+        sys.exit(EXIT_GENERAL)
 
 
 @schedule.command("install")
@@ -2356,47 +2621,84 @@ def schedule_install(ctx: click.Context, interval: int, uninstall: bool, as_json
     system = _platform.system()
     exe_name = "xpst.exe" if _platform.system() == "Windows" else "xpst"
     xpst_bin = os.path.realpath(os.path.join(os.path.dirname(sys.executable), exe_name))
+    config_path = ctx.obj.get("config_path")
 
     if uninstall:
-        result = _uninstall_os_scheduler(system, xpst_bin, as_json)
+        try:
+            result = _uninstall_os_scheduler(system, xpst_bin, as_json)
+        except Exception as exc:
+            if as_json:
+                _json_error(str(exc), EXIT_GENERAL)
+            raise
     else:
-        result = _install_os_scheduler(system, xpst_bin, interval, as_json)
+        if interval <= 0:
+            message = "Schedule interval must be greater than zero minutes."
+            if as_json:
+                json_output({"ok": False, "error": message}, True)
+                sys.exit(EXIT_CONFIG_ERROR)
+            raise click.ClickException(message)
+        try:
+            result = _install_os_scheduler(system, xpst_bin, interval, as_json, config_path=config_path)
+        except Exception as exc:
+            if as_json:
+                _json_error(str(exc), EXIT_GENERAL)
+            raise
 
     if not result:
         sys.exit(EXIT_GENERAL)
 
 
-def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bool) -> bool:
+def _schedule_run_args(config_path: str | None = None) -> list[str]:
+    args = ["--quiet"]
+    if config_path:
+        args.extend(["--config", str(Path(config_path).expanduser())])
+    args.extend(["schedule", "run"])
+    return args
+
+
+def _schedule_log_dir(config_path: str | None = None) -> Path:
+    if config_path:
+        return Path(config_path).expanduser().parent / "logs"
+    return get_config_dir() / "logs"
+
+
+def _install_os_scheduler(
+    system: str,
+    xpst_bin: str,
+    interval: int,
+    as_json: bool,
+    config_path: str | None = None,
+) -> bool:
     """Install OS-specific scheduler entry. Returns True on success."""
     import os
 
     if system == "Darwin":
         plist_dir = Path(os.path.expanduser("~/Library/LaunchAgents"))
         plist_dir.mkdir(parents=True, exist_ok=True)
-        plist_path = plist_dir / f"com.{'xpst'}.schedule.plist"
+        plist_path = plist_dir / "com.xpst.schedule.plist"
         interval_sec = interval * 60
+        log_dir = _schedule_log_dir(config_path)
+        log_dir.mkdir(parents=True, exist_ok=True)
         plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.{'xpst'}.schedule</string>
+    <string>com.xpst.schedule</string>
     <key>ProgramArguments</key>
     <array>
         <string>{xpst_bin}</string>
-        <string>schedule</string>
-        <string>run</string>
-        <string>--quiet</string>
+        {"".join(f"<string>{arg}</string>" for arg in _schedule_run_args(config_path))}
     </array>
     <key>StartInterval</key>
     <integer>{interval_sec}</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>{get_config_dir() / "logs" / "launchagent.log"}</string>
+    <string>{log_dir / "launchagent.log"}</string>
     <key>StandardErrorPath</key>
-    <string>{get_config_dir() / "logs" / "launchagent.err"}</string>
+    <string>{log_dir / "launchagent.err"}</string>
 </dict>
 </plist>"""
         with open(plist_path, "w") as f:
@@ -2413,7 +2715,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
             else:
                 console.print(f"[green]✓[/green] LaunchAgent installed: [bold]{plist_path}[/bold]")
                 console.print(f"  Runs every {interval} minutes")
-                console.print(f"  Logs: {get_config_dir() / 'logs' / 'launchagent.log'}")
+                console.print(f"  Logs: {log_dir / 'launchagent.log'}")
                 console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
         else:
@@ -2434,8 +2736,13 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
             )
 
         # cron does NOT expand '~', so the log path must be fully resolved.
-        cron_log = get_config_dir() / "logs" / "cron.log"
-        cron_line = f"*/{interval} * * * * {xpst_bin} schedule run --quiet >> {cron_log} 2>&1"
+        import shlex
+
+        log_dir = _schedule_log_dir(config_path)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        cron_log = log_dir / "cron.log"
+        command = " ".join([shlex.quote(xpst_bin), *[shlex.quote(arg) for arg in _schedule_run_args(config_path)]])
+        cron_line = f"*/{interval} * * * * {command} >> {shlex.quote(str(cron_log))} 2>&1"
 
         # Read existing crontab
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
@@ -2449,7 +2756,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
             if marker in line:
                 skip_next = True
                 continue
-            if skip_next and "xpst schedule run" in line:
+            if skip_next and "xpst" in line and "schedule run" in line:
                 skip_next = False
                 continue
             skip_next = False
@@ -2465,7 +2772,7 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
                 json_output({"ok": True, "os": "linux", "interval_min": interval}, True)
             else:
                 console.print(f"[green]✓[/green] Crontab entry installed (every {interval} minutes)")
-                console.print(f"  Logs: {get_config_dir() / 'logs' / 'cron.log'}")
+                console.print(f"  Logs: {cron_log}")
                 console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
         else:
@@ -2478,7 +2785,8 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
     elif system == "Windows":
         import subprocess
         task_name = "XpstScheduleRun"
-        cmd = f'"{xpst_bin}" schedule run --quiet'
+        args = " ".join(f'"{arg}"' if " " in arg else arg for arg in _schedule_run_args(config_path))
+        cmd = f'"{xpst_bin}" {args}'
 
         result = subprocess.run(
             ["schtasks", "/Create", "/TN", task_name, "/TR", cmd,
@@ -2513,7 +2821,7 @@ def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
     import subprocess
 
     if system == "Darwin":
-        plist_path = Path(os.path.expanduser(f"~/Library/LaunchAgents/com.{'xpst'}.schedule.plist"))
+        plist_path = Path(os.path.expanduser("~/Library/LaunchAgents/com.xpst.schedule.plist"))
         if not plist_path.exists():
             if as_json:
                 json_output({"ok": False, "error": "LaunchAgent not found"}, True)
@@ -2550,7 +2858,7 @@ def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
             if "# xPST schedule runner" in line:
                 skip_next = True
                 continue
-            if skip_next and "xpst schedule run" in line:
+            if skip_next and "xpst" in line and "schedule run" in line:
                 skip_next = False
                 continue
             skip_next = False
@@ -2813,6 +3121,14 @@ def plugins(ctx: click.Context):
     pass
 
 
+def _plugin_manager_for_context(ctx: click.Context):
+    """Return a plugin manager rooted at the active config directory."""
+    from xpst.plugins import PluginManager
+
+    config = load_config(ctx.obj.get("config_path"))
+    return PluginManager(plugin_dir=Path(config.config_dir).expanduser() / "plugins")
+
+
 @plugins.command("docs")
 @click.option("--output", "-o", default=None, type=click.Path(), help="Output file (default: stdout)")
 @json_option
@@ -2824,9 +3140,7 @@ def plugins_docs(ctx: click.Context, output: str | None, as_json: bool):
     documenting each plugin's name, description, capabilities, and
     configuration options.
     """
-    from xpst.plugins import PluginManager
-
-    pm = PluginManager()
+    pm = _plugin_manager_for_context(ctx)
     pm.discover()
     plugin_list = pm.list_plugins()
 
@@ -2834,7 +3148,7 @@ def plugins_docs(ctx: click.Context, output: str | None, as_json: bool):
         if as_json:
             json_output({"ok": True, "plugins": 0, "message": "No plugins installed"}, True)
         else:
-            console.print(f"[dim]No plugins installed. Place .py files in {get_config_dir() / 'plugins'}[/dim]")
+            console.print(f"[dim]No plugins installed. Place .py files in {pm.plugin_dir}[/dim]")
         return
 
     # Build markdown
@@ -2897,9 +3211,7 @@ def plugins_docs(ctx: click.Context, output: str | None, as_json: bool):
 @click.pass_context
 def plugins_list(ctx: click.Context, as_json: bool):
     """List installed plugins."""
-    from xpst.plugins import PluginManager
-
-    pm = PluginManager()
+    pm = _plugin_manager_for_context(ctx)
     pm.discover()
     plugin_list = pm.list_plugins()
 

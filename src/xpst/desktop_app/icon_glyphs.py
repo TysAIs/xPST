@@ -26,9 +26,11 @@ if TYPE_CHECKING:
 #: Family name the bundled Lucide TTF registers as. QML ``font.family`` bindings
 #: must use this exact string for the glyphs below to resolve.
 ICON_FONT_FAMILY = "lucide"
+UI_FONT_FAMILY = "Inter"
 
 #: Path segments (under the resource base) to the bundled icon font.
 ICON_FONT_RELATIVE_PARTS: tuple[str, ...] = ("assets", "fonts", "lucide.ttf")
+UI_FONT_RELATIVE_PARTS: tuple[str, ...] = ("assets", "fonts", "Inter.ttf")
 
 
 def icon_font_path() -> Path:
@@ -48,6 +50,13 @@ def icon_font_path() -> Path:
 
     return resource_path(*ICON_FONT_RELATIVE_PARTS)
 
+
+def ui_font_path() -> Path:
+    """Return the bundled Inter UI font path resolved against the project root."""
+    from xpst.desktop_app.resource_path import resource_path
+
+    return resource_path(*UI_FONT_RELATIVE_PARTS)
+
 #: Logical icon name -> codepoint (int) in the bundled Lucide font.
 #:
 #: Platform icons (youtube/instagram/x/tiktok) use brand-neutral glyphs because
@@ -66,6 +75,14 @@ ICON_CODEPOINTS: dict[str, int] = {
     "moon": 0xE11E,       # moon
     "sun": 0xE178,        # sun
     "stats": 0xE2A3,      # chart-column
+    "views": 0xE0BA,      # eye
+    "likes": 0xE0F2,      # heart
+    "comments": 0xE116,   # message-circle
+    "shares": 0xE156,     # share-2
+    "view_grid": 0xE0FF,  # layout-grid
+    "view_list": 0xE1D9,  # layout-list
+    "chevron_left": 0xE06E,   # chevron-left
+    "chevron_right": 0xE06F,  # chevron-right
     # Navigation
     "dashboard": 0xE1C1,  # layout-dashboard
     "content": 0xE0FF,    # layout-grid
@@ -81,6 +98,10 @@ ICON_CODEPOINTS: dict[str, int] = {
     "close": 0xE1B2,      # x
     "edit": 0xE1F9,       # pencil
     "web": 0xE0E8,        # globe
+    "repo": 0xE0CC,       # file-text
+    "docs": 0xE05F,       # book-open
+    "issue": 0xE20C,      # bug
+    "changelog": 0xE45F,  # scroll-text
     "users": 0xE1A4,      # users
     "trophy": 0xE373,     # trophy
     "calendar": 0xE063,   # calendar
@@ -89,6 +110,10 @@ ICON_CODEPOINTS: dict[str, int] = {
     "retry": 0xE149,      # rotate-cw
     "plus": 0xE13D,       # plus
     "search": 0xE151,     # search
+    "play": 0xE080,       # circle-play
+    "pause": 0xE07F,      # circle-pause
+    "stop": 0xE083,       # circle-stop
+    "external": 0xE0B9,   # external-link
 }
 
 

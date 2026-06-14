@@ -13,6 +13,7 @@ Upload specs:
 - Category: 28 (Science & Technology) - configurable
 """
 
+import asyncio
 from pathlib import Path
 
 from xpst.config import XPSTConfig
@@ -193,8 +194,8 @@ class YouTubeUploader(PlatformUploader):
                 media_body=media,
             )
 
-            # Execute upload in thread pool to avoid blocking event loop
-            response = await self._execute_upload(request)
+            # Execute upload in a worker thread so resumable chunks do not block the event loop.
+            response = await asyncio.to_thread(self._execute_upload, request)
 
             video_id = response.get("id") or ""
             if not video_id:

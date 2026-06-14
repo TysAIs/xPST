@@ -32,12 +32,14 @@ Page {
             try {
                 connectPage.healthData = JSON.parse(controller.platformHealth)
             } catch(e) {}
+            connectPage.loadSavedChoices()
             connectPage.loadProviders()
             connectPage.loadReadiness()
         }
     }
 
     Component.onCompleted: {
+        loadSavedChoices()
         loadProviders()
         loadReadiness()
     }
@@ -84,6 +86,24 @@ Page {
         } catch(e) {}
     }
 
+    function loadSavedChoices() {
+        if (typeof controller === "undefined" || !controller.configData)
+            return
+        try {
+            var cfg = JSON.parse(controller.configData)
+            if (cfg.local && cfg.local.path !== undefined)
+                connectPage.onboardingLocalPath = cfg.local.path || ""
+            if (cfg.tiktok && cfg.tiktok.username !== undefined)
+                connectPage.onboardingTikTokUsername = cfg.tiktok.username || ""
+            if (cfg.youtube && cfg.youtube.enabled !== undefined)
+                connectPage.onboardingYouTube = cfg.youtube.enabled
+            if (cfg.instagram && cfg.instagram.enabled !== undefined)
+                connectPage.onboardingInstagram = cfg.instagram.enabled
+            if (cfg.x && cfg.x.enabled !== undefined)
+                connectPage.onboardingX = cfg.x.enabled
+        } catch(e) {}
+    }
+
     function setupItems() {
         var items = []
         var blocking = connectPage.readinessData.blocking || []
@@ -101,8 +121,8 @@ Page {
         if (p === "instagram") return theme.iconInstagram
         if (p === "x") return theme.iconX
         if (p === "tiktok") return theme.iconTikTok
-        if (p === "local") return "..."
-        return "+"
+        if (p === "local") return theme.iconRepo
+        return theme.iconPlus
     }
 
     function providerColor(providerName) {
@@ -144,13 +164,14 @@ Page {
 
     function getHealthColor(status) {
         if (status === "ok" || status === "healthy" || status === "connected") return theme.success
-        if (status === "warning" || status === "degraded") return theme.warning
+        if (status === "warning" || status === "degraded" || status === "missing_credentials") return theme.warning
         if (status === "error" || status === "failed") return theme.error
         return theme.textMuted
     }
 
     function getHealthLabel(status) {
         if (status === "ok" || status === "healthy" || status === "connected") return "Healthy"
+        if (status === "missing_credentials") return "Missing credentials"
         if (status === "warning" || status === "degraded") return "Degraded"
         if (status === "error" || status === "failed") return "Error"
         return "Unknown"
@@ -161,6 +182,13 @@ Page {
         connectPage.connectingPlatforms[platformName.toLowerCase()] = true
         connectPage.connectingPlatformsChanged()
         controller.connectPlatformAsync(platformName.toLowerCase())
+    }
+
+    function disconnectPlatform(platformName) {
+        if (typeof controller === "undefined" || !controller.disconnectPlatform) return
+        connectPage.connectingPlatforms[platformName.toLowerCase()] = true
+        connectPage.connectingPlatformsChanged()
+        controller.disconnectPlatform(platformName.toLowerCase())
     }
 
     function saveFirstRunChoices() {
@@ -311,11 +339,22 @@ Page {
                         onClicked: {
                             if (cookieInput.text.length > 0 && typeof controller !== "undefined") {
                                 var settings = { x_cookies: cookieInput.text }
-                                controller.saveSettings(JSON.stringify(settings))
-                                if (typeof showToast !== "undefined") showToast("X cookies saved", false)
+                                try {
+                                    var raw = controller.saveSettings(JSON.stringify(settings))
+                                    var result = JSON.parse(raw)
+                                    if (result.ok) {
+                                        if (typeof showToast !== "undefined") showToast("X cookies saved", false)
+                                        cookieInput.text = ""
+                                        xCookieDialog.close()
+                                    } else {
+                                        if (typeof showToast !== "undefined") showToast(result.error || "Could not save X cookies", true)
+                                    }
+                                } catch(e) {
+                                    if (typeof showToast !== "undefined") showToast("Could not save X cookies", true)
+                                }
+                            } else {
+                                xCookieDialog.close()
                             }
-                            cookieInput.text = ""
-                            xCookieDialog.close()
                         }
                     }
                 }
@@ -483,16 +522,94 @@ Page {
                             text: "YouTube"
                             checked: connectPage.onboardingYouTube
                             onToggled: connectPage.onboardingYouTube = checked
+                            indicator: Rectangle {
+                                implicitWidth: 18
+                                implicitHeight: 18
+                                x: 0
+                                y: parent.height / 2 - height / 2
+                                radius: theme.radiusSm
+                                color: parent.checked ? theme.youtube : theme.surfaceAlt
+                                border.color: parent.checked ? theme.youtube : theme.textMuted
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: theme.iconCheck
+                                    font.family: theme.iconFontFamily
+                                    font.pixelSize: 12
+                                    color: "#ffffff"
+                                    visible: parent.parent.checked
+                                }
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                color: theme.textPrimary
+                                font.pixelSize: 13
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
                         }
                         CheckBox {
                             text: "Instagram"
                             checked: connectPage.onboardingInstagram
                             onToggled: connectPage.onboardingInstagram = checked
+                            indicator: Rectangle {
+                                implicitWidth: 18
+                                implicitHeight: 18
+                                x: 0
+                                y: parent.height / 2 - height / 2
+                                radius: theme.radiusSm
+                                color: parent.checked ? theme.instagram : theme.surfaceAlt
+                                border.color: parent.checked ? theme.instagram : theme.textMuted
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: theme.iconCheck
+                                    font.family: theme.iconFontFamily
+                                    font.pixelSize: 12
+                                    color: "#ffffff"
+                                    visible: parent.parent.checked
+                                }
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                color: theme.textPrimary
+                                font.pixelSize: 13
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
                         }
                         CheckBox {
                             text: "X"
                             checked: connectPage.onboardingX
                             onToggled: connectPage.onboardingX = checked
+                            indicator: Rectangle {
+                                implicitWidth: 18
+                                implicitHeight: 18
+                                x: 0
+                                y: parent.height / 2 - height / 2
+                                radius: theme.radiusSm
+                                color: parent.checked ? theme.xtwitter : theme.surfaceAlt
+                                border.color: parent.checked ? theme.xtwitter : theme.textMuted
+                                border.width: 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: theme.iconCheck
+                                    font.family: theme.iconFontFamily
+                                    font.pixelSize: 12
+                                    color: "#ffffff"
+                                    visible: parent.parent.checked
+                                }
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                color: theme.textPrimary
+                                font.pixelSize: 13
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: parent.indicator.width + parent.spacing
+                            }
                         }
                         Item { Layout.fillWidth: true }
                     }
@@ -777,7 +894,9 @@ Page {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
                                     enabled: !isConnecting
-                                    onClicked: connectPage.connectPlatform(providerKey)
+                                    onClicked: platformStatus.connected
+                                               ? connectPage.disconnectPlatform(providerKey)
+                                               : connectPage.connectPlatform(providerKey)
                                     Accessible.name: (isConnecting ? "Connecting" : (platformStatus.connected ? "Disconnect from " : "Connect to ")) + providerName
                                     Accessible.role: Accessible.Button
                                 }

@@ -8,7 +8,16 @@ from urllib.parse import unquote
 
 import yaml
 
-from scripts.verify_desktop_package import _check_qt_lgpl_notice, verify_desktop_package
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
+
+from scripts.verify_desktop_package import (
+    _check_desktop_fonts,
+    _check_qt_lgpl_notice,
+    verify_desktop_package,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\((?!https?://)([^)]+)\)")
@@ -73,10 +82,17 @@ def test_dockerignore_excludes_runtime_data_and_secrets():
 
 def test_docker_assets_reference_existing_entrypoint_and_current_commands():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    install_doc = (ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
     entrypoint = (ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
     ci_workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
 
     assert "COPY docker-entrypoint.sh /docker-entrypoint.sh" in dockerfile
+    assert "COPY assets/fonts/ assets/fonts/" in dockerfile
+    volumes = compose["services"]["xpst"]["volumes"]
+    assert "xpst-data:/home/xpst/.xpst" in volumes
+    assert "/root/.xpst" not in install_doc
+    assert 'pip install "xpst[pyside6]"' in install_doc
     for command in ["diagnostics", "providers", "readiness", "schedule", "plugins"]:
         assert command in entrypoint
     assert "docker" in ci_workflow["jobs"]
@@ -86,6 +102,15 @@ def test_docker_assets_reference_existing_entrypoint_and_current_commands():
     ci_steps = "\n".join(str(step.get("run", "")) for step in ci_workflow["jobs"]["test"]["steps"])
     assert "python scripts/release_preflight.py --json" in ci_steps
     assert "python scripts/scan_public_safety.py --json" in ci_steps
+
+
+def test_build_script_uses_release_specs():
+    build_script = (ROOT / "build.sh").read_text(encoding="utf-8")
+
+    assert "pyinstaller build_macos.spec --noconfirm --clean" in build_script
+    assert "pyinstaller build_windows.spec --noconfirm --clean" in build_script
+    assert "pyinstaller build_linux.spec --noconfirm --clean" in build_script
+    assert "--add-data \"src/xpst/desktop_app/qml:xpst/desktop_app/qml\"" not in build_script
 
 
 def test_contributing_uses_current_repository_and_no_mojibake():
@@ -127,6 +152,25 @@ def test_local_markdown_links_point_to_existing_files():
     assert broken_links == []
 
 
+def test_mcp_docs_match_live_tool_registry():
+    from xpst.mcp import server as mcp_server
+
+    names = [tool.name for tool in mcp_server.TOOLS]
+    xpst_count = sum(name.startswith("xpst_") for name in names)
+    kb_count = sum(name.startswith("kb_") for name in names)
+    total = len(names)
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    mcp_docs = (ROOT / "docs" / "MCP_TOOLS.md").read_text(encoding="utf-8")
+    combined = readme + "\n" + mcp_docs
+
+    assert f"{total} tools" in readme
+    assert f"{total} tools total: {xpst_count} `xpst_*` + {kb_count} `kb_*`" in mcp_docs
+    for name in names:
+        assert name in combined
+    assert "kb_course` is not exposed over MCP yet" not in mcp_docs
+
+
 def test_release_workflow_preserves_required_ship_gates():
     workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8"))
 
@@ -138,6 +182,21 @@ def test_release_workflow_preserves_required_ship_gates():
         if step.get("uses") == "softprops/action-gh-release@v2"
     )
     assert release_step["with"]["prerelease"] == "${{ contains(github.ref_name, '-rc') }}"
+    github_release_steps = workflow["jobs"]["github-release"]["steps"]
+    github_release_text = "\n".join(str(step) for step in github_release_steps)
+    assert "actions/setup-python@v5" in github_release_text
+    assert 'python -m pip install -e ".[full]"' in github_release_text
+    assert "python scripts/public_release_check.py --dist release-artifacts --output-dir release-public --json" in github_release_text
+    assert "public-release-evidence" in github_release_text
+    assert "secrets.WINDOWS_CERTIFICATE_BASE64" in github_release_text
+    assert "secrets.MACOS_CODESIGN_IDENTITY" in github_release_text
+    public_gate = next(step for step in github_release_steps if step.get("name") == "Public release gate")
+    public_evidence = next(step for step in github_release_steps if step.get("name") == "Upload public release evidence")
+    stage_public_evidence = next(step for step in github_release_steps if step.get("name") == "Stage public release evidence")
+    assert public_gate["if"] == "${{ !contains(github.ref_name, '-rc') }}"
+    assert public_evidence["if"] == "${{ !contains(github.ref_name, '-rc') }}"
+    assert stage_public_evidence["if"] == "${{ !contains(github.ref_name, '-rc') }}"
+    assert "cp release-public/* release-artifacts/" in stage_public_evidence["run"]
 
     # W3-2: the Linux desktop release lane must build, smoke, and attest a binary.
     linux_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-linux"]["steps"])
@@ -153,18 +212,16 @@ def test_release_workflow_preserves_required_ship_gates():
         "python scripts/scan_public_safety.py --json",
         "python scripts/build_package.py",
         "python scripts/release_preflight.py --json",
-        "python scripts/clean_install_smoke.py --dist dist --artifact both",
+        "python scripts/clean_install_smoke.py --dist dist --artifact both --install-timeout 600",
         "python scripts/verify_desktop_package.py",
         "QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py",
-        "python scripts/release_artifacts.py --dist dist --output-dir release/python --skip-checks",
+        "python scripts/release_artifacts.py --dist dist --output-dir release/python --metadata-label python --skip-checks",
     ]:
         assert required in python_steps
     python_uses = "\n".join(str(step.get("uses", "")) for step in workflow["jobs"]["build-python"]["steps"])
     assert "actions/attest@v4" in python_uses
     python_step_text = "\n".join(str(step) for step in workflow["jobs"]["build-python"]["steps"])
     assert "release/python/*" in python_step_text
-    assert "!release/python/SHA256SUMS" in python_step_text
-    assert "!release/python/SHA512SUMS" in python_step_text
 
     windows_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-windows"]["steps"])
     assert "pyinstaller --clean --noconfirm build_windows.spec" in windows_steps
@@ -174,13 +231,14 @@ def test_release_workflow_preserves_required_ship_gates():
     assert '${{ github.event_name }}" -eq "push"' in windows_steps
     assert '$smokeArgs += "--require-signed"' in windows_steps
     assert "python scripts/verify_windows_exe.py @smokeArgs" in windows_steps
-    assert "python scripts/release_artifacts.py --dist dist --output-dir release/windows --skip-checks" in windows_steps
+    assert (
+        "python scripts/release_artifacts.py --dist dist --output-dir release/windows --metadata-label windows --skip-checks"
+        in windows_steps
+    )
     windows_uses = "\n".join(str(step.get("uses", "")) for step in workflow["jobs"]["build-windows"]["steps"])
     assert "actions/attest@v4" in windows_uses
     windows_step_text = "\n".join(str(step) for step in workflow["jobs"]["build-windows"]["steps"])
     assert "release/windows/*" in windows_step_text
-    assert "!release/windows/SHA256SUMS" in windows_step_text
-    assert "!release/windows/SHA512SUMS" in windows_step_text
 
     macos_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-macos"]["steps"])
     assert "bash scripts/verify_macos.sh" in macos_steps
@@ -191,14 +249,17 @@ def test_release_workflow_preserves_required_ship_gates():
     macos_uses = "\n".join(str(step.get("uses", "")) for step in workflow["jobs"]["build-macos"]["steps"])
     assert "actions/attest@v4" in macos_uses
     assert "release/*" in macos_step_text
-    assert "!release/SHA256SUMS" in macos_step_text
-    assert "!release/SHA512SUMS" in macos_step_text
     verify_macos = (ROOT / "scripts" / "verify_macos.sh").read_text(encoding="utf-8")
     assert "MACOS_CODESIGN_IDENTITY" in verify_macos
     assert "bash scripts/sign_macos.sh dist/xPST.app" in verify_macos
     assert "--require-developer-id --require-notarized" in verify_macos
+    assert "scripts/release_artifacts.py --dist dist --output-dir release --metadata-label macos --skip-checks" in verify_macos
 
     linux_step_text = "\n".join(str(step) for step in workflow["jobs"]["build-linux"]["steps"])
+    assert (
+        "python scripts/release_artifacts.py --dist dist --output-dir release/linux --metadata-label linux --skip-checks"
+        in linux_step_text
+    )
     assert "release/linux/*" in linux_step_text
     assert "!release/linux/SHA256SUMS" in linux_step_text
     assert "!release/linux/SHA512SUMS" in linux_step_text
@@ -209,12 +270,24 @@ def test_release_workflow_preserves_required_ship_gates():
     assert "sha256sum > SHA256SUMS" in release_steps
     assert "sha512sum > SHA512SUMS" in release_steps
 
-
 def test_desktop_package_specs_include_runtime_assets_and_dynamic_imports():
     result = verify_desktop_package(ROOT)
 
     assert result["ok"] is True
     assert {"DashboardPage.qml", "ConnectPage.qml"} <= set(result["qml_pages"])
+    for spec in ("build_windows.spec", "build_macos.spec", "build_linux.spec"):
+        text = (ROOT / spec).read_text(encoding="utf-8")
+        assert "PySide6.QtMultimedia" in text
+
+
+def test_macos_bundle_version_comes_from_project_metadata():
+    text = (ROOT / "build_macos.spec").read_text(encoding="utf-8")
+
+    assert "PROJECT_VERSION = _project_version(project_root)" in text
+    assert '"CFBundleVersion": PROJECT_VERSION' in text
+    assert '"CFBundleShortVersionString": PROJECT_VERSION' in text
+    assert '"CFBundleVersion": "0.1.0"' not in text
+    assert '"CFBundleShortVersionString": "0.1.0"' not in text
 
 
 def test_desktop_package_gate_includes_qt_lgpl_notice():
@@ -223,6 +296,35 @@ def test_desktop_package_gate_includes_qt_lgpl_notice():
     lgpl_checks = [check for check in result["checks"] if check["path"] == "NOTICES_QT_LGPL.md"]
     assert lgpl_checks, "verify gate must check the Qt/PySide6 LGPL notice"
     assert lgpl_checks[0]["ok"] is True
+
+
+def test_desktop_package_gate_includes_bundled_fonts():
+    result = verify_desktop_package(ROOT)
+
+    font_checks = [check for check in result["checks"] if check["path"] == "assets/fonts"]
+    assert font_checks, "verify gate must check bundled UI and icon fonts"
+    assert font_checks[0]["ok"] is True
+
+
+def test_wheel_build_includes_desktop_font_assets():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    force_include = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+
+    expected = {
+        "assets/fonts/Inter.ttf": "src/xpst/desktop_app/assets/fonts/Inter.ttf",
+        "assets/fonts/LICENSE-Inter.txt": "src/xpst/desktop_app/assets/fonts/LICENSE-Inter.txt",
+        "assets/fonts/lucide.ttf": "src/xpst/desktop_app/assets/fonts/lucide.ttf",
+        "assets/fonts/LICENSE-lucide.txt": "src/xpst/desktop_app/assets/fonts/LICENSE-lucide.txt",
+        "assets/fonts/README.md": "src/xpst/desktop_app/assets/fonts/README.md",
+    }
+    assert expected.items() <= force_include.items()
+
+
+def test_desktop_font_gate_fails_when_fonts_missing(tmp_path):
+    check = _check_desktop_fonts(tmp_path)
+
+    assert check["ok"] is False
+    assert any("Inter.ttf" in issue for issue in check["issues"])
 
 
 def test_qt_lgpl_notice_gate_fails_when_notice_missing(tmp_path):

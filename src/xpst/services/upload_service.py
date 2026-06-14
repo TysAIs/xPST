@@ -335,6 +335,7 @@ class UploadService:
                     caption=caption,
                     content_hash=content_hash,
                     source_platform=source_platform,
+                    video_path=str(video_path),
                 )
                 self.circuit_breakers.record_success(platform_name)
                 self.state.update_platform_health(platform_name, True)
@@ -663,7 +664,10 @@ class UploadService:
     def _duration_limit(uploader: PlatformUploader) -> int | None:
         """Platform max video duration from the provider manifest (G08)."""
         try:
-            extra = uploader.manifest().extra or {}
+            manifest = uploader.manifest
+            if callable(manifest):
+                manifest = manifest()
+            extra = manifest.extra or {}
         except Exception:
             return None
         for key in ("max_duration_seconds", "max_video_duration_seconds"):

@@ -30,6 +30,8 @@ Page {
     readonly property int timestampRole: 261
     readonly property int thumbnailRole: 262
     readonly property int postIdRole: 263
+    readonly property int sourceIdRole: 264
+    readonly property int videoPathRole: 265
 
     // Settings persistence for sort option (#21)
     Settings {
@@ -105,6 +107,9 @@ Page {
             var title = postModel.data(idx, titleRole) || ""
             var caption = postModel.data(idx, captionRole) || ""
             if (matchesFilter(platform) && matchesSearch(title, caption)) {
+                var postId = postModel.data(idx, postIdRole) || ""
+                var sourceId = postModel.data(idx, sourceIdRole) || postId
+                var videoPath = postModel.data(idx, videoPathRole) || ""
                 posts.push({
                     title: title,
                     caption: caption,
@@ -112,7 +117,10 @@ Page {
                     status: postModel.data(idx, statusRole) || "posted",
                     timestamp: postModel.data(idx, timestampRole) || "",
                     thumbnail: postModel.data(idx, thumbnailRole) || "",
-                    postId: postModel.data(idx, postIdRole) || ""
+                    postId: postId,
+                    sourceId: sourceId,
+                    videoPath: videoPath,
+                    rowKey: sourceId + "::" + platform + "::" + postId
                 })
             }
         }
@@ -151,19 +159,19 @@ Page {
     }
 
     // Selection helpers (Item 8 - batch post)
-    function toggleSelection(postId) {
+    function toggleSelection(rowKey) {
         var items = selectedItems.slice()
-        var idx = items.indexOf(postId)
+        var idx = items.indexOf(rowKey)
         if (idx >= 0) {
             items.splice(idx, 1)
         } else {
-            items.push(postId)
+            items.push(rowKey)
         }
         selectedItems = items
     }
 
-    function isSelected(postId) {
-        return selectedItems.indexOf(postId) >= 0
+    function isSelected(rowKey) {
+        return selectedItems.indexOf(rowKey) >= 0
     }
 
     function clearSelection() {
@@ -175,7 +183,7 @@ Page {
         if (selectedItems.length === 0) return
         if (selectedItems.length === 1) {
             for (var i = 0; i < filteredPosts.length; i++) {
-                if (filteredPosts[i].postId === selectedItems[0]) {
+                if (filteredPosts[i].rowKey === selectedItems[0]) {
                     preparePostPreview(filteredPosts[i])
                     break
                 }
@@ -187,7 +195,7 @@ Page {
     }
 
     function preparePostPreview(post) {
-        var videoPath = post.thumbnail || ""
+        var videoPath = post.videoPath || ""
         var caption = post.caption || ""
         pendingPost = { videoPath: videoPath, caption: caption }
         if (typeof controller !== "undefined" && controller.previewPost) {
@@ -217,7 +225,7 @@ Page {
         var posts = []
         for (var i = 0; i < selectedItems.length; i++) {
             for (var j = 0; j < filteredPosts.length; j++) {
-                if (filteredPosts[j].postId === selectedItems[i]) {
+                if (filteredPosts[j].rowKey === selectedItems[i]) {
                     posts.push(filteredPosts[j])
                     break
                 }
@@ -233,7 +241,7 @@ Page {
         var warnings = []
         for (var i = 0; i < posts.length; i++) {
             var post = posts[i]
-            var videoPath = post.thumbnail || ""
+            var videoPath = post.videoPath || ""
             var caption = post.caption || ""
             var preview = { ready: false, blocking: ["Posting preview is unavailable"], warnings: [], platforms: [], video: {} }
             if (typeof controller !== "undefined" && controller.previewPost) {
@@ -284,16 +292,10 @@ Page {
     // Batch delete selected items (#10)
     function deleteSelected() {
         if (selectedItems.length === 0) return
-        for (var i = 0; i < selectedItems.length; i++) {
-            var postId = selectedItems[i]
-            // Find platform for this postId
-            for (var j = 0; j < filteredPosts.length; j++) {
-                if (filteredPosts[j].postId === postId) {
-                    if (typeof controller !== "undefined") {
-                        controller.deletePost(postId, filteredPosts[j].platform || "")
-                    }
-                    break
-                }
+        var posts = selectedPostObjects()
+        for (var i = 0; i < posts.length; i++) {
+            if (typeof controller !== "undefined") {
+                controller.deletePost(posts[i].sourceId || posts[i].postId, posts[i].platform || "")
             }
         }
         var count = selectedItems.length
@@ -519,7 +521,7 @@ Page {
             spacing: theme.spacingXl
 
             Text {
-                text: "Delete " + contentPage.selectedItems.length + " items from all platforms?"
+                text: "Delete " + contentPage.selectedItems.length + " selected platform post(s)?"
                 font.pixelSize: 13
                 color: theme.textPrimary
                 wrapMode: Text.WordWrap
@@ -950,8 +952,10 @@ Page {
                     spacing: theme.spacingSm
 
                     Text {
-                        text: "!"
+                        text: theme.iconError
+                        font.family: theme.iconFontFamily
                         font.pixelSize: 32
+                        color: theme.error
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
                     }
@@ -1009,11 +1013,36 @@ Page {
                 Slider {
                     id: seekSlider
                     Layout.fillWidth: true
+                    implicitHeight: 24
                     from: 0
                     to: videoPlayer.duration > 0 ? videoPlayer.duration : 1
                     value: videoPlayer.position || 0
                     onMoved: videoPlayer.seek(value)
                     enabled: videoPlayer.duration > 0
+                    background: Rectangle {
+                        x: seekSlider.leftPadding
+                        y: seekSlider.topPadding + seekSlider.availableHeight / 2 - height / 2
+                        width: seekSlider.availableWidth
+                        height: 4
+                        radius: 2
+                        color: theme.surfaceAlt
+                        Rectangle {
+                            width: seekSlider.visualPosition * parent.width
+                            height: parent.height
+                            radius: 2
+                            color: seekSlider.enabled ? theme.accent : theme.border
+                        }
+                    }
+                    handle: Rectangle {
+                        x: seekSlider.leftPadding + seekSlider.visualPosition * (seekSlider.availableWidth - width)
+                        y: seekSlider.topPadding + seekSlider.availableHeight / 2 - height / 2
+                        width: 14
+                        height: 14
+                        radius: 7
+                        color: seekSlider.enabled ? theme.accent : theme.textMuted
+                        border.color: theme.surfaceCard
+                        border.width: 2
+                    }
                 }
 
                 Text {
@@ -1038,17 +1067,28 @@ Page {
 
                 // Play/Pause button
                 Rectangle {
-                    width: playPauseLabel.implicitWidth + 24
+                    width: playPauseRow.implicitWidth + 24
                     height: 32
                     radius: theme.radiusMd
                     color: theme.accent
-                    Text {
-                        id: playPauseLabel
+
+                    Row {
+                        id: playPauseRow
                         anchors.centerIn: parent
-                        text: videoPlayer.playbackState === MediaPlayer.PlayingState ? "⏸ Pause" : "▶ Play"
-                        font.pixelSize: 12
-                        font.weight: Font.DemiBold
-                        color: "#ffffff"
+                        spacing: theme.spacingXs
+
+                        Text {
+                            text: videoPlayer.playbackState === MediaPlayer.PlayingState ? theme.iconPause : theme.iconPlay
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 13
+                            color: "#ffffff"
+                        }
+                        Text {
+                            text: videoPlayer.playbackState === MediaPlayer.PlayingState ? "Pause" : "Play"
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: "#ffffff"
+                        }
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -1065,16 +1105,27 @@ Page {
 
                 // Stop button
                 Rectangle {
-                    width: stopLabel.implicitWidth + 24
+                    width: stopRow.implicitWidth + 24
                     height: 32
                     radius: theme.radiusMd
                     color: theme.surfaceAlt
-                    Text {
-                        id: stopLabel
+
+                    Row {
+                        id: stopRow
                         anchors.centerIn: parent
-                        text: "⏹ Stop"
-                        font.pixelSize: 12
-                        color: theme.textSecondary
+                        spacing: theme.spacingXs
+
+                        Text {
+                            text: theme.iconStop
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 13
+                            color: theme.textSecondary
+                        }
+                        Text {
+                            text: "Stop"
+                            font.pixelSize: 12
+                            color: theme.textSecondary
+                        }
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -1087,16 +1138,27 @@ Page {
 
                 // Open externally button
                 Rectangle {
-                    width: openExtLabel.implicitWidth + 24
+                    width: openExtRow.implicitWidth + 24
                     height: 32
                     radius: theme.radiusMd
                     color: theme.surfaceAlt
-                    Text {
-                        id: openExtLabel
+
+                    Row {
+                        id: openExtRow
                         anchors.centerIn: parent
-                        text: "↗ System Player"
-                        font.pixelSize: 11
-                        color: theme.textSecondary
+                        spacing: theme.spacingXs
+
+                        Text {
+                            text: theme.iconExternal
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 13
+                            color: theme.textSecondary
+                        }
+                        Text {
+                            text: "System Player"
+                            font.pixelSize: 11
+                            color: theme.textSecondary
+                        }
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -1282,7 +1344,8 @@ Page {
                         color: !contentPage.listViewMode ? theme.accentMuted : "transparent"
                         Text {
                             anchors.centerIn: parent
-                            text: "⊞"
+                            text: theme.iconViewGrid
+                            font.family: theme.iconFontFamily
                             font.pixelSize: 16
                             color: !contentPage.listViewMode ? theme.accent : theme.textMuted
                         }
@@ -1300,8 +1363,9 @@ Page {
                         color: contentPage.listViewMode ? theme.accentMuted : "transparent"
                         Text {
                             anchors.centerIn: parent
-                            text: "List"
-                            font.pixelSize: 11
+                            text: theme.iconViewList
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 16
                             color: contentPage.listViewMode ? theme.accent : theme.textMuted
                         }
                         MouseArea {
@@ -1348,8 +1412,9 @@ Page {
                         visible: searchField.text.length > 0
                         Text {
                             anchors.centerIn: parent
-                            text: "Clear"
-                            font.pixelSize: 10
+                            text: theme.iconClose
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
                             color: theme.textMuted
                         }
                         MouseArea {
@@ -1409,6 +1474,62 @@ Page {
                     Layout.preferredWidth: 120
                     Accessible.name: "Sort content by"
                     Accessible.role: Accessible.ComboBox
+                    background: Rectangle {
+                        color: theme.surfaceCard
+                        radius: theme.radiusMd
+                        border.color: sortCombo.hovered || sortCombo.activeFocus ? theme.accent : theme.surfaceAlt
+                        border.width: 1
+                    }
+                    contentItem: Text {
+                        text: sortCombo.displayText
+                        color: theme.textPrimary
+                        font.pixelSize: 12
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: theme.spacingMd
+                        rightPadding: 28
+                        elide: Text.ElideRight
+                    }
+                    indicator: Text {
+                        anchors.right: parent.right
+                        anchors.rightMargin: theme.spacingMd
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: theme.iconChevronRight
+                        rotation: 90
+                        color: theme.textMuted
+                        font.family: theme.iconFontFamily
+                        font.pixelSize: 12
+                    }
+                    delegate: ItemDelegate {
+                        width: sortCombo.width
+                        height: 32
+                        contentItem: Text {
+                            text: modelData
+                            color: highlighted ? "#ffffff" : theme.textPrimary
+                            font.pixelSize: 12
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            color: highlighted ? theme.accent : theme.surfaceCard
+                        }
+                    }
+                    popup: Popup {
+                        y: sortCombo.height + 4
+                        width: sortCombo.width
+                        implicitHeight: contentItem.implicitHeight
+                        padding: 0
+                        contentItem: ListView {
+                            clip: true
+                            implicitHeight: contentHeight
+                            model: sortCombo.popup.visible ? sortCombo.delegateModel : null
+                            currentIndex: sortCombo.highlightedIndex
+                        }
+                        background: Rectangle {
+                            color: theme.surfaceCard
+                            radius: theme.radiusMd
+                            border.color: theme.surfaceAlt
+                            border.width: 1
+                        }
+                    }
                 }
 
                 Item { Layout.fillWidth: true }
@@ -1511,7 +1632,7 @@ Page {
             // Content grid view - using pageItems (filtered + sorted + paginated)
             GridLayout {
                 Layout.fillWidth: true
-                columns: contentPage.listViewMode ? 1 : 3
+                columns: contentPage.listViewMode ? 1 : (contentPage.width < 900 ? 2 : 3)
                 columnSpacing: theme.spacingXl
                 rowSpacing: theme.spacingXl
 
@@ -1534,24 +1655,25 @@ Page {
                             Rectangle {
                                 width: 20; height: 20
                                 radius: 4
-                                color: contentPage.isSelected(modelData.postId) ? theme.accent : "transparent"
-                                border.color: contentPage.isSelected(modelData.postId) ? theme.accent : theme.textMuted
+                                color: contentPage.isSelected(modelData.rowKey) ? theme.accent : "transparent"
+                                border.color: contentPage.isSelected(modelData.rowKey) ? theme.accent : theme.textMuted
                                 border.width: 1.5
                                 Layout.alignment: Qt.AlignTop
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "OK"
+                                    text: theme.iconCheck
+                                    font.family: theme.iconFontFamily
                                     font.pixelSize: 12
                                     font.weight: Font.DemiBold
                                     color: "#ffffff"
-                                    visible: contentPage.isSelected(modelData.postId)
+                                    visible: contentPage.isSelected(modelData.rowKey)
                                 }
 
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: contentPage.toggleSelection(modelData.postId || "")
+                                    onClicked: contentPage.toggleSelection(modelData.rowKey || "")
                                     Accessible.name: "Select " + (modelData.title || "item")
                                     Accessible.role: Accessible.CheckBox
                                 }
@@ -1559,10 +1681,11 @@ Page {
 
                             // Thumbnail area (hidden in list mode)
                             Rectangle {
-                                Layout.preferredWidth: contentPage.listViewMode ? 56 : -1
+                                Layout.preferredWidth: contentPage.listViewMode ? 56 : 72
                                 Layout.preferredHeight: contentPage.listViewMode ? 56 : 100
-                                Layout.fillWidth: !contentPage.listViewMode
+                                Layout.fillWidth: false
                                 Layout.fillHeight: false
+                                Layout.alignment: Qt.AlignTop
                                 radius: theme.radiusMd
                                 color: theme.surfaceAlt
                                 clip: true
@@ -1574,8 +1697,8 @@ Page {
                                     fillMode: Image.PreserveAspectCrop
                                     visible: status === Image.Ready
                                     source: {
-                                        if (typeof controller !== "undefined" && modelData.thumbnail) {
-                                            return controller.getThumbnail(modelData.thumbnail)
+                                        if (typeof controller !== "undefined" && modelData.videoPath) {
+                                            return controller.getThumbnail(modelData.videoPath)
                                         }
                                         return ""
                                     }
@@ -1592,7 +1715,8 @@ Page {
 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: "Video"
+                                    text: theme.iconVideo
+                                    font.family: theme.iconFontFamily
                                     font.pixelSize: contentPage.listViewMode ? 16 : 24
                                     color: theme.textMuted
                                     visible: thumbImage.status !== Image.Ready
@@ -1603,7 +1727,7 @@ Page {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: {
-                                        contentPage.previewVideoPath = modelData.thumbnail || ""
+                                        contentPage.previewVideoPath = modelData.videoPath || ""
                                         contentPage.previewVideoTitle = modelData.title || "Untitled"
                                         videoPreviewDialog.open()
                                     }
@@ -1613,6 +1737,7 @@ Page {
                             // Text content
                             ColumnLayout {
                                 Layout.fillWidth: true
+                                Layout.alignment: Qt.AlignTop
                                 spacing: theme.spacingXs
 
                                 RowLayout {
@@ -1717,8 +1842,10 @@ Page {
                                         color: editMouseArea.containsMouse ? theme.surfaceAlt : "transparent"
                                         Text {
                                             anchors.centerIn: parent
-                                            text: "Edit"
-                                            font.pixelSize: 10
+                                            text: theme.iconEdit
+                                            font.family: theme.iconFontFamily
+                                            font.pixelSize: 12
+                                            color: theme.textSecondary
                                         }
                                         MouseArea {
                                             id: editMouseArea
@@ -1726,7 +1853,7 @@ Page {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                contentPage.editingPostId = modelData.postId || ""
+                                                contentPage.editingPostId = modelData.sourceId || modelData.postId || ""
                                                 // Build per-platform captions dict
                                                 var caps = {}
                                                 caps[modelData.platform || ""] = modelData.caption || ""
@@ -1779,12 +1906,23 @@ Page {
                     color: contentPage.currentPage > 1 ? theme.surfaceCard : theme.surfaceAlt
                     opacity: contentPage.currentPage > 1 ? 1.0 : 0.5
 
-                    Text {
+                    Row {
                         id: prevLabel
                         anchors.centerIn: parent
-                        text: "< Previous"
-                        font.pixelSize: 12
-                        color: contentPage.currentPage > 1 ? theme.textPrimary : theme.textMuted
+                        spacing: 4
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: theme.iconChevronLeft
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            color: contentPage.currentPage > 1 ? theme.textPrimary : theme.textMuted
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Previous"
+                            font.pixelSize: 12
+                            color: contentPage.currentPage > 1 ? theme.textPrimary : theme.textMuted
+                        }
                     }
 
                     MouseArea {
@@ -1810,12 +1948,23 @@ Page {
                     color: contentPage.currentPage < contentPage.totalPages ? theme.surfaceCard : theme.surfaceAlt
                     opacity: contentPage.currentPage < contentPage.totalPages ? 1.0 : 0.5
 
-                    Text {
+                    Row {
                         id: nextLabel
                         anchors.centerIn: parent
-                        text: "Next >"
-                        font.pixelSize: 12
-                        color: contentPage.currentPage < contentPage.totalPages ? theme.textPrimary : theme.textMuted
+                        spacing: 4
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Next"
+                            font.pixelSize: 12
+                            color: contentPage.currentPage < contentPage.totalPages ? theme.textPrimary : theme.textMuted
+                        }
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: theme.iconChevronRight
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            color: contentPage.currentPage < contentPage.totalPages ? theme.textPrimary : theme.textMuted
+                        }
                     }
 
                     MouseArea {
@@ -1841,8 +1990,10 @@ Page {
                     spacing: theme.spacingMd
 
                     Text {
-                        text: "Empty"
-                        font.pixelSize: 24
+                        text: theme.iconVideo
+                        font.family: theme.iconFontFamily
+                        font.pixelSize: 30
+                        color: theme.accent
                         horizontalAlignment: Text.AlignHCenter
                         Layout.alignment: Qt.AlignHCenter
                     }

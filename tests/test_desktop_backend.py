@@ -1,6 +1,8 @@
 """Desktop backend smoke tests."""
 
 import json
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -11,6 +13,14 @@ pytest.importorskip("PySide6", reason="desktop extra not installed")
 
 from xpst.config import XPSTConfig
 from xpst.desktop_app.backend import AppController
+from xpst.desktop_app.models import NotificationListModel, PostListModel
+from xpst.state import StateManager
+
+
+def _enable_desktop_notifications(config: XPSTConfig) -> None:
+    config.notifications.enabled = True
+    config.notifications.on_success = True
+    config.notifications.on_failure = True
 
 
 def test_desktop_check_for_updates_returns_component_status():
@@ -54,6 +64,432 @@ def test_desktop_get_readiness_returns_report(tmp_path):
     assert data["ok"] is True
     assert "readiness" in data
     assert "checks" in data["readiness"]
+
+
+def test_desktop_disconnect_platform_disables_and_removes_credentials(tmp_path):
+    token = tmp_path / "credentials" / "youtube_token.json"
+    token.parent.mkdir(parents=True)
+    token.write_text("{}", encoding="utf-8")
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.youtube.enabled = True
+    config.youtube.token_file = str(token)
+    config.save()
+
+    emitted = []
+    refreshed = []
+
+    class SignalSink:
+        def emit(self, payload):
+            emitted.append(payload)
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        connectResult=SignalSink(),
+        refreshData=lambda: refreshed.append(True),
+    )
+
+    AppController.disconnectPlatform(controller, "youtube")
+
+    data = json.loads(emitted[-1])
+    assert data["ok"] is True
+    assert data["platform"] == "youtube"
+    assert data["removed_credentials"] is True
+    assert not token.exists()
+    assert controller._engine is None
+    assert refreshed == [True]
+
+    reloaded = XPSTConfig.load(str(tmp_path / "config.yaml"))
+    assert reloaded.youtube.enabled is False
+
+
+def test_desktop_connect_requires_verified_platform_health(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+
+    class FakeEngine:
+        async def check_health(self):
+            return {
+                "platforms": {
+                    "youtube": {
+                        "authenticated": False,
+                        "session_valid": False,
+                        "error": "missing YouTube OAuth files",
+                    }
+                }
+            }
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=FakeEngine(),
+        _ensure_engine=lambda: True,
+    )
+
+    with patch("xpst.desktop_app.backend.subprocess.run") as run:
+        run.return_value = SimpleNamespace(
+            returncode=0,
+            stdout="Save client_secrets.json, then run auth again.",
+            stderr="",
+        )
+        result = AppController._connect_platform_result(controller, "youtube")
+
+    assert result["ok"] is False
+    assert result["platform"] == "youtube"
+    assert result["error"] == "missing YouTube OAuth files"
+    assert result["output"] == "Save client_secrets.json, then run auth again."
+    assert run.call_args.kwargs["env"]["XPST_CONFIG_DIR"] == str(tmp_path)
+
+
+def test_desktop_connect_reports_success_after_verified_health(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+
+    class FakeEngine:
+        async def check_health(self):
+            return {
+                "platforms": {
+                    "x": {
+                        "authenticated": True,
+                        "session_valid": True,
+                        "error": "",
+                    }
+                }
+            }
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=FakeEngine(),
+        _ensure_engine=lambda: True,
+    )
+
+    with patch("xpst.desktop_app.backend.subprocess.run") as run:
+        run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        result = AppController._connect_platform_result(controller, "x")
+
+    assert result["ok"] is True
+    assert result["message"] == "Authenticated with x"
+
+
+def test_connect_page_disconnect_button_calls_disconnect():
+    qml = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ConnectPage.qml"
+    ).read_text(encoding="utf-8")
+
+    assert "function disconnectPlatform(platformName)" in qml
+    assert "connectPage.disconnectPlatform(providerKey)" in qml
+
+
+def test_desktop_processes_due_scheduled_post(tmp_path):
+    from datetime import datetime, timedelta
+
+    from xpst.schedule_manager import ScheduleManager
+
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"fake")
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    manager = ScheduleManager(str(tmp_path))
+    entry = manager.add(
+        str(video),
+        "Scheduled post",
+        datetime.now() - timedelta(minutes=1),
+        platforms=["youtube"],
+    )
+    emitted = []
+    locks = []
+
+    class SignalSink:
+        def emit(self, payload):
+            emitted.append(payload)
+
+    class FakeEngine:
+        def acquire_pidfile(self):
+            locks.append("acquire")
+
+        def release_pidfile(self):
+            locks.append("release")
+
+        async def post_manual(self, video_path, caption, platforms):
+            assert video_path == video
+            assert caption == "Scheduled post"
+            assert platforms == ["youtube"]
+            return SimpleNamespace(
+                video_id="scheduled-video",
+                all_success=True,
+                partial_success=False,
+                results={
+                    "youtube": SimpleNamespace(
+                        success=True,
+                        error=None,
+                        metadata={},
+                    )
+                },
+            )
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=FakeEngine(),
+        _ensure_engine=lambda: True,
+        postComplete=SignalSink(),
+    )
+
+    processed = AppController._process_due_scheduled_posts_once(controller)
+
+    assert processed == [{"id": entry["id"], "status": "completed", "error": None}]
+    assert locks == ["acquire", "release"]
+    reloaded = ScheduleManager(str(tmp_path)).list()[0]
+    assert reloaded["status"] == "completed"
+    assert json.loads(emitted[0])["scheduled"] is True
+
+
+def test_desktop_process_due_scheduled_post_marks_missing_file_failed(tmp_path):
+    from datetime import datetime, timedelta
+
+    from xpst.schedule_manager import ScheduleManager
+
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    manager = ScheduleManager(str(tmp_path))
+    entry = manager.add(
+        str(tmp_path / "missing.mp4"),
+        "Scheduled post",
+        datetime.now() - timedelta(minutes=1),
+        platforms=["youtube"],
+    )
+
+    def fail_engine():
+        raise AssertionError("Engine should not be needed for missing files")
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=None,
+        _ensure_engine=fail_engine,
+        postComplete=SimpleNamespace(emit=lambda _payload: None),
+    )
+
+    processed = AppController._process_due_scheduled_posts_once(controller)
+
+    assert processed == [
+        {
+            "id": entry["id"],
+            "status": "failed",
+            "error": f"File not found: {tmp_path / 'missing.mp4'}",
+        }
+    ]
+    reloaded = ScheduleManager(str(tmp_path)).list()[0]
+    assert reloaded["status"] == "failed"
+
+
+def test_desktop_process_due_scheduled_post_marks_deferred_without_failure_notification(tmp_path):
+    from datetime import datetime, timedelta
+
+    from xpst.schedule_manager import ScheduleManager
+
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"fake")
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.instagram.enabled = True
+    manager = ScheduleManager(str(tmp_path))
+    entry = manager.add(
+        str(video),
+        "Scheduled post",
+        datetime.now() - timedelta(minutes=1),
+        platforms=["instagram"],
+    )
+    emitted = []
+    locks = []
+
+    class SignalSink:
+        def emit(self, payload):
+            emitted.append(payload)
+
+    class FakeEngine:
+        def acquire_pidfile(self):
+            locks.append("acquire")
+
+        def release_pidfile(self):
+            locks.append("release")
+
+        async def post_manual(self, video_path, caption, platforms):
+            assert video_path == video
+            assert caption == "Scheduled post"
+            assert platforms == ["instagram"]
+            return SimpleNamespace(
+                video_id="scheduled-video",
+                all_success=False,
+                partial_success=False,
+                results={
+                    "instagram": SimpleNamespace(
+                        success=False,
+                        error="Outside posting hours (8am-11pm), deferred",
+                        metadata={"deferred": True},
+                    )
+                },
+            )
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=FakeEngine(),
+        _ensure_engine=lambda: True,
+        postComplete=SignalSink(),
+    )
+
+    processed = AppController._process_due_scheduled_posts_once(controller)
+    payload = json.loads(emitted[0])
+
+    assert processed == [
+        {
+            "id": entry["id"],
+            "status": "deferred",
+            "error": "instagram: Outside posting hours (8am-11pm), deferred",
+        }
+    ]
+    assert locks == ["acquire", "release"]
+    assert payload["deferred"] is True
+    assert payload["all_success"] is False
+    reloaded = ScheduleManager(str(tmp_path)).list()[0]
+    assert reloaded["status"] == "pending"
+    assert reloaded["completed_at"] is None
+
+
+def test_desktop_schedule_rejects_disabled_platform(tmp_path):
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"fake")
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.youtube.enabled = False
+    _enable_desktop_notifications(config)
+    notifications = []
+
+    controller = SimpleNamespace(
+        _config=config,
+        notification=SimpleNamespace(
+            emit=lambda message, is_error: notifications.append((message, is_error))
+        ),
+        refreshData=lambda: None,
+    )
+
+    ok = AppController.scheduleNew(
+        controller,
+        str(video),
+        "Scheduled post",
+        "2026-12-25T10:00:00",
+        '["youtube"]',
+    )
+
+    assert ok is False
+    assert notifications[-1] == ("Invalid platform: youtube", True)
+    assert not (tmp_path / "schedule.json").exists()
+
+
+def test_desktop_get_file_info_formats_local_file_size(tmp_path):
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"x" * 1536)
+
+    controller = SimpleNamespace()
+
+    assert AppController.getFileInfo(controller, str(video)) == "1.5 KB"
+    assert AppController.getFileInfo(controller, video.as_uri()) == "1.5 KB"
+    assert AppController.getFileInfo(controller, str(tmp_path / "missing.mp4")) == ""
+
+
+def test_desktop_platform_health_requires_credentials_even_with_prior_success(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.youtube.enabled = True
+    config.youtube.client_secrets = str(tmp_path / "credentials" / "youtube_client_secrets.json")
+    config.youtube.token_file = str(tmp_path / "credentials" / "youtube_token.json")
+
+    class FakeState:
+        def get_platform_health(self, _platform):
+            return {
+                "status": "ok",
+                "failures": 0,
+                "circuit_breaker_open": False,
+                "last_success": "2026-06-14T00:00:00",
+            }
+
+    controller = SimpleNamespace(
+        _config=config,
+        _state=FakeState(),
+        _quota=None,
+        _platform_health="{}",
+    )
+
+    AppController._refresh_platform_health(controller)
+    data = json.loads(controller._platform_health)
+
+    assert data["youtube"]["status"] == "missing_credentials"
+    assert data["youtube"]["credential_ready"] is False
+
+
+def test_desktop_preview_requires_youtube_token_file(tmp_path):
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"fake")
+    secrets = tmp_path / "credentials" / "youtube_client_secrets.json"
+    secrets.parent.mkdir()
+    secrets.write_text("{}", encoding="utf-8")
+
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.youtube.enabled = True
+    config.youtube.client_secrets = str(secrets)
+    config.youtube.token_file = str(tmp_path / "credentials" / "youtube_token.json")
+    config.instagram.enabled = False
+    config.x.enabled = False
+
+    controller = SimpleNamespace(_config=config)
+
+    raw = AppController.previewPost(controller, str(video), "Caption", '["youtube"]')
+    data = json.loads(raw)
+
+    assert data["ready"] is False
+    assert any("YouTube Shorts is not connected." in item for item in data["blocking"])
+
+
+def test_desktop_generate_encoding_sample_uses_ffmpeg_and_active_config_dir(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.video.encoding_youtube.resolution = 1920
+    config.video.encoding_youtube.fps = 60
+    controller = SimpleNamespace(_config=config)
+
+    with (
+        patch("xpst.desktop_app.backend.shutil.which", return_value="ffmpeg"),
+        patch("xpst.desktop_app.backend.subprocess.run") as run,
+    ):
+        run.return_value = SimpleNamespace(returncode=0, stderr="")
+        raw = AppController.generateEncodingSample(controller, "youtube", "")
+
+    data = json.loads(raw)
+    assert data["ok"] is True
+    assert data["path"] == str(tmp_path / "samples" / "xpst_sample_youtube.mp4")
+    assert data["resolution"] == "1080x1920"
+    assert data["fps"] == 60
+    cmd = run.call_args.args[0]
+    assert "testsrc2=size=1080x1920:rate=60" in cmd
+    assert str(tmp_path / "samples" / "xpst_sample_youtube.mp4") == cmd[-1]
+
+
+def test_desktop_generate_encoding_sample_reports_missing_ffmpeg(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    controller = SimpleNamespace(_config=config)
+
+    with patch("xpst.desktop_app.backend.shutil.which", return_value=None):
+        raw = AppController.generateEncodingSample(controller, "instagram", "")
+
+    data = json.loads(raw)
+    assert data["ok"] is False
+    assert "FFmpeg is required" in data["error"]
 
 
 def test_desktop_preview_post_accepts_ready_local_video(tmp_path):
@@ -129,6 +565,213 @@ def test_desktop_save_settings_uses_active_config_dir_and_local_source(tmp_path)
     assert controller._engine is None
 
 
+def test_desktop_save_settings_preserves_rate_limits_when_not_sent(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.rate_limits.youtube = 3
+    config.rate_limits.instagram = 7
+    config.rate_limits.x = 11
+    config.rate_limits.tiktok = 13
+    config.save()
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        refreshData=lambda: None,
+    )
+
+    raw = AppController.saveSettings(
+        controller,
+        json.dumps({"youtube": {"enabled": False}}),
+    )
+    data = json.loads(raw)
+    reloaded = XPSTConfig.load(str(tmp_path / "config.yaml"))
+
+    assert data["ok"] is True
+    assert reloaded.rate_limits.youtube == 3
+    assert reloaded.rate_limits.instagram == 7
+    assert reloaded.rate_limits.x == 11
+    assert reloaded.rate_limits.tiktok == 13
+
+
+def test_desktop_save_settings_persists_download_dir(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        refreshData=lambda: None,
+    )
+
+    raw = AppController.saveSettings(
+        controller,
+        json.dumps(
+            {
+                "video": {"download_dir": str(tmp_path / "downloads")},
+            }
+        ),
+    )
+    data = json.loads(raw)
+    reloaded = XPSTConfig.load(str(tmp_path / "config.yaml"))
+
+    assert data["ok"] is True
+    assert reloaded.video.download_dir == str(tmp_path / "downloads")
+    assert controller._engine is None
+
+
+def test_desktop_save_settings_persists_notifications(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        refreshData=lambda: None,
+    )
+
+    raw = AppController.saveSettings(
+        controller,
+        json.dumps(
+            {
+                "notifications": {
+                    "enabled": True,
+                    "on_success": False,
+                    "on_failure": True,
+                },
+            }
+        ),
+    )
+    data = json.loads(raw)
+    reloaded = XPSTConfig.load(str(tmp_path / "config.yaml"))
+
+    assert data["ok"] is True
+    assert reloaded.notifications.enabled is True
+    assert reloaded.notifications.on_success is False
+    assert reloaded.notifications.on_failure is True
+
+
+def test_desktop_save_settings_persists_x_cookies(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        refreshData=lambda: None,
+    )
+
+    raw = AppController.saveSettings(
+        controller,
+        json.dumps(
+            {
+                "x_cookies": json.dumps([
+                    {"name": "ct0", "value": "token"},
+                    {"name": "auth_token", "value": "secret"},
+                ]),
+            }
+        ),
+    )
+    data = json.loads(raw)
+    reloaded = XPSTConfig.load(str(tmp_path / "config.yaml"))
+    cookies_path = tmp_path / "credentials" / "x_cookies.json"
+
+    assert data["ok"] is True
+    assert reloaded.x.cookies_file == str(cookies_path)
+    assert json.loads(cookies_path.read_text(encoding="utf-8"))[0]["name"] == "ct0"
+    assert controller._engine is None
+
+
+def test_desktop_save_settings_rejects_invalid_x_cookies(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        refreshData=lambda: None,
+    )
+
+    raw = AppController.saveSettings(controller, json.dumps({"x_cookies": "not json"}))
+    data = json.loads(raw)
+
+    assert data["ok"] is False
+    assert not (tmp_path / "credentials" / "x_cookies.json").exists()
+
+
+def test_desktop_config_data_exposes_download_dir(tmp_path):
+    config = XPSTConfig()
+    config.video.download_dir = str(tmp_path / "downloads")
+    controller = SimpleNamespace(_config=config)
+
+    AppController._refresh_config(controller)
+    data = json.loads(controller._config_data)
+
+    assert data["video"]["download_dir"] == str(tmp_path / "downloads")
+
+
+def test_desktop_config_data_exposes_notifications():
+    config = XPSTConfig()
+    config.notifications.enabled = True
+    config.notifications.on_success = False
+    config.notifications.on_failure = True
+    controller = SimpleNamespace(_config=config)
+
+    AppController._refresh_config(controller)
+    data = json.loads(controller._config_data)
+
+    assert data["notifications"] == {
+        "enabled": True,
+        "on_success": False,
+        "on_failure": True,
+    }
+
+
+def test_desktop_lazy_analytics_uses_active_config_dir(monkeypatch, tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path / "active-profile")
+    captured = {}
+
+    class FakeAnalytics:
+        def __init__(self, config_dir):
+            captured["config_dir"] = config_dir
+
+    monkeypatch.setattr("xpst.desktop_app.backend.AnalyticsCollector", FakeAnalytics)
+    controller = SimpleNamespace(
+        _config=config,
+        _analytics=None,
+        _analytics_initialized=False,
+    )
+
+    analytics = AppController._get_analytics(controller)
+
+    assert isinstance(analytics, FakeAnalytics)
+    assert captured["config_dir"] == str(tmp_path / "active-profile")
+
+
+def test_desktop_available_languages_uses_active_config_dir(monkeypatch, tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path / "active-profile")
+    translations = tmp_path / "active-profile" / "translations"
+    translations.mkdir(parents=True)
+    (translations / "zz.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr("xpst.desktop_app.backend._get_available_langs", None)
+    controller = SimpleNamespace(_config=config)
+
+    data = json.loads(AppController.getAvailableLanguages(controller))
+
+    assert "zz" in data
+
+
+def test_desktop_controller_loads_config_dir_override(tmp_path):
+    active_dir = tmp_path / "active-profile"
+    active_dir.mkdir()
+    config = XPSTConfig()
+    config.config_dir = str(active_dir)
+    config.save()
+
+    controller = AppController(config_dir=str(active_dir))
+
+    assert controller._config is not None
+    assert controller._config.config_dir == str(active_dir)
+
+
 @patch("xpst.readiness.check_yt_dlp", return_value="2026.1.1")
 @patch("xpst.readiness.check_ffmpeg", return_value=True)
 @patch("xpst.readiness.shutil.which", return_value="ffmpeg")
@@ -181,4 +824,358 @@ def test_desktop_repair_readiness_creates_local_folders(_which, _ffmpeg, _ytdlp,
 
     assert data["ok"] is True
     assert (tmp_path / "downloads").exists()
+    assert controller._config.config_dir == str(tmp_path)
     assert controller._engine is None
+
+
+def test_desktop_mcp_tools_are_real_server_tools():
+    controller = SimpleNamespace()
+
+    data = json.loads(AppController._get_mcp_tools(controller))
+    names = {item["name"] for item in data}
+
+    assert "xpst_run" in names
+    assert "xpst_post" in names
+    assert "xpst_providers" in names
+    assert "post_video" not in names
+    assert "crosspost_new" not in names
+
+
+def test_desktop_mcp_start_stop_manages_process(monkeypatch, tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    emissions = []
+    popen_calls = []
+
+    class FakeProcess:
+        pid = 4242
+        returncode = None
+
+        def __init__(self) -> None:
+            self.terminated = False
+            self.killed = False
+
+        def poll(self):
+            return None if not self.terminated else 0
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = 0
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+    fake_process = FakeProcess()
+
+    def fake_popen(command, **kwargs):
+        popen_calls.append((command, kwargs))
+        return fake_process
+
+    monkeypatch.setattr("xpst.desktop_app.backend.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("xpst.desktop_app.backend.shutil.which", lambda name: None)
+    controller = SimpleNamespace(
+        _config=config,
+        _mcp_process=None,
+        _mcp_last_error="",
+        mcpStatusChanged=SimpleNamespace(emit=lambda: emissions.append("status")),
+    )
+
+    start = json.loads(AppController.startMcpServer(controller))
+    status = json.loads(AppController._get_mcp_status(controller))
+    stop = json.loads(AppController.stopMcpServer(controller))
+
+    assert start == {
+        "ok": True,
+        "running": True,
+        "pid": 4242,
+        "message": "MCP server started",
+    }
+    assert status["running"] is True
+    assert status["pid"] == 4242
+    assert popen_calls[0][0] == [sys.executable, "-m", "xpst.mcp.server"]
+    assert popen_calls[0][1]["env"]["XPST_CONFIG_DIR"] == str(tmp_path)
+    assert stop["ok"] is True
+    assert stop["running"] is False
+    assert fake_process.terminated is True
+    assert controller._mcp_process is None
+    assert emissions == ["status", "status"]
+
+
+def test_desktop_mcp_command_prefers_packaged_entrypoint(monkeypatch):
+    monkeypatch.setattr(
+        "xpst.desktop_app.backend.shutil.which",
+        lambda name: r"C:\Tools\xpst-mcp.exe" if name == "xpst-mcp" else None,
+    )
+
+    command = AppController._mcp_command(SimpleNamespace())
+
+    assert command == [r"C:\Tools\xpst-mcp.exe"]
+
+
+def test_desktop_mcp_test_command_starts_and_stops_probe(monkeypatch):
+    config = XPSTConfig()
+    config.config_dir = r"C:\Profiles\creator"
+    popen_calls = []
+
+    class FakeStream:
+        def read(self):
+            return ""
+
+    class FakeProcess:
+        returncode = None
+        stderr = FakeStream()
+
+        def __init__(self) -> None:
+            self.killed = False
+
+        def wait(self, timeout=None):
+            if timeout == 2:
+                raise TimeoutError()
+            return self.returncode
+
+        def poll(self):
+            return None if not self.killed else -9
+
+        def kill(self):
+            self.killed = True
+            self.returncode = -9
+
+    fake_process = FakeProcess()
+
+    def fake_popen(command, **kwargs):
+        popen_calls.append((command, kwargs))
+        return fake_process
+
+    monkeypatch.setattr("xpst.desktop_app.backend.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("xpst.desktop_app.backend.shutil.which", lambda name: "xpst-mcp")
+    monkeypatch.setattr("xpst.desktop_app.backend.subprocess.TimeoutExpired", TimeoutError)
+    controller = SimpleNamespace(
+        _config=config,
+        _mcp_process=None,
+        _mcp_last_error="",
+        mcpStatusChanged=SimpleNamespace(emit=lambda: None),
+    )
+
+    result = json.loads(AppController.testMcpServer(controller))
+
+    assert result["ok"] is True
+    assert result["command"] == "xpst-mcp"
+    assert "waited for stdio input" in result["message"]
+    assert fake_process.killed is True
+    assert popen_calls[0][0] == ["xpst-mcp"]
+    assert popen_calls[0][1]["env"]["XPST_CONFIG_DIR"] == r"C:\Profiles\creator"
+
+
+def test_settings_mcp_controls_are_not_fake_toggle():
+    qml = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "SettingsPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "controller.testMcpServer()" in qml
+    assert "Connect via stdio: " in qml
+    assert "controller.startMcpServer()" not in qml
+    assert "controller.stopMcpServer()" not in qml
+    assert "mcpRunning = !mcpRunning" not in qml
+    assert "post_video" not in qml
+    assert "crosspost_new" not in qml
+
+
+def test_desktop_app_stops_mcp_server_on_quit():
+    main_py = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "main.py"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "app.aboutToQuit.connect(controller.stopMcpServer)" in main_py
+
+
+def test_post_list_model_keeps_source_id_separate_from_platform_post_id(tmp_path):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"video bytes")
+    state = StateManager(state_dir=str(tmp_path))
+    state.add_posted_video(
+        "source-video-1",
+        source_url="https://www.tiktok.com/@source/video/1",
+        source_platform="tiktok",
+        posted_to={
+            "youtube": {
+                "id": "youtube-platform-post-99",
+                "url": "https://youtu.be/youtube-platform-post-99",
+                "timestamp": "2026-06-13T10:00:00",
+            }
+        },
+        caption="Published caption",
+    )
+    state._state["posted_videos"]["source-video-1"]["video_path"] = str(video)
+    state.save()
+    model = PostListModel()
+
+    model.load_from_state(str(tmp_path))
+
+    assert model.rowCount() == 1
+    idx = model.index(0, 0)
+    role_names = {bytes(name).decode(): role for role, name in model.roleNames().items()}
+    assert "sourceId" in role_names
+    assert "videoPath" in role_names
+    assert model.data(idx, role_names["postId"]) == "youtube-platform-post-99"
+    assert model.data(idx, role_names["sourceId"]) == "source-video-1"
+    assert model.data(idx, role_names["thumbnail"]) == "https://youtu.be/youtube-platform-post-99"
+    assert model.data(idx, role_names["videoPath"]) == str(video)
+
+
+def test_desktop_update_caption_persists_platform_caption(tmp_path):
+    state = StateManager(state_dir=str(tmp_path))
+    state.add_posted_video(
+        "source-video-2",
+        source_url="https://www.tiktok.com/@source/video/2",
+        source_platform="tiktok",
+        posted_to={
+            "youtube": {
+                "id": "youtube-platform-post-100",
+                "url": "https://youtu.be/youtube-platform-post-100",
+                "timestamp": "2026-06-13T11:00:00",
+            }
+        },
+        caption="Original caption",
+    )
+    notifications = []
+    controller = AppController()
+    _enable_desktop_notifications(controller._config)
+    controller._state = state
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.updateCaption("source-video-2", "youtube", "Edited YouTube caption")
+
+    reloaded = StateManager(state_dir=str(tmp_path))
+    posted_to = reloaded._state["posted_videos"]["source-video-2"]["posted_to"]
+    assert posted_to["youtube"]["caption"] == "Edited YouTube caption"
+    assert notifications[-1] == ("Caption saved", False)
+
+    model = PostListModel()
+    model.load_from_state(str(tmp_path))
+    idx = model.index(0, 0)
+    role_names = {bytes(name).decode(): role for role, name in model.roleNames().items()}
+    assert model.data(idx, role_names["caption"]) == "Edited YouTube caption"
+
+
+def test_desktop_post_complete_notifications_match_upload_result():
+    notifications = []
+    controller = AppController()
+    _enable_desktop_notifications(controller._config)
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.postComplete.emit(json.dumps({"all_success": True, "partial_success": False}))
+    controller.postComplete.emit(json.dumps({"all_success": False, "partial_success": True}))
+    controller.postComplete.emit(json.dumps({"all_success": False, "partial_success": False}))
+
+    assert notifications[-3:] == [
+        ("Post completed successfully", False),
+        ("Post partially completed", True),
+        ("Post failed", True),
+    ]
+
+
+def test_desktop_post_complete_notifications_match_delete_result():
+    notifications = []
+    controller = AppController()
+    _enable_desktop_notifications(controller._config)
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.postComplete.emit(json.dumps({"ok": True, "removed": "source/youtube", "platform_deleted": True}))
+    controller.postComplete.emit(json.dumps({"ok": True, "removed": "source/x", "platform_deleted": False}))
+
+    assert notifications[-2:] == [
+        ("Post removed from platform and xPST", False),
+        ("Post removed from xPST state only", False),
+    ]
+
+
+def test_desktop_post_complete_notifications_match_autoposter_result():
+    notifications = []
+    controller = AppController()
+    _enable_desktop_notifications(controller._config)
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.postComplete.emit(json.dumps([]))
+    controller.postComplete.emit(json.dumps([
+        {"all_success": False, "partial_success": True},
+        {"all_success": False, "partial_success": False},
+    ]))
+
+    assert notifications[-2:] == [
+        ("No new posts were ready", False),
+        ("Post partially completed", True),
+    ]
+
+
+def test_desktop_post_complete_notification_treats_deferred_as_neutral():
+    notifications = []
+    controller = AppController()
+    _enable_desktop_notifications(controller._config)
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.postComplete.emit(json.dumps({"all_success": False, "partial_success": False, "deferred": True}))
+
+    assert notifications == [("Post deferred", False)]
+
+
+def test_desktop_notification_settings_can_suppress_success_alerts():
+    notifications = []
+    controller = AppController()
+    controller._config.notifications.enabled = True
+    controller._config.notifications.on_success = False
+    controller._config.notifications.on_failure = True
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.postComplete.emit(json.dumps({"all_success": True, "partial_success": False}))
+    controller.postComplete.emit(json.dumps({"all_success": False, "partial_success": False}))
+
+    assert notifications == [("Post failed", True)]
+
+
+def test_desktop_notification_settings_can_suppress_failure_alerts():
+    notifications = []
+    controller = AppController()
+    controller._config.notifications.enabled = True
+    controller._config.notifications.on_success = True
+    controller._config.notifications.on_failure = False
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.error.emit("Upload failed")
+    controller.postComplete.emit(json.dumps({"all_success": True, "partial_success": False}))
+
+    assert notifications == [("Post completed successfully", False)]
+
+
+def test_notification_list_model_records_and_clears_notifications():
+    model = NotificationListModel()
+
+    model.add_notification("Post failed", True)
+    model.add_notification("Post scheduled", False)
+
+    roles = {bytes(name).decode(): role for role, name in model.roleNames().items()}
+    assert model.rowCount() == 2
+    first = model.index(0, 0)
+    second = model.index(1, 0)
+    assert model.data(first, roles["message"]) == "Post scheduled"
+    assert model.data(first, roles["isError"]) is False
+    assert model.data(second, roles["message"]) == "Post failed"
+    assert model.data(second, roles["isError"]) is True
+    assert model.data(first, roles["timestamp"])
+
+    model.clear()
+
+    assert model.rowCount() == 0

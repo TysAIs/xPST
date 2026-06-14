@@ -1,6 +1,7 @@
 ﻿# -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for building xPST macOS .app bundle."""
 
+import re
 import sys
 from pathlib import Path
 
@@ -15,6 +16,21 @@ assets_dir = project_root / "assets"
 mac_icon = assets_dir / "icon.icns"
 if not mac_icon.exists():
     mac_icon = project_root / "docs" / "assets" / "xpst-icon.icns"
+
+
+def _project_version(root):
+    pyproject = root / "pyproject.toml"
+    match = re.search(
+        r'^version\s*=\s*"([^"]+)"',
+        pyproject.read_text(encoding="utf-8"),
+        flags=re.MULTILINE,
+    )
+    if not match:
+        raise RuntimeError("Could not read project.version from pyproject.toml")
+    return match.group(1)
+
+
+PROJECT_VERSION = _project_version(project_root)
 
 a = Analysis(
     [str(src_dir / "xpst" / "desktop_app" / "main.py")],
@@ -56,6 +72,7 @@ a = Analysis(
         "PySide6.QtQuickControls2",
         "PySide6.QtQml",
         "PySide6.QtWidgets",
+        "PySide6.QtMultimedia",
     ],
     hookspath=[],
     hooksconfig={},
@@ -107,8 +124,8 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "xPST",
         "CFBundleDisplayName": "xPST - Cross-Posting Suite",
-        "CFBundleVersion": "0.1.0",
-        "CFBundleShortVersionString": "0.1.0",
+        "CFBundleVersion": PROJECT_VERSION,
+        "CFBundleShortVersionString": PROJECT_VERSION,
         "NSHighResolutionCapable": True,
         "NSRequiresAquaSystemAppearance": False,
     },

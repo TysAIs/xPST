@@ -14,6 +14,7 @@ __all__ = [
     "KB_TOOL_NAMES",
     "kb_add",
     "kb_areas",
+    "kb_course",
     "kb_organize",
     "kb_query",
 ]
@@ -22,6 +23,7 @@ from xpst.knowledge.mcp.tools import (
     KB_TOOL_NAMES,
     kb_add,
     kb_areas,
+    kb_course,
     kb_organize,
     kb_query,
 )

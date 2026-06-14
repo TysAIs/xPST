@@ -307,11 +307,11 @@ Page {
 
                         Repeater {
                             model: [
-                                { label: "Homepage", icon: "Web", url: "https://github.com/TysAIs/xPST" },
-                                { label: "Repository", icon: "Repo", url: "https://github.com/TysAIs/xPST" },
-                                { label: "Documentation", icon: "Docs", url: "https://github.com/TysAIs/xPST/wiki" },
-                                { label: "Report Issues", icon: "Issue", url: "https://github.com/TysAIs/xPST/issues" },
-                                { label: "Changelog", icon: "Log", url: "https://github.com/TysAIs/xPST/blob/main/CHANGELOG.md" }
+                                { label: "Homepage", icon: theme.iconWeb, url: "https://github.com/TysAIs/xPST" },
+                                { label: "Repository", icon: theme.iconRepo, url: "https://github.com/TysAIs/xPST" },
+                                { label: "Documentation", icon: theme.iconDocs, url: "https://github.com/TysAIs/xPST/wiki" },
+                                { label: "Report Issues", icon: theme.iconIssue, url: "https://github.com/TysAIs/xPST/issues" },
+                                { label: "Changelog", icon: theme.iconChangelog, url: "https://github.com/TysAIs/xPST/blob/main/CHANGELOG.md" }
                             ]
 
                             Rectangle {
@@ -338,7 +338,8 @@ Page {
                                         Layout.fillWidth: true
                                     }
                                     Text {
-                                        text: ">"
+                                        text: theme.iconChevronRight
+                                        font.family: theme.iconFontFamily
                                         font.pixelSize: 13
                                         color: theme.textMuted
                                     }

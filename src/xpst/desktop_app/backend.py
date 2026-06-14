@@ -6,8 +6,10 @@ data is serialised as JSON strings so QML can parse with JSON.parse().
 """
 
 import asyncio
+import contextlib
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import threading
@@ -15,7 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from xpst.utils.platform import get_config_dir
+from xpst.utils.platform import get_config_dir, get_ffmpeg_name
 
 # PySide6 is an optional ('desktop'/'pyside6') extra. Import it gracefully so
 # that importing this module does not hard-fail when the extra is absent. The
@@ -178,12 +180,14 @@ class AppController(QObject):
     settingsSaved = Signal(bool, str)  # success, message
     progressChanged = Signal(str, float)  # platform, percentage 0-100
     notification = Signal(str, bool)   # message, isError
+    mcpStatusChanged = Signal()
 
     # ── Init ─────────────────────────────────────────────────────────
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, config_dir: str | Path | None = None) -> None:
         super().__init__(parent)
         self._config: Any = None
+        self._config_dir_override = str(Path(config_dir).expanduser()) if config_dir else None
         self._state: Any = None
         self._engine: Any = None
         self._analytics: Any = None
@@ -200,11 +204,19 @@ class AppController(QObject):
         self._config_data: str = "{}"
         self._analytics_data: str = "{}"
         self._quota_data: str = "{}"
+        self._mcp_process: subprocess.Popen | None = None
+        self._mcp_last_error: str = ""
+        self._schedule_processing: bool = False
 
         # Auto-refresh timer (30s)
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refreshData)
         self._refresh_timer.start(30_000)
+
+        # Process due desktop-created scheduled posts while the app is open.
+        self._schedule_timer = QTimer(self)
+        self._schedule_timer.timeout.connect(self.processDueScheduledPosts)
+        self._schedule_timer.start(60_000)
 
         # Platform health auto-check timer (5 minutes)
         self._health_check_interval = self._get_health_check_interval()
@@ -212,39 +224,106 @@ class AppController(QObject):
         self._health_timer.timeout.connect(self._run_health_check)
         self._health_timer.start(self._health_check_interval)
 
-        # Thumbnail cache dir follows the platform config directory.
-        self._thumb_dir = get_config_dir() / "thumbnails"
-        self._thumb_dir.mkdir(parents=True, exist_ok=True)
-
-        # Wire error signal to notification signal
-        self.error.connect(lambda msg: self.notification.emit(msg, True))
-        self.postComplete.connect(
-            lambda json_str: self.notification.emit("Post completed successfully", False)
-        )
+        # Wire error signal to user-facing notifications when alert settings allow it.
+        self.error.connect(lambda msg: AppController._emit_notification(self, msg, True))
+        self.postComplete.connect(self._notify_post_complete)
 
         # Initialise backends (best-effort)
         self._init_backends()
+        self._thumb_dir = AppController._active_config_dir(self) / "thumbnails"
+        self._thumb_dir.mkdir(parents=True, exist_ok=True)
         self.refreshData()
 
+    @staticmethod
+    def _notification_enabled(self, is_error: bool) -> bool:
+        """Return whether desktop notification toasts/history should be emitted."""
+        config = getattr(self, "_config", None)
+        notifications = getattr(config, "notifications", None)
+        if notifications is None:
+            return True
+        if not getattr(notifications, "enabled", False):
+            return False
+        key = "on_failure" if is_error else "on_success"
+        return bool(getattr(notifications, key, True))
+
+    @staticmethod
+    def _emit_notification(self, message: str, is_error: bool) -> None:
+        if not AppController._notification_enabled(self, is_error):
+            return
+        notification = getattr(self, "notification", None)
+        if notification is not None:
+            notification.emit(message, is_error)
+
     # ── Backend initialisation ───────────────────────────────────────
+
+    def _notify_post_complete(self, json_str: str) -> None:
+        """Emit a user-facing notification that matches the completed action."""
+        try:
+            payload = json.loads(json_str)
+        except (TypeError, json.JSONDecodeError):
+            AppController._emit_notification(self, "Action completed", False)
+            return
+
+        if isinstance(payload, list):
+            if not payload:
+                AppController._emit_notification(self, "No new posts were ready", False)
+                return
+            all_success = all(
+                item.get("all_success") for item in payload if isinstance(item, dict)
+            )
+            partial_success = any(
+                item.get("partial_success") for item in payload if isinstance(item, dict)
+            )
+            if all_success:
+                AppController._emit_notification(self, "Post completed successfully", False)
+            elif partial_success:
+                AppController._emit_notification(self, "Post partially completed", True)
+            else:
+                AppController._emit_notification(self, "Post failed", True)
+            return
+
+        if not isinstance(payload, dict):
+            AppController._emit_notification(self, "Action completed", False)
+            return
+
+        if payload.get("removed"):
+            if payload.get("platform_deleted"):
+                AppController._emit_notification(self, "Post removed from platform and xPST", False)
+            else:
+                AppController._emit_notification(self, "Post removed from xPST state only", False)
+            return
+
+        if payload.get("deferred"):
+            AppController._emit_notification(self, "Post deferred", False)
+            return
+
+        if payload.get("all_success"):
+            AppController._emit_notification(self, "Post completed successfully", False)
+        elif payload.get("partial_success"):
+            AppController._emit_notification(self, "Post partially completed", True)
+        else:
+            AppController._emit_notification(self, "Post failed", True)
 
     def _init_backends(self) -> None:
         """Create backend objects, swallowing errors for missing deps."""
         try:
             if XPSTConfig is not None:
-                self._config = XPSTConfig.load()
+                config_path = None
+                if self._config_dir_override:
+                    config_path = str(Path(self._config_dir_override) / "config.yaml")
+                self._config = XPSTConfig.load(config_path)
         except Exception as exc:
             logger.warning("Failed to load XPSTConfig: %s", exc)
 
         try:
             if StateManager is not None:
-                self._state = StateManager()
+                self._state = StateManager(AppController._active_config_dir(self))
         except Exception as exc:
             logger.warning("Failed to create StateManager: %s", exc)
 
         try:
             if QuotaManager is not None:
-                self._quota = QuotaManager()
+                self._quota = QuotaManager(AppController._active_config_dir(self))
         except Exception as exc:
             logger.warning("Failed to create QuotaManager: %s", exc)
 
@@ -261,10 +340,18 @@ class AppController(QObject):
             self._analytics_initialized = True
             if AnalyticsCollector is not None:
                 try:
-                    self._analytics = AnalyticsCollector()
+                    self._analytics = AnalyticsCollector(str(AppController._active_config_dir(self)))
                 except Exception as exc:
                     logger.warning("Failed to create AnalyticsCollector: %s", exc)
         return self._analytics
+
+    def _active_config_dir(self) -> Path:
+        config = getattr(self, "_config", None)
+        if config is not None:
+            config_dir = getattr(config, "config_dir", None)
+            if config_dir:
+                return Path(config_dir).expanduser()
+        return get_config_dir()
 
     def _ensure_engine(self) -> bool:
         """Lazily initialize the CrossPostEngine. Returns True if ready."""
@@ -350,6 +437,195 @@ class AppController(QObject):
         return self._quota_data
 
     quotaData = Property(str, _get_quota_data, notify=dataChanged)
+
+    def _get_mcp_status(self) -> str:
+        AppController._refresh_mcp_process_state(self)
+        return json.dumps({
+            "running": self._mcp_process is not None,
+            "pid": self._mcp_process.pid if self._mcp_process is not None else None,
+            "command": AppController._mcp_command_display(self),
+            "error": self._mcp_last_error,
+        })
+
+    mcpStatus = Property(str, _get_mcp_status, notify=mcpStatusChanged)
+
+    def _get_mcp_tools(self) -> str:
+        try:
+            from xpst.mcp import server as mcp_server
+
+            tools = [
+                {"name": tool.name, "description": tool.description}
+                for tool in getattr(mcp_server, "TOOLS", [])
+            ]
+        except Exception as exc:
+            tools = []
+            logger.warning("Failed to list MCP tools: %s", exc)
+        return json.dumps(tools, default=str)
+
+    mcpTools = Property(str, _get_mcp_tools, notify=mcpStatusChanged)
+
+    def _mcp_command(self) -> list[str]:
+        entrypoint = shutil.which("xpst-mcp")
+        if entrypoint:
+            return [entrypoint]
+        if getattr(sys, "frozen", False):
+            return ["xpst-mcp"]
+        return [sys.executable, "-m", "xpst.mcp.server"]
+
+    def _mcp_command_display(self) -> str:
+        return " ".join(AppController._mcp_command(self))
+
+    def _mcp_env(self) -> dict[str, str] | None:
+        config = getattr(self, "_config", None)
+        if config is None:
+            return None
+        config_dir = getattr(config, "config_dir", None)
+        if not config_dir:
+            return None
+        import os
+
+        env = os.environ.copy()
+        env["XPST_CONFIG_DIR"] = str(config_dir)
+        return env
+
+    def _refresh_mcp_process_state(self) -> None:
+        proc = getattr(self, "_mcp_process", None)
+        if proc is not None and proc.poll() is not None:
+            self._mcp_last_error = f"MCP server exited with code {proc.returncode}"
+            self._mcp_process = None
+
+    @Slot(result=str)
+    def testMcpServer(self) -> str:
+        """Verify that the MCP stdio entry point can start cleanly."""
+        proc = None
+        try:
+            startupinfo = None
+            creationflags = 0
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+            proc = subprocess.Popen(
+                AppController._mcp_command(self),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=AppController._mcp_env(self),
+                startupinfo=startupinfo,
+                creationflags=creationflags,
+            )
+            try:
+                proc.wait(timeout=2)
+                stderr = (proc.stderr.read() if proc.stderr is not None else "").strip()
+                detail = stderr or f"MCP command exited with code {proc.returncode}"
+                self._mcp_last_error = detail
+                ok = False
+            except subprocess.TimeoutExpired:
+                ok = True
+                detail = "MCP command started and waited for stdio input"
+                self._mcp_last_error = ""
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
+
+            self.mcpStatusChanged.emit()
+            return json.dumps({
+                "ok": ok,
+                "command": AppController._mcp_command_display(self),
+                "message": detail if ok else "",
+                "error": "" if ok else detail,
+            })
+        except Exception as exc:
+            self._mcp_last_error = str(exc)
+            logger.error("Failed to test MCP server: %s", exc)
+            self.mcpStatusChanged.emit()
+            return json.dumps({
+                "ok": False,
+                "command": AppController._mcp_command_display(self),
+                "error": str(exc),
+            })
+
+    @Slot(result=str)
+    def startMcpServer(self) -> str:
+        """Start the real stdio MCP server used by AI clients."""
+        AppController._refresh_mcp_process_state(self)
+        if self._mcp_process is not None:
+            return json.dumps({
+                "ok": True,
+                "running": True,
+                "pid": self._mcp_process.pid,
+                "message": "MCP server is already running",
+            })
+
+        try:
+            startupinfo = None
+            creationflags = 0
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+            self._mcp_process = subprocess.Popen(
+                AppController._mcp_command(self),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=AppController._mcp_env(self),
+                startupinfo=startupinfo,
+                creationflags=creationflags,
+            )
+            self._mcp_last_error = ""
+            self.mcpStatusChanged.emit()
+            return json.dumps({
+                "ok": True,
+                "running": True,
+                "pid": self._mcp_process.pid,
+                "message": "MCP server started",
+            })
+        except Exception as exc:
+            self._mcp_process = None
+            self._mcp_last_error = str(exc)
+            logger.error("Failed to start MCP server: %s", exc)
+            self.mcpStatusChanged.emit()
+            return json.dumps({"ok": False, "running": False, "error": str(exc)})
+
+    @Slot(result=str)
+    def stopMcpServer(self) -> str:
+        """Stop the desktop-managed MCP server process."""
+        AppController._refresh_mcp_process_state(self)
+        proc = self._mcp_process
+        if proc is None:
+            self.mcpStatusChanged.emit()
+            return json.dumps({
+                "ok": True,
+                "running": False,
+                "message": "MCP server is already stopped",
+            })
+
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+            self._mcp_process = None
+            self._mcp_last_error = ""
+            self.mcpStatusChanged.emit()
+            return json.dumps({
+                "ok": True,
+                "running": False,
+                "message": "MCP server stopped",
+            })
+        except Exception as exc:
+            self._mcp_last_error = str(exc)
+            logger.error("Failed to stop MCP server: %s", exc)
+            self.mcpStatusChanged.emit()
+            return json.dumps({"ok": False, "running": True, "error": str(exc)})
 
     # ── Data refresh ─────────────────────────────────────────────────
 
@@ -475,6 +751,16 @@ class AppController(QObject):
                         info["enabled"] = True
                 except Exception:
                     info["enabled"] = True
+                credential_paths = AppController._credential_paths_for_platform(self._config, plat)
+                missing_credentials = [
+                    str(path)
+                    for path in credential_paths
+                    if not Path(path).expanduser().exists()
+                ]
+                info["credential_ready"] = not missing_credentials
+                if info.get("enabled") and missing_credentials:
+                    info["status"] = "missing_credentials"
+                    info["credential_error"] = "Missing credential file(s): " + ", ".join(missing_credentials)
 
             health[plat] = info
 
@@ -494,17 +780,22 @@ class AppController(QObject):
                 caption = (vdata.get("caption") or "")[:120]
                 downloaded_at = vdata.get("downloaded_at") or ""
                 thumbnail_path = vdata.get("thumbnail") or ""
+                video_path = vdata.get("video_path") or ""
+                if not video_path and vdata.get("source_platform") == "local":
+                    video_path = vdata.get("source_url") or ""
 
                 for platform, pinfo in vdata.get("posted_to", {}).items():
+                    platform_caption = (pinfo.get("caption") or caption)[:120]
                     posts.append({
                         "title": video_id,
-                        "caption": caption,
+                        "caption": platform_caption,
                         "platform": platform,
                         "status": "posted",
                         "timestamp": pinfo.get("timestamp") or downloaded_at,
                         "postId": pinfo.get("id") or video_id,
                         "url": pinfo.get("url", ""),
                         "thumbnail": thumbnail_path,
+                        "videoPath": video_path,
                     })
 
             # Sort newest first, limit to 50
@@ -579,6 +870,25 @@ class AppController(QObject):
                     "log_level": getattr(mon, "log_level", "INFO"),
                 }
 
+            if hasattr(self._config, "video"):
+                video = self._config.video
+                cfg["video"] = {
+                    "download_dir": getattr(video, "download_dir", ""),
+                }
+
+            if hasattr(self._config, "local"):
+                cfg["local"] = {
+                    "path": getattr(self._config.local, "path", ""),
+                }
+
+            if hasattr(self._config, "notifications"):
+                notifications = self._config.notifications
+                cfg["notifications"] = {
+                    "enabled": getattr(notifications, "enabled", False),
+                    "on_success": getattr(notifications, "on_success", True),
+                    "on_failure": getattr(notifications, "on_failure", True),
+                }
+
             self._config_data = json.dumps(cfg, default=str)
         except Exception as exc:
             logger.warning("Config refresh error: %s", exc)
@@ -651,7 +961,7 @@ class AppController(QObject):
             if config is None:
                 return json.dumps({"ok": False, "ready": False, "blocking": ["Config not loaded"], "warnings": []})
 
-            from xpst.platforms.base import PlatformRegistry
+            from xpst.post_preflight import build_post_preflight
 
             requested_platforms: list[str] = []
             if platforms_json:
@@ -666,105 +976,14 @@ class AppController(QObject):
                         if item.strip()
                     ]
 
-            PlatformRegistry.auto_discover()
-            manifests = {
-                manifest.name: manifest
-                for manifest in PlatformRegistry.list_manifests(config)
-            }
-            enabled_platforms = [
-                name
-                for name in ("youtube", "instagram", "x")
-                if getattr(getattr(config, name), "enabled", False)
-            ]
-            targets = requested_platforms or enabled_platforms
-
-            path = Path(video_path).expanduser()
-            blocking: list[str] = []
-            warnings: list[str] = []
-            if not video_path.strip():
-                blocking.append("Choose a video file before posting.")
-            elif not path.exists():
-                blocking.append(f"Video file not found: {video_path}")
-            elif not path.is_file():
-                blocking.append(f"Video path is not a file: {video_path}")
-
-            supported_suffixes = {".mp4", ".mov", ".m4v", ".webm"}
-            if path.suffix.lower() and path.suffix.lower() not in supported_suffixes:
-                warnings.append(f"{path.suffix.lower()} may need conversion before upload.")
-
-            if not caption.strip():
-                warnings.append("Caption is empty.")
-
-            if not targets:
-                blocking.append("Enable at least one destination platform.")
-
-            platform_previews: list[dict[str, Any]] = []
-            for platform_name in targets:
-                if platform_name not in manifests:
-                    blocking.append(f"{platform_name} is not an installed destination provider.")
-                    continue
-
-                account = getattr(config, platform_name, None)
-                enabled = bool(getattr(account, "enabled", False))
-                manifest = manifests[platform_name]
-                extra = manifest.extra
-                platform_warnings: list[str] = []
-                platform_blocking: list[str] = []
-
-                if not enabled:
-                    platform_blocking.append(f"{manifest.display_name} is disabled.")
-
-                credential_path = AppController._credential_path_for_platform(config, platform_name)
-                if credential_path and not Path(credential_path).expanduser().exists():
-                    platform_blocking.append(f"{manifest.display_name} is not connected.")
-
-                max_caption = extra.get("max_caption_length")
-                if isinstance(max_caption, int) and len(caption) > max_caption:
-                    platform_blocking.append(
-                        f"{manifest.display_name} caption is {len(caption) - max_caption} character(s) too long."
-                    )
-
-                quota = getattr(self, "_quota", None)
-                if quota is not None:
-                    try:
-                        if not quota.can_upload(platform_name):
-                            platform_blocking.append(f"{manifest.display_name} daily quota is exhausted.")
-                    except Exception:
-                        platform_warnings.append(f"{manifest.display_name} quota could not be checked.")
-
-                platform_previews.append(
-                    {
-                        "name": platform_name,
-                        "display_name": manifest.display_name,
-                        "auth_mode": manifest.auth_mode.value,
-                        "official": manifest.is_official_api,
-                        "max_caption_length": max_caption,
-                        "caption_length": len(caption),
-                        "blocking": platform_blocking,
-                        "warnings": platform_warnings,
-                        "ready": not platform_blocking,
-                    }
-                )
-                blocking.extend(platform_blocking)
-                warnings.extend(platform_warnings)
-
-            file_size = path.stat().st_size if path.exists() and path.is_file() else 0
             return json.dumps(
-                {
-                    "ok": True,
-                    "ready": not blocking,
-                    "video": {
-                        "path": str(path),
-                        "filename": path.name,
-                        "size_bytes": file_size,
-                        "size_mb": round(file_size / (1024 * 1024), 2) if file_size else 0,
-                    },
-                    "caption": caption,
-                    "caption_length": len(caption),
-                    "platforms": platform_previews,
-                    "blocking": blocking,
-                    "warnings": warnings,
-                },
+                build_post_preflight(
+                    config=config,
+                    video_path=video_path,
+                    caption=caption,
+                    platforms=requested_platforms,
+                    quota=getattr(self, "_quota", None),
+                ),
                 default=str,
             )
         except Exception as exc:
@@ -773,16 +992,31 @@ class AppController(QObject):
 
     @staticmethod
     def _credential_path_for_platform(config: Any, platform_name: str) -> str:
-        account = getattr(config, platform_name, None)
-        if account is None:
-            return ""
-        if platform_name == "youtube":
-            return str(getattr(account, "client_secrets", "") or "")
-        if platform_name == "x":
-            return str(getattr(account, "cookies_file", "") or "")
-        if platform_name == "instagram":
-            return str(getattr(account, "session_file", "") or "")
-        return ""
+        paths = AppController._credential_paths_for_platform(config, platform_name)
+        return paths[0] if paths else ""
+
+    @staticmethod
+    def _credential_paths_for_platform(config: Any, platform_name: str) -> list[str]:
+        from xpst.post_preflight import credential_paths_for_platform
+
+        return credential_paths_for_platform(config, platform_name)
+
+    @staticmethod
+    def _valid_destination_platforms(config: Any) -> set[str]:
+        try:
+            from xpst.platforms.base import PlatformRegistry
+
+            PlatformRegistry.auto_discover()
+            registered = [str(name).lower() for name in PlatformRegistry.list_platforms()]
+            if not registered:
+                return {"youtube", "instagram", "x"}
+            return {
+                name
+                for name in registered
+                if getattr(getattr(config, name, None), "enabled", False)
+            }
+        except Exception:
+            return {"youtube", "instagram", "x"}
 
     @Slot(str, str)
     def postVideo(self, video_path: str, caption: str) -> None:
@@ -862,18 +1096,18 @@ class AppController(QObject):
         try:
             manager = AppController._schedule_manager(self)
             if manager is None:
-                self.notification.emit("Schedule manager is not available", True)
+                AppController._emit_notification(self, "Schedule manager is not available", True)
                 return False
 
             path = Path(content_path).expanduser()
             if not path.exists() or not path.is_file():
-                self.notification.emit(f"Video file not found: {content_path}", True)
+                AppController._emit_notification(self, f"Video file not found: {content_path}", True)
                 return False
 
             try:
                 scheduled_time = datetime.fromisoformat(when_iso)
             except ValueError:
-                self.notification.emit("Schedule time is invalid", True)
+                AppController._emit_notification(self, "Schedule time is invalid", True)
                 return False
 
             selected_platforms: list[str] = []
@@ -893,6 +1127,19 @@ class AppController(QObject):
                         if item.strip()
                     ]
 
+            if not selected_platforms:
+                AppController._emit_notification(self, "Select at least one platform", True)
+                return False
+            valid_platforms = AppController._valid_destination_platforms(self._config)
+            invalid_platforms = sorted(set(selected_platforms) - valid_platforms)
+            if invalid_platforms:
+                AppController._emit_notification(
+                    self,
+                    "Invalid platform: " + ", ".join(invalid_platforms),
+                    True,
+                )
+                return False
+
             manager.add(
                 video_path=str(path),
                 caption=caption,
@@ -900,12 +1147,161 @@ class AppController(QObject):
                 platforms=selected_platforms,
             )
             self.refreshData()
-            self.notification.emit("Post scheduled", False)
+            AppController._emit_notification(self, "Post scheduled", False)
             return True
         except Exception as exc:
             logger.error("scheduleNew error: %s", exc)
-            self.notification.emit(str(exc), True)
+            AppController._emit_notification(self, str(exc), True)
             return False
+
+    @staticmethod
+    def _scheduled_post_deferred(result: Any) -> bool:
+        """Return True when only temporary anti-bot deferrals blocked a post."""
+        upload_results = list(getattr(result, "results", {}).values())
+        if not upload_results:
+            return False
+        return any(
+            getattr(ur, "metadata", {}).get("deferred") for ur in upload_results
+        ) and all(
+            getattr(ur, "success", False) or getattr(ur, "metadata", {}).get("deferred")
+            for ur in upload_results
+        )
+
+    def _process_due_scheduled_posts_once(self) -> list[dict[str, Any]]:
+        """Process all currently due scheduled posts for the desktop app."""
+        manager = AppController._schedule_manager(self)
+        if manager is None:
+            return [{"status": "error", "error": "Schedule manager is not available"}]
+
+        due = manager.get_due()
+        if not due:
+            return []
+
+        valid_platforms = AppController._valid_destination_platforms(self._config)
+        needs_engine = False
+        prepared: list[tuple[dict[str, Any], Path, list[str] | None]] = []
+        processed: list[dict[str, Any]] = []
+
+        for entry in due:
+            entry_id = entry["id"]
+            video_path = Path(entry["video_path"])
+            platforms = entry.get("platforms") or None
+            if platforms:
+                normalized = [str(p).lower() for p in platforms]
+                invalid = sorted(set(normalized) - valid_platforms)
+                if invalid:
+                    error_msg = "Invalid platform(s): " + ", ".join(invalid)
+                    manager.mark_complete(entry_id, success=False, error=error_msg)
+                    processed.append({"id": entry_id, "status": "failed", "error": error_msg})
+                    continue
+                platforms = normalized
+
+            if not video_path.exists():
+                error_msg = f"File not found: {video_path}"
+                manager.mark_complete(entry_id, success=False, error=error_msg)
+                processed.append({"id": entry_id, "status": "failed", "error": error_msg})
+                continue
+
+            needs_engine = True
+            prepared.append((entry, video_path, platforms))
+
+        if not needs_engine:
+            return processed
+
+        if not self._ensure_engine():
+            error_msg = "Posting engine is unavailable"
+            processed.extend(
+                {"id": entry["id"], "status": "pending", "error": error_msg}
+                for entry, _path, _platforms in prepared
+            )
+            return processed
+
+        try:
+            self._engine.acquire_pidfile()
+        except Exception as exc:
+            error_msg = str(exc)
+            processed.extend(
+                {"id": entry["id"], "status": "pending", "error": error_msg}
+                for entry, _path, _platforms in prepared
+            )
+            return processed
+
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            for entry, video_path, platforms in prepared:
+                entry_id = entry["id"]
+                try:
+                    result = loop.run_until_complete(
+                        self._engine.post_manual(video_path, entry["caption"], platforms)
+                    )
+                    success = bool(getattr(result, "all_success", False))
+                    failed = [
+                        f"{platform}: {getattr(upload_result, 'error', '')}"
+                        for platform, upload_result in getattr(result, "results", {}).items()
+                        if not getattr(upload_result, "success", False)
+                    ]
+                    error_msg = "; ".join(item for item in failed if item.strip()) or None
+                    deferred = AppController._scheduled_post_deferred(result)
+                    if deferred:
+                        manager.mark_deferred(entry_id, error=error_msg)
+                        processed.append({"id": entry_id, "status": "deferred", "error": error_msg})
+                    else:
+                        manager.mark_complete(entry_id, success=success, error=error_msg)
+                        processed.append({
+                            "id": entry_id,
+                            "status": "completed" if success else "failed",
+                            "error": error_msg,
+                        })
+                    self.postComplete.emit(json.dumps({
+                        "video_id": getattr(result, "video_id", entry_id),
+                        "caption": entry["caption"],
+                        "all_success": success,
+                        "partial_success": bool(getattr(result, "partial_success", False)),
+                        "deferred": deferred,
+                        "scheduled": True,
+                        "schedule_id": entry_id,
+                    }, default=str))
+                except Exception as exc:
+                    manager.mark_complete(entry_id, success=False, error=str(exc))
+                    processed.append({"id": entry_id, "status": "failed", "error": str(exc)})
+        finally:
+            loop.close()
+            self._engine.release_pidfile()
+
+        return processed
+
+    @Slot(result=str)
+    def processDueScheduledPosts(self) -> str:
+        """Process due desktop scheduled posts without blocking the UI."""
+        if self._schedule_processing:
+            return json.dumps({"ok": False, "status": "busy"})
+
+        self._schedule_processing = True
+
+        def _run() -> None:
+            try:
+                processed = AppController._process_due_scheduled_posts_once(self)
+                if processed:
+                    self.refreshData()
+                    completed = sum(1 for item in processed if item.get("status") == "completed")
+                    failed = sum(1 for item in processed if item.get("status") == "failed")
+                    deferred = sum(1 for item in processed if item.get("status") == "deferred")
+                    if completed:
+                        AppController._emit_notification(self, f"Posted {completed} scheduled post(s)", False)
+                    if deferred:
+                        AppController._emit_notification(self, f"Deferred {deferred} scheduled post(s)", False)
+                    if failed:
+                        AppController._emit_notification(self, f"{failed} scheduled post(s) failed", True)
+            except Exception as exc:
+                logger.error("processDueScheduledPosts error: %s", exc)
+                AppController._emit_notification(self, str(exc), True)
+            finally:
+                self._schedule_processing = False
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        return json.dumps({"ok": True, "status": "started"})
 
     @Slot(str, str)
     def deletePost(self, post_id: str, platform: str) -> None:
@@ -1024,6 +1420,24 @@ class AppController(QObject):
                         for k, v in plat_settings.items():
                             existing["accounts"][plat][k] = v
 
+            if "x_cookies" in settings:
+                cookies_raw = settings["x_cookies"]
+                cookies_data = json.loads(cookies_raw) if isinstance(cookies_raw, str) else cookies_raw
+                if not isinstance(cookies_data, list | dict):
+                    raise ValueError("X cookies must be a JSON object or array")
+                cookies_path = config_path.parent / "credentials" / "x_cookies.json"
+                cookies_path.parent.mkdir(parents=True, exist_ok=True)
+                cookies_path.write_text(json.dumps(cookies_data, indent=2), encoding="utf-8")
+                with contextlib.suppress(OSError):
+                    cookies_path.chmod(0o600)
+                existing["accounts"].setdefault("x", {})["cookies_file"] = str(cookies_path)
+                try:
+                    from xpst.utils.credentials import CredentialStore
+
+                    CredentialStore(str(config_path.parent)).store("x_cookies", json.dumps(cookies_data))
+                except Exception as exc:
+                    logger.debug("Encrypted X cookie store skipped: %s", exc)
+
             if "rate_limits" in settings:
                 existing["rate_limits"] = settings["rate_limits"]
 
@@ -1032,6 +1446,9 @@ class AppController(QObject):
 
             if "video" in settings:
                 existing.setdefault("video", {}).update(settings["video"])
+
+            if "download_dir" in settings:
+                existing.setdefault("video", {})["download_dir"] = settings["download_dir"]
 
             if "reliability" in settings:
                 existing.setdefault("reliability", {}).update(settings["reliability"])
@@ -1115,66 +1532,132 @@ class AppController(QObject):
                 self.settingsSaved.emit(False, str(exc))
             return json.dumps({"ok": False, "error": str(exc)})
 
+    def _connect_platform_result(self, platform: str) -> dict[str, Any]:
+        """Run setup/auth and verify the selected platform is actually usable."""
+        platform = (platform or "").strip().lower()
+        auth_output = ""
+        auth_error = ""
+        auth_returncode: int | None = None
+
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "xpst", "auth", platform],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env=AppController._mcp_env(self),
+            )
+            auth_returncode = result.returncode
+            auth_output = result.stdout.strip()
+            auth_error = result.stderr.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            auth_error = str(exc)
+            logger.debug("Auth subprocess failed: %s, trying engine", exc)
+
+        if not self._ensure_engine():
+            return {
+                "ok": False,
+                "platform": platform,
+                "error": "Connection could not be verified.",
+                "output": auth_output,
+                "auth_error": auth_error,
+                "auth_returncode": auth_returncode,
+            }
+
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            health = loop.run_until_complete(self._engine.check_health())
+        finally:
+            loop.close()
+
+        plat_health = health.get("platforms", {}).get(platform, {})
+        authenticated = bool(plat_health.get("authenticated"))
+        session_valid = bool(plat_health.get("session_valid"))
+        ok = authenticated and session_valid
+        payload: dict[str, Any] = {
+            "ok": ok,
+            "platform": platform,
+            "details": plat_health,
+            "output": auth_output,
+            "auth_error": auth_error,
+            "auth_returncode": auth_returncode,
+        }
+        if ok:
+            payload["message"] = f"Authenticated with {platform}"
+        else:
+            payload["error"] = (
+                plat_health.get("error")
+                or auth_output
+                or auth_error
+                or f"{platform} is not connected yet."
+            )
+        return payload
+
     @Slot(str)
     def connectPlatform(self, platform: str) -> None:
-        """Test connectivity / authenticate a platform.
-
-        Runs in a background thread to avoid blocking the UI.
-        Emits postComplete with JSON result containing ok/details.
-
-        Args:
-            platform: Platform name to connect/test.
-        """
+        """Test connectivity / authenticate a platform in a background thread."""
         def _run() -> None:
             try:
-                # First try running 'xpst auth <platform>' via subprocess
-                # This handles OAuth flows etc.
-                try:
-                    result = subprocess.run(
-                        [sys.executable, "-m", "xpst", "auth", platform],
-                        capture_output=True,
-                        text=True,
-                        timeout=60,
-                    )
-                    if result.returncode == 0:
-                        self.connectResult.emit(json.dumps({
-                            "ok": True,
-                            "platform": platform,
-                            "message": f"Authenticated with {platform}",
-                            "output": result.stdout.strip(),
-                        }))
-                        return
-                except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-                    logger.debug("Auth subprocess failed: %s, trying engine", exc)
-
-                # Fallback: use engine check_health for connectivity test
-                if self._ensure_engine():
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    health = loop.run_until_complete(self._engine.check_health())
-                    loop.close()
-
-                    plat_health = health.get("platforms", {}).get(platform, {})
-                    ok = plat_health.get("authenticated", False)
-
-                    self.connectResult.emit(json.dumps({
-                        "ok": ok,
-                        "platform": platform,
-                        "details": plat_health,
-                    }, default=str))
-                else:
-                    self.connectResult.emit(json.dumps({
-                        "ok": False,
-                        "platform": platform,
-                        "error": "Engine not available and auth subprocess failed",
-                    }))
-
+                result = AppController._connect_platform_result(self, platform)
+                self.connectResult.emit(json.dumps(result, default=str))
             except Exception as exc:
                 logger.error("connectPlatform(%s) error: %s", platform, exc)
-                self.error.emit(str(exc))
+                self.connectResult.emit(json.dumps({
+                    "ok": False,
+                    "platform": platform,
+                    "error": str(exc),
+                }))
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
+
+    @Slot(str)
+    def disconnectPlatform(self, platform: str) -> None:
+        """Disable a platform and remove its local credential file."""
+        platform = (platform or "").strip().lower()
+        try:
+            account = getattr(self._config, platform, None)
+            if account is None:
+                self.connectResult.emit(json.dumps({
+                    "ok": False,
+                    "platform": platform,
+                    "error": f"Unknown platform: {platform}",
+                }))
+                return
+
+            if hasattr(account, "enabled"):
+                account.enabled = False
+
+            removed_credentials = False
+            for field in ("token_file", "cookies_file", "session_file"):
+                path_value = getattr(account, field, None)
+                if not path_value:
+                    continue
+                path = Path(path_value).expanduser()
+                try:
+                    if path.exists():
+                        path.unlink()
+                        removed_credentials = True
+                except OSError as exc:
+                    logger.warning("Failed to remove %s credential %s: %s", platform, path, exc)
+
+            self._config.save()
+            self._engine = None
+            self.refreshData()
+            self.connectResult.emit(json.dumps({
+                "ok": True,
+                "platform": platform,
+                "message": f"Disconnected {platform}",
+                "removed_credentials": removed_credentials,
+            }))
+        except Exception as exc:
+            logger.error("disconnectPlatform(%s) error: %s", platform, exc)
+            self.connectResult.emit(json.dumps({
+                "ok": False,
+                "platform": platform,
+                "error": str(exc),
+            }))
 
     @Slot(str, result=str)
     def getAnalytics(self, platform: str = "") -> str:
@@ -1427,13 +1910,41 @@ class AppController(QObject):
             if self._config is None:
                 return json.dumps({"ok": False, "error": "Config not loaded"})
             result = repair_local_setup(self._config)
-            self._config = XPSTConfig.load()
+            config_path = AppController._active_config_dir(self) / "config.yaml"
+            self._config = XPSTConfig.load(str(config_path))
             self._engine = None
             self.refreshData()
             return json.dumps(result, default=str)
         except Exception as exc:
             logger.error("repairReadiness error: %s", exc)
             return json.dumps({"ok": False, "error": str(exc)})
+
+    @Slot(str, result=str)
+    def getFileInfo(self, file_path: str) -> str:
+        """Return a compact display string for a local file."""
+        if not file_path:
+            return ""
+        source = file_path
+        if source.startswith("file://"):
+            source = source[7:]
+            if len(source) >= 3 and source[0] == "/" and source[2] == ":":
+                source = source[1:]
+        try:
+            path = Path(source).expanduser()
+            if not path.is_file():
+                return ""
+            size = float(path.stat().st_size)
+        except OSError:
+            return ""
+
+        units = ("B", "KB", "MB", "GB", "TB")
+        unit_index = 0
+        while size >= 1024 and unit_index < len(units) - 1:
+            size /= 1024
+            unit_index += 1
+        if unit_index == 0:
+            return f"{int(size)} {units[unit_index]}"
+        return f"{size:.1f} {units[unit_index]}"
 
     @Slot(str, result=str)
     def getThumbnail(self, video_path: str) -> str:
@@ -1494,17 +2005,48 @@ class AppController(QObject):
 
     @Slot(str, str, str)
     def updateCaption(self, post_id: str, platform: str, new_caption: str) -> None:
-        """Update caption for a specific post/platform in the post model.
+        """Update caption for a specific source/platform in state and the post model.
 
         Args:
-            post_id: The post identifier.
+            post_id: Source video identifier, with platform post id accepted as fallback.
             platform: The platform name.
             new_caption: The new caption text.
         """
-        # This is called from QML; the actual model update happens in main.py
-        # where we connect this signal.  Emit a notification on success.
-        self._pending_caption_update = (post_id, platform, new_caption)
-        self._captionUpdateReady.emit(post_id, platform, new_caption)
+        if self._state is None:
+            self.error.emit("StateManager not available")
+            return
+
+        try:
+            platform_key = platform.strip().lower()
+            posted = self._state._state.get("posted_videos", {})
+            source_id = post_id
+
+            if source_id not in posted:
+                for video_id, vdata in posted.items():
+                    pinfo = vdata.get("posted_to", {}).get(platform_key, {})
+                    if pinfo.get("id") == post_id:
+                        source_id = video_id
+                        break
+
+            if source_id not in posted:
+                AppController._emit_notification(self, "Post was not found", True)
+                return
+
+            video = posted[source_id]
+            posted_to = video.get("posted_to", {})
+            if platform_key and platform_key in posted_to:
+                posted_to[platform_key]["caption"] = new_caption
+            else:
+                video["caption"] = new_caption
+
+            self._state.save()
+            self._pending_caption_update = (source_id, platform_key, new_caption)
+            self._captionUpdateReady.emit(source_id, platform_key, new_caption)
+            self.refreshData()
+            AppController._emit_notification(self, "Caption saved", False)
+        except Exception as exc:
+            logger.error("updateCaption error: %s", exc)
+            self.error.emit(str(exc))
 
     _captionUpdateReady = Signal(str, str, str)
 
@@ -1598,7 +2140,7 @@ class AppController(QObject):
         # Fallback: scan translations dir
         try:
             from pathlib import Path as _Path
-            translations_dir = get_config_dir() / "translations"
+            translations_dir = AppController._active_config_dir(self) / "translations"
             bundled_dir = _Path(__file__).resolve().parent.parent / "i18n"
 
             langs: list[str] = []
@@ -1686,21 +2228,97 @@ class AppController(QObject):
                 "errors": [str(exc)],
             })
 
+    @Slot(str, str, result=str)
+    def generateEncodingSample(self, platform: str, output_path: str = "") -> str:
+        """Generate a short local test video for a platform encoding profile."""
+        if self._config is None:
+            return json.dumps({"ok": False, "error": "Configuration not loaded"})
+
+        platform_key = (platform or "").strip().lower()
+        if platform_key not in {"youtube", "instagram", "x"}:
+            return json.dumps({"ok": False, "error": f"Unsupported platform: {platform}"})
+
+        ffmpeg = shutil.which(get_ffmpeg_name()) or shutil.which("ffmpeg")
+        if not ffmpeg:
+            return json.dumps({
+                "ok": False,
+                "error": "FFmpeg is required to generate encoding samples.",
+            })
+
+        enc = getattr(self._config.video, f"encoding_{platform_key}", None)
+        resolution = int(getattr(enc, "resolution", 1920) or 1920)
+        fps = int(getattr(enc, "fps", 30) or 30)
+        fps = max(1, min(fps, 60))
+        width = max(2, int(round(resolution * 9 / 16)))
+        width += width % 2
+        height = max(2, resolution + resolution % 2)
+
+        if output_path:
+            out_path = Path(output_path).expanduser()
+        else:
+            out_path = AppController._active_config_dir(self) / "samples" / f"xpst_sample_{platform_key}.mp4"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc2=size={width}x{height}:rate={fps}",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=1000:sample_rate=48000",
+            "-t",
+            "2",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "28",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-shortest",
+            str(out_path),
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, check=False)
+        except Exception as exc:
+            with contextlib.suppress(OSError):
+                out_path.unlink()
+            return json.dumps({"ok": False, "error": str(exc)})
+
+        if result.returncode != 0:
+            with contextlib.suppress(OSError):
+                out_path.unlink()
+            stderr = (result.stderr or "").strip().splitlines()
+            message = stderr[-1] if stderr else "FFmpeg failed to generate the sample."
+            return json.dumps({"ok": False, "error": message})
+
+        return json.dumps({
+            "ok": True,
+            "path": str(out_path),
+            "platform": platform_key,
+            "resolution": f"{width}x{height}",
+            "fps": fps,
+        })
+
 
 def _default_ui_font() -> str:
     """Return a sensible default UI font family for the current platform (W4-7).
 
-    The app previously hardcoded "Segoe UI", which only exists on Windows; on
-    macOS and Linux Qt silently substituted a different family, drifting the
-    text metrics the layout was tuned against. This returns the native UI font
-    per platform so each OS uses its intended family.
+    The app ships Inter so regular UI text never falls back to the bundled
+    Lucide icon font in headless, offscreen, or packaged environments where Qt
+    cannot see system sans fonts.
     """
-    if sys.platform == "darwin":
-        return "SF Pro Text"
-    if sys.platform.startswith("win"):
-        return "Segoe UI"
-    # Linux / other: a widely-installed, metrically-sane sans family.
-    return "Noto Sans"
+    return icon_glyphs.UI_FONT_FAMILY
 
 
 def _default_mono_font() -> str:
@@ -1772,6 +2390,9 @@ class ThemeProvider(QObject):
 
     @Property(str, notify=darkModeChanged)
     def surfaceCard(self): return self._col("surfaceCard")
+
+    @Property(str, notify=darkModeChanged)
+    def border(self): return self._col("surfaceAlt")
 
     # Text hierarchy
     @Property(str, notify=darkModeChanged)
@@ -1897,7 +2518,73 @@ class ThemeProvider(QObject):
     @Property(str, constant=True)
     def iconStats(self): return icon_glyphs.glyph("stats")
     @Property(str, constant=True)
+    def iconViews(self): return icon_glyphs.glyph("views")
+    @Property(str, constant=True)
+    def iconLikes(self): return icon_glyphs.glyph("likes")
+    @Property(str, constant=True)
+    def iconComments(self): return icon_glyphs.glyph("comments")
+    @Property(str, constant=True)
+    def iconShares(self): return icon_glyphs.glyph("shares")
+    @Property(str, constant=True)
+    def iconViewGrid(self): return icon_glyphs.glyph("view_grid")
+    @Property(str, constant=True)
+    def iconViewList(self): return icon_glyphs.glyph("view_list")
+    @Property(str, constant=True)
+    def iconChevronLeft(self): return icon_glyphs.glyph("chevron_left")
+    @Property(str, constant=True)
+    def iconChevronRight(self): return icon_glyphs.glyph("chevron_right")
+    @Property(str, constant=True)
+    def iconUsers(self): return icon_glyphs.glyph("users")
+    @Property(str, constant=True)
+    def iconTrophy(self): return icon_glyphs.glyph("trophy")
+    @Property(str, constant=True)
+    def iconCalendar(self): return icon_glyphs.glyph("calendar")
+    @Property(str, constant=True)
+    def iconVideo(self): return icon_glyphs.glyph("video")
+    @Property(str, constant=True)
+    def iconCheck(self): return icon_glyphs.glyph("check")
+    @Property(str, constant=True)
+    def iconError(self): return icon_glyphs.glyph("error")
+    @Property(str, constant=True)
+    def iconClose(self): return icon_glyphs.glyph("close")
+    @Property(str, constant=True)
+    def iconEdit(self): return icon_glyphs.glyph("edit")
+    @Property(str, constant=True)
+    def iconWeb(self): return icon_glyphs.glyph("web")
+    @Property(str, constant=True)
+    def iconRepo(self): return icon_glyphs.glyph("repo")
+    @Property(str, constant=True)
+    def iconDocs(self): return icon_glyphs.glyph("docs")
+    @Property(str, constant=True)
+    def iconIssue(self): return icon_glyphs.glyph("issue")
+    @Property(str, constant=True)
+    def iconChangelog(self): return icon_glyphs.glyph("changelog")
+
+    @Property(str, constant=True)
     def iconPlus(self): return icon_glyphs.glyph("plus")
+    @Property(str, constant=True)
+    def iconPlay(self): return icon_glyphs.glyph("play")
+    @Property(str, constant=True)
+    def iconPause(self): return icon_glyphs.glyph("pause")
+    @Property(str, constant=True)
+    def iconStop(self): return icon_glyphs.glyph("stop")
+    @Property(str, constant=True)
+    def iconExternal(self): return icon_glyphs.glyph("external")
+
+    @Property(str, constant=True)
+    def iconDashboard(self): return icon_glyphs.glyph("dashboard")
+    @Property(str, constant=True)
+    def iconContent(self): return icon_glyphs.glyph("content")
+    @Property(str, constant=True)
+    def iconAnalytics(self): return icon_glyphs.glyph("analytics")
+    @Property(str, constant=True)
+    def iconConnect(self): return icon_glyphs.glyph("connect")
+    @Property(str, constant=True)
+    def iconSchedule(self): return icon_glyphs.glyph("schedule")
+    @Property(str, constant=True)
+    def iconSettings(self): return icon_glyphs.glyph("settings")
+    @Property(str, constant=True)
+    def iconAbout(self): return icon_glyphs.glyph("about")
 
     # Dark mode toggle
     @Property(bool, notify=darkModeChanged)

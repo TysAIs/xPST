@@ -43,6 +43,22 @@ def _row_to_nugget(row: dict) -> Nugget:
     return Nugget.from_dict(json.loads(row["payload"]))
 
 
+def _row_score(row: dict) -> float | None:
+    """Convert LanceDB row metadata to a higher-is-better similarity score."""
+    raw_score = row.get("_score")
+    if raw_score is None:
+        raw_score = row.get("score")
+    if raw_score is not None:
+        return float(raw_score)
+    raw_distance = row.get("_distance")
+    if raw_distance is None:
+        raw_distance = row.get("distance")
+    if raw_distance is None:
+        return None
+    distance = max(0.0, float(raw_distance))
+    return 1.0 / (1.0 + distance)
+
+
 class LanceDBStore(KnowledgeStore):
     def __init__(self, path: str | Path, *, dim: int = _DEFAULT_DIM) -> None:
         self._path = Path(path)
@@ -102,6 +118,11 @@ class LanceDBStore(KnowledgeStore):
         self.add_nugget(nugget)
 
     def search(self, embedding: Sequence[float], k: int) -> list[Nugget]:
+        return [n for n, _score in self.search_with_scores(embedding, k)]
+
+    def search_with_scores(
+        self, embedding: Sequence[float], k: int
+    ) -> list[tuple[Nugget, float | None]]:
         tbl = self._open(_NUGGETS, None)
         if tbl is None or k <= 0:
             return []
@@ -111,7 +132,7 @@ class LanceDBStore(KnowledgeStore):
             .limit(k)
             .to_list()
         )
-        return [_row_to_nugget(r) for r in rows]
+        return [(_row_to_nugget(r), _row_score(r)) for r in rows]
 
     # ── areas ──
 

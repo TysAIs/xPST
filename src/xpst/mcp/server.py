@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import asdict
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 # The 'mcp' package is an optional extra. Import it gracefully so that simply
@@ -70,6 +72,7 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
 
 from xpst.config import XPSTConfig
 from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.post_preflight import build_post_preflight
 from xpst.utils.logger import get_logger, setup_logging
 
 if TYPE_CHECKING:
@@ -429,6 +432,12 @@ TOOLS: list[Tool] = [
                     "description": "Workspace name (isolated data dir)",
                     "default": "default",
                 },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of nuggets to return",
+                    "minimum": 1,
+                    "default": 8,
+                },
             },
             "required": ["text"],
             "additionalProperties": False,
@@ -464,6 +473,25 @@ TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Workspace name (isolated data dir)",
                     "default": "default",
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="kb_course",
+        description="Assemble organized areas and cited nuggets into a course outline",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "workspace": {
+                    "type": "string",
+                    "description": "Workspace name (isolated data dir)",
+                    "default": "default",
+                },
+                "area_id": {
+                    "type": "string",
+                    "description": "Optional area id to assemble; omit for the full course",
                 },
             },
             "additionalProperties": False,
@@ -538,7 +566,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             engine = server.get_engine()
             return await _handle_backfill(engine, arguments)
         elif name == "xpst_analytics":
-            return await _handle_analytics(arguments)
+            return await _handle_analytics(server.config, arguments)
         elif name == "xpst_schedule_list":
             return await _handle_schedule_list(server.config)
         elif name == "xpst_schedule_add":
@@ -552,8 +580,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         elif name == "xpst_delete":
             engine = server.get_engine()
             return await _handle_delete(engine, arguments)
-        elif name in {"kb_add", "kb_query", "kb_organize", "kb_areas"}:
-            return await _handle_kb_tool(name, arguments)
+        elif name in {"kb_add", "kb_query", "kb_organize", "kb_areas", "kb_course"}:
+            return await _handle_kb_tool(name, arguments, server.config)
         else:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"Unknown tool: {name}")],
@@ -635,6 +663,13 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
     """Handle xpst_post tool."""
     dry_run = args.get("dry_run", False)
     carousel_paths = args.get("carousel_paths", [])
+    preflight = build_post_preflight(
+        config=engine.config,
+        video_path=args["video_path"],
+        caption=args["caption"],
+        platforms=args.get("platforms"),
+        carousel_paths=carousel_paths,
+    )
 
     if dry_run:
         return CallToolResult(
@@ -642,11 +677,21 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                 type="text",
                 text=json.dumps({
                     "dry_run": True,
-                    "video": args["video_path"],
-                    "caption": args["caption"][:100],
-                    "carousel": len(carousel_paths) > 0,
-                    "targets": args.get("platforms") or list(engine._platforms.keys()),
-                }, indent=2),
+                    **preflight,
+                }, indent=2, default=str),
+            )],
+        )
+
+    if not preflight["ready"]:
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "ok": False,
+                    "error": preflight["blocking"][0] if preflight["blocking"] else "Post is not ready.",
+                    "preflight": preflight,
+                }, indent=2, default=str),
             )],
         )
 
@@ -767,7 +812,10 @@ async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) ->
     )
 
 
-async def _handle_analytics(arguments: dict[str, Any]) -> CallToolResult:
+async def _handle_analytics(
+    config: XPSTConfig | dict[str, Any] | None = None,
+    arguments: dict[str, Any] | None = None,
+) -> CallToolResult:
     """Handle xpst_analytics (G27): expose the same numbers the UI shows.
 
     Reads the persisted snapshot store by default; live=true runs a real
@@ -775,10 +823,19 @@ async def _handle_analytics(arguments: dict[str, Any]) -> CallToolResult:
     """
     from xpst.analytics import AnalyticsCollector
 
+    if arguments is None:
+        if isinstance(config, dict):
+            arguments = config
+            config = None
+        else:
+            arguments = {}
+    if config is None:
+        config = XPSTConfig()
+
     platform = arguments.get("platform")
     live = bool(arguments.get("live", False))
 
-    collector = AnalyticsCollector()
+    collector = AnalyticsCollector(config.config_dir)
     if live:
         await collector.collect_all()
 
@@ -931,7 +988,7 @@ async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallT
     )
 
 
-async def _handle_kb_tool(name: str, args: dict[str, Any]) -> CallToolResult:
+async def _handle_kb_tool(name: str, args: dict[str, Any], config: XPSTConfig) -> CallToolResult:
     """Dispatch a knowledge-base tool call.
 
     The heavy KB subsystem (faster-whisper / fastembed / lancedb) is imported
@@ -954,17 +1011,20 @@ async def _handle_kb_tool(name: str, args: dict[str, Any]) -> CallToolResult:
             isError=True,
         )
 
-    workspace = args.get("workspace", "default")
-    if name == "kb_add":
-        payload = await asyncio.to_thread(kb_tools.kb_add, args["source"], workspace)
-    elif name == "kb_query":
-        payload = await asyncio.to_thread(kb_tools.kb_query, args["text"], workspace)
-    elif name == "kb_organize":
-        payload = await asyncio.to_thread(
-            kb_tools.kb_organize, workspace, args.get("threshold")
-        )
-    else:  # kb_areas
-        payload = await asyncio.to_thread(kb_tools.kb_areas, workspace)
+    def run_active_profile_kb_tool() -> dict[str, Any]:
+        workspace = args.get("workspace", "default")
+        home = str(config.config_dir)
+        if name == "kb_add":
+            return kb_tools.kb_add(args["source"], workspace, home=home)
+        if name == "kb_query":
+            return kb_tools.kb_query(args["text"], workspace, args.get("limit", 8), home=home)
+        if name == "kb_organize":
+            return kb_tools.kb_organize(workspace, args.get("threshold"), home=home)
+        if name == "kb_areas":
+            return kb_tools.kb_areas(workspace, home=home)
+        return kb_tools.kb_course(workspace, args.get("area_id"), home=home)
+
+    payload = await asyncio.to_thread(run_active_profile_kb_tool)
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
@@ -993,7 +1053,7 @@ async def main(config: XPSTConfig | None = None) -> None:
         ModuleNotFoundError: with an install hint if the 'mcp' extra is missing.
     """
     _require_mcp()
-    await get_server(config)
+    await get_server(config, initialize=False)
 
     # Run the MCP server
     async with stdio_server() as (read_stream, write_stream):
@@ -1006,7 +1066,9 @@ async def main(config: XPSTConfig | None = None) -> None:
 
 def cli_main() -> None:
     """CLI entry point for xpst mcp command."""
-    config = XPSTConfig()
+    config_dir = os.environ.get("XPST_CONFIG_DIR")
+    config_path = str(Path(config_dir).expanduser() / "config.yaml") if config_dir else None
+    config = XPSTConfig.load(config_path)
     asyncio.run(main(config))
 
 

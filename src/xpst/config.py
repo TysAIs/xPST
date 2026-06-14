@@ -802,4 +802,3 @@ class XPSTConfig:
                 yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
         except OSError as e:
             logger.warning("Failed to save config: %s", e)
-

@@ -22,6 +22,7 @@ from scripts.release_artifacts import (
     verify_wheel,
 )
 from scripts.release_preflight import build_release_preflight
+from scripts.release_version_guard import expected_version_for_tag, validate_release_version
 from scripts.verify_macos_artifact import verify_macos_artifact
 from scripts.verify_windows_exe import verify_windows_exe
 
@@ -37,6 +38,49 @@ def _make_sdist(path: Path, tmp_path: Path) -> None:
     pyproject.write_text("[project]\nname = \"xpst\"\n", encoding="utf-8")
     with tarfile.open(path, "w:gz") as archive:
         archive.add(pyproject, arcname="xpst-0.1.0/pyproject.toml")
+
+
+def _write_versioned_project(root: Path, version: str) -> None:
+    (root / "src" / "xpst").mkdir(parents=True, exist_ok=True)
+    (root / "pyproject.toml").write_text(
+        f"[project]\nname = \"xpst\"\nversion = \"{version}\"\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "xpst" / "__init__.py").write_text(
+        f"__version__ = \"{version}\"\n",
+        encoding="utf-8",
+    )
+
+
+def test_release_version_guard_maps_rc_tag_to_pep440_version():
+    assert expected_version_for_tag("v0.1.0-rc2") == "0.1.0rc2"
+
+
+def test_release_version_guard_rejects_rc_tag_with_final_package_version(tmp_path):
+    _write_versioned_project(tmp_path, "0.1.0")
+
+    result = validate_release_version("v0.1.0-rc2", root=tmp_path)
+
+    assert result["ok"] is False
+    assert result["expected_version"] == "0.1.0rc2"
+    assert "pyproject has 0.1.0" in result["error"]
+
+
+def test_release_version_guard_accepts_matching_final_and_rc_tags(tmp_path):
+    _write_versioned_project(tmp_path, "0.1.0")
+    assert validate_release_version("v0.1.0", root=tmp_path)["ok"] is True
+
+    _write_versioned_project(tmp_path, "0.1.0rc2")
+    assert validate_release_version("v0.1.0-rc2", root=tmp_path)["ok"] is True
+
+
+def test_release_workflow_guards_version_and_skips_pypi_for_rc_tags():
+    workflow = (BUILD_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    assert "python scripts/release_version_guard.py --tag" in workflow
+    assert "github.event_name == 'push' && !contains(github.ref_name, '-rc')" in workflow
+    assert "python scripts/public_release_check.py --dist release-artifacts --output-dir release-public --json" in workflow
+    assert "if: ${{ !contains(github.ref_name, '-rc') }}" in workflow
 
 
 def test_find_dist_files_accepts_desktop_only_artifact(tmp_path):
@@ -193,6 +237,44 @@ def test_generate_release_evidence_includes_artifacts_and_manual_gates(tmp_path)
         "quality_checks"
     ]["required_commands"]
     assert data["known_limitations"]
+
+
+def test_generate_release_evidence_supports_labeled_metadata(tmp_path):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    exe = dist / "xPST.exe"
+    exe.write_bytes(b"binary")
+    output_dir = tmp_path / "release"
+    output_dir.mkdir()
+    for name in [
+        "SHA256SUMS",
+        "SHA512SUMS",
+        "windows-xpst-sbom.cdx.json",
+        "windows-RELEASE_NOTES.md",
+        "LICENSE",
+        "NOTICES.md",
+        "NOTICES_QT_LGPL.md",
+        "LICENSING_REPORT.md",
+        "CHANGELOG.md",
+    ]:
+        (output_dir / name).write_text(name, encoding="utf-8")
+    output = output_dir / "windows-RELEASE_EVIDENCE.json"
+
+    generate_release_evidence(
+        dist,
+        output_dir,
+        output,
+        "0.1.0",
+        checks_run=False,
+        metadata_label="windows",
+    )
+    data = json.loads(output.read_text(encoding="utf-8"))
+    generated = {item["filename"]: item["present"] for item in data["generated_files"]}
+
+    assert generated["windows-xpst-sbom.cdx.json"] is True
+    assert generated["windows-RELEASE_NOTES.md"] is True
+    assert "xpst-sbom.cdx.json" not in generated
+    assert "RELEASE_NOTES.md" not in generated
 
 
 def test_release_preflight_local_mode_warns_for_desktop_gates(tmp_path, monkeypatch):

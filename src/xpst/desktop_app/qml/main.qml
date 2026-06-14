@@ -14,6 +14,7 @@ ApplicationWindow {
     minimumHeight: 600
     title: "xPST - Cross-Posting Suite"
     color: theme.canvas
+    font.family: theme.fontFamily
 
     // Bind the Material style to the live ThemeProvider so native Material
     // controls follow the app theme instead of rendering default-purple (W4-6).
@@ -102,8 +103,8 @@ ApplicationWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 32
-        width: toastText.implicitWidth + 48
-        height: 44
+        width: Math.min(toastText.implicitWidth + 48, root.width - 64)
+        height: Math.max(44, toastText.implicitHeight + 20)
         radius: theme.radiusMd
         color: toast.isError ? theme.error : theme.success
         opacity: 0
@@ -115,10 +116,15 @@ ApplicationWindow {
         Text {
             id: toastText
             anchors.centerIn: parent
+            width: parent.width - 32
             text: toast.message
             font.pixelSize: 13
             font.weight: Font.DemiBold
             color: "#ffffff"
+            wrapMode: Text.WordWrap
+            maximumLineCount: 3
+            elide: Text.ElideRight
+            horizontalAlignment: Text.AlignHCenter
         }
 
         function show(msg, error) {
@@ -153,8 +159,10 @@ ApplicationWindow {
             spacing: 16
 
             Text {
-                text: "!"
+                text: theme.iconError
+                font.family: theme.iconFontFamily
                 font.pixelSize: 32
+                color: theme.error
                 Layout.alignment: Qt.AlignHCenter
             }
 
@@ -342,6 +350,29 @@ ApplicationWindow {
         toast.show(msg, isError)
     }
 
+    function confirmDroppedPost() {
+        if (dropCaptionDialog.droppedPath.length === 0 || typeof controller === "undefined")
+            return
+        if (controller.previewPost) {
+            try {
+                var raw = controller.previewPost(dropCaptionDialog.droppedPath, captionInput.text, "")
+                var preview = JSON.parse(raw)
+                if (!preview.ready) {
+                    var blocking = preview.blocking || [preview.error || "Post is not ready"]
+                    showToast(blocking[0], true)
+                    return
+                }
+            } catch(e) {
+                showToast("Could not preview dropped video", true)
+                return
+            }
+        }
+        controller.postVideo(dropCaptionDialog.droppedPath, captionInput.text)
+        showToast("Posting: " + dropCaptionDialog.droppedPath.split("/").pop(), false)
+        captionInput.text = ""
+        dropCaptionDialog.close()
+    }
+
     // ── Keyboard Shortcuts ──────────────────────────────────────
     Shortcut { sequence: "Meta+1"; onActivated: navigateTo("dashboard") }
     Shortcut { sequence: "Meta+2"; onActivated: navigateTo("content") }
@@ -384,10 +415,14 @@ ApplicationWindow {
             showToast(ok ? msg : ("Save failed: " + msg), !ok)
         }
 
+        function onNotification(msg, isError) {
+            showToast(msg, isError)
+        }
+
         function onConnectResult(jsonStr) {
             var result = JSON.parse(jsonStr)
             if (result.ok) {
-                showToast(result.platform + " connected successfully", false)
+                showToast(result.message || (result.platform + " connected successfully"), false)
             } else {
                 showToast("Connection failed: " + (result.error || "Unknown error"), true)
             }
@@ -483,7 +518,8 @@ ApplicationWindow {
             spacing: 16
 
             Text {
-                text: "Video"
+                text: theme.iconVideo
+                font.family: theme.iconFontFamily
                 font.pixelSize: 28
                 font.weight: Font.DemiBold
                 color: "#ffffff"
@@ -540,7 +576,8 @@ ApplicationWindow {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "Video"
+                    text: theme.iconVideo
+                    font.family: theme.iconFontFamily
                     font.pixelSize: 36
                     color: theme.textMuted
                     visible: dropThumbnail.status !== Image.Ready
@@ -552,7 +589,7 @@ ApplicationWindow {
                 spacing: 4
                 Layout.fillWidth: true
                 Text {
-                    text: "Video " + (dropCaptionDialog.droppedPath ? dropCaptionDialog.droppedPath.split("/").pop() : "")
+                    text: "Video: " + (dropCaptionDialog.droppedPath ? dropCaptionDialog.droppedPath.split("/").pop() : "")
                     font.pixelSize: 14
                     font.weight: Font.DemiBold
                     color: theme.textPrimary
@@ -645,14 +682,7 @@ ApplicationWindow {
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (dropCaptionDialog.droppedPath.length > 0 && typeof controller !== "undefined") {
-                                controller.postVideo(dropCaptionDialog.droppedPath, captionInput.text)
-                                showToast("Posting: " + dropCaptionDialog.droppedPath.split("/").pop(), false)
-                            }
-                            captionInput.text = ""
-                            dropCaptionDialog.close()
-                        }
+                        onClicked: root.confirmDroppedPost()
                     }
                 }
             }

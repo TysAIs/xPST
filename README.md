@@ -63,7 +63,7 @@ Queries are semantic: the query is embedded and vector-searched against the stor
 
 - **Desktop GUI** (PySide6/QML): dashboard, content library, analytics, connect, schedule, settings.
 - **CLI** (Click): 25 top-level commands covering the entire workflow.
-- **MCP server**: 16 tools (12 `xpst_*` + 4 `kb_*`) so AI agents can discover providers, check health, post, and mine your knowledge base. See [For AI Agents](#for-ai-agents).
+- **MCP server**: 17 tools (12 `xpst_*` + 5 `kb_*`) so AI agents can discover providers, check health, schedule, post, inspect analytics, and mine your knowledge base. See [For AI Agents](#for-ai-agents).
 
 ---
 
@@ -261,11 +261,11 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 }
 ```
 
-### 16 tools
+### 17 tools
 
-**9 posting/ops tools:** `xpst_providers`, `xpst_config_show`, `xpst_auth_status`, `xpst_status`, `xpst_health`, `xpst_run`, `xpst_post`, `xpst_backfill`, `xpst_delete`
+**12 posting/ops tools:** `xpst_providers`, `xpst_config_show`, `xpst_auth_status`, `xpst_status`, `xpst_health`, `xpst_analytics`, `xpst_schedule_list`, `xpst_schedule_add`, `xpst_run`, `xpst_post`, `xpst_backfill`, `xpst_delete`
 
-**4 knowledge-base tools:** `kb_add`, `kb_query`, `kb_organize`, `kb_areas`
+**5 knowledge-base tools:** `kb_add`, `kb_query`, `kb_organize`, `kb_areas`, `kb_course`
 
 Metadata tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) are lightweight and never start the posting engine. **`xpst_run` and `xpst_post` post to your real accounts** — agents should always use `dry_run: true` first and confirm with the user before a live post.
 

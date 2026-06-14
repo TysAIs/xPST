@@ -13,14 +13,24 @@ module ever importing the ``mcp`` package.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Stable list of the KB tool names this module exposes. The MCP server uses it
 # to route calls and tests use it to assert registration.
-KB_TOOL_NAMES: tuple[str, ...] = ("kb_add", "kb_query", "kb_organize", "kb_areas")
+KB_TOOL_NAMES: tuple[str, ...] = (
+    "kb_add", "kb_query", "kb_organize", "kb_areas", "kb_course"
+)
 
 
-def kb_add(source: str, workspace: str = "default") -> dict[str, Any]:
+def kb_add(
+    source: str,
+    workspace: str = "default",
+    *,
+    home: str | Path | None = None,
+) -> dict[str, Any]:
     """Ingest a local file or URL into the knowledge base.
 
     Mirrors ``xpst kb add``. Returns a dict describing the outcome:
@@ -34,12 +44,12 @@ def kb_add(source: str, workspace: str = "default") -> dict[str, Any]:
     from xpst.knowledge.config import KnowledgeConfig
     from xpst.knowledge.ingest.pipeline import ingest
     from xpst.knowledge.manifest import Manifest
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
     config = KnowledgeConfig.from_env()
-    ws = Workspace.resolve(workspace)
-    store = JsonKnowledgeStore(ws.nuggets_path)
+    ws = Workspace.resolve(workspace, home=home)
+    store = open_default_store(ws)
     manifest = Manifest(ws.manifest_path)
     result = ingest(
         source,
@@ -71,7 +81,13 @@ def kb_add(source: str, workspace: str = "default") -> dict[str, Any]:
     }
 
 
-def kb_query(text: str, workspace: str = "default", k: int = 8) -> dict[str, Any]:
+def kb_query(
+    text: str,
+    workspace: str = "default",
+    k: int = 8,
+    *,
+    home: str | Path | None = None,
+) -> dict[str, Any]:
     """Semantic search over stored nuggets with substring fallback (G31).
 
     Mirrors ``xpst kb query``. Results carry provenance and a similarity
@@ -79,11 +95,14 @@ def kb_query(text: str, workspace: str = "default", k: int = 8) -> dict[str, Any
     """
     from xpst.knowledge.query import query_nuggets
 
-    return query_nuggets(text, workspace=workspace, k=k)
+    return query_nuggets(text, workspace=workspace, k=k, home=home)
 
 
 def kb_organize(
-    workspace: str = "default", threshold: float | None = None
+    workspace: str = "default",
+    threshold: float | None = None,
+    *,
+    home: str | Path | None = None,
 ) -> dict[str, Any]:
     """Discover areas, tag difficulty, and assign nuggets (Phase 3).
 
@@ -93,12 +112,12 @@ def kb_organize(
     from xpst.knowledge.config import KnowledgeConfig
     from xpst.knowledge.organize.cluster import DEFAULT_CLUSTER_THRESHOLD
     from xpst.knowledge.organize.pipeline import organize_store
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
     config = KnowledgeConfig.from_env()
-    ws = Workspace.resolve(workspace)
-    store = JsonKnowledgeStore(ws.nuggets_path)
+    ws = Workspace.resolve(workspace, home=home)
+    store = open_default_store(ws)
     thr = threshold if threshold is not None else DEFAULT_CLUSTER_THRESHOLD
     result = organize_store(store, _build_llm_client(config), threshold=thr)
     return {
@@ -109,17 +128,21 @@ def kb_organize(
     }
 
 
-def kb_areas(workspace: str = "default") -> dict[str, Any]:
+def kb_areas(
+    workspace: str = "default",
+    *,
+    home: str | Path | None = None,
+) -> dict[str, Any]:
     """List discovered areas in course order (beginner -> advanced).
 
     Mirrors ``xpst kb areas``.
     """
     from xpst.knowledge.organize.difficulty import order_areas
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
-    ws = Workspace.resolve(workspace)
-    store = JsonKnowledgeStore(ws.nuggets_path)
+    ws = Workspace.resolve(workspace, create=False, home=home)
+    store = open_default_store(ws)
     areas = order_areas(store.areas())
     return {
         "workspace": ws.name,
@@ -133,3 +156,19 @@ def kb_areas(workspace: str = "default") -> dict[str, Any]:
             for area in areas
         ],
     }
+
+
+def kb_course(
+    workspace: str = "default",
+    area_id: str | None = None,
+    *,
+    home: str | Path | None = None,
+) -> dict[str, Any]:
+    """Assemble organized areas and cited nuggets into a course outline."""
+    from xpst.knowledge.course.assemble import assemble_course
+    from xpst.knowledge.store import open_default_store
+    from xpst.knowledge.workspace import Workspace
+
+    ws = Workspace.resolve(workspace, create=False, home=home)
+    store = open_default_store(ws)
+    return assemble_course(store, workspace=ws.name, area_id=area_id).to_dict()

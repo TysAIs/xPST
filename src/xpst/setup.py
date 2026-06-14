@@ -12,6 +12,8 @@ Guides users through:
 import shutil
 import subprocess
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 
 from rich.console import Console
@@ -71,6 +73,10 @@ def check_yt_dlp() -> str | None:
         if result.returncode == 0:
             return result.stdout.strip()
     except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    try:
+        return package_version("yt-dlp")
+    except PackageNotFoundError:
         pass
     return None
 

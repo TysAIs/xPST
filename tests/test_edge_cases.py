@@ -16,7 +16,7 @@ Covers all 9 categories from the audit spec:
 import json
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -107,6 +107,40 @@ class TestYouTubeAPIEdgeCases:
         # The fixed code uses `or ""` to normalize:
         fixed_id = response.get("id") or ""
         assert fixed_id == ""  # Fixed behavior
+
+    @pytest.mark.asyncio
+    async def test_youtube_upload_treats_sync_chunk_response_as_success(self, tmp_path):
+        """A successful blocking YouTube upload response must not be awaited as a dict."""
+        from xpst.platforms.youtube import YouTubeUploader
+
+        video_path = tmp_path / "short.mp4"
+        video_path.write_bytes(b"fake video")
+
+        class FinishedUploadRequest:
+            def __init__(self):
+                self.calls = 0
+
+            def next_chunk(self):
+                self.calls += 1
+                return None, {"id": "yt123"}
+
+        request = FinishedUploadRequest()
+        service = MagicMock()
+        service.videos.return_value.insert.return_value = request
+
+        config = XPSTConfig()
+        uploader = YouTubeUploader(config)
+
+        with (
+            patch.object(uploader, "_get_service", AsyncMock(return_value=service)),
+            patch("googleapiclient.http.MediaFileUpload", MagicMock()),
+        ):
+            result = await uploader.upload(video_path, "Launch day")
+
+        assert result.success is True
+        assert result.post_id == "yt123"
+        assert result.post_url == "https://youtube.com/shorts/yt123"
+        assert request.calls == 1
 
 
 class TestXAPIEdgeCases:

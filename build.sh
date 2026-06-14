@@ -44,40 +44,20 @@ case "$PLATFORM" in
         echo "Building macOS .app bundle..."
         pyinstaller build_macos.spec --noconfirm --clean
         echo ""
-        echo "✅ Build complete: dist/xPST.app"
-        echo "   To distribute, create a DMG or zip the .app bundle."
+        echo "Build complete: dist/xPST.app"
+        echo "To distribute, create a DMG or zip the .app bundle."
         ;;
     windows)
         echo "Building Windows .exe..."
         pyinstaller build_windows.spec --noconfirm --clean
         echo ""
-        echo "✅ Build complete: dist/xPST.exe"
+        echo "Build complete: dist/xPST.exe"
         ;;
     linux)
         echo "Building Linux standalone binary..."
-        pyinstaller \
-            --name xPST \
-            --windowed \
-            --noconfirm \
-            --clean \
-            --add-data "src/xpst/desktop_app/qml:xpst/desktop_app/qml" \
-            --hidden-import xpst \
-            --hidden-import xpst.config \
-            --hidden-import xpst.state \
-            --hidden-import xpst.engine \
-            --hidden-import xpst.cli \
-            --hidden-import xpst.desktop_app.backend \
-            --hidden-import xpst.desktop_app.models \
-            --hidden-import xpst.plugins \
-            --hidden-import PySide6.QtQuick \
-            --hidden-import PySide6.QtQuickControls2 \
-            --hidden-import PySide6.QtQml \
-            --exclude-module tkinter \
-            --exclude-module matplotlib \
-            --exclude-module scipy \
-            src/xpst/desktop_app/main.py
+        pyinstaller build_linux.spec --noconfirm --clean
         echo ""
-        echo "✅ Build complete: dist/xPST/"
+        echo "Build complete: dist/xPST"
         ;;
     *)
         echo "Unknown platform: $PLATFORM"

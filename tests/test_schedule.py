@@ -1,6 +1,6 @@
 """Comprehensive tests for ScheduleManager (item 29)."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -108,6 +108,20 @@ class TestGetDue:
         due = manager.get_due()
         assert len(due) == 0
 
+    def test_get_due_handles_timezone_aware_entries(self, manager):
+        """Timezone-aware ISO timestamps compare without crashing."""
+        past = datetime.now(timezone.utc) - timedelta(minutes=5)
+        future = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+        due_entry = manager.add("/tmp/aware-due.mp4", "due", past)
+        future_entry = manager.add("/tmp/aware-future.mp4", "future", future)
+
+        due = manager.get_due()
+        due_ids = {entry["id"] for entry in due}
+
+        assert due_entry["id"] in due_ids
+        assert future_entry["id"] not in due_ids
+
 
 class TestMarkComplete:
     """test_mark_complete: mark entry complete, verify status changes."""
@@ -150,6 +164,26 @@ class TestPersistence:
         m2 = ScheduleManager(config_dir=tmp_schedule_dir)
         assert len(m2.list()) == 1
         assert m2.list()[0]["caption"] == "persisted"
+
+    def test_stale_managers_do_not_overwrite_each_other(self, tmp_schedule_dir):
+        """Mutations reload current disk state before saving."""
+        m1 = ScheduleManager(config_dir=tmp_schedule_dir)
+        m2 = ScheduleManager(config_dir=tmp_schedule_dir)
+
+        first = m1.add("/tmp/v1.mp4", "first", datetime(2026, 12, 1))
+        second = m2.add("/tmp/v2.mp4", "second", datetime(2026, 12, 2))
+
+        entries = ScheduleManager(config_dir=tmp_schedule_dir).list()
+        assert {entry["id"] for entry in entries} == {first["id"], second["id"]}
+
+    def test_atomic_save_leaves_no_temp_files(self, tmp_schedule_dir):
+        manager = ScheduleManager(config_dir=tmp_schedule_dir)
+        manager.add("/tmp/v.mp4", "persisted", datetime(2026, 12, 1))
+
+        schedule_dir = manager.schedule_file.parent
+        assert manager.schedule_file.exists()
+        assert not list(schedule_dir.glob(".schedule.json.*.tmp"))
+        assert (schedule_dir / ".schedule.lock").exists()
 
 
 class TestEmptySchedule:

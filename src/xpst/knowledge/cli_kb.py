@@ -53,12 +53,12 @@ def kb_add(source: str, workspace: str) -> None:
     from xpst.knowledge.config import KnowledgeConfig
     from xpst.knowledge.ingest.pipeline import ingest
     from xpst.knowledge.manifest import Manifest
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
     config = KnowledgeConfig.from_env()
     ws = Workspace.resolve(workspace)
-    store = JsonKnowledgeStore(ws.nuggets_path)
+    store = open_default_store(ws)
     manifest = Manifest(ws.manifest_path)
     result = ingest(
         source,
@@ -185,12 +185,12 @@ def kb_organize(workspace: str, threshold: float | None) -> None:
     from xpst.knowledge.config import KnowledgeConfig
     from xpst.knowledge.organize.cluster import DEFAULT_CLUSTER_THRESHOLD
     from xpst.knowledge.organize.pipeline import organize_store
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
     config = KnowledgeConfig.from_env()
     ws = Workspace.resolve(workspace)
-    store = JsonKnowledgeStore(ws.nuggets_path)
+    store = open_default_store(ws)
     thr = threshold if threshold is not None else DEFAULT_CLUSTER_THRESHOLD
     result = organize_store(store, _build_llm_client(config), threshold=thr)
     console.print(
@@ -205,11 +205,11 @@ def kb_organize(workspace: str, threshold: float | None) -> None:
 def kb_areas(workspace: str, as_json: bool) -> None:
     """List discovered areas in course order (beginner -> advanced)."""
     from xpst.knowledge.organize.difficulty import order_areas
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
-    ws = Workspace.resolve(workspace)
-    store = JsonKnowledgeStore(ws.nuggets_path)
+    ws = Workspace.resolve(workspace, create=False)
+    store = open_default_store(ws)
     areas = order_areas(store.areas())
     if as_json:
         console.print_json(_json.dumps({
@@ -237,11 +237,11 @@ def kb_course(workspace: str, area_id: str | None, as_json: bool) -> None:
     """Emit the organized outline (areas -> ordered, cited nuggets) for an AI to
     write a course from. Pre-ordered beginner -> advanced."""
     from xpst.knowledge.course.assemble import assemble_course
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
-    ws = Workspace.resolve(workspace)
-    store = JsonKnowledgeStore(ws.nuggets_path)
+    ws = Workspace.resolve(workspace, create=False)
+    store = open_default_store(ws)
     course = assemble_course(store, workspace=ws.name, area_id=area_id)
     if as_json:
         console.print_json(_json.dumps(course.to_dict()))
@@ -279,7 +279,7 @@ def kb_doctor(workspace: str, as_json: bool) -> None:
     )
     from xpst.knowledge.workspace import Workspace
 
-    ws = Workspace.resolve(workspace)
+    ws = Workspace.resolve(workspace, create=False)
     report = diagnose(ws)
     if as_json:
         console.print_json(_json.dumps(report.to_dict()))

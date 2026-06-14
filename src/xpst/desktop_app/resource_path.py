@@ -46,6 +46,9 @@ def resource_path(*relative_parts: str) -> Path:
     "icon.png")``). The returned path is not guaranteed to exist; callers
     should check ``.exists()`` and fall back as appropriate.
     """
+    package_local = Path(__file__).resolve().parent.joinpath(*relative_parts)
+    if package_local.exists():
+        return package_local
     return get_base_path().joinpath(*relative_parts)
 
 

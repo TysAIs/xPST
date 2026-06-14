@@ -16,10 +16,12 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
+from PySide6.QtGui import QFont
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlEngine
 from PySide6.QtWidgets import QApplication
 
-from xpst.desktop_app.backend import ThemeProvider
+from xpst.desktop_app.backend import ThemeProvider, _default_ui_font
+from xpst.desktop_app.main import _load_icon_font, _load_ui_font
 
 
 class SmokeController(QObject):
@@ -239,6 +241,9 @@ def main() -> int:
     qml_dir = root / "src" / "xpst" / "desktop_app" / "qml"
     pages_dir = qml_dir / "pages"
     app = QApplication.instance() or QApplication([])
+    _load_ui_font()
+    app.setFont(QFont(_default_ui_font()))
+    _load_icon_font()
     failures: list[str] = []
 
     engine, _theme, _controller = _make_engine(qml_dir)

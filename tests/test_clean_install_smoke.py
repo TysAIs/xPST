@@ -5,10 +5,20 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from scripts.clean_install_smoke import _select_artifacts, find_sdist, find_wheel, json_from_output, write_smoke_config
+from scripts.clean_install_smoke import (
+    _select_artifacts,
+    find_sdist,
+    find_wheel,
+    json_from_output,
+    run_clean_install_smoke,
+    venv_xpst_mcp,
+    write_smoke_config,
+    write_smoke_kb_store,
+)
 
 
 def test_find_wheel_returns_newest_xpst_wheel(tmp_path):
@@ -61,3 +71,57 @@ def test_write_smoke_config_uses_temp_paths(tmp_path):
     assert str(Path.home()) not in text
     assert "enabled: false" in text
     assert json.dumps(str(tmp_path)) not in text
+
+
+def test_venv_xpst_mcp_points_to_console_script(tmp_path):
+    path = venv_xpst_mcp(tmp_path / "venv")
+
+    assert path.name in {"xpst-mcp", "xpst-mcp.exe"}
+    assert "xpst-mcp" in str(path)
+
+
+def test_write_smoke_kb_store_seeds_substring_query_nugget(tmp_path):
+    config_path = write_smoke_config(tmp_path)
+
+    store_path = write_smoke_kb_store(config_path)
+
+    data = json.loads(store_path.read_text(encoding="utf-8"))
+    nugget = data["packaged-stdio-smoke"]
+    assert store_path == tmp_path / "xpst-home" / "knowledge" / "default" / "nuggets.json"
+    assert "packaged stdio smoke" in nugget["point"]
+    assert nugget["embedding"] == []
+    assert nugget["source_video_id"] == "clean-install-smoke"
+
+
+def test_clean_install_smoke_disables_pip_cache(tmp_path, monkeypatch):
+    artifact = tmp_path / "dist" / "xpst-0.1.0.tar.gz"
+    artifact.parent.mkdir()
+    artifact.write_bytes(b"sdist")
+    commands = []
+    timeouts = []
+
+    class FakeBuilder:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def create(self, venv_dir):
+            (venv_dir / "Scripts").mkdir(parents=True)
+
+    def fake_run_command(cmd, env, timeout=120):
+        commands.append(cmd)
+        timeouts.append(timeout)
+        return SimpleNamespace(returncode=1, stdout="", stderr="stop after install")
+
+    monkeypatch.setattr("scripts.clean_install_smoke.venv.EnvBuilder", FakeBuilder)
+    monkeypatch.setattr("scripts.clean_install_smoke.run_command", fake_run_command)
+
+    with pytest.raises(RuntimeError):
+        run_clean_install_smoke(
+            artifact.parent,
+            tmp_path / "work",
+            artifact="sdist",
+            install_timeout=777,
+        )
+
+    assert "--no-cache-dir" in commands[0]
+    assert timeouts == [777]

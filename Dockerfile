@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Copy project files
 COPY pyproject.toml README.md LICENSE ./
+COPY assets/fonts/ assets/fonts/
 COPY src/ src/
 
 # Install dependencies

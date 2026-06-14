@@ -123,9 +123,6 @@ Page {
                 controller.refreshData()
                 schedulePage.selectedDayPosts = schedulePage.getPostsForDay(schedulePage.selectedDay)
                 close()
-                showToast("Post scheduled", false)
-            } else {
-                showToast("Could not schedule post", true)
             }
         }
 
@@ -137,18 +134,48 @@ Page {
         contentItem: ColumnLayout {
             spacing: theme.spacingMd
 
+            Text {
+                text: "Video file"
+                font.pixelSize: 12
+                color: theme.textSecondary
+                Layout.fillWidth: true
+            }
             TextField {
                 id: schedulePathField
                 Layout.fillWidth: true
                 placeholderText: "Video file path"
+                selectByMouse: true
+                color: theme.textPrimary
+                placeholderTextColor: theme.textMuted
+                background: Rectangle {
+                    radius: theme.radiusMd
+                    color: theme.surfaceAlt
+                    border.color: schedulePathField.activeFocus ? theme.accent : theme.textMuted
+                    border.width: schedulePathField.activeFocus ? 2 : 1
+                }
             }
 
+            Text {
+                text: "Caption"
+                font.pixelSize: 12
+                color: theme.textSecondary
+                Layout.fillWidth: true
+            }
             TextArea {
                 id: scheduleCaptionField
                 Layout.fillWidth: true
                 Layout.preferredHeight: 96
                 placeholderText: "Caption"
                 wrapMode: TextEdit.Wrap
+                selectByMouse: true
+                color: theme.textPrimary
+                placeholderTextColor: theme.textMuted
+                background: Rectangle {
+                    radius: theme.radiusMd
+                    color: theme.surfaceAlt
+                    border.color: scheduleCaptionField.activeFocus ? theme.accent : theme.textMuted
+                    border.width: scheduleCaptionField.activeFocus ? 2 : 1
+                }
             }
 
             RowLayout {
@@ -158,33 +185,172 @@ Page {
                     id: scheduleDateField
                     Layout.fillWidth: true
                     placeholderText: "YYYY-MM-DD"
+                    selectByMouse: true
+                    color: theme.textPrimary
+                    placeholderTextColor: theme.textMuted
+                    background: Rectangle {
+                        radius: theme.radiusMd
+                        color: theme.surfaceAlt
+                        border.color: scheduleDateField.activeFocus ? theme.accent : theme.textMuted
+                        border.width: scheduleDateField.activeFocus ? 2 : 1
+                    }
                 }
                 TextField {
                     id: scheduleTimeField
                     Layout.preferredWidth: 110
                     placeholderText: "HH:MM"
+                    selectByMouse: true
+                    color: theme.textPrimary
+                    placeholderTextColor: theme.textMuted
+                    background: Rectangle {
+                        radius: theme.radiusMd
+                        color: theme.surfaceAlt
+                        border.color: scheduleTimeField.activeFocus ? theme.accent : theme.textMuted
+                        border.width: scheduleTimeField.activeFocus ? 2 : 1
+                    }
                 }
             }
 
             RowLayout {
                 Layout.fillWidth: true
                 spacing: theme.spacingLg
-                CheckBox { id: youtubeCheck; text: "YouTube" }
-                CheckBox { id: instagramCheck; text: "Instagram" }
-                CheckBox { id: xCheck; text: "X" }
+                CheckBox {
+                    id: youtubeCheck
+                    text: "YouTube"
+                    indicator: Rectangle {
+                        implicitWidth: 18
+                        implicitHeight: 18
+                        x: 0
+                        y: parent.height / 2 - height / 2
+                        radius: theme.radiusSm
+                        color: parent.checked ? theme.youtube : theme.surfaceAlt
+                        border.color: parent.checked ? theme.youtube : theme.textMuted
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: theme.iconCheck
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            color: "#ffffff"
+                            visible: parent.parent.checked
+                        }
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme.textPrimary
+                        font.pixelSize: 13
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: parent.indicator.width + parent.spacing
+                    }
+                }
+                CheckBox {
+                    id: instagramCheck
+                    text: "Instagram"
+                    indicator: Rectangle {
+                        implicitWidth: 18
+                        implicitHeight: 18
+                        x: 0
+                        y: parent.height / 2 - height / 2
+                        radius: theme.radiusSm
+                        color: parent.checked ? theme.instagram : theme.surfaceAlt
+                        border.color: parent.checked ? theme.instagram : theme.textMuted
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: theme.iconCheck
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            color: "#ffffff"
+                            visible: parent.parent.checked
+                        }
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme.textPrimary
+                        font.pixelSize: 13
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: parent.indicator.width + parent.spacing
+                    }
+                }
+                CheckBox {
+                    id: xCheck
+                    text: "X"
+                    indicator: Rectangle {
+                        implicitWidth: 18
+                        implicitHeight: 18
+                        x: 0
+                        y: parent.height / 2 - height / 2
+                        radius: theme.radiusSm
+                        color: parent.checked ? theme.xtwitter : theme.surfaceAlt
+                        border.color: parent.checked ? theme.xtwitter : theme.textMuted
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: theme.iconCheck
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 12
+                            color: "#ffffff"
+                            visible: parent.parent.checked
+                        }
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: theme.textPrimary
+                        font.pixelSize: 13
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: parent.indicator.width + parent.spacing
+                    }
+                }
             }
 
             RowLayout {
                 Layout.fillWidth: true
                 spacing: theme.spacingSm
                 Item { Layout.fillWidth: true }
-                Button {
-                    text: "Cancel"
-                    onClicked: scheduleNewDialog.close()
+                Rectangle {
+                    width: scheduleCancelLabel.implicitWidth + 28
+                    height: 36
+                    radius: theme.radiusMd
+                    color: theme.surfaceAlt
+                    border.color: theme.textMuted
+                    Text {
+                        id: scheduleCancelLabel
+                        anchors.centerIn: parent
+                        text: "Cancel"
+                        font.pixelSize: 13
+                        color: theme.textSecondary
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: scheduleNewDialog.close()
+                        Accessible.name: "Cancel scheduling"
+                        Accessible.role: Accessible.Button
+                    }
                 }
-                Button {
-                    text: "Schedule"
-                    onClicked: scheduleNewDialog.submit()
+                Rectangle {
+                    width: scheduleSubmitLabel.implicitWidth + 28
+                    height: 36
+                    radius: theme.radiusMd
+                    color: theme.accent
+                    Text {
+                        id: scheduleSubmitLabel
+                        anchors.centerIn: parent
+                        text: "Schedule"
+                        font.pixelSize: 13
+                        font.weight: Font.DemiBold
+                        color: "#ffffff"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: scheduleNewDialog.submit()
+                        Accessible.name: "Schedule post"
+                        Accessible.role: Accessible.Button
+                    }
                 }
             }
         }
@@ -276,12 +442,21 @@ Page {
                 Layout.preferredHeight: 36
                 radius: theme.radiusMd
                 color: theme.accent
-                Text {
+                RowLayout {
                     anchors.centerIn: parent
-                    text: "+ Schedule New"
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                    color: "#ffffff"
+                    spacing: theme.spacingXs
+                    Text {
+                        text: theme.iconPlus
+                        font.family: theme.iconFontFamily
+                        font.pixelSize: 12
+                        color: "#ffffff"
+                    }
+                    Text {
+                        text: "Schedule New"
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        color: "#ffffff"
+                    }
                 }
                 MouseArea {
                     anchors.fill: parent
@@ -417,8 +592,9 @@ Page {
                             color: theme.surfaceAlt
                             Text {
                                 anchors.centerIn: parent
-                                text: "<"
-                                font.pixelSize: 14
+                                text: theme.iconChevronLeft
+                                font.family: theme.iconFontFamily
+                                font.pixelSize: 15
                                 color: theme.textPrimary
                             }
                             MouseArea {
@@ -443,8 +619,9 @@ Page {
                             color: theme.surfaceAlt
                             Text {
                                 anchors.centerIn: parent
-                                text: ">"
-                                font.pixelSize: 14
+                                text: theme.iconChevronRight
+                                font.family: theme.iconFontFamily
+                                font.pixelSize: 15
                                 color: theme.textPrimary
                             }
                             MouseArea {
@@ -637,8 +814,10 @@ Page {
                         anchors.centerIn: parent
                         spacing: theme.spacingSm
                         Text {
-                            text: "Calendar"
+                            text: theme.iconCalendar
+                            font.family: theme.iconFontFamily
                             font.pixelSize: 24
+                            color: theme.textMuted
                             horizontalAlignment: Text.AlignHCenter
                             Layout.alignment: Qt.AlignHCenter
                         }

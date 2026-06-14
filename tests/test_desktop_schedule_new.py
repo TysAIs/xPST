@@ -19,6 +19,9 @@ class _Signal:
 def _controller(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)
+    config.notifications.enabled = True
+    config.notifications.on_success = True
+    config.notifications.on_failure = True
     data_changed = _Signal()
     notification = _Signal()
     controller = SimpleNamespace(
@@ -80,6 +83,42 @@ def test_schedule_new_rejects_missing_file(tmp_path):
     assert controller.notification.emitted[-1][1] is True
 
 
+def test_schedule_new_rejects_empty_platforms(tmp_path):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake video")
+    controller = _controller(tmp_path)
+
+    ok = AppController.scheduleNew(
+        controller,
+        str(video),
+        "Caption",
+        "2026-06-12T09:30:00",
+        "[]",
+    )
+
+    assert ok is False
+    assert not (tmp_path / "schedule.json").exists()
+    assert controller.notification.emitted[-1] == ("Select at least one platform", True)
+
+
+def test_schedule_new_rejects_invalid_platform(tmp_path):
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake video")
+    controller = _controller(tmp_path)
+
+    ok = AppController.scheduleNew(
+        controller,
+        str(video),
+        "Caption",
+        "2026-06-12T09:30:00",
+        '["youtube", "youtbe"]',
+    )
+
+    assert ok is False
+    assert not (tmp_path / "schedule.json").exists()
+    assert controller.notification.emitted[-1] == ("Invalid platform: youtbe", True)
+
+
 def test_schedule_page_uses_backend_schedule_new():
     qml = Path(
         "src/xpst/desktop_app/qml/pages/SchedulePage.qml"
@@ -91,3 +130,35 @@ def test_schedule_page_uses_backend_schedule_new():
     assert "controller.scheduledPosts" in text
     assert "scheduleNewHeaderLabel" in text
     assert "Schedule new post" in text
+
+
+def test_schedule_page_does_not_duplicate_success_notification():
+    qml = Path(
+        "src/xpst/desktop_app/qml/pages/SchedulePage.qml"
+    )
+    text = qml.read_text(encoding="utf-8")
+
+    assert 'showToast("Post scheduled", false)' not in text
+    assert 'showToast("Could not schedule post", true)' not in text
+
+
+def test_desktop_shell_routes_backend_notifications_to_toasts():
+    qml = Path("src/xpst/desktop_app/qml/main.qml")
+    text = qml.read_text(encoding="utf-8")
+
+    assert "function onNotification(msg, isError)" in text
+    assert "showToast(msg, isError)" in text
+
+
+def test_schedule_new_dialog_uses_app_theme_controls():
+    qml = Path(
+        "src/xpst/desktop_app/qml/pages/SchedulePage.qml"
+    )
+    text = qml.read_text(encoding="utf-8")
+
+    assert "Button {" not in text
+    assert "background: Rectangle" in text
+    assert "placeholderTextColor: theme.textMuted" in text
+    assert "border.color: schedulePathField.activeFocus ? theme.accent : theme.textMuted" in text
+    assert "contentItem: Text" in text
+    assert "Accessible.name: \"Schedule post\"" in text
