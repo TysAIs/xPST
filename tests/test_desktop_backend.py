@@ -310,6 +310,17 @@ def test_desktop_schedule_rejects_disabled_platform(tmp_path):
     assert not (tmp_path / "schedule.json").exists()
 
 
+def test_desktop_get_file_info_formats_local_file_size(tmp_path):
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"x" * 1536)
+
+    controller = SimpleNamespace()
+
+    assert AppController.getFileInfo(controller, str(video)) == "1.5 KB"
+    assert AppController.getFileInfo(controller, video.as_uri()) == "1.5 KB"
+    assert AppController.getFileInfo(controller, str(tmp_path / "missing.mp4")) == ""
+
+
 def test_desktop_generate_encoding_sample_uses_ffmpeg_and_active_config_dir(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)

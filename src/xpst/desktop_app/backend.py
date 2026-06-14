@@ -1972,6 +1972,33 @@ class AppController(QObject):
             return json.dumps({"ok": False, "error": str(exc)})
 
     @Slot(str, result=str)
+    def getFileInfo(self, file_path: str) -> str:
+        """Return a compact display string for a local file."""
+        if not file_path:
+            return ""
+        source = file_path
+        if source.startswith("file://"):
+            source = source[7:]
+            if len(source) >= 3 and source[0] == "/" and source[2] == ":":
+                source = source[1:]
+        try:
+            path = Path(source).expanduser()
+            if not path.is_file():
+                return ""
+            size = float(path.stat().st_size)
+        except OSError:
+            return ""
+
+        units = ("B", "KB", "MB", "GB", "TB")
+        unit_index = 0
+        while size >= 1024 and unit_index < len(units) - 1:
+            size /= 1024
+            unit_index += 1
+        if unit_index == 0:
+            return f"{int(size)} {units[unit_index]}"
+        return f"{size:.1f} {units[unit_index]}"
+
+    @Slot(str, result=str)
     def getThumbnail(self, video_path: str) -> str:
         """Generate or retrieve a cached thumbnail for a video file/URL.
 
