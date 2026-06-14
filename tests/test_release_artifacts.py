@@ -567,6 +567,28 @@ def test_windows_exe_smoke_can_use_clean_profile(tmp_path):
     assert "xpst-clean-profile-" in marker.read_text(encoding="utf-8")
 
 
+def test_windows_exe_smoke_ignores_late_clean_profile_cleanup_lock(tmp_path, monkeypatch):
+    if os.name != "nt":
+        return
+
+    script = tmp_path / "clean-profile.cmd"
+    script.write_text("@echo off\r\nexit /b 0\r\n", encoding="utf-8")
+
+    calls = []
+
+    def locked_rmtree(path, ignore_errors=False):
+        calls.append(ignore_errors)
+        if not ignore_errors:
+            raise PermissionError("late PyInstaller cleanup lock")
+
+    monkeypatch.setattr("scripts.verify_windows_exe.shutil.rmtree", locked_rmtree)
+
+    result = verify_windows_exe(script, seconds=1, clean_profile=True)
+
+    assert result["ok"] is True
+    assert calls[-1] is True
+
+
 def test_windows_exe_smoke_blocks_unsigned_when_required(tmp_path, monkeypatch):
     if os.name != "nt":
         return
