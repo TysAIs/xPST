@@ -186,8 +186,10 @@ def test_kb_organize_summarizes_result(isolated_home, monkeypatch):
         assigned = 3
 
     captured: dict = {}
+    sentinel_store = object()
 
     def fake_organize_store(store, client, *, threshold):
+        captured["store"] = store
         captured["threshold"] = threshold
         captured["client"] = client
         return _Result()
@@ -199,12 +201,16 @@ def test_kb_organize_summarizes_result(isolated_home, monkeypatch):
     monkeypatch.setattr(
         "xpst.knowledge.organize.pipeline.organize_store", fake_organize_store
     )
+    monkeypatch.setattr(
+        "xpst.knowledge.store.open_default_store", lambda ws: sentinel_store
+    )
 
     result = kb_tools.kb_organize(threshold=0.42)
 
     assert result["nugget_count"] == 3
     assert result["area_count"] == 2
     assert result["assigned"] == 3
+    assert captured["store"] is sentinel_store
     assert captured["threshold"] == 0.42
 
 
@@ -246,6 +252,7 @@ def test_kb_add_reports_ingested(isolated_home, monkeypatch):
         nuggets = [object(), object()]
 
     captured: dict = {}
+    sentinel_store = object()
 
     def fake_ingest(source, **kwargs):
         captured["source"] = source
@@ -262,6 +269,9 @@ def test_kb_add_reports_ingested(isolated_home, monkeypatch):
     monkeypatch.setattr(
         "xpst.knowledge.cli_kb._build_llm_client", lambda config: "L"
     )
+    monkeypatch.setattr(
+        "xpst.knowledge.store.open_default_store", lambda ws: sentinel_store
+    )
     monkeypatch.setattr("xpst.knowledge.ingest.pipeline.ingest", fake_ingest)
 
     result = kb_tools.kb_add("https://example.com/clip")
@@ -269,6 +279,7 @@ def test_kb_add_reports_ingested(isolated_home, monkeypatch):
     assert result["status"] == "ingested"
     assert result["nugget_count"] == 2
     assert captured["source"] == "https://example.com/clip"
+    assert captured["kwargs"]["store"] is sentinel_store
     assert captured["kwargs"]["transcriber"] == "T"
     assert captured["kwargs"]["embedder"] == "E"
     assert captured["kwargs"]["llm_client"] == "L"

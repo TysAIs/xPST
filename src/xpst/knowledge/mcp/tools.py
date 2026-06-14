@@ -36,12 +36,12 @@ def kb_add(source: str, workspace: str = "default") -> dict[str, Any]:
     from xpst.knowledge.config import KnowledgeConfig
     from xpst.knowledge.ingest.pipeline import ingest
     from xpst.knowledge.manifest import Manifest
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
     config = KnowledgeConfig.from_env()
     ws = Workspace.resolve(workspace)
-    store = JsonKnowledgeStore(ws.nuggets_path)
+    store = open_default_store(ws)
     manifest = Manifest(ws.manifest_path)
     result = ingest(
         source,
@@ -95,12 +95,12 @@ def kb_organize(
     from xpst.knowledge.config import KnowledgeConfig
     from xpst.knowledge.organize.cluster import DEFAULT_CLUSTER_THRESHOLD
     from xpst.knowledge.organize.pipeline import organize_store
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
     config = KnowledgeConfig.from_env()
     ws = Workspace.resolve(workspace)
-    store = JsonKnowledgeStore(ws.nuggets_path)
+    store = open_default_store(ws)
     thr = threshold if threshold is not None else DEFAULT_CLUSTER_THRESHOLD
     result = organize_store(store, _build_llm_client(config), threshold=thr)
     return {
@@ -117,11 +117,11 @@ def kb_areas(workspace: str = "default") -> dict[str, Any]:
     Mirrors ``xpst kb areas``.
     """
     from xpst.knowledge.organize.difficulty import order_areas
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
     ws = Workspace.resolve(workspace, create=False)
-    store = JsonKnowledgeStore(ws.nuggets_path)
+    store = open_default_store(ws)
     areas = order_areas(store.areas())
     return {
         "workspace": ws.name,
@@ -140,9 +140,9 @@ def kb_areas(workspace: str = "default") -> dict[str, Any]:
 def kb_course(workspace: str = "default", area_id: str | None = None) -> dict[str, Any]:
     """Assemble organized areas and cited nuggets into a course outline."""
     from xpst.knowledge.course.assemble import assemble_course
-    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
     ws = Workspace.resolve(workspace, create=False)
-    store = JsonKnowledgeStore(ws.nuggets_path)
+    store = open_default_store(ws)
     return assemble_course(store, workspace=ws.name, area_id=area_id).to_dict()

@@ -194,7 +194,7 @@ class TestStoreSelection:
         store = open_default_store(ws)
         assert isinstance(store, JsonKnowledgeStore)
 
-    def test_lancedb_default_for_fresh_workspace_when_installed(
+    def test_json_store_default_for_fresh_workspace_even_when_lancedb_installed(
         self, tmp_path, monkeypatch
     ):
         pytest.importorskip("lancedb")
@@ -202,8 +202,23 @@ class TestStoreSelection:
         ws = Workspace.resolve("fresh")
 
         from xpst.knowledge.store import open_default_store
-        from xpst.knowledge.store.vector_lancedb import LanceDBStore
-        assert isinstance(open_default_store(ws), LanceDBStore)
+        store = open_default_store(ws)
+
+        assert isinstance(store, JsonKnowledgeStore)
+        assert not ws.lancedb_path.exists()
+
+    def test_query_missing_workspace_does_not_create_lancedb_or_json_paths(
+        self, tmp_path, monkeypatch
+    ):
+        pytest.importorskip("lancedb")
+        monkeypatch.setenv("XPST_HOME", str(tmp_path))
+
+        from xpst.knowledge.query import query_nuggets
+
+        result = query_nuggets("nothing", workspace="ghost")
+
+        assert result["count"] == 0
+        assert not (tmp_path / "knowledge" / "ghost").exists()
 
 
 class TestContentDedup:
