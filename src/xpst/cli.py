@@ -471,6 +471,8 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
         json_output(_result_to_dict(result), True)
     else:
         _display_result(result)
+    if not result.all_success:
+        sys.exit(EXIT_GENERAL)
 
 
 @main.command()
@@ -2442,6 +2444,27 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
             raise click.exceptions.Exit(EXIT_GENERAL) from exc
 
     processed: list[dict[str, Any]] = []
+
+    def release_engine_lock() -> None:
+        nonlocal engine_locked
+        if engine is not None and engine_locked:
+            engine.release_pidfile()
+            engine_locked = False
+
+    def mark_complete(entry_id: str, success: bool, error: str | None) -> None:
+        try:
+            manager.mark_complete(entry_id, success=success, error=error)
+        except Exception:
+            release_engine_lock()
+            raise
+
+    def mark_deferred(entry_id: str, error: str | None) -> None:
+        try:
+            manager.mark_deferred(entry_id, error=error)
+        except Exception:
+            release_engine_lock()
+            raise
+
     for entry in due:
         entry_id = entry["id"]
         video_path = Path(entry["video_path"])
@@ -2451,7 +2474,7 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
             invalid = sorted(set(str(p).lower() for p in platforms) - _valid_schedule_platforms(config_obj))
             if invalid:
                 error_msg = "Invalid platform(s): " + ", ".join(invalid)
-                manager.mark_complete(entry_id, success=False, error=error_msg)
+                mark_complete(entry_id, success=False, error=error_msg)
                 processed.append({"id": entry_id, "status": "failed", "error": error_msg})
                 if not as_json:
                     console.print(f"  [red]✗[/red] {entry_id}: {error_msg}")
@@ -2461,7 +2484,7 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
             if not as_json:
                 console.print(f"  [red]✗[/red] {entry_id}: file not found — {video_path}")
             error_msg = f"File not found: {video_path}"
-            manager.mark_complete(entry_id, success=False, error=error_msg)
+            mark_complete(entry_id, success=False, error=error_msg)
             processed.append({"id": entry_id, "status": "failed", "error": error_msg})
             continue
 
@@ -2477,14 +2500,14 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
 
             deferred = _scheduled_post_deferred(result)
             if deferred:
-                manager.mark_deferred(entry_id, error=error_msg)
+                mark_deferred(entry_id, error=error_msg)
                 processed.append({
                     "id": entry_id,
                     "status": "deferred",
                     "error": error_msg,
                 })
             else:
-                manager.mark_complete(entry_id, success=success, error=error_msg)
+                mark_complete(entry_id, success=success, error=error_msg)
                 processed.append({
                     "id": entry_id,
                     "status": "completed" if success else "failed",
@@ -2499,7 +2522,7 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
                 else:
                     console.print(f"  [yellow]⚠[/yellow] {entry_id}: partial — {error_msg}")
         except Exception as e:
-            manager.mark_complete(entry_id, success=False, error=str(e))
+            mark_complete(entry_id, success=False, error=str(e))
             processed.append({"id": entry_id, "status": "failed", "error": str(e)})
             if not as_json:
                 console.print(f"  [red]✗[/red] {entry_id}: {e}")
@@ -2508,8 +2531,9 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
         json_output({"status": "processed", "count": len(due), "posts": processed}, True)
     else:
         console.print(f"\n[green]Processed {len(due)} scheduled post(s)[/green]")
-    if engine is not None and engine_locked:
-        engine.release_pidfile()
+    release_engine_lock()
+    if any(item.get("status") == "failed" for item in processed):
+        sys.exit(EXIT_GENERAL)
 
 
 @schedule.command("install")
@@ -2534,6 +2558,12 @@ def schedule_install(ctx: click.Context, interval: int, uninstall: bool, as_json
     if uninstall:
         result = _uninstall_os_scheduler(system, xpst_bin, as_json)
     else:
+        if interval <= 0:
+            message = "Schedule interval must be greater than zero minutes."
+            if as_json:
+                json_output({"ok": False, "error": message}, True)
+                sys.exit(EXIT_CONFIG_ERROR)
+            raise click.ClickException(message)
         result = _install_os_scheduler(system, xpst_bin, interval, as_json, config_path=config_path)
 
     if not result:

@@ -7,6 +7,7 @@ import json
 import logging
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -298,6 +299,55 @@ class TestPostCommand:
         assert data["ok"] is False
         assert "Invalid platform(s): youtube" in data["error"]
 
+    def test_post_json_failed_upload_exits_nonzero(
+        self, runner, config_file, tmp_path, monkeypatch
+    ):
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+        released = []
+
+        class FailedEngine:
+            def acquire_pidfile(self):
+                return None
+
+            def release_pidfile(self):
+                released.append(True)
+
+            async def post_manual(self, video_path, caption, platforms):
+                assert video_path == video
+                return SimpleNamespace(
+                    video_id="manual-video",
+                    caption=caption,
+                    all_success=False,
+                    partial_success=False,
+                    results={
+                        "youtube": SimpleNamespace(
+                            success=False,
+                            post_url=None,
+                            post_id=None,
+                            error="upload failed",
+                            platform="youtube",
+                        )
+                    },
+                )
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", lambda _config: FailedEngine())
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "post",
+            "--video", str(video),
+            "--caption", "Manual post",
+            "--platforms", "youtube",
+            "--json",
+        ])
+
+        assert result.exit_code == 1
+        data = extract_json(result.output)
+        assert data["all_success"] is False
+        assert data["platforms"]["youtube"]["error"] == "upload failed"
+        assert released == [True]
+
 
 class TestBackfillCommand:
     """Backfill command safety."""
@@ -518,7 +568,7 @@ class TestScheduleRunJson:
         )
 
         result = runner.invoke(main, ["schedule", "run", "--json"])
-        assert result.exit_code == 0
+        assert result.exit_code == 1
         assert result.output.lstrip().startswith("{")
         assert "Found 1 due post" not in result.output
         data = extract_json(result.output)
@@ -561,7 +611,7 @@ class TestScheduleRunJson:
         )
 
         result = runner.invoke(main, ["schedule", "run", "--json"])
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1, result.output
         data = extract_json(result.output)
 
         assert data["status"] == "processed"
@@ -576,6 +626,65 @@ class TestScheduleRunJson:
         reloaded = ScheduleManager(config_dir=sched_dir).list()[0]
         assert reloaded["status"] == "failed"
         assert reloaded["error"] == "Invalid platform(s): youtbe"
+
+    def test_schedule_run_json_failed_upload_exits_nonzero(
+        self, runner, tmp_path, monkeypatch
+    ):
+        from datetime import datetime, timedelta
+
+        from xpst.schedule_manager import ScheduleManager
+
+        orig_init = ScheduleManager.__init__
+        sched_dir = str(tmp_path / ".xpst_schedule")
+
+        def patched_init(self, config_dir="~/.xpst"):
+            orig_init(self, config_dir=sched_dir)
+
+        monkeypatch.setattr(ScheduleManager, "__init__", patched_init)
+
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+        mgr = ScheduleManager(config_dir=sched_dir)
+        entry = mgr.add(
+            str(video),
+            "run me",
+            datetime.now() - timedelta(minutes=1),
+            platforms=["youtube"],
+        )
+
+        class FailedEngine:
+            def acquire_pidfile(self):
+                return None
+
+            def release_pidfile(self):
+                return None
+
+            async def post_manual(self, *_args, **_kwargs):
+                return SimpleNamespace(
+                    all_success=False,
+                    results={
+                        "youtube": SimpleNamespace(
+                            success=False,
+                            error="upload failed",
+                            metadata={},
+                        )
+                    },
+                )
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", lambda _config: FailedEngine())
+
+        result = runner.invoke(main, ["schedule", "run", "--json"])
+        assert result.exit_code == 1, result.output
+        data = extract_json(result.output)
+
+        assert data["status"] == "processed"
+        assert data["posts"] == [
+            {
+                "id": entry["id"],
+                "status": "failed",
+                "error": "youtube: upload failed",
+            }
+        ]
 
     def test_schedule_run_json_keeps_anti_bot_deferral_pending(
         self, runner, tmp_path, monkeypatch
@@ -686,6 +795,95 @@ class TestScheduleRunJson:
         reloaded = ScheduleManager(config_dir=sched_dir).list()[0]
         assert reloaded["status"] == "pending"
         assert reloaded["error"] is None
+
+    def test_schedule_run_releases_lock_when_mark_complete_raises(
+        self, runner, tmp_path, monkeypatch
+    ):
+        from datetime import datetime, timedelta
+
+        from xpst.schedule_manager import ScheduleManager
+
+        orig_init = ScheduleManager.__init__
+        sched_dir = str(tmp_path / ".xpst_schedule")
+
+        def patched_init(self, config_dir="~/.xpst"):
+            orig_init(self, config_dir=sched_dir)
+
+        monkeypatch.setattr(ScheduleManager, "__init__", patched_init)
+
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+        ScheduleManager(config_dir=sched_dir).add(
+            str(video),
+            "run me",
+            datetime.now() - timedelta(minutes=1),
+            platforms=["youtube"],
+        )
+        lock_events = []
+
+        class FailedEngine:
+            def acquire_pidfile(self):
+                lock_events.append("acquire")
+
+            def release_pidfile(self):
+                lock_events.append("release")
+
+            async def post_manual(self, *_args, **_kwargs):
+                return SimpleNamespace(
+                    all_success=False,
+                    results={
+                        "youtube": SimpleNamespace(
+                            success=False,
+                            error="upload failed",
+                            metadata={},
+                        )
+                    },
+                )
+
+        def broken_mark_complete(self, *_args, **_kwargs):
+            raise OSError("state write failed")
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", lambda _config: FailedEngine())
+        monkeypatch.setattr(ScheduleManager, "mark_complete", broken_mark_complete)
+
+        result = runner.invoke(main, ["schedule", "run", "--json"])
+
+        assert result.exit_code != 0
+        assert lock_events == ["acquire", "release"]
+
+
+class TestScheduleInstall:
+    """OS scheduler install validation."""
+
+    def test_schedule_install_json_rejects_zero_interval_before_os_calls(
+        self, runner, monkeypatch
+    ):
+        def fail_install(*_args, **_kwargs):
+            raise AssertionError("OS scheduler install should not be called")
+
+        monkeypatch.setattr("xpst.cli._install_os_scheduler", fail_install)
+
+        result = runner.invoke(main, ["schedule", "install", "--interval", "0", "--json"])
+
+        assert result.exit_code == 4
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert "greater than zero" in data["error"]
+
+    def test_schedule_install_json_rejects_negative_interval_before_os_calls(
+        self, runner, monkeypatch
+    ):
+        def fail_install(*_args, **_kwargs):
+            raise AssertionError("OS scheduler install should not be called")
+
+        monkeypatch.setattr("xpst.cli._install_os_scheduler", fail_install)
+
+        result = runner.invoke(main, ["schedule", "install", "--interval", "-1", "--json"])
+
+        assert result.exit_code == 4
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert "greater than zero" in data["error"]
 
 
 class TestVersionJson:
