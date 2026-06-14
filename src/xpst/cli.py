@@ -28,6 +28,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
+from xpst import __version__
 from xpst.config import XPSTConfig
 from xpst.engine import CrossPostEngine, CrossPostResult
 from xpst.post_preflight import build_post_preflight
@@ -165,7 +166,7 @@ def _active_config_path(ctx: click.Context, config_file: str | None = None) -> s
 @click.option("--verbose", "-v", is_flag=True, help="Enable verbose logging")
 @click.option("--quiet", "-q", is_flag=True, help="Suppress decorative output")
 @click.option("--json", "json_output", is_flag=True, help="Output in JSON format")
-@click.version_option(version="0.1.0", prog_name="xPST")
+@click.version_option(version=__version__, prog_name="xPST")
 @click.pass_context
 def main(ctx: click.Context, config: str | None, verbose: bool, quiet: bool, json_output: bool):
     """

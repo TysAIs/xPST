@@ -20,7 +20,7 @@ class TestVersionChecking:
         """Test that xPST version is returned."""
         ver = get_xpst_version()
         assert ver is not None
-        assert ver == "0.1.0"
+        assert ver == "0.1.0rc2"
 
     def test_get_installed_version_known_package(self):
         """Test getting version of an installed package."""
