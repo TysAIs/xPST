@@ -281,6 +281,35 @@ def test_desktop_process_due_scheduled_post_marks_missing_file_failed(tmp_path):
     assert reloaded["status"] == "failed"
 
 
+def test_desktop_schedule_rejects_disabled_platform(tmp_path):
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"fake")
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.youtube.enabled = False
+    notifications = []
+
+    controller = SimpleNamespace(
+        _config=config,
+        notification=SimpleNamespace(
+            emit=lambda message, is_error: notifications.append((message, is_error))
+        ),
+        refreshData=lambda: None,
+    )
+
+    ok = AppController.scheduleNew(
+        controller,
+        str(video),
+        "Scheduled post",
+        "2026-12-25T10:00:00",
+        '["youtube"]',
+    )
+
+    assert ok is False
+    assert notifications[-1] == ("Invalid platform: youtube", True)
+    assert not (tmp_path / "schedule.json").exists()
+
+
 def test_desktop_generate_encoding_sample_uses_ffmpeg_and_active_config_dir(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)

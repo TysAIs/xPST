@@ -2179,8 +2179,14 @@ def _valid_schedule_platforms(config: Any) -> set[str]:
         from xpst.platforms.base import PlatformRegistry
 
         PlatformRegistry.auto_discover()
-        platforms = {str(name).lower() for name in PlatformRegistry.list_platforms()}
-        return platforms or {"youtube", "instagram", "x"}
+        registered = [str(name).lower() for name in PlatformRegistry.list_platforms()]
+        if not registered:
+            return {"youtube", "instagram", "x"}
+        return {
+            str(name).lower()
+            for name in registered
+            if getattr(getattr(config, str(name).lower(), None), "enabled", False)
+        }
     except Exception:
         return {"youtube", "instagram", "x"}
 

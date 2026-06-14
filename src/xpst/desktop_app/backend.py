@@ -1062,7 +1062,14 @@ class AppController(QObject):
             from xpst.platforms.base import PlatformRegistry
 
             PlatformRegistry.auto_discover()
-            return {str(name).lower() for name in PlatformRegistry.list_platforms()}
+            registered = [str(name).lower() for name in PlatformRegistry.list_platforms()]
+            if not registered:
+                return {"youtube", "instagram", "x"}
+            return {
+                name
+                for name in registered
+                if getattr(getattr(config, name, None), "enabled", False)
+            }
         except Exception:
             return {"youtube", "instagram", "x"}
 

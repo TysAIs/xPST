@@ -268,6 +268,36 @@ class TestPostCommand:
         assert data["status"] == "locked"
         assert data["error"] == "manual post already running"
 
+    def test_post_json_rejects_disabled_platform(
+        self, runner, config_file, tmp_path, monkeypatch
+    ):
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+        with open(config_file) as f:
+            cfg = yaml.safe_load(f)
+        cfg["accounts"]["youtube"]["enabled"] = False
+        with open(config_file, "w") as f:
+            yaml.safe_dump(cfg, f)
+
+        def fail_engine(*_args, **_kwargs):
+            raise AssertionError("CrossPostEngine should not be constructed")
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", fail_engine)
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "post",
+            "--video", str(video),
+            "--caption", "Manual post",
+            "--platforms", "youtube",
+            "--json",
+        ])
+
+        assert result.exit_code == 4
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert "Invalid platform(s): youtube" in data["error"]
+
 
 class TestBackfillCommand:
     """Backfill command safety."""
@@ -392,6 +422,26 @@ class TestScheduleAddJson:
         assert result.exit_code != 0
         assert "Invalid platform(s): youtbe" in result.output
         assert not (Path(sched_dir) / "schedule.json").exists()
+
+    def test_schedule_add_rejects_disabled_platform(self, runner, tmp_path, config_file):
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+        with open(config_file) as f:
+            cfg = yaml.safe_load(f)
+        cfg["accounts"]["youtube"]["enabled"] = False
+        with open(config_file, "w") as f:
+            yaml.safe_dump(cfg, f)
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "schedule", "add", str(video),
+            "--caption", "Disabled target",
+            "--at", "2026-12-25 10:00",
+            "--platforms", "youtube",
+        ])
+
+        assert result.exit_code != 0
+        assert "Invalid platform(s): youtube" in result.output
 
 
 class TestScheduleListJson:
