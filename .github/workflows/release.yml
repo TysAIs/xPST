@@ -47,7 +47,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: python-release
-          path: release/python/*
+          path: |
+            release/python/*
+            !release/python/SHA256SUMS
+            !release/python/SHA512SUMS
 
       - name: Attest Python artifacts
         uses: actions/attest@v4
@@ -119,7 +122,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-release
-          path: release/windows/*
+          path: |
+            release/windows/*
+            !release/windows/SHA256SUMS
+            !release/windows/SHA512SUMS
 
       - name: Attest Windows artifacts
         uses: actions/attest@v4
@@ -161,7 +167,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-release
-          path: release/linux/*
+          path: |
+            release/linux/*
+            !release/linux/SHA256SUMS
+            !release/linux/SHA512SUMS
 
       - name: Attest Linux artifacts
         uses: actions/attest@v4
@@ -199,7 +208,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-release
-          path: release/*
+          path: |
+            release/*
+            !release/SHA256SUMS
+            !release/SHA512SUMS
 
       - name: Attest macOS artifacts
         uses: actions/attest@v4
@@ -215,6 +227,17 @@ jobs:
         with:
           path: release-artifacts
           merge-multiple: true
+
+      - name: Aggregate checksums
+        run: |
+          cd release-artifacts
+          rm -f SHA256SUMS SHA512SUMS
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS' ! -name 'SHA512SUMS' -printf '%P\0' \
+            | sort -z \
+            | xargs -0 sha256sum > SHA256SUMS
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS' ! -name 'SHA512SUMS' -printf '%P\0' \
+            | sort -z \
+            | xargs -0 sha512sum > SHA512SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
