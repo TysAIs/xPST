@@ -455,10 +455,17 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
 
     engine = CrossPostEngine(config)
 
-    if len(media_paths) > 1:
-        result = asyncio.run(engine.post_manual_carousel(media_paths, caption, platform_list))
-    else:
-        result = asyncio.run(engine.post_manual(media_paths[0], caption, platform_list))
+    try:
+        engine.acquire_pidfile()
+    except PidfileLockError as exc:
+        _exit_for_engine_lock(exc, as_json)
+    try:
+        if len(media_paths) > 1:
+            result = asyncio.run(engine.post_manual_carousel(media_paths, caption, platform_list))
+        else:
+            result = asyncio.run(engine.post_manual(media_paths[0], caption, platform_list))
+    finally:
+        engine.release_pidfile()
 
     if as_json:
         json_output(_result_to_dict(result), True)
@@ -505,7 +512,14 @@ def backfill(ctx: click.Context, platforms: str | None, limit: int, dry_run: boo
     if not as_json and not quiet:
         console.print(f"[bold blue]Backfilling (limit: {limit})...[/bold blue]")
 
-    results = asyncio.run(engine.backfill(platform_list, limit))
+    try:
+        engine.acquire_pidfile()
+    except PidfileLockError as exc:
+        _exit_for_engine_lock(exc, as_json)
+    try:
+        results = asyncio.run(engine.backfill(platform_list, limit))
+    finally:
+        engine.release_pidfile()
 
     if as_json:
         out = [_result_to_dict(r) for r in results]

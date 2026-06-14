@@ -240,6 +240,55 @@ class TestPostCommand:
         assert result.exit_code != 0
         assert "Invalid platform(s): youtbe" in result.output
 
+    def test_post_json_reports_active_lock(
+        self, runner, config_file, tmp_path, monkeypatch
+    ):
+        from xpst.utils.pidfile import PidfileLockError
+
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+
+        class LockedEngine:
+            def acquire_pidfile(self):
+                raise PidfileLockError("manual post already running")
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", lambda _config: LockedEngine())
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "post",
+            "--video", str(video),
+            "--caption", "Manual post",
+            "--json",
+        ])
+
+        assert result.exit_code == 1
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert data["status"] == "locked"
+        assert data["error"] == "manual post already running"
+
+
+class TestBackfillCommand:
+    """Backfill command safety."""
+
+    def test_backfill_json_reports_active_lock(self, runner, config_file, monkeypatch):
+        from xpst.utils.pidfile import PidfileLockError
+
+        class LockedEngine:
+            def acquire_pidfile(self):
+                raise PidfileLockError("backfill already running")
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", lambda _config: LockedEngine())
+
+        result = runner.invoke(main, ["--config", config_file, "backfill", "--json"])
+
+        assert result.exit_code == 1
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert data["status"] == "locked"
+        assert data["error"] == "backfill already running"
+
 
 class TestRunCommand:
     """One-shot autoposter command safety."""
