@@ -17,7 +17,9 @@ from typing import Any
 
 # Stable list of the KB tool names this module exposes. The MCP server uses it
 # to route calls and tests use it to assert registration.
-KB_TOOL_NAMES: tuple[str, ...] = ("kb_add", "kb_query", "kb_organize", "kb_areas")
+KB_TOOL_NAMES: tuple[str, ...] = (
+    "kb_add", "kb_query", "kb_organize", "kb_areas", "kb_course"
+)
 
 
 def kb_add(source: str, workspace: str = "default") -> dict[str, Any]:
@@ -133,3 +135,14 @@ def kb_areas(workspace: str = "default") -> dict[str, Any]:
             for area in areas
         ],
     }
+
+
+def kb_course(workspace: str = "default", area_id: str | None = None) -> dict[str, Any]:
+    """Assemble organized areas and cited nuggets into a course outline."""
+    from xpst.knowledge.course.assemble import assemble_course
+    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+    from xpst.knowledge.workspace import Workspace
+
+    ws = Workspace.resolve(workspace, create=False)
+    store = JsonKnowledgeStore(ws.nuggets_path)
+    return assemble_course(store, workspace=ws.name, area_id=area_id).to_dict()

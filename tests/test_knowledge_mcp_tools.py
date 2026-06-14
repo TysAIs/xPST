@@ -46,7 +46,7 @@ def test_importing_kb_tools_stays_light():
     import them internally."""
     code = (
         "import sys; import xpst.knowledge.mcp.tools as t; "
-        "assert t.KB_TOOL_NAMES == ('kb_add', 'kb_query', 'kb_organize', 'kb_areas'); "
+        "assert t.KB_TOOL_NAMES == ('kb_add', 'kb_query', 'kb_organize', 'kb_areas', 'kb_course'); "
         "assert 'faster_whisper' not in sys.modules; "
         "assert 'fastembed' not in sys.modules; "
         "assert 'lancedb' not in sys.modules; "
@@ -61,21 +61,24 @@ def test_importing_kb_tools_stays_light():
 
 # ── Registration ──
 
-def test_mcp_server_registers_four_kb_tools():
-    """The four KB tools must be registered in the server's TOOLS list with the
+def test_mcp_server_registers_kb_tools():
+    """The KB tools must be registered in the server's TOOLS list with the
     right input schemas. Requires the 'mcp' extra (Tool objects are real)."""
     pytest.importorskip("mcp", reason="mcp extra not installed")
     from xpst.mcp import server as mcp_server
 
     tool_names = {tool.name for tool in mcp_server.TOOLS}
-    assert {"kb_add", "kb_query", "kb_organize", "kb_areas"} <= tool_names
+    assert {"kb_add", "kb_query", "kb_organize", "kb_areas", "kb_course"} <= tool_names
 
     by_name = {tool.name: tool for tool in mcp_server.TOOLS}
     assert by_name["kb_add"].inputSchema["required"] == ["source"]
     assert by_name["kb_query"].inputSchema["required"] == ["text"]
+    assert "limit" in by_name["kb_query"].inputSchema["properties"]
     # organize/areas take only an optional workspace (+ threshold for organize).
     assert "required" not in by_name["kb_organize"].inputSchema
     assert "required" not in by_name["kb_areas"].inputSchema
+    assert "required" not in by_name["kb_course"].inputSchema
+    assert "area_id" in by_name["kb_course"].inputSchema["properties"]
 
 
 # ── Workspace isolation ──
@@ -154,6 +157,22 @@ def test_kb_areas_missing_workspace_does_not_create(isolated_home):
     assert result["count"] == 0
     assert result["areas"] == []
     assert not (isolated_home / "knowledge" / "ghost").exists()
+
+
+def test_kb_course_assembles_selected_area(isolated_home):
+    ws = Workspace.resolve("default")
+    nugget = _seed_nugget(ws, "Teach upload duration preflight")
+    store = JsonKnowledgeStore(ws.nuggets_path)
+    area = Area.create(label="Uploads", nugget_ids=[nugget.id], order_index=0)
+    store.upsert_area(area)
+
+    result = kb_tools.kb_course(area_id=area.id)
+
+    assert result["workspace"] == "default"
+    assert result["area_count"] == 1
+    assert result["nugget_count"] == 1
+    assert result["areas"][0]["label"] == "Uploads"
+    assert result["areas"][0]["nuggets"][0]["point"] == "Teach upload duration preflight"
 
 
 # ── kb_organize ──
@@ -334,3 +353,23 @@ async def test_server_dispatches_kb_query_without_engine_init(isolated_home, mon
     assert payload["count"] == 1
     assert "embedding" in payload["nuggets"][0]["point"]
     initialize.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_server_dispatches_kb_course(isolated_home):
+    pytest.importorskip("mcp", reason="mcp extra not installed")
+
+    from xpst.mcp import server as mcp_server
+
+    ws = Workspace.resolve("default")
+    nugget = _seed_nugget(ws, "Build a course outline")
+    store = JsonKnowledgeStore(ws.nuggets_path)
+    area = Area.create(label="Course", nugget_ids=[nugget.id], order_index=0)
+    store.upsert_area(area)
+
+    result = await mcp_server.handle_call_tool("kb_course", {"area_id": area.id})
+
+    assert result.isError is not True
+    payload = json.loads(result.content[0].text)
+    assert payload["area_count"] == 1
+    assert payload["areas"][0]["label"] == "Course"

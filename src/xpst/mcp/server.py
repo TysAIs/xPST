@@ -429,6 +429,12 @@ TOOLS: list[Tool] = [
                     "description": "Workspace name (isolated data dir)",
                     "default": "default",
                 },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of nuggets to return",
+                    "minimum": 1,
+                    "default": 8,
+                },
             },
             "required": ["text"],
             "additionalProperties": False,
@@ -464,6 +470,25 @@ TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Workspace name (isolated data dir)",
                     "default": "default",
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="kb_course",
+        description="Assemble organized areas and cited nuggets into a course outline",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "workspace": {
+                    "type": "string",
+                    "description": "Workspace name (isolated data dir)",
+                    "default": "default",
+                },
+                "area_id": {
+                    "type": "string",
+                    "description": "Optional area id to assemble; omit for the full course",
                 },
             },
             "additionalProperties": False,
@@ -552,7 +577,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         elif name == "xpst_delete":
             engine = server.get_engine()
             return await _handle_delete(engine, arguments)
-        elif name in {"kb_add", "kb_query", "kb_organize", "kb_areas"}:
+        elif name in {"kb_add", "kb_query", "kb_organize", "kb_areas", "kb_course"}:
             return await _handle_kb_tool(name, arguments)
         else:
             return CallToolResult(
@@ -970,13 +995,19 @@ async def _handle_kb_tool(name: str, args: dict[str, Any]) -> CallToolResult:
     if name == "kb_add":
         payload = await asyncio.to_thread(kb_tools.kb_add, args["source"], workspace)
     elif name == "kb_query":
-        payload = await asyncio.to_thread(kb_tools.kb_query, args["text"], workspace)
+        payload = await asyncio.to_thread(
+            kb_tools.kb_query, args["text"], workspace, args.get("limit", 8)
+        )
     elif name == "kb_organize":
         payload = await asyncio.to_thread(
             kb_tools.kb_organize, workspace, args.get("threshold")
         )
-    else:  # kb_areas
+    elif name == "kb_areas":
         payload = await asyncio.to_thread(kb_tools.kb_areas, workspace)
+    else:  # kb_course
+        payload = await asyncio.to_thread(
+            kb_tools.kb_course, workspace, args.get("area_id")
+        )
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
