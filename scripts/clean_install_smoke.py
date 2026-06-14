@@ -52,9 +52,9 @@ def venv_xpst_mcp(venv_dir: Path) -> Path:
     return venv_dir / "bin" / "xpst-mcp"
 
 
-def run_command(cmd: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def run_command(cmd: list[str], env: dict[str, str], timeout: int = 120) -> subprocess.CompletedProcess[str]:
     """Run a command and capture text output."""
-    return subprocess.run(cmd, text=True, capture_output=True, env=env, timeout=120, check=False)
+    return subprocess.run(cmd, text=True, capture_output=True, env=env, timeout=timeout, check=False)
 
 
 def json_from_output(output: str) -> object:
@@ -217,10 +217,14 @@ def run_clean_install_smoke(
     work_dir: Path,
     keep: bool = False,
     artifact: str = "wheel",
+    install_timeout: int = 300,
 ) -> dict[str, object]:
     """Install Python artifacts into fresh virtual environments and smoke core commands."""
     artifacts = _select_artifacts(dist_dir, artifact)
-    results = [_smoke_artifact(path, work_dir / path.stem.replace(".", "-"), keep=keep) for path in artifacts]
+    results = [
+        _smoke_artifact(path, work_dir / path.stem.replace(".", "-"), keep=keep, install_timeout=install_timeout)
+        for path in artifacts
+    ]
     return {
         "ok": True,
         "artifacts": results,
@@ -229,7 +233,12 @@ def run_clean_install_smoke(
     }
 
 
-def _smoke_artifact(artifact_path: Path, work_dir: Path, keep: bool = False) -> dict[str, object]:
+def _smoke_artifact(
+    artifact_path: Path,
+    work_dir: Path,
+    keep: bool = False,
+    install_timeout: int = 300,
+) -> dict[str, object]:
     """Install one artifact into a fresh virtual environment and smoke core commands."""
     venv_dir = work_dir / "venv"
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -253,6 +262,7 @@ def _smoke_artifact(artifact_path: Path, work_dir: Path, keep: bool = False) -> 
             install_target,
         ],
         env,
+        timeout=install_timeout,
     )
     if install.returncode != 0:
         raise RuntimeError(f"Artifact install failed for {artifact_path.name}:\n{install.stdout}\n{install.stderr}")
@@ -309,6 +319,12 @@ def main() -> int:
     )
     parser.add_argument("--work-dir", default=None, help="Working directory to use instead of a temporary directory")
     parser.add_argument("--keep", action="store_true", help="Keep the temporary smoke environment")
+    parser.add_argument(
+        "--install-timeout",
+        type=int,
+        default=300,
+        help="Seconds to allow for installing each artifact and its dependencies",
+    )
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     args = parser.parse_args()
 
@@ -322,7 +338,13 @@ def main() -> int:
         cleanup = not args.keep
 
     try:
-        result = run_clean_install_smoke(dist_dir, work_dir, keep=args.keep, artifact=args.artifact)
+        result = run_clean_install_smoke(
+            dist_dir,
+            work_dir,
+            keep=args.keep,
+            artifact=args.artifact,
+            install_timeout=args.install_timeout,
+        )
     except Exception as exc:
         if args.json:
             print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))

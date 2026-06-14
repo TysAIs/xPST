@@ -98,6 +98,7 @@ def test_clean_install_smoke_disables_pip_cache(tmp_path, monkeypatch):
     artifact.parent.mkdir()
     artifact.write_bytes(b"sdist")
     commands = []
+    timeouts = []
 
     class FakeBuilder:
         def __init__(self, *args, **kwargs):
@@ -106,14 +107,21 @@ def test_clean_install_smoke_disables_pip_cache(tmp_path, monkeypatch):
         def create(self, venv_dir):
             (venv_dir / "Scripts").mkdir(parents=True)
 
-    def fake_run_command(cmd, env):
+    def fake_run_command(cmd, env, timeout=120):
         commands.append(cmd)
+        timeouts.append(timeout)
         return SimpleNamespace(returncode=1, stdout="", stderr="stop after install")
 
     monkeypatch.setattr("scripts.clean_install_smoke.venv.EnvBuilder", FakeBuilder)
     monkeypatch.setattr("scripts.clean_install_smoke.run_command", fake_run_command)
 
     with pytest.raises(RuntimeError):
-        run_clean_install_smoke(artifact.parent, tmp_path / "work", artifact="sdist")
+        run_clean_install_smoke(
+            artifact.parent,
+            tmp_path / "work",
+            artifact="sdist",
+            install_timeout=777,
+        )
 
     assert "--no-cache-dir" in commands[0]
+    assert timeouts == [777]
