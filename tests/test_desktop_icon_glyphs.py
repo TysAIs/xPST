@@ -599,6 +599,19 @@ def test_settings_notification_switches_round_trip_config():
     assert "checked: true" not in settings
 
 
+def test_platform_health_missing_credentials_is_actionable_in_ui():
+    from pathlib import Path
+
+    root = Path(__file__).parent.parent / "src" / "xpst" / "desktop_app" / "qml" / "pages"
+    connect = (root / "ConnectPage.qml").read_text(encoding="utf-8-sig")
+    dashboard = (root / "DashboardPage.qml").read_text(encoding="utf-8-sig")
+
+    assert 'status === "missing_credentials") return theme.warning' in connect
+    assert 'status === "missing_credentials") return "Missing credentials"' in connect
+    assert 's === "missing_credentials") return theme.warning' in dashboard
+    assert 's === "missing_credentials") return "Missing credentials"' in dashboard
+
+
 def test_settings_rate_limit_ui_matches_daily_config():
     from pathlib import Path
 

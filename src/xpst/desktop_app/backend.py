@@ -292,6 +292,10 @@ class AppController(QObject):
                 AppController._emit_notification(self, "Post removed from xPST state only", False)
             return
 
+        if payload.get("deferred"):
+            AppController._emit_notification(self, "Post deferred", False)
+            return
+
         if payload.get("all_success"):
             AppController._emit_notification(self, "Post completed successfully", False)
         elif payload.get("partial_success"):
@@ -1360,6 +1364,7 @@ class AppController(QObject):
                         "caption": entry["caption"],
                         "all_success": success,
                         "partial_success": bool(getattr(result, "partial_success", False)),
+                        "deferred": deferred,
                         "scheduled": True,
                         "schedule_id": entry_id,
                     }, default=str))

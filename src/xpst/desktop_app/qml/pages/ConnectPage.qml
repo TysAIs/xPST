@@ -164,13 +164,14 @@ Page {
 
     function getHealthColor(status) {
         if (status === "ok" || status === "healthy" || status === "connected") return theme.success
-        if (status === "warning" || status === "degraded") return theme.warning
+        if (status === "warning" || status === "degraded" || status === "missing_credentials") return theme.warning
         if (status === "error" || status === "failed") return theme.error
         return theme.textMuted
     }
 
     function getHealthLabel(status) {
         if (status === "ok" || status === "healthy" || status === "connected") return "Healthy"
+        if (status === "missing_credentials") return "Missing credentials"
         if (status === "warning" || status === "degraded") return "Degraded"
         if (status === "error" || status === "failed") return "Error"
         return "Unknown"

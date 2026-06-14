@@ -336,7 +336,7 @@ Page {
                                     color: {
                                         var s = modelData.status || "unknown"
                                         if (s === "ok" || s === "healthy" || s === "connected") return theme.success
-                                        if (s === "warning" || s === "degraded") return theme.warning
+                                        if (s === "warning" || s === "degraded" || s === "missing_credentials") return theme.warning
                                         if (s === "error" || s === "failed") return theme.error
                                         return theme.textMuted
                                     }
@@ -353,6 +353,7 @@ Page {
                                         text: {
                                             var s = modelData.status || "unknown"
                                             if (s === "ok" || s === "healthy" || s === "connected") return "Connected"
+                                            if (s === "missing_credentials") return "Missing credentials"
                                             if (s === "warning" || s === "degraded") return "Degraded"
                                             if (s === "error" || s === "failed") return "Error"
                                             return "Unknown"

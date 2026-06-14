@@ -287,6 +287,79 @@ def test_desktop_process_due_scheduled_post_marks_missing_file_failed(tmp_path):
     assert reloaded["status"] == "failed"
 
 
+def test_desktop_process_due_scheduled_post_marks_deferred_without_failure_notification(tmp_path):
+    from datetime import datetime, timedelta
+
+    from xpst.schedule_manager import ScheduleManager
+
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"fake")
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.instagram.enabled = True
+    manager = ScheduleManager(str(tmp_path))
+    entry = manager.add(
+        str(video),
+        "Scheduled post",
+        datetime.now() - timedelta(minutes=1),
+        platforms=["instagram"],
+    )
+    emitted = []
+    locks = []
+
+    class SignalSink:
+        def emit(self, payload):
+            emitted.append(payload)
+
+    class FakeEngine:
+        def acquire_pidfile(self):
+            locks.append("acquire")
+
+        def release_pidfile(self):
+            locks.append("release")
+
+        async def post_manual(self, video_path, caption, platforms):
+            assert video_path == video
+            assert caption == "Scheduled post"
+            assert platforms == ["instagram"]
+            return SimpleNamespace(
+                video_id="scheduled-video",
+                all_success=False,
+                partial_success=False,
+                results={
+                    "instagram": SimpleNamespace(
+                        success=False,
+                        error="Outside posting hours (8am-11pm), deferred",
+                        metadata={"deferred": True},
+                    )
+                },
+            )
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=FakeEngine(),
+        _ensure_engine=lambda: True,
+        postComplete=SignalSink(),
+    )
+
+    processed = AppController._process_due_scheduled_posts_once(controller)
+    payload = json.loads(emitted[0])
+
+    assert processed == [
+        {
+            "id": entry["id"],
+            "status": "deferred",
+            "error": "instagram: Outside posting hours (8am-11pm), deferred",
+        }
+    ]
+    assert locks == ["acquire", "release"]
+    assert payload["deferred"] is True
+    assert payload["all_success"] is False
+    reloaded = ScheduleManager(str(tmp_path)).list()[0]
+    assert reloaded["status"] == "pending"
+    assert reloaded["completed_at"] is None
+
+
 def test_desktop_schedule_rejects_disabled_platform(tmp_path):
     video = tmp_path / "video.mp4"
     video.write_bytes(b"fake")
@@ -1004,6 +1077,17 @@ def test_desktop_post_complete_notifications_match_autoposter_result():
         ("No new posts were ready", False),
         ("Post partially completed", True),
     ]
+
+
+def test_desktop_post_complete_notification_treats_deferred_as_neutral():
+    notifications = []
+    controller = AppController()
+    _enable_desktop_notifications(controller._config)
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.postComplete.emit(json.dumps({"all_success": False, "partial_success": False, "deferred": True}))
+
+    assert notifications == [("Post deferred", False)]
 
 
 def test_desktop_notification_settings_can_suppress_success_alerts():
