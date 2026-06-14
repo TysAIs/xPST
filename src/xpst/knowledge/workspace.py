@@ -7,10 +7,16 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from xpst.utils.platform import get_config_dir
+
 _WORKSPACE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 def _xpst_home(home: str | Path | None = None) -> Path:
-    return Path(home if home is not None else os.environ.get("XPST_HOME", "~/.xpst")).expanduser()
+    if home is not None:
+        return Path(home).expanduser()
+    if override := os.environ.get("XPST_HOME"):
+        return Path(override).expanduser()
+    return get_config_dir()
 
 
 def _validate_workspace_name(name: str) -> str:

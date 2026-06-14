@@ -5,6 +5,7 @@ Handles OS-specific differences in paths, signals, and process management.
 """
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -20,30 +21,11 @@ def get_config_dir() -> Path:
     Returns:
         Path to config directory
 
-    Coverage note (W3-4):
-        This helper is the single source of truth for the config directory,
-        but a large number of hardcoded ``~/.xpst`` literals across the
-        codebase (~89) still bypass it. They were NOT migrated wholesale: a
-        blind repo-wide replace is risky because many of those literals are
-        user-facing *display* strings (help text, console hints, log lines,
-        docstrings) rather than real path construction, and rewriting them
-        would change output without changing behavior.
-
-        Routed through this helper (high-value, desktop/app-critical paths):
-          - ``cli.py`` ``dashboard`` and ``app`` commands' config_dir default.
-          - ``cli.py`` cron/launchd scheduler log paths
-            (~/.xpst/logs/*), which must be real expanded paths so cron and
-            launchd can write to them.
-
-        Deferred (intentionally left as literals for now):
-          - Display/help/console strings that merely *mention* ``~/.xpst`` for
-            the user (e.g. "Logs: ~/.xpst/logs/cron.log").
-          - Default values inside the config loader / config model, which have
-            their own POSIX-vs-Windows handling and are exercised by the
-            config test suite.
-        These are tracked here so the migration state is explicit rather than
-        ambiguous; finishing them is a separate, lower-risk follow-up.
+    ``XPST_CONFIG_DIR`` is honored first, making this helper the single source
+    of truth for user data and configuration paths.
     """
+    if override := os.environ.get("XPST_CONFIG_DIR"):
+        return Path(override).expanduser()
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
         if appdata:
@@ -57,6 +39,11 @@ def get_ffmpeg_name() -> str:
     if sys.platform == "win32":
         return "ffmpeg.exe"
     return "ffmpeg"
+
+
+def ensure_ffmpeg() -> str | None:
+    """Return the ffmpeg executable path when it is available on PATH."""
+    return shutil.which(get_ffmpeg_name()) or shutil.which("ffmpeg")
 
 
 def get_ffprobe_name() -> str:

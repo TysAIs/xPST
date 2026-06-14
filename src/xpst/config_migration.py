@@ -6,11 +6,11 @@ Supports incremental migrations from any version to latest.
 
 from __future__ import annotations
 
-import os
 import shutil
-import sys
 import time
 from pathlib import Path
+
+from xpst.utils.platform import get_config_dir
 
 
 class ConfigMigration:
@@ -31,11 +31,7 @@ class ConfigMigration:
             config_dir: Path to config directory. Defaults to platform default.
         """
         if config_dir is None:
-            if sys.platform == "win32":
-                appdata = os.environ.get("APPDATA")
-                config_dir = Path(appdata) / "xPST" if appdata else Path.home() / ".xpst"
-            else:
-                config_dir = Path.home() / ".xpst"
+            config_dir = get_config_dir()
 
         self.config_dir = Path(config_dir)
         self.config_file = self.config_dir / "config.yaml"
@@ -135,7 +131,7 @@ class ConfigMigration:
         if "monitoring" not in data:
             data["monitoring"] = {
                 "log_level": "INFO",
-                "log_file": "~/.xpst/logs/xpst.log",
+                "log_file": str(get_config_dir() / "logs" / "xpst.log"),
                 "log_rotation": "10 MB",
                 "healthcheck_port": 8080,
                 "enable_metrics": True,
@@ -167,7 +163,7 @@ class ConfigMigration:
 
         # Ensure all monitoring fields exist with correct structure
         monitoring.setdefault("log_level", "INFO")
-        monitoring.setdefault("log_file", "~/.xpst/logs/xpst.log")
+        monitoring.setdefault("log_file", str(get_config_dir() / "logs" / "xpst.log"))
         monitoring.setdefault("log_rotation", "10 MB")
         monitoring.setdefault("healthcheck_port", 8080)
         monitoring.setdefault("enable_metrics", True)

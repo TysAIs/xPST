@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import get_config_dir
 
 logger = get_logger(__name__)
 
@@ -50,7 +51,7 @@ class AnalyticsStore:
 
     def __init__(self, db_path: Path | str | None = None) -> None:
         if db_path is None:
-            db_path = Path("~/.xpst/analytics.db").expanduser()
+            db_path = get_config_dir() / "analytics.db"
         self.db_path = Path(db_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:

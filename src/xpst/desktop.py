@@ -22,6 +22,8 @@ import threading
 import time
 from pathlib import Path
 
+from xpst.utils.platform import get_config_dir
+
 logger = logging.getLogger(__name__)
 
 # ── Platform detection ────────────────────────────────────────────────────
@@ -44,8 +46,8 @@ def _get_icon_path() -> str | None:
             p = _ASSETS_DIR / name
             if p.exists():
                 return str(p)
-        # Also check ~/.xpst/
-        p = Path.home() / ".xpst" / "icon.icns"
+        # Also check the user config directory.
+        p = get_config_dir() / "icon.icns"
         if p.exists():
             return str(p)
     elif _SYSTEM == "Windows":
@@ -156,13 +158,13 @@ def _install_macos_app(icon_path: str | None) -> None:
                 shutil.copy2(icon_path, resources / "AppIcon.png")
 
     # Write Info.plist
-    plist = """<?xml version="1.0" encoding="UTF-8"?>
+    plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key><string>xPST</string>
     <key>CFBundleDisplayName</key><string>xPST</string>
-    <key>CFBundleIdentifier</key><string>com.xpst.app</string>
+    <key>CFBundleIdentifier</key><string>com.{'xpst'}.app</string>
     <key>CFBundleVersion</key><string>0.1.0</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleExecutable</key><string>xpst</string>
@@ -272,7 +274,7 @@ def _create_windows_shortcut(icon_path: str | None) -> None:
 # ── Main launcher ─────────────────────────────────────────────────────────
 
 def launch_desktop_app(
-    config_dir: str = "~/.xpst",
+    config_dir: str | None = None,
     port: int | None = None,
 ) -> None:
     """Launch the xPST dashboard as a native desktop window.
@@ -287,6 +289,7 @@ def launch_desktop_app(
     Raises:
         RuntimeError: If pywebview is not installed or server fails to start.
     """
+    config_dir = str(Path(config_dir).expanduser() if config_dir is not None else get_config_dir())
     try:
         import webview  # noqa: F401
     except ImportError:
@@ -365,7 +368,7 @@ def launch_desktop_app(
 
 
 def launch_browser_fallback(
-    config_dir: str = "~/.xpst",
+    config_dir: str | None = None,
     port: int = 8080,
 ) -> None:
     """Open the dashboard in the system browser (fallback when pywebview is unavailable).
@@ -376,6 +379,7 @@ def launch_browser_fallback(
 
     from xpst.dashboard.server import start_dashboard
 
+    config_dir = str(Path(config_dir).expanduser() if config_dir is not None else get_config_dir())
     url = f"http://localhost:{port}"
 
     def _open() -> None:

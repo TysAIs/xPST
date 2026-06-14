@@ -32,6 +32,7 @@ from xpst.config import XPSTConfig
 from xpst.crash_recovery import CrashRecoveryManager
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
+from xpst.utils.platform import get_config_dir
 from xpst.utils.shutdown import ShutdownHandler
 
 # ---------------------------------------------------------------------------
@@ -42,9 +43,10 @@ class TestPathHandling:
     """Config paths expand correctly, state files created in right locations, temp files work."""
 
     def test_expanduser_tilde_in_config_dir(self, tmp_path):
-        """~/.xpst expands to an absolute path."""
+        """Default config_dir uses the platform config directory."""
         config = XPSTConfig()
-        assert config.config_dir == "~/.xpst"
+        assert Path(config.config_dir) == get_config_dir()
+        assert Path(config.config_dir).is_absolute()
 
         # After load(), paths must be expanded
         config_file = tmp_path / "config.yaml"

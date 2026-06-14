@@ -15,6 +15,8 @@ from PySide6.QtCore import (
     Qt,
 )
 
+from xpst.utils.platform import get_config_dir
+
 # Optional: state manager for real data
 try:
     from xpst.state import StateManager
@@ -94,7 +96,7 @@ class PostListModel(QAbstractListModel):
 
     # ── Public API ───────────────────────────────────────────────────
 
-    def load_from_state(self, state_dir: str = "~/.xpst") -> None:
+    def load_from_state(self, state_dir: str | None = None) -> None:
         """Reload the model from StateManager state.json.
 
         Each posted video becomes one row, with one entry per platform
@@ -104,7 +106,7 @@ class PostListModel(QAbstractListModel):
             return
 
         try:
-            sm = StateManager(state_dir=state_dir)
+            sm = StateManager(state_dir=state_dir or get_config_dir())
             posted = sm._state.get("posted_videos", {})
         except Exception:
             posted = {}

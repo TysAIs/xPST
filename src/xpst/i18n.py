@@ -1,7 +1,7 @@
 """Simple i18n framework for xPST desktop app.
 
 Provides a tr() lookup function that loads translation strings from
-JSON files in ~/.xpst/translations/<lang>.json.
+JSON files in the user translations directory.
 """
 
 from __future__ import annotations
@@ -11,12 +11,14 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from xpst.utils.platform import get_config_dir
+
 logger = logging.getLogger(__name__)
 
 # Current language (default English)
 _current_lang: str = "en"
 _translations: dict[str, str] = {}
-_translations_dir: Path = Path("~/.xpst/translations").expanduser()
+_translations_dir: Path = get_config_dir() / "translations"
 
 
 def set_language(lang: str) -> None:
@@ -54,7 +56,7 @@ def get_available_languages() -> list[str]:
 
 
 def _load_translations(lang: str) -> None:
-    """Load translation strings from ~/.xpst/translations/<lang>.json."""
+    """Load translation strings from the user translations directory."""
     global _translations
     path = _translations_dir / f"{lang}.json"
     if not path.exists():
@@ -125,7 +127,7 @@ _translations_dir_bundled = _bundled_dir if (_bundled_dir / "en.json").exists() 
 
 # Override load to also check bundled dir
 def _load_translations(lang: str) -> None:
-    """Load translation strings from ~/.xpst/translations/<lang>.json
+    """Load translation strings from the bundled fallback directory.
     or from the bundled i18n/ directory."""
     global _translations
 

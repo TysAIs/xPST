@@ -4,7 +4,7 @@ from __future__ import annotations
 Schedule Manager for xPST
 
 Manages scheduled posts that should be published at a specific time.
-Stores entries in ~/.xpst/schedule.json.
+Stores entries in the xPST config directory.
 
 Each entry:
     {
@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import get_config_dir
 
 logger = get_logger(__name__)
 
@@ -63,17 +64,17 @@ def _clamp_day(day: int, year: int, month: int) -> int:
 class ScheduleManager:
     """Manages scheduled posts for xPST.
 
-    Stores scheduled posts in ~/.xpst/schedule.json and provides
+    Stores scheduled posts in the xPST config directory and provides
     methods to add, list, remove, and process due posts.
     """
 
-    def __init__(self, config_dir: str = "~/.xpst"):
+    def __init__(self, config_dir: str | None = None):
         """Initialize the schedule manager.
 
         Args:
             config_dir: Path to the xPST config directory.
         """
-        self.config_dir = Path(config_dir).expanduser()
+        self.config_dir = Path(config_dir).expanduser() if config_dir is not None else get_config_dir()
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.schedule_file = self.config_dir / "schedule.json"
         self.lock_path = self.config_dir / ".schedule.lock"

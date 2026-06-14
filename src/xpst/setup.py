@@ -21,12 +21,12 @@ from rich.panel import Panel
 
 from xpst.config import XPSTConfig
 from xpst.utils.logger import get_logger
-from xpst.utils.platform import get_ffmpeg_name
+from xpst.utils.platform import get_config_dir, get_ffmpeg_name
 
 console = Console()
 logger = get_logger(__name__)
 
-CONFIG_DIR = Path.home() / ".xpst"
+CONFIG_DIR = get_config_dir()
 REQUIRED_DIRS = [
     "credentials",
     "downloads",
@@ -82,7 +82,7 @@ def check_yt_dlp() -> str | None:
 
 
 def create_directory_structure() -> Path:
-    """Create the ``~/.xpst/`` directory structure with required subdirectories.
+    """Create the xPST config directory structure with required subdirectories.
 
     Creates: ``credentials/``, ``downloads/``, ``logs/``, ``backups/``.
 
@@ -90,7 +90,7 @@ def create_directory_structure() -> Path:
         Path to the created config directory.
     """
 
-    config_dir = Path.home() / ".xpst"
+    config_dir = get_config_dir()
     config_dir.mkdir(parents=True, exist_ok=True)
 
     for subdir in REQUIRED_DIRS:

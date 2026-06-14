@@ -61,6 +61,10 @@ class SmokeController(QObject):
         return "[]"
 
     @Property(str, notify=dataChanged)
+    def scheduledPosts(self) -> str:
+        return "[]"
+
+    @Property(str, notify=dataChanged)
     def analyticsData(self) -> str:
         return json.dumps({"available": False})
 
@@ -100,6 +104,11 @@ class SmokeController(QObject):
     @Slot(str, str)
     def postVideo(self, _path: str, _caption: str) -> None:
         self.notification.emit("Smoke post skipped", False)
+
+    @Slot(str, str, str, str, result=bool)
+    def scheduleNew(self, _path: str, _caption: str, _when_iso: str, _platforms: str) -> bool:
+        self.notification.emit("Smoke schedule skipped", False)
+        return True
 
     @Slot(str, result=str)
     def getThumbnail(self, _path: str) -> str:

@@ -1,9 +1,9 @@
-"""
+﻿"""
 Configuration management for xPST
 
 Handles loading, validation, and merging of configuration from:
 1. Default values
-2. Config file (~/.xpst/config.yaml)
+2. Config file in the xPST config directory
 3. Environment variables
 4. CLI arguments
 
@@ -13,7 +13,7 @@ Example config file:
         username: "your_username"
       youtube:
         enabled: true
-        client_secrets: "~/.xpst/credentials/youtube_client_secrets.json"
+        client_secrets: "<config-dir>/credentials/youtube_client_secrets.json"
 """
 
 import logging
@@ -24,124 +24,134 @@ from typing import Any
 
 import yaml
 
+from xpst.utils.platform import get_config_dir
+
 logger = logging.getLogger(__name__)
 
-# Default configuration values
-DEFAULT_CONFIG = {
-    "accounts": {
-        "tiktok": {
-            "username": "",
-            "cookies_from_browser": False,
-            "cookies_file": None,
-        },
-        "youtube": {
-            "enabled": True,
-            "client_secrets": "~/.xpst/credentials/youtube_client_secrets.json",
-            "token_file": "~/.xpst/credentials/youtube_token.json",
-        },
-        "x": {
-            "enabled": True,
-            "cookies_file": "~/.xpst/credentials/x_cookies.json",
-        },
-        "instagram": {
-            "enabled": True,
-            "session_file": "~/.xpst/credentials/instagram_session.json",
-            "username": "",
-        },
-        "local": {
-            "path": "",
-        },
-    },
-    "video": {
-        "download_dir": "~/.xpst/downloads",
-        "cleanup_after_post": False,
-        "encoding": {
-            "youtube": {
-                "passthrough": False,
-                "resolution": 1920,
-                "bitrate": "8M",
-                "maxrate": "10M",
-                "bufsize": "12M",
-                "profile": "high",
-                "gop": 15,
-                "fps": 60,
-                "color": "bt709",
-                "pix_fmt": "yuv420p",
+
+def _config_path(*parts: str) -> str:
+    return str(get_config_dir().joinpath(*parts))
+
+
+def _default_config() -> dict[str, Any]:
+    return {
+        "accounts": {
+            "tiktok": {
+                "username": "",
+                "cookies_from_browser": False,
+                "cookies_file": None,
             },
-            "instagram": {
-                "resolution": 1920,
-                "crf": 20,
-                "maxrate": "10M",
-                "profile": "high",
-                "level": "4.0",
-                "gop": 72,
-                "fps": 60,
-                "color": "bt709",
-                "pix_fmt": "yuv420p",
+            "youtube": {
+                "enabled": True,
+                "client_secrets": _config_path("credentials", "youtube_client_secrets.json"),
+                "token_file": _config_path("credentials", "youtube_token.json"),
             },
             "x": {
-                "resolution": 1920,
-                "bitrate": "10M",
-                "maxrate": "12M",
-                "profile": "high",
-                "level": "4.0",
-                "gop": 90,
-                "fps": 60,
-                "color": "bt709",
-                "pix_fmt": "yuv420p",
+                "enabled": True,
+                "cookies_file": _config_path("credentials", "x_cookies.json"),
+            },
+            "instagram": {
+                "enabled": True,
+                "session_file": _config_path("credentials", "instagram_session.json"),
+                "username": "",
+            },
+            "local": {
+                "path": "",
             },
         },
-    },
-    "reliability": {
-        "max_retries": 3,
-        "retry_backoff": 2,
-        "circuit_breaker_threshold": 5,
-        "circuit_breaker_reset": 3600,
-    },
-    "monitoring": {
-        "log_level": "INFO",
-        "log_file": "~/.xpst/logs/xpst.log",
-        "log_rotation": "10 MB",
-        "healthcheck_port": 8080,
-        "enable_metrics": True,
-        "dashboard_username": "",
-        "dashboard_password_hash": "",
-        "health_check_interval": 300,
-    },
-    "notifications": {
-        "enabled": False,
-        "on_success": True,
-        "on_failure": True,
-        "discord": {
-            "webhook_url": "",
+        "video": {
+            "download_dir": _config_path("downloads"),
+            "cleanup_after_post": False,
+            "encoding": {
+                "youtube": {
+                    "passthrough": False,
+                    "resolution": 1920,
+                    "bitrate": "8M",
+                    "maxrate": "10M",
+                    "bufsize": "12M",
+                    "profile": "high",
+                    "gop": 15,
+                    "fps": 60,
+                    "color": "bt709",
+                    "pix_fmt": "yuv420p",
+                },
+                "instagram": {
+                    "resolution": 1920,
+                    "crf": 20,
+                    "maxrate": "10M",
+                    "profile": "high",
+                    "level": "4.0",
+                    "gop": 72,
+                    "fps": 60,
+                    "color": "bt709",
+                    "pix_fmt": "yuv420p",
+                },
+                "x": {
+                    "resolution": 1920,
+                    "bitrate": "10M",
+                    "maxrate": "12M",
+                    "profile": "high",
+                    "level": "4.0",
+                    "gop": 90,
+                    "fps": 60,
+                    "color": "bt709",
+                    "pix_fmt": "yuv420p",
+                },
+            },
         },
-        "telegram": {
-            "bot_token": "",
-            "chat_id": "",
+        "reliability": {
+            "max_retries": 3,
+            "retry_backoff": 2,
+            "circuit_breaker_threshold": 5,
+            "circuit_breaker_reset": 3600,
         },
-    },
-    "rate_limits": {
-        "youtube": 5,
-        "instagram": 5,
-        "x": 5,
-        "tiktok": 5,
-    },
-    "schedule": {
-        "check_interval": 900,  # 15 minutes
-        "catchup_window": 172800,  # 48 hours
-        "catchup_times_per_day": 3,
-    },
-    "shortcuts": {
-        "dashboard": "Ctrl+1",
-        "content": "Ctrl+2",
-        "analytics": "Ctrl+3",
-        "connect": "Ctrl+4",
-        "schedule": "Ctrl+5",
-        "refresh": "Ctrl+R",
-        "quit": "Ctrl+Q",
-    },
-}
+        "monitoring": {
+            "log_level": "INFO",
+            "log_file": _config_path("logs", "xpst.log"),
+            "log_rotation": "10 MB",
+            "healthcheck_port": 8080,
+            "enable_metrics": True,
+            "dashboard_username": "",
+            "dashboard_password_hash": "",
+            "health_check_interval": 300,
+        },
+        "notifications": {
+            "enabled": False,
+            "on_success": True,
+            "on_failure": True,
+            "discord": {
+                "webhook_url": "",
+            },
+            "telegram": {
+                "bot_token": "",
+                "chat_id": "",
+            },
+        },
+        "rate_limits": {
+            "youtube": 5,
+            "instagram": 5,
+            "x": 5,
+            "tiktok": 5,
+        },
+        "schedule": {
+            "check_interval": 900,
+            "catchup_window": 172800,
+            "catchup_times_per_day": 3,
+        },
+        "shortcuts": {
+            "dashboard": "Ctrl+1",
+            "content": "Ctrl+2",
+            "analytics": "Ctrl+3",
+            "connect": "Ctrl+4",
+            "schedule": "Ctrl+5",
+            "refresh": "Ctrl+R",
+            "quit": "Ctrl+Q",
+        },
+    }
 
+
+# Default configuration values
+DEFAULT_CONFIG = _default_config()
 
 @dataclass
 class AccountConfig:
@@ -213,7 +223,7 @@ class EncodingConfig:
 @dataclass
 class VideoConfig:
     """Video processing configuration"""
-    download_dir: str = "~/.xpst/downloads"
+    download_dir: str = field(default_factory=lambda: _config_path("downloads"))
     cleanup_after_post: bool = False
     encoding_youtube: EncodingConfig = field(default_factory=lambda: EncodingConfig(
         resolution=1920, bitrate="8M", maxrate="10M", bufsize="12M", profile="high", gop=15, fps=60
@@ -239,7 +249,7 @@ class ReliabilityConfig:
 class MonitoringConfig:
     """Monitoring and logging configuration"""
     log_level: str = "INFO"
-    log_file: str = "~/.xpst/logs/xpst.log"
+    log_file: str = field(default_factory=lambda: _config_path("logs", "xpst.log"))
     log_rotation: str = "10 MB"
     healthcheck_port: int = 8080
     enable_metrics: bool = True
@@ -317,7 +327,7 @@ class XPSTConfig:
     notifications: NotificationConfig = field(default_factory=NotificationConfig)
 
     # Paths
-    config_dir: str = "~/.xpst"
+    config_dir: str = field(default_factory=lambda: str(get_config_dir()))
 
     # Shortcuts (stored as raw dict, not a dataclass)
     _shortcuts: dict = field(default_factory=lambda: {
@@ -341,22 +351,22 @@ class XPSTConfig:
         3. Default values
 
         Args:
-            config_path: Path to config file (default: ~/.xpst/config.yaml)
+            config_path: Path to config file (default: config-dir/config.yaml)
 
         Returns:
             Loaded and validated configuration
         """
-        config = cls._merge_config(cls(), DEFAULT_CONFIG)
+        config = cls._merge_config(cls(), _default_config())
 
-        # Load from file - backward compatibility: use old ~/.crosspstr/ if it exists
+        # Load from file - backward compatibility: use old config directory if it exists
         if config_path is None:
-            new_dir = Path(os.path.expanduser("~/.xpst"))
+            new_dir = get_config_dir()
             old_dir = Path(os.path.expanduser("~/.crosspstr"))
             if old_dir.exists() and not new_dir.exists():
                 # Migrate: rename old directory to new
                 import shutil
                 shutil.move(str(old_dir), str(new_dir))
-            config_path = os.path.expanduser("~/.xpst/config.yaml")
+            config_path = str(new_dir / "config.yaml")
 
         config_path = Path(config_path)
         if config_path.exists():
@@ -500,12 +510,12 @@ class XPSTConfig:
 
     @classmethod
     def _fix_legacy_paths(cls, config: "XPSTConfig") -> "XPSTConfig":
-        """Auto-replace stale .crosspstr path references with .xpst.
+        """Auto-replace stale renamed path references with the current config dir.
 
         Handles configs written by older versions before the rename.
         """
         def _fix(path: str) -> str:
-            return path.replace(".crosspstr", ".xpst").replace("crosspstr", "xpst")
+            return path.replace(".crosspstr", get_config_dir().name).replace("crosspstr", "xpst")
 
         config.video.download_dir = _fix(config.video.download_dir)
         config.monitoring.log_file = _fix(config.monitoring.log_file)
@@ -667,7 +677,7 @@ class XPSTConfig:
         sections including encoding profiles and notification settings.
 
         Args:
-            config_path: Output path. Defaults to ``~/.xpst/config.yaml``.
+            config_path: Output path. Defaults to ``config-dir/config.yaml``.
         """
 
         if config_path is None:
