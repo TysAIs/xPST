@@ -45,6 +45,13 @@ def venv_xpst(venv_dir: Path) -> Path:
     return venv_dir / "bin" / "xpst"
 
 
+def venv_xpst_mcp(venv_dir: Path) -> Path:
+    """Return the xpst-mcp entrypoint path for a virtual environment."""
+    if os.name == "nt":
+        return venv_dir / "Scripts" / "xpst-mcp.exe"
+    return venv_dir / "bin" / "xpst-mcp"
+
+
 def run_command(cmd: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     """Run a command and capture text output."""
     return subprocess.run(cmd, text=True, capture_output=True, env=env, timeout=120, check=False)
@@ -116,6 +123,85 @@ schedule:
     return config_path
 
 
+def write_smoke_kb_store(config_path: Path) -> Path:
+    """Seed a tiny JSON knowledge store for installed MCP stdio smoke."""
+    store_path = config_path.parent / "knowledge" / "default" / "nuggets.json"
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+    nugget = {
+        "id": "packaged-stdio-smoke",
+        "point": "packaged stdio smoke proves xpst-mcp can query installed KB",
+        "source_video_id": "clean-install-smoke",
+        "timestamp_start": 0.0,
+        "timestamp_end": 1.0,
+        "source_url": None,
+        "source_platform": None,
+        "source_post_id": None,
+        "area_id": None,
+        "difficulty": "beginner",
+        "prerequisites": [],
+        "embedding": [],
+        "created_at": 0.0,
+    }
+    store_path.write_text(json.dumps({nugget["id"]: nugget}, indent=2), encoding="utf-8")
+    return store_path
+
+
+def _write_mcp_stdio_smoke_script(work_dir: Path) -> Path:
+    script = work_dir / "mcp_stdio_smoke.py"
+    script.write_text(
+        r'''
+import asyncio
+import json
+import os
+import sys
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+
+async def main() -> None:
+    env = os.environ.copy()
+    params = StdioServerParameters(command=sys.argv[1], args=[], env=env)
+    async with stdio_client(params) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            await session.initialize()
+            tools = await session.list_tools()
+            names = sorted(tool.name for tool in tools.tools)
+            if "kb_query" not in names:
+                raise RuntimeError(f"kb_query not exposed by installed xpst-mcp: {names}")
+            result = await session.call_tool(
+                "kb_query",
+                {"text": "packaged stdio smoke", "limit": 3},
+            )
+            if getattr(result, "isError", False):
+                raise RuntimeError(result.content[0].text if result.content else "kb_query failed")
+            payload = json.loads(result.content[0].text)
+            if payload.get("mode") != "substring":
+                raise RuntimeError(f"expected substring fallback, got {payload.get('mode')}")
+            if payload.get("count") != 1:
+                raise RuntimeError(f"expected one seeded nugget, got {payload}")
+            point = payload["nuggets"][0]["point"]
+            if "packaged stdio smoke" not in point:
+                raise RuntimeError(f"seeded nugget not returned: {payload}")
+            print(json.dumps({"ok": True, "tools": names, "payload": payload}))
+
+
+asyncio.run(main())
+'''.lstrip(),
+        encoding="utf-8",
+    )
+    return script
+
+
+def assert_mcp_stdio_kb_query(python: Path, xpst_mcp: Path, config_path: Path, env: dict[str, str]) -> object:
+    """Run installed xpst-mcp over stdio and invoke a read-only KB query."""
+    smoke_env = env.copy()
+    smoke_env["XPST_CONFIG_DIR"] = str(config_path.parent)
+    smoke_env["XPST_MCP_READONLY"] = "1"
+    script = _write_mcp_stdio_smoke_script(config_path.parent.parent)
+    return assert_command_json([str(python), str(script), str(xpst_mcp)], smoke_env)
+
+
 def _select_artifacts(dist_dir: Path, artifact: str) -> list[Path]:
     if artifact == "wheel":
         return [find_wheel(dist_dir)]
@@ -150,15 +236,18 @@ def _smoke_artifact(artifact_path: Path, work_dir: Path, keep: bool = False) -> 
     venv.EnvBuilder(with_pip=True, clear=True).create(venv_dir)
     python = venv_python(venv_dir)
     xpst = venv_xpst(venv_dir)
+    xpst_mcp = venv_xpst_mcp(venv_dir)
     env = os.environ.copy()
     env["XPST_LOG_LEVEL"] = "WARNING"
     env["PYTHONUTF8"] = "1"
 
-    install = run_command([str(python), "-m", "pip", "install", "--disable-pip-version-check", str(artifact_path)], env)
+    install_target = f"xpst[mcp] @ {artifact_path.resolve().as_uri()}"
+    install = run_command([str(python), "-m", "pip", "install", "--disable-pip-version-check", install_target], env)
     if install.returncode != 0:
         raise RuntimeError(f"Artifact install failed for {artifact_path.name}:\n{install.stdout}\n{install.stderr}")
 
     config_path = write_smoke_config(work_dir)
+    write_smoke_kb_store(config_path)
     diagnostics_path = work_dir / "diagnostics.zip"
     commands = {
         "version": [str(xpst), "version", "--json"],
@@ -183,6 +272,9 @@ def _smoke_artifact(artifact_path: Path, work_dir: Path, keep: bool = False) -> 
         entries = set(archive.namelist())
     if entries != {"README.txt", "diagnostics.json"}:
         raise RuntimeError(f"Unexpected diagnostics bundle contents: {sorted(entries)}")
+
+    mcp_output = assert_mcp_stdio_kb_query(python, xpst_mcp, config_path, env)
+    outputs["mcp_stdio_kb_query"] = mcp_output
 
     return {
         "ok": True,
