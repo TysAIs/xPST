@@ -223,8 +223,8 @@ class AppController(QObject):
         self._health_timer.timeout.connect(self._run_health_check)
         self._health_timer.start(self._health_check_interval)
 
-        # Wire error signal to notification signal
-        self.error.connect(lambda msg: self.notification.emit(msg, True))
+        # Wire error signal to user-facing notifications when alert settings allow it.
+        self.error.connect(lambda msg: AppController._emit_notification(self, msg, True))
         self.postComplete.connect(self._notify_post_complete)
 
         # Initialise backends (best-effort)
@@ -233,6 +233,26 @@ class AppController(QObject):
         self._thumb_dir.mkdir(parents=True, exist_ok=True)
         self.refreshData()
 
+    @staticmethod
+    def _notification_enabled(self, is_error: bool) -> bool:
+        """Return whether desktop notification toasts/history should be emitted."""
+        config = getattr(self, "_config", None)
+        notifications = getattr(config, "notifications", None)
+        if notifications is None:
+            return True
+        if not getattr(notifications, "enabled", False):
+            return False
+        key = "on_failure" if is_error else "on_success"
+        return bool(getattr(notifications, key, True))
+
+    @staticmethod
+    def _emit_notification(self, message: str, is_error: bool) -> None:
+        if not AppController._notification_enabled(self, is_error):
+            return
+        notification = getattr(self, "notification", None)
+        if notification is not None:
+            notification.emit(message, is_error)
+
     # ── Backend initialisation ───────────────────────────────────────
 
     def _notify_post_complete(self, json_str: str) -> None:
@@ -240,12 +260,12 @@ class AppController(QObject):
         try:
             payload = json.loads(json_str)
         except (TypeError, json.JSONDecodeError):
-            self.notification.emit("Action completed", False)
+            AppController._emit_notification(self, "Action completed", False)
             return
 
         if isinstance(payload, list):
             if not payload:
-                self.notification.emit("No new posts were ready", False)
+                AppController._emit_notification(self, "No new posts were ready", False)
                 return
             all_success = all(
                 item.get("all_success") for item in payload if isinstance(item, dict)
@@ -254,30 +274,30 @@ class AppController(QObject):
                 item.get("partial_success") for item in payload if isinstance(item, dict)
             )
             if all_success:
-                self.notification.emit("Post completed successfully", False)
+                AppController._emit_notification(self, "Post completed successfully", False)
             elif partial_success:
-                self.notification.emit("Post partially completed", True)
+                AppController._emit_notification(self, "Post partially completed", True)
             else:
-                self.notification.emit("Post failed", True)
+                AppController._emit_notification(self, "Post failed", True)
             return
 
         if not isinstance(payload, dict):
-            self.notification.emit("Action completed", False)
+            AppController._emit_notification(self, "Action completed", False)
             return
 
         if payload.get("removed"):
             if payload.get("platform_deleted"):
-                self.notification.emit("Post removed from platform and xPST", False)
+                AppController._emit_notification(self, "Post removed from platform and xPST", False)
             else:
-                self.notification.emit("Post removed from xPST state only", False)
+                AppController._emit_notification(self, "Post removed from xPST state only", False)
             return
 
         if payload.get("all_success"):
-            self.notification.emit("Post completed successfully", False)
+            AppController._emit_notification(self, "Post completed successfully", False)
         elif payload.get("partial_success"):
-            self.notification.emit("Post partially completed", True)
+            AppController._emit_notification(self, "Post partially completed", True)
         else:
-            self.notification.emit("Post failed", True)
+            AppController._emit_notification(self, "Post failed", True)
 
     def _init_backends(self) -> None:
         """Create backend objects, swallowing errors for missing deps."""
@@ -1178,18 +1198,18 @@ class AppController(QObject):
         try:
             manager = AppController._schedule_manager(self)
             if manager is None:
-                self.notification.emit("Schedule manager is not available", True)
+                AppController._emit_notification(self, "Schedule manager is not available", True)
                 return False
 
             path = Path(content_path).expanduser()
             if not path.exists() or not path.is_file():
-                self.notification.emit(f"Video file not found: {content_path}", True)
+                AppController._emit_notification(self, f"Video file not found: {content_path}", True)
                 return False
 
             try:
                 scheduled_time = datetime.fromisoformat(when_iso)
             except ValueError:
-                self.notification.emit("Schedule time is invalid", True)
+                AppController._emit_notification(self, "Schedule time is invalid", True)
                 return False
 
             selected_platforms: list[str] = []
@@ -1210,12 +1230,13 @@ class AppController(QObject):
                     ]
 
             if not selected_platforms:
-                self.notification.emit("Select at least one platform", True)
+                AppController._emit_notification(self, "Select at least one platform", True)
                 return False
             valid_platforms = AppController._valid_destination_platforms(self._config)
             invalid_platforms = sorted(set(selected_platforms) - valid_platforms)
             if invalid_platforms:
-                self.notification.emit(
+                AppController._emit_notification(
+                    self,
                     "Invalid platform: " + ", ".join(invalid_platforms),
                     True,
                 )
@@ -1228,11 +1249,11 @@ class AppController(QObject):
                 platforms=selected_platforms,
             )
             self.refreshData()
-            self.notification.emit("Post scheduled", False)
+            AppController._emit_notification(self, "Post scheduled", False)
             return True
         except Exception as exc:
             logger.error("scheduleNew error: %s", exc)
-            self.notification.emit(str(exc), True)
+            AppController._emit_notification(self, str(exc), True)
             return False
 
     @staticmethod
@@ -1368,14 +1389,14 @@ class AppController(QObject):
                     failed = sum(1 for item in processed if item.get("status") == "failed")
                     deferred = sum(1 for item in processed if item.get("status") == "deferred")
                     if completed:
-                        self.notification.emit(f"Posted {completed} scheduled post(s)", False)
+                        AppController._emit_notification(self, f"Posted {completed} scheduled post(s)", False)
                     if deferred:
-                        self.notification.emit(f"Deferred {deferred} scheduled post(s)", False)
+                        AppController._emit_notification(self, f"Deferred {deferred} scheduled post(s)", False)
                     if failed:
-                        self.notification.emit(f"{failed} scheduled post(s) failed", True)
+                        AppController._emit_notification(self, f"{failed} scheduled post(s) failed", True)
             except Exception as exc:
                 logger.error("processDueScheduledPosts error: %s", exc)
-                self.notification.emit(str(exc), True)
+                AppController._emit_notification(self, str(exc), True)
             finally:
                 self._schedule_processing = False
 
@@ -2108,7 +2129,7 @@ class AppController(QObject):
                         break
 
             if source_id not in posted:
-                self.notification.emit("Post was not found", True)
+                AppController._emit_notification(self, "Post was not found", True)
                 return
 
             video = posted[source_id]
@@ -2122,7 +2143,7 @@ class AppController(QObject):
             self._pending_caption_update = (source_id, platform_key, new_caption)
             self._captionUpdateReady.emit(source_id, platform_key, new_caption)
             self.refreshData()
-            self.notification.emit("Caption saved", False)
+            AppController._emit_notification(self, "Caption saved", False)
         except Exception as exc:
             logger.error("updateCaption error: %s", exc)
             self.error.emit(str(exc))

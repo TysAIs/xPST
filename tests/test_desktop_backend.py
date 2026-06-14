@@ -17,6 +17,12 @@ from xpst.desktop_app.models import NotificationListModel, PostListModel
 from xpst.state import StateManager
 
 
+def _enable_desktop_notifications(config: XPSTConfig) -> None:
+    config.notifications.enabled = True
+    config.notifications.on_success = True
+    config.notifications.on_failure = True
+
+
 def test_desktop_check_for_updates_returns_component_status():
     raw = AppController.checkForUpdates(SimpleNamespace())
     data = json.loads(raw)
@@ -287,6 +293,7 @@ def test_desktop_schedule_rejects_disabled_platform(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)
     config.youtube.enabled = False
+    _enable_desktop_notifications(config)
     notifications = []
 
     controller = SimpleNamespace(
@@ -931,6 +938,7 @@ def test_desktop_update_caption_persists_platform_caption(tmp_path):
     )
     notifications = []
     controller = AppController()
+    _enable_desktop_notifications(controller._config)
     controller._state = state
     controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
 
@@ -951,6 +959,7 @@ def test_desktop_update_caption_persists_platform_caption(tmp_path):
 def test_desktop_post_complete_notifications_match_upload_result():
     notifications = []
     controller = AppController()
+    _enable_desktop_notifications(controller._config)
     controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
 
     controller.postComplete.emit(json.dumps({"all_success": True, "partial_success": False}))
@@ -967,6 +976,7 @@ def test_desktop_post_complete_notifications_match_upload_result():
 def test_desktop_post_complete_notifications_match_delete_result():
     notifications = []
     controller = AppController()
+    _enable_desktop_notifications(controller._config)
     controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
 
     controller.postComplete.emit(json.dumps({"ok": True, "removed": "source/youtube", "platform_deleted": True}))
@@ -981,6 +991,7 @@ def test_desktop_post_complete_notifications_match_delete_result():
 def test_desktop_post_complete_notifications_match_autoposter_result():
     notifications = []
     controller = AppController()
+    _enable_desktop_notifications(controller._config)
     controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
 
     controller.postComplete.emit(json.dumps([]))
@@ -993,6 +1004,34 @@ def test_desktop_post_complete_notifications_match_autoposter_result():
         ("No new posts were ready", False),
         ("Post partially completed", True),
     ]
+
+
+def test_desktop_notification_settings_can_suppress_success_alerts():
+    notifications = []
+    controller = AppController()
+    controller._config.notifications.enabled = True
+    controller._config.notifications.on_success = False
+    controller._config.notifications.on_failure = True
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.postComplete.emit(json.dumps({"all_success": True, "partial_success": False}))
+    controller.postComplete.emit(json.dumps({"all_success": False, "partial_success": False}))
+
+    assert notifications == [("Post failed", True)]
+
+
+def test_desktop_notification_settings_can_suppress_failure_alerts():
+    notifications = []
+    controller = AppController()
+    controller._config.notifications.enabled = True
+    controller._config.notifications.on_success = True
+    controller._config.notifications.on_failure = False
+    controller.notification.connect(lambda message, is_error: notifications.append((message, is_error)))
+
+    controller.error.emit("Upload failed")
+    controller.postComplete.emit(json.dumps({"all_success": True, "partial_success": False}))
+
+    assert notifications == [("Post completed successfully", False)]
 
 
 def test_notification_list_model_records_and_clears_notifications():
