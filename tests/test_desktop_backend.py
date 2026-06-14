@@ -98,6 +98,73 @@ def test_desktop_disconnect_platform_disables_and_removes_credentials(tmp_path):
     assert reloaded.youtube.enabled is False
 
 
+def test_desktop_connect_requires_verified_platform_health(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+
+    class FakeEngine:
+        async def check_health(self):
+            return {
+                "platforms": {
+                    "youtube": {
+                        "authenticated": False,
+                        "session_valid": False,
+                        "error": "missing YouTube OAuth files",
+                    }
+                }
+            }
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=FakeEngine(),
+        _ensure_engine=lambda: True,
+    )
+
+    with patch("xpst.desktop_app.backend.subprocess.run") as run:
+        run.return_value = SimpleNamespace(
+            returncode=0,
+            stdout="Save client_secrets.json, then run auth again.",
+            stderr="",
+        )
+        result = AppController._connect_platform_result(controller, "youtube")
+
+    assert result["ok"] is False
+    assert result["platform"] == "youtube"
+    assert result["error"] == "missing YouTube OAuth files"
+    assert result["output"] == "Save client_secrets.json, then run auth again."
+    assert run.call_args.kwargs["env"]["XPST_CONFIG_DIR"] == str(tmp_path)
+
+
+def test_desktop_connect_reports_success_after_verified_health(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+
+    class FakeEngine:
+        async def check_health(self):
+            return {
+                "platforms": {
+                    "x": {
+                        "authenticated": True,
+                        "session_valid": True,
+                        "error": "",
+                    }
+                }
+            }
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=FakeEngine(),
+        _ensure_engine=lambda: True,
+    )
+
+    with patch("xpst.desktop_app.backend.subprocess.run") as run:
+        run.return_value = SimpleNamespace(returncode=0, stdout="", stderr="")
+        result = AppController._connect_platform_result(controller, "x")
+
+    assert result["ok"] is True
+    assert result["message"] == "Authenticated with x"
+
+
 def test_connect_page_disconnect_button_calls_disconnect():
     qml = (
         Path(__file__).resolve().parents[1]

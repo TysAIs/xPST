@@ -1424,63 +1424,82 @@ class AppController(QObject):
                 self.settingsSaved.emit(False, str(exc))
             return json.dumps({"ok": False, "error": str(exc)})
 
+    def _connect_platform_result(self, platform: str) -> dict[str, Any]:
+        """Run setup/auth and verify the selected platform is actually usable."""
+        platform = (platform or "").strip().lower()
+        auth_output = ""
+        auth_error = ""
+        auth_returncode: int | None = None
+
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "xpst", "auth", platform],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                env=AppController._mcp_env(self),
+            )
+            auth_returncode = result.returncode
+            auth_output = result.stdout.strip()
+            auth_error = result.stderr.strip()
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            auth_error = str(exc)
+            logger.debug("Auth subprocess failed: %s, trying engine", exc)
+
+        if not self._ensure_engine():
+            return {
+                "ok": False,
+                "platform": platform,
+                "error": "Connection could not be verified.",
+                "output": auth_output,
+                "auth_error": auth_error,
+                "auth_returncode": auth_returncode,
+            }
+
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            health = loop.run_until_complete(self._engine.check_health())
+        finally:
+            loop.close()
+
+        plat_health = health.get("platforms", {}).get(platform, {})
+        authenticated = bool(plat_health.get("authenticated"))
+        session_valid = bool(plat_health.get("session_valid"))
+        ok = authenticated and session_valid
+        payload: dict[str, Any] = {
+            "ok": ok,
+            "platform": platform,
+            "details": plat_health,
+            "output": auth_output,
+            "auth_error": auth_error,
+            "auth_returncode": auth_returncode,
+        }
+        if ok:
+            payload["message"] = f"Authenticated with {platform}"
+        else:
+            payload["error"] = (
+                plat_health.get("error")
+                or auth_output
+                or auth_error
+                or f"{platform} is not connected yet."
+            )
+        return payload
+
     @Slot(str)
     def connectPlatform(self, platform: str) -> None:
-        """Test connectivity / authenticate a platform.
-
-        Runs in a background thread to avoid blocking the UI.
-        Emits postComplete with JSON result containing ok/details.
-
-        Args:
-            platform: Platform name to connect/test.
-        """
+        """Test connectivity / authenticate a platform in a background thread."""
         def _run() -> None:
             try:
-                # First try running 'xpst auth <platform>' via subprocess
-                # This handles OAuth flows etc.
-                try:
-                    result = subprocess.run(
-                        [sys.executable, "-m", "xpst", "auth", platform],
-                        capture_output=True,
-                        text=True,
-                        timeout=60,
-                    )
-                    if result.returncode == 0:
-                        self.connectResult.emit(json.dumps({
-                            "ok": True,
-                            "platform": platform,
-                            "message": f"Authenticated with {platform}",
-                            "output": result.stdout.strip(),
-                        }))
-                        return
-                except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
-                    logger.debug("Auth subprocess failed: %s, trying engine", exc)
-
-                # Fallback: use engine check_health for connectivity test
-                if self._ensure_engine():
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    health = loop.run_until_complete(self._engine.check_health())
-                    loop.close()
-
-                    plat_health = health.get("platforms", {}).get(platform, {})
-                    ok = plat_health.get("authenticated", False)
-
-                    self.connectResult.emit(json.dumps({
-                        "ok": ok,
-                        "platform": platform,
-                        "details": plat_health,
-                    }, default=str))
-                else:
-                    self.connectResult.emit(json.dumps({
-                        "ok": False,
-                        "platform": platform,
-                        "error": "Engine not available and auth subprocess failed",
-                    }))
-
+                result = AppController._connect_platform_result(self, platform)
+                self.connectResult.emit(json.dumps(result, default=str))
             except Exception as exc:
                 logger.error("connectPlatform(%s) error: %s", platform, exc)
-                self.error.emit(str(exc))
+                self.connectResult.emit(json.dumps({
+                    "ok": False,
+                    "platform": platform,
+                    "error": str(exc),
+                }))
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
