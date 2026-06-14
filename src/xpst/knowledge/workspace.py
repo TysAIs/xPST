@@ -3,12 +3,30 @@ a workspace is just a name and an isolated directory."""
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
+_WORKSPACE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 def _xpst_home(home: str | Path | None = None) -> Path:
     return Path(home if home is not None else os.environ.get("XPST_HOME", "~/.xpst")).expanduser()
+
+
+def _validate_workspace_name(name: str) -> str:
+    normalized = str(name).strip()
+    if (
+        not normalized
+        or normalized in {".", ".."}
+        or "/" in normalized
+        or "\\" in normalized
+        or Path(normalized).is_absolute()
+        or not _WORKSPACE_NAME_RE.fullmatch(normalized)
+    ):
+        raise ValueError(
+            "workspace must be a simple name using letters, numbers, '.', '_', or '-'"
+        )
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -27,10 +45,11 @@ class Workspace:
         """Resolve a workspace directory. Read paths (query, doctor, areas)
         pass ``create=False`` so probing a nonexistent workspace never
         creates it as a side effect (G30)."""
-        root = _xpst_home(home) / "knowledge" / name
+        workspace_name = _validate_workspace_name(name)
+        root = _xpst_home(home) / "knowledge" / workspace_name
         if create:
             root.mkdir(parents=True, exist_ok=True)
-        return cls(name=name, root=root)
+        return cls(name=workspace_name, root=root)
 
     @property
     def nuggets_path(self) -> Path:

@@ -160,6 +160,14 @@ def test_kb_areas_missing_workspace_does_not_create(isolated_home):
     assert not (isolated_home / "knowledge" / "ghost").exists()
 
 
+def test_kb_tools_reject_path_like_workspace_names(isolated_home):
+    with pytest.raises(ValueError, match="workspace must be a simple name"):
+        kb_tools.kb_areas("../outside")
+
+    assert not (isolated_home / "outside").exists()
+    assert list(isolated_home.rglob("*")) == []
+
+
 def test_kb_course_assembles_selected_area(isolated_home):
     ws = Workspace.resolve("default")
     nugget = _seed_nugget(ws, "Teach upload duration preflight")
