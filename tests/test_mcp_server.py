@@ -2,6 +2,7 @@
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -89,6 +90,24 @@ async def test_mcp_main_starts_stdio_without_engine_init(tmp_path):
     get_server.assert_awaited_once_with(config, initialize=False)
     run.assert_awaited_once()
     assert fake_server.engine is None
+
+
+def test_xpst_mcp_entrypoint_loads_config_dir_from_environment(tmp_path, monkeypatch):
+    config_dir = tmp_path / "active-profile"
+    config_dir.mkdir()
+    config = XPSTConfig()
+    config.config_dir = str(config_dir)
+    run_main = AsyncMock()
+
+    monkeypatch.setenv("XPST_CONFIG_DIR", str(config_dir))
+    with (
+        patch.object(mcp_server.XPSTConfig, "load", return_value=config) as load_config,
+        patch.object(mcp_server, "main", new=run_main),
+    ):
+        mcp_server.cli_main()
+
+    load_config.assert_called_once_with(str(Path(config_dir) / "config.yaml"))
+    run_main.assert_awaited_once_with(config)
 
 
 @pytest.mark.asyncio

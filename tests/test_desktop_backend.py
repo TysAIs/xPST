@@ -731,6 +731,19 @@ def test_desktop_available_languages_uses_active_config_dir(monkeypatch, tmp_pat
     assert "zz" in data
 
 
+def test_desktop_controller_loads_config_dir_override(tmp_path):
+    active_dir = tmp_path / "active-profile"
+    active_dir.mkdir()
+    config = XPSTConfig()
+    config.config_dir = str(active_dir)
+    config.save()
+
+    controller = AppController(config_dir=str(active_dir))
+
+    assert controller._config is not None
+    assert controller._config.config_dir == str(active_dir)
+
+
 @patch("xpst.readiness.check_yt_dlp", return_value="2026.1.1")
 @patch("xpst.readiness.check_ffmpeg", return_value=True)
 @patch("xpst.readiness.shutil.which", return_value="ffmpeg")

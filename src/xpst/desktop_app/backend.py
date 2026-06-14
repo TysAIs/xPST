@@ -184,9 +184,10 @@ class AppController(QObject):
 
     # ── Init ─────────────────────────────────────────────────────────
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, config_dir: str | Path | None = None) -> None:
         super().__init__(parent)
         self._config: Any = None
+        self._config_dir_override = str(Path(config_dir).expanduser()) if config_dir else None
         self._state: Any = None
         self._engine: Any = None
         self._analytics: Any = None
@@ -307,7 +308,10 @@ class AppController(QObject):
         """Create backend objects, swallowing errors for missing deps."""
         try:
             if XPSTConfig is not None:
-                self._config = XPSTConfig.load()
+                config_path = None
+                if self._config_dir_override:
+                    config_path = str(Path(self._config_dir_override) / "config.yaml")
+                self._config = XPSTConfig.load(config_path)
         except Exception as exc:
             logger.warning("Failed to load XPSTConfig: %s", exc)
 

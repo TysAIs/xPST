@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 from dataclasses import asdict
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 # The 'mcp' package is an optional extra. Import it gracefully so that simply
@@ -993,24 +994,17 @@ async def _handle_kb_tool(name: str, args: dict[str, Any], config: XPSTConfig) -
         )
 
     def run_active_profile_kb_tool() -> dict[str, Any]:
-        previous_home = os.environ.get("XPST_HOME")
-        os.environ["XPST_HOME"] = str(config.config_dir)
-        try:
-            workspace = args.get("workspace", "default")
-            if name == "kb_add":
-                return kb_tools.kb_add(args["source"], workspace)
-            if name == "kb_query":
-                return kb_tools.kb_query(args["text"], workspace, args.get("limit", 8))
-            if name == "kb_organize":
-                return kb_tools.kb_organize(workspace, args.get("threshold"))
-            if name == "kb_areas":
-                return kb_tools.kb_areas(workspace)
-            return kb_tools.kb_course(workspace, args.get("area_id"))
-        finally:
-            if previous_home is None:
-                os.environ.pop("XPST_HOME", None)
-            else:
-                os.environ["XPST_HOME"] = previous_home
+        workspace = args.get("workspace", "default")
+        home = str(config.config_dir)
+        if name == "kb_add":
+            return kb_tools.kb_add(args["source"], workspace, home=home)
+        if name == "kb_query":
+            return kb_tools.kb_query(args["text"], workspace, args.get("limit", 8), home=home)
+        if name == "kb_organize":
+            return kb_tools.kb_organize(workspace, args.get("threshold"), home=home)
+        if name == "kb_areas":
+            return kb_tools.kb_areas(workspace, home=home)
+        return kb_tools.kb_course(workspace, args.get("area_id"), home=home)
 
     payload = await asyncio.to_thread(run_active_profile_kb_tool)
 
@@ -1054,7 +1048,9 @@ async def main(config: XPSTConfig | None = None) -> None:
 
 def cli_main() -> None:
     """CLI entry point for xpst mcp command."""
-    config = XPSTConfig()
+    config_dir = os.environ.get("XPST_CONFIG_DIR")
+    config_path = str(Path(config_dir).expanduser() / "config.yaml") if config_dir else None
+    config = XPSTConfig.load(config_path)
     asyncio.run(main(config))
 
 

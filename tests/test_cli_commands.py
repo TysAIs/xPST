@@ -411,6 +411,46 @@ class TestRunCommand:
         assert data["status"] == "locked"
         assert data["error"] == "already running"
 
+    def test_run_json_failed_upload_exits_nonzero(self, runner, config_file, monkeypatch):
+        released = []
+
+        class FailedEngine:
+            def acquire_pidfile(self):
+                return None
+
+            def release_pidfile(self):
+                released.append(True)
+
+            async def check_and_post(self):
+                return [
+                    SimpleNamespace(
+                        video_id="auto-video",
+                        caption="Auto post",
+                        all_success=False,
+                        partial_success=False,
+                        results={
+                            "youtube": SimpleNamespace(
+                                success=False,
+                                post_url=None,
+                                post_id=None,
+                                error="upload failed",
+                                platform="youtube",
+                            )
+                        },
+                    )
+                ]
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", lambda _config: FailedEngine())
+
+        result = runner.invoke(main, ["--config", config_file, "run", "--json"])
+
+        assert result.exit_code == 1
+        data = extract_json(result.output)
+        assert data["status"] == "ok"
+        assert data["results"][0]["all_success"] is False
+        assert data["results"][0]["platforms"]["youtube"]["error"] == "upload failed"
+        assert released == [True]
+
 
 class TestFailuresCommand:
     def test_global_json_failures_list_uses_json(self, runner, config_file):

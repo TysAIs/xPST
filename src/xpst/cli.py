@@ -337,6 +337,8 @@ def run(ctx: click.Context, bidirectional: bool, dry_run: bool, as_json: bool):
     else:
         for result in results:
             _display_result(result)
+    if any(not result.all_success for result in results):
+        sys.exit(EXIT_GENERAL)
 
 
 @main.command()

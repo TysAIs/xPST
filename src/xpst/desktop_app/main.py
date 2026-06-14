@@ -333,7 +333,7 @@ def main(no_splash: bool = False, config_dir: str | None = None) -> int:
     _load_icon_font()
 
     # ── Splash Screen ────────────────────────────────────────────────
-    no_splash = "--no-splash" in sys.argv
+    no_splash = no_splash or "--no-splash" in sys.argv
     splash = None
     if not no_splash:
         splash = _create_splash()
@@ -360,7 +360,7 @@ def main(no_splash: bool = False, config_dir: str | None = None) -> int:
     engine.addImportPath(str(qml_main.parents[3]))
 
     # Create backend objects (lightweight - defer heavy init)
-    controller = AppController()
+    controller = AppController(config_dir=config_dir)
     post_model = PostListModel()
     active_config_dir = str(AppController._active_config_dir(controller))
     post_model.load_from_state(active_config_dir)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -354,7 +355,9 @@ async def test_server_dispatches_kb_query_without_engine_init(isolated_home, mon
     ws = Workspace.resolve("default")
     _seed_nugget(ws, "Routing is embedding similarity")
 
-    fake_server = mcp_server.XPSTMCPServer(XPSTConfig())
+    config = XPSTConfig()
+    config.config_dir = str(isolated_home)
+    fake_server = mcp_server.XPSTMCPServer(config)
     with patch.object(mcp_server, "_server", fake_server):
         with patch.object(fake_server, "initialize", new=AsyncMock()) as initialize:
             result = await mcp_server.handle_call_tool("kb_query", {"text": "embedding"})
@@ -370,6 +373,7 @@ async def test_server_dispatches_kb_query_without_engine_init(isolated_home, mon
 async def test_server_dispatches_kb_course(isolated_home):
     pytest.importorskip("mcp", reason="mcp extra not installed")
 
+    from xpst.config import XPSTConfig
     from xpst.mcp import server as mcp_server
 
     ws = Workspace.resolve("default")
@@ -378,7 +382,11 @@ async def test_server_dispatches_kb_course(isolated_home):
     area = Area.create(label="Course", nugget_ids=[nugget.id], order_index=0)
     store.upsert_area(area)
 
-    result = await mcp_server.handle_call_tool("kb_course", {"area_id": area.id})
+    config = XPSTConfig()
+    config.config_dir = str(isolated_home)
+    fake_server = mcp_server.XPSTMCPServer(config)
+    with patch.object(mcp_server, "_server", fake_server):
+        result = await mcp_server.handle_call_tool("kb_course", {"area_id": area.id})
 
     assert result.isError is not True
     payload = json.loads(result.content[0].text)

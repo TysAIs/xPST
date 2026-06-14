@@ -8,18 +8,27 @@ can cite and rank.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def query_nuggets(text: str, workspace: str = "default", k: int = 8) -> dict[str, Any]:
+def query_nuggets(
+    text: str,
+    workspace: str = "default",
+    k: int = 8,
+    *,
+    home: str | Path | None = None,
+) -> dict[str, Any]:
     from xpst.knowledge.store import open_default_store
     from xpst.knowledge.workspace import Workspace
 
-    ws = Workspace.resolve(workspace, create=False)
+    ws = Workspace.resolve(workspace, create=False, home=home)
     store = open_default_store(ws)
 
     mode = "substring"

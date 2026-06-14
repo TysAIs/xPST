@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-def _xpst_home() -> Path:
-    return Path(os.environ.get("XPST_HOME", "~/.xpst")).expanduser()
+def _xpst_home(home: str | Path | None = None) -> Path:
+    return Path(home if home is not None else os.environ.get("XPST_HOME", "~/.xpst")).expanduser()
 
 
 @dataclass(frozen=True)
@@ -17,11 +17,17 @@ class Workspace:
     root: Path
 
     @classmethod
-    def resolve(cls, name: str = "default", *, create: bool = True) -> Workspace:
+    def resolve(
+        cls,
+        name: str = "default",
+        *,
+        create: bool = True,
+        home: str | Path | None = None,
+    ) -> Workspace:
         """Resolve a workspace directory. Read paths (query, doctor, areas)
         pass ``create=False`` so probing a nonexistent workspace never
         creates it as a side effect (G30)."""
-        root = _xpst_home() / "knowledge" / name
+        root = _xpst_home(home) / "knowledge" / name
         if create:
             root.mkdir(parents=True, exist_ok=True)
         return cls(name=name, root=root)
