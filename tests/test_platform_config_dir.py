@@ -26,6 +26,13 @@ def test_windows_uses_appdata(monkeypatch):
     assert plat.get_config_dir() == Path(r"C:\Users\tester\AppData\Roaming") / "xPST"
 
 
+def test_xpst_config_dir_overrides_platform(monkeypatch):
+    monkeypatch.setenv("XPST_CONFIG_DIR", "/tmp/custom-xpst")
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv("APPDATA", r"C:\Users\tester\AppData\Roaming")
+    assert plat.get_config_dir() == Path("/tmp/custom-xpst")
+
+
 def test_windows_falls_back_to_home_without_appdata(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.delenv("APPDATA", raising=False)

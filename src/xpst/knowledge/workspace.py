@@ -6,9 +6,13 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from xpst.utils.platform import get_config_dir
+
 
 def _xpst_home() -> Path:
-    return Path(os.environ.get("XPST_HOME", "~/.xpst")).expanduser()
+    if override := os.environ.get("XPST_HOME"):
+        return Path(override).expanduser()
+    return get_config_dir()
 
 
 @dataclass(frozen=True)

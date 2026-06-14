@@ -7,7 +7,7 @@ released when the process exits (even on crash), preventing stale locks.
 Usage:
     from xpst.utils.pidfile import PidfileLock
 
-    with PidfileLock("~/.xpst"):
+    with PidfileLock():
         # Only one instance can enter this block
         run_engine()
 """
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import get_config_dir
 
 logger = get_logger(__name__)
 
@@ -40,13 +41,13 @@ class PidfileLock:
         _fd: File descriptor for the lock (kept open while held).
     """
 
-    def __init__(self, config_dir: str = "~/.xpst") -> None:
+    def __init__(self, config_dir: str | None = None) -> None:
         """Initialize pidfile lock.
 
         Args:
             config_dir: xPST config directory for the lock file.
         """
-        self.config_dir = Path(config_dir).expanduser()
+        self.config_dir = Path(config_dir).expanduser() if config_dir is not None else get_config_dir()
         self.lock_path = self.config_dir / "xpst.pid"
         self._fd: int | None = None
         self._lock_offset = 1024

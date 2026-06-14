@@ -1,6 +1,6 @@
 """Owner-only secure file writes for credential material.
 
-Credential, token, session, and cookie files written under ``~/.xpst`` must
+Credential, token, session, and cookie files written under the config directory must
 never be world- or group-readable. This module centralizes the write so every
 call site applies the same ``0600`` (owner read/write only) policy.
 

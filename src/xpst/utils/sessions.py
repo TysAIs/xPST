@@ -25,6 +25,7 @@ from pathlib import Path
 
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import get_config_dir
 from xpst.utils.secure_io import write_text_0600
 
 logger = get_logger(__name__)
@@ -41,18 +42,18 @@ class SessionManager:
     - Graceful degradation on auth failures
     """
 
-    def __init__(self, config_dir: str = "~/.xpst"):
+    def __init__(self, config_dir: str | None = None):
         """
         Initialize session manager.
 
         Args:
             config_dir: Configuration directory
         """
-        self.config_dir = Path(config_dir).expanduser()
+        self.config_dir = Path(config_dir).expanduser() if config_dir is not None else get_config_dir()
         self.sessions_dir = self.config_dir / "sessions"
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
 
-        self.credentials = CredentialStore(config_dir)
+        self.credentials = CredentialStore(str(self.config_dir))
 
     # ── YouTube ──────────────────────────────────────────────────────────
 
