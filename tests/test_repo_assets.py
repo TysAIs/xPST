@@ -100,6 +100,15 @@ def test_docker_assets_reference_existing_entrypoint_and_current_commands():
     assert "python scripts/scan_public_safety.py --json" in ci_steps
 
 
+def test_build_script_uses_release_specs():
+    build_script = (ROOT / "build.sh").read_text(encoding="utf-8")
+
+    assert "pyinstaller build_macos.spec --noconfirm --clean" in build_script
+    assert "pyinstaller build_windows.spec --noconfirm --clean" in build_script
+    assert "pyinstaller build_linux.spec --noconfirm --clean" in build_script
+    assert "--add-data \"src/xpst/desktop_app/qml:xpst/desktop_app/qml\"" not in build_script
+
+
 def test_contributing_uses_current_repository_and_no_mojibake():
     text = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
 
