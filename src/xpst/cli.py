@@ -30,6 +30,7 @@ from rich.table import Table
 
 from xpst.config import XPSTConfig
 from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.post_preflight import build_post_preflight
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger, setup_logging
@@ -412,7 +413,7 @@ def watch(ctx: click.Context, interval: int | None, bidirectional: bool):
 
 
 @main.command()
-@click.option("--video", "-v", required=True, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
+@click.option("--video", "-v", required=True, multiple=True, type=click.Path(), help="Video/image file path (use multiple times for carousel)")
 @click.option("--caption", "-c", required=True, help="Video caption")
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
@@ -436,16 +437,18 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
             sys.exit(EXIT_CONFIG_ERROR)
         raise
 
+    preflight = build_post_preflight(
+        config=config,
+        video_path=media_paths[0],
+        caption=caption,
+        platforms=platform_list,
+        carousel_paths=media_paths[1:],
+    )
+
     if dry_run:
-        engine = CrossPostEngine(config)
-        targets = platform_list or list(engine._platforms.keys())
         info = {
             "dry_run": True,
-            "video": str(media_paths[0]),
-            "caption": caption[:80],
-            "carousel": len(media_paths) > 1,
-            "items": len(media_paths),
-            "targets": targets,
+            **preflight,
         }
         if as_json:
             json_output(info, True)
@@ -456,8 +459,24 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
             if len(media_paths) > 1:
                 console.print(f"  Carousel: {len(media_paths)} items")
             console.print(f"  Caption: {caption[:80]}")
-            console.print(f"  Targets: {', '.join(targets)}")
+            console.print(f"  Targets: {', '.join(preflight['targets'])}")
+            for item in preflight["blocking"]:
+                console.print(f"  [red]Blocking:[/red] {item}")
+            for item in preflight["warnings"]:
+                console.print(f"  [yellow]Warning:[/yellow] {item}")
         return
+
+    if not preflight["ready"]:
+        first_blocking = preflight["blocking"][0] if preflight["blocking"] else "Post is not ready."
+        if as_json:
+            json_output({"ok": False, "error": first_blocking, "preflight": preflight}, True)
+        else:
+            console.print(f"[red]Post is not ready:[/red] {first_blocking}")
+            for item in preflight["blocking"][1:]:
+                console.print(f"  [red]Blocking:[/red] {item}")
+            for item in preflight["warnings"]:
+                console.print(f"  [yellow]Warning:[/yellow] {item}")
+        sys.exit(EXIT_CONFIG_ERROR)
 
     if not as_json and not quiet:
         if len(media_paths) > 1:

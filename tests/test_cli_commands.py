@@ -319,6 +319,59 @@ class TestPostCommand:
         data = extract_json(result.output)
         assert data["dry_run"] is True
         assert data["targets"] == ["youtube"]
+        assert data["ready"] is True
+        assert data["video"]["filename"] == "video.mp4"
+
+    def test_post_json_dry_run_reports_preflight_blockers_without_engine(
+        self, runner, config_file, tmp_path, monkeypatch
+    ):
+        missing = tmp_path / "missing.mp4"
+
+        def fail_engine(*_args, **_kwargs):
+            raise AssertionError("CrossPostEngine should not be constructed")
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", fail_engine)
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "--json",
+            "post",
+            "--video", str(missing),
+            "--caption", "Manual post",
+            "--platforms", "youtube",
+            "--dry-run",
+        ])
+
+        assert result.exit_code == 0, result.output
+        data = extract_json(result.output)
+        assert data["dry_run"] is True
+        assert data["ready"] is False
+        assert any("Video file not found" in item for item in data["blocking"])
+
+    def test_post_json_blocks_failed_preflight_before_engine(
+        self, runner, config_file, tmp_path, monkeypatch
+    ):
+        missing = tmp_path / "missing.mp4"
+
+        def fail_engine(*_args, **_kwargs):
+            raise AssertionError("CrossPostEngine should not be constructed")
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", fail_engine)
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "post",
+            "--video", str(missing),
+            "--caption", "Manual post",
+            "--platforms", "youtube",
+            "--json",
+        ])
+
+        assert result.exit_code == 4
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert "Video file not found" in data["error"]
+        assert data["preflight"]["ready"] is False
 
     def test_post_json_failed_upload_exits_nonzero(
         self, runner, config_file, tmp_path, monkeypatch

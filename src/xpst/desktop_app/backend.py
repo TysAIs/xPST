@@ -961,7 +961,7 @@ class AppController(QObject):
             if config is None:
                 return json.dumps({"ok": False, "ready": False, "blocking": ["Config not loaded"], "warnings": []})
 
-            from xpst.platforms.base import PlatformRegistry
+            from xpst.post_preflight import build_post_preflight
 
             requested_platforms: list[str] = []
             if platforms_json:
@@ -976,108 +976,14 @@ class AppController(QObject):
                         if item.strip()
                     ]
 
-            PlatformRegistry.auto_discover()
-            manifests = {
-                manifest.name: manifest
-                for manifest in PlatformRegistry.list_manifests(config)
-            }
-            enabled_platforms = [
-                name
-                for name in ("youtube", "instagram", "x")
-                if getattr(getattr(config, name), "enabled", False)
-            ]
-            targets = requested_platforms or enabled_platforms
-
-            path = Path(video_path).expanduser()
-            blocking: list[str] = []
-            warnings: list[str] = []
-            if not video_path.strip():
-                blocking.append("Choose a video file before posting.")
-            elif not path.exists():
-                blocking.append(f"Video file not found: {video_path}")
-            elif not path.is_file():
-                blocking.append(f"Video path is not a file: {video_path}")
-
-            supported_suffixes = {".mp4", ".mov", ".m4v", ".webm"}
-            if path.suffix.lower() and path.suffix.lower() not in supported_suffixes:
-                warnings.append(f"{path.suffix.lower()} may need conversion before upload.")
-
-            if not caption.strip():
-                warnings.append("Caption is empty.")
-
-            if not targets:
-                blocking.append("Enable at least one destination platform.")
-
-            platform_previews: list[dict[str, Any]] = []
-            for platform_name in targets:
-                if platform_name not in manifests:
-                    blocking.append(f"{platform_name} is not an installed destination provider.")
-                    continue
-
-                account = getattr(config, platform_name, None)
-                enabled = bool(getattr(account, "enabled", False))
-                manifest = manifests[platform_name]
-                extra = manifest.extra
-                platform_warnings: list[str] = []
-                platform_blocking: list[str] = []
-
-                if not enabled:
-                    platform_blocking.append(f"{manifest.display_name} is disabled.")
-
-                credential_paths = AppController._credential_paths_for_platform(config, platform_name)
-                if credential_paths and any(
-                    not Path(credential_path).expanduser().exists()
-                    for credential_path in credential_paths
-                ):
-                    platform_blocking.append(f"{manifest.display_name} is not connected.")
-
-                max_caption = extra.get("max_caption_length")
-                if isinstance(max_caption, int) and len(caption) > max_caption:
-                    platform_blocking.append(
-                        f"{manifest.display_name} caption is {len(caption) - max_caption} character(s) too long."
-                    )
-
-                quota = getattr(self, "_quota", None)
-                if quota is not None:
-                    try:
-                        if not quota.can_upload(platform_name):
-                            platform_blocking.append(f"{manifest.display_name} daily quota is exhausted.")
-                    except Exception:
-                        platform_warnings.append(f"{manifest.display_name} quota could not be checked.")
-
-                platform_previews.append(
-                    {
-                        "name": platform_name,
-                        "display_name": manifest.display_name,
-                        "auth_mode": manifest.auth_mode.value,
-                        "official": manifest.is_official_api,
-                        "max_caption_length": max_caption,
-                        "caption_length": len(caption),
-                        "blocking": platform_blocking,
-                        "warnings": platform_warnings,
-                        "ready": not platform_blocking,
-                    }
-                )
-                blocking.extend(platform_blocking)
-                warnings.extend(platform_warnings)
-
-            file_size = path.stat().st_size if path.exists() and path.is_file() else 0
             return json.dumps(
-                {
-                    "ok": True,
-                    "ready": not blocking,
-                    "video": {
-                        "path": str(path),
-                        "filename": path.name,
-                        "size_bytes": file_size,
-                        "size_mb": round(file_size / (1024 * 1024), 2) if file_size else 0,
-                    },
-                    "caption": caption,
-                    "caption_length": len(caption),
-                    "platforms": platform_previews,
-                    "blocking": blocking,
-                    "warnings": warnings,
-                },
+                build_post_preflight(
+                    config=config,
+                    video_path=video_path,
+                    caption=caption,
+                    platforms=requested_platforms,
+                    quota=getattr(self, "_quota", None),
+                ),
                 default=str,
             )
         except Exception as exc:
@@ -1091,25 +997,9 @@ class AppController(QObject):
 
     @staticmethod
     def _credential_paths_for_platform(config: Any, platform_name: str) -> list[str]:
-        account = getattr(config, platform_name, None)
-        if account is None:
-            return []
-        if platform_name == "youtube":
-            return [
-                str(path)
-                for path in (
-                    getattr(account, "client_secrets", "") or "",
-                    getattr(account, "token_file", "") or "",
-                )
-                if path
-            ]
-        if platform_name == "x":
-            path = str(getattr(account, "cookies_file", "") or "")
-            return [path] if path else []
-        if platform_name == "instagram":
-            path = str(getattr(account, "session_file", "") or "")
-            return [path] if path else []
-        return []
+        from xpst.post_preflight import credential_paths_for_platform
+
+        return credential_paths_for_platform(config, platform_name)
 
     @staticmethod
     def _valid_destination_platforms(config: Any) -> set[str]:

@@ -192,3 +192,62 @@ async def test_mcp_kb_query_uses_active_config_dir(tmp_path, monkeypatch):
     assert data["nuggets"][0]["point"] == "custom profile only"
     assert "default profile only" not in json.dumps(data)
     assert os.environ["XPST_HOME"] == str(default_dir)
+
+
+@pytest.mark.asyncio
+async def test_mcp_post_dry_run_reports_shared_preflight(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.youtube.enabled = True
+    config.youtube.client_secrets = ""
+    config.youtube.token_file = ""
+    config.instagram.enabled = False
+    config.x.enabled = False
+    engine = Mock(config=config)
+
+    result = await mcp_server._handle_post(
+        engine,
+        {
+            "video_path": str(tmp_path / "missing.mp4"),
+            "caption": "Manual post",
+            "platforms": ["youtube"],
+            "dry_run": True,
+        },
+    )
+
+    data = _text_payload(result)
+
+    assert result.isError is not True
+    assert data["dry_run"] is True
+    assert data["ready"] is False
+    assert any("Video file not found" in item for item in data["blocking"])
+
+
+@pytest.mark.asyncio
+async def test_mcp_post_blocks_failed_preflight_before_upload(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.youtube.enabled = True
+    config.youtube.client_secrets = ""
+    config.youtube.token_file = ""
+    config.instagram.enabled = False
+    config.x.enabled = False
+    engine = Mock(config=config)
+    engine.post_manual = AsyncMock()
+
+    result = await mcp_server._handle_post(
+        engine,
+        {
+            "video_path": str(tmp_path / "missing.mp4"),
+            "caption": "Manual post",
+            "platforms": ["youtube"],
+        },
+    )
+
+    data = _text_payload(result)
+
+    assert result.isError is True
+    assert data["ok"] is False
+    assert "Video file not found" in data["error"]
+    assert data["preflight"]["ready"] is False
+    engine.post_manual.assert_not_awaited()

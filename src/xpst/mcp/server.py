@@ -72,6 +72,7 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
 
 from xpst.config import XPSTConfig
 from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.post_preflight import build_post_preflight
 from xpst.utils.logger import get_logger, setup_logging
 
 if TYPE_CHECKING:
@@ -662,6 +663,13 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
     """Handle xpst_post tool."""
     dry_run = args.get("dry_run", False)
     carousel_paths = args.get("carousel_paths", [])
+    preflight = build_post_preflight(
+        config=engine.config,
+        video_path=args["video_path"],
+        caption=args["caption"],
+        platforms=args.get("platforms"),
+        carousel_paths=carousel_paths,
+    )
 
     if dry_run:
         return CallToolResult(
@@ -669,11 +677,21 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                 type="text",
                 text=json.dumps({
                     "dry_run": True,
-                    "video": args["video_path"],
-                    "caption": args["caption"][:100],
-                    "carousel": len(carousel_paths) > 0,
-                    "targets": args.get("platforms") or list(engine._platforms.keys()),
-                }, indent=2),
+                    **preflight,
+                }, indent=2, default=str),
+            )],
+        )
+
+    if not preflight["ready"]:
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "ok": False,
+                    "error": preflight["blocking"][0] if preflight["blocking"] else "Post is not ready.",
+                    "preflight": preflight,
+                }, indent=2, default=str),
             )],
         )
 
