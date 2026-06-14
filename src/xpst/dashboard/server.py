@@ -25,6 +25,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from xpst import __version__
 from xpst.utils.platform import get_config_dir
 
 if TYPE_CHECKING:
@@ -61,7 +62,7 @@ def _create_app(config_dir: str | None = None) -> FastAPI:
     app = FastAPI(
         title="xPST Dashboard",
         description="xPST cross-posting analytics and health API",
-        version="0.1.0",
+        version=__version__,
     )
 
     # ── Health endpoint ─────────────────────────────────────────────────

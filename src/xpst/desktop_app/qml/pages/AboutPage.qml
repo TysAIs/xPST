@@ -83,10 +83,10 @@ Page {
 
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: "v0.1.0"
+                        text: "v0.1.0-rc2"
                         font.pixelSize: 13
                         color: theme.textMuted
-                        Accessible.name: "Version 0.1.0"
+                        Accessible.name: "Version 0.1.0 rc2"
                     }
 
                     Text {

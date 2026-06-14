@@ -20,7 +20,7 @@ Quick Start:
     >>> results = asyncio.run(engine.check_and_post())
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.0rc2"
 __author__ = "xPST Contributors"
 
 from .config import NotificationConfig, XPSTConfig
