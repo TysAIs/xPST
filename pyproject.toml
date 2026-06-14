@@ -116,6 +116,13 @@ Changelog = "https://github.com/TysAIs/xPST/blob/main/CHANGELOG.md"
 [tool.hatch.build.targets.wheel]
 packages = ["src/xpst"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"assets/fonts/Inter.ttf" = "src/xpst/desktop_app/assets/fonts/Inter.ttf"
+"assets/fonts/LICENSE-Inter.txt" = "src/xpst/desktop_app/assets/fonts/LICENSE-Inter.txt"
+"assets/fonts/lucide.ttf" = "src/xpst/desktop_app/assets/fonts/lucide.ttf"
+"assets/fonts/LICENSE-lucide.txt" = "src/xpst/desktop_app/assets/fonts/LICENSE-lucide.txt"
+"assets/fonts/README.md" = "src/xpst/desktop_app/assets/fonts/README.md"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]

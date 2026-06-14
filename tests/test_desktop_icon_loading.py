@@ -55,6 +55,22 @@ def test_resolve_app_icon_prefers_icon_png(monkeypatch, tmp_path):
     assert found == assets / "icon.png"
 
 
+def test_resource_path_prefers_package_local_assets(monkeypatch, tmp_path):
+    package_dir = tmp_path / "site" / "xpst" / "desktop_app"
+    package_font = package_dir / "assets" / "fonts" / "lucide.ttf"
+    package_font.parent.mkdir(parents=True)
+    package_font.write_bytes(b"font")
+    project_root = tmp_path / "checkout"
+    project_font = project_root / "assets" / "fonts" / "lucide.ttf"
+    project_font.parent.mkdir(parents=True)
+    project_font.write_bytes(b"root")
+
+    monkeypatch.setattr(rp, "__file__", str(package_dir / "resource_path.py"))
+    monkeypatch.setattr(rp, "get_base_path", lambda: project_root)
+
+    assert rp.resource_path("assets", "fonts", "lucide.ttf") == package_font
+
+
 def test_icon_logic_is_qt_free():
     # Resolving an icon must never require PySide6.
     import subprocess

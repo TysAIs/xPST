@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from urllib.parse import unquote
 
+import tomllib
 import yaml
 
 from scripts.verify_desktop_package import (
@@ -261,6 +262,20 @@ def test_desktop_package_gate_includes_bundled_fonts():
     font_checks = [check for check in result["checks"] if check["path"] == "assets/fonts"]
     assert font_checks, "verify gate must check bundled UI and icon fonts"
     assert font_checks[0]["ok"] is True
+
+
+def test_wheel_build_includes_desktop_font_assets():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    force_include = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+
+    expected = {
+        "assets/fonts/Inter.ttf": "src/xpst/desktop_app/assets/fonts/Inter.ttf",
+        "assets/fonts/LICENSE-Inter.txt": "src/xpst/desktop_app/assets/fonts/LICENSE-Inter.txt",
+        "assets/fonts/lucide.ttf": "src/xpst/desktop_app/assets/fonts/lucide.ttf",
+        "assets/fonts/LICENSE-lucide.txt": "src/xpst/desktop_app/assets/fonts/LICENSE-lucide.txt",
+        "assets/fonts/README.md": "src/xpst/desktop_app/assets/fonts/README.md",
+    }
+    assert expected.items() <= force_include.items()
 
 
 def test_desktop_font_gate_fails_when_fonts_missing(tmp_path):
