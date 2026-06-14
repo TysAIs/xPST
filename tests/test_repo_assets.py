@@ -237,6 +237,16 @@ def test_desktop_package_specs_include_runtime_assets_and_dynamic_imports():
         assert "PySide6.QtMultimedia" in text
 
 
+def test_macos_bundle_version_comes_from_project_metadata():
+    text = (ROOT / "build_macos.spec").read_text(encoding="utf-8")
+
+    assert "PROJECT_VERSION = _project_version(project_root)" in text
+    assert '"CFBundleVersion": PROJECT_VERSION' in text
+    assert '"CFBundleShortVersionString": PROJECT_VERSION' in text
+    assert '"CFBundleVersion": "0.1.0"' not in text
+    assert '"CFBundleShortVersionString": "0.1.0"' not in text
+
+
 def test_desktop_package_gate_includes_qt_lgpl_notice():
     result = verify_desktop_package(ROOT)
 
