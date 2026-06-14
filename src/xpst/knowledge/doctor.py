@@ -25,9 +25,10 @@ from typing import TYPE_CHECKING
 
 from xpst.knowledge.manifest import Manifest
 from xpst.knowledge.queue import IngestionQueue
-from xpst.knowledge.store.json_store import JsonKnowledgeStore
+from xpst.knowledge.store import open_default_store
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from xpst.knowledge.store.base import KnowledgeStore
     from xpst.knowledge.workspace import Workspace
 
 SEVERITY_OK = "ok"
@@ -108,7 +109,7 @@ def _check_dependencies() -> list[Finding]:
     return findings
 
 
-def _check_store(store: JsonKnowledgeStore) -> tuple[list[Finding], list, list]:
+def _check_store(store: KnowledgeStore) -> tuple[list[Finding], list, list]:
     nuggets = list(store.all_nuggets())
     areas = store.areas()
     findings: list[Finding] = []
@@ -243,7 +244,7 @@ def diagnose(workspace: Workspace) -> DoctorReport:
     findings: list[Finding] = []
     findings.extend(_check_dependencies())
 
-    store = JsonKnowledgeStore(workspace.nuggets_path)
+    store = open_default_store(workspace)
     store_findings, nuggets, areas = _check_store(store)
     findings.extend(store_findings)
     findings.extend(_check_embeddings(nuggets))
