@@ -5,9 +5,10 @@ Uses Click's CliRunner to invoke commands and verify JSON output.
 
 import json
 import logging
+import sys
 import zipfile
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -1342,7 +1343,9 @@ class TestDesktopCommand:
             captured["config_dir"] = config_dir
             return 0
 
-        monkeypatch.setattr("xpst.desktop_app.main.main", fake_pyside_main)
+        fake_desktop_main = ModuleType("xpst.desktop_app.main")
+        fake_desktop_main.main = fake_pyside_main
+        monkeypatch.setitem(sys.modules, "xpst.desktop_app.main", fake_desktop_main)
 
         result = runner.invoke(main, ["--config", config_file, "app", "--no-splash"])
 

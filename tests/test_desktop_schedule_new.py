@@ -19,6 +19,9 @@ class _Signal:
 def _controller(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)
+    config.notifications.enabled = True
+    config.notifications.on_success = True
+    config.notifications.on_failure = True
     data_changed = _Signal()
     notification = _Signal()
     controller = SimpleNamespace(
