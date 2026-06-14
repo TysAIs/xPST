@@ -561,6 +561,7 @@ class TestRunCommand:
             def acquire_pidfile(self):
                 raise PidfileLockError("already running")
 
+        monkeypatch.setattr("xpst.cli.ensure_ffmpeg", lambda: "ffmpeg")
         monkeypatch.setattr("xpst.cli.CrossPostEngine", lambda _config: LockedEngine())
 
         result = runner.invoke(main, ["--config", config_file, "run", "--json"])
@@ -600,6 +601,7 @@ class TestRunCommand:
                     )
                 ]
 
+        monkeypatch.setattr("xpst.cli.ensure_ffmpeg", lambda: "ffmpeg")
         monkeypatch.setattr("xpst.cli.CrossPostEngine", lambda _config: FailedEngine())
 
         result = runner.invoke(main, ["--config", config_file, "run", "--json"])
