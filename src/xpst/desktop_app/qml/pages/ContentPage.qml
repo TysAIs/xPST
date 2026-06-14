@@ -1697,8 +1697,8 @@ Page {
                                     fillMode: Image.PreserveAspectCrop
                                     visible: status === Image.Ready
                                     source: {
-                                        if (typeof controller !== "undefined" && modelData.thumbnail) {
-                                            return controller.getThumbnail(modelData.thumbnail)
+                                        if (typeof controller !== "undefined" && modelData.videoPath) {
+                                            return controller.getThumbnail(modelData.videoPath)
                                         }
                                         return ""
                                     }
@@ -1727,7 +1727,7 @@ Page {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: {
-                                        contentPage.previewVideoPath = modelData.thumbnail || ""
+                                        contentPage.previewVideoPath = modelData.videoPath || ""
                                         contentPage.previewVideoTitle = modelData.title || "Untitled"
                                         videoPreviewDialog.open()
                                     }

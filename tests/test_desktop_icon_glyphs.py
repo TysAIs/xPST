@@ -336,7 +336,11 @@ def test_content_post_preview_uses_video_path_not_thumbnail():
     content = content_page.read_text(encoding="utf-8-sig")
 
     assert "var videoPath = post.videoPath || \"\"" in content
+    assert "controller.getThumbnail(modelData.videoPath)" in content
+    assert "contentPage.previewVideoPath = modelData.videoPath || \"\"" in content
     assert "var videoPath = post.thumbnail || \"\"" not in content
+    assert "controller.getThumbnail(modelData.thumbnail)" not in content
+    assert "contentPage.previewVideoPath = modelData.thumbnail || \"\"" not in content
 
 
 def test_content_caption_editor_updates_source_id():
@@ -402,6 +406,15 @@ def test_content_video_preview_slider_is_themed():
     assert "handle: Rectangle" in content
     assert "color: seekSlider.enabled ? theme.accent : theme.border" in content
     assert "border.color: theme.surfaceCard" in content
+
+    backend = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "backend.py"
+    ).read_text(encoding="utf-8-sig")
+    assert "def border(self): return self._col(\"surfaceAlt\")" in backend
 
 
 def test_content_search_clear_uses_theme_icon():
@@ -746,6 +759,39 @@ def test_tray_post_now_preflights_before_posting():
     assert preview_idx < post_idx
     assert "QSystemTrayIcon.Warning" in main_py
     assert "Post preview failed:" in main_py
+
+
+def test_tray_refresh_and_health_use_controller_state():
+    from pathlib import Path
+
+    main_py = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "main.py"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "controller_obj.refreshData()" in main_py
+    assert "platform_health = health.get(\"platforms\")" in main_py
+    assert "total = len(platform_health)" in main_py
+
+
+def test_settings_mcp_status_uses_backend_running_state():
+    from pathlib import Path
+
+    settings = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "SettingsPage.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "mcpRunning = !!status.running" in settings
+    assert "mcpRunning = false" in settings
 
 
 def test_icon_glyphs_is_qt_free():

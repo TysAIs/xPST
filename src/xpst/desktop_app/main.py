@@ -190,6 +190,10 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
                     obj.requestActivate()
 
     def _refresh() -> None:
+        controller_obj = engine.rootContext().contextProperty("controller")
+        if controller_obj and hasattr(controller_obj, "refreshData"):
+            controller_obj.refreshData()
+            return
         root_objects = engine.rootObjects()
         for obj in root_objects:
             if hasattr(obj, "refreshData"):
@@ -225,11 +229,15 @@ def _setup_tray(app: QApplication, engine: QQmlApplicationEngine) -> QSystemTray
             try:
                 import json
                 health = json.loads(health_json)
+                platform_health = health.get("platforms") if isinstance(health, dict) else None
+                if not isinstance(platform_health, dict):
+                    platform_health = health if isinstance(health, dict) else {}
                 healthy_count = sum(
-                    1 for p in health.values()
-                    if p.get("status") in ("ok", "healthy", "connected")
+                    1 for p in platform_health.values()
+                    if isinstance(p, dict)
+                    and p.get("status") in ("ok", "healthy", "connected")
                 )
-                total = len(health)
+                total = len(platform_health)
                 tray.showMessage(
                     "xPST Health",
                     f"{healthy_count}/{total} platforms healthy",

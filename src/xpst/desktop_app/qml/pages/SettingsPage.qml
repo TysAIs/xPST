@@ -130,7 +130,7 @@ Page {
         if (typeof controller === "undefined") return
         try {
             var status = JSON.parse(controller.mcpStatus)
-            mcpRunning = false
+            mcpRunning = !!status.running
             mcpPid = status.pid || 0
             mcpCommand = status.command || "xpst-mcp"
             mcpError = status.error || ""

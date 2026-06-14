@@ -824,6 +824,7 @@ def test_desktop_repair_readiness_creates_local_folders(_which, _ffmpeg, _ytdlp,
 
     assert data["ok"] is True
     assert (tmp_path / "downloads").exists()
+    assert controller._config.config_dir == str(tmp_path)
     assert controller._engine is None
 
 

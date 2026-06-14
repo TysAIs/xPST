@@ -2020,7 +2020,8 @@ class AppController(QObject):
             if self._config is None:
                 return json.dumps({"ok": False, "error": "Config not loaded"})
             result = repair_local_setup(self._config)
-            self._config = XPSTConfig.load()
+            config_path = AppController._active_config_dir(self) / "config.yaml"
+            self._config = XPSTConfig.load(str(config_path))
             self._engine = None
             self.refreshData()
             return json.dumps(result, default=str)
@@ -2499,6 +2500,9 @@ class ThemeProvider(QObject):
 
     @Property(str, notify=darkModeChanged)
     def surfaceCard(self): return self._col("surfaceCard")
+
+    @Property(str, notify=darkModeChanged)
+    def border(self): return self._col("surfaceAlt")
 
     # Text hierarchy
     @Property(str, notify=darkModeChanged)
