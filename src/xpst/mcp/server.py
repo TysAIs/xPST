@@ -767,13 +767,25 @@ async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) ->
     )
 
 
-async def _handle_analytics(config: XPSTConfig, arguments: dict[str, Any]) -> CallToolResult:
+async def _handle_analytics(
+    config: XPSTConfig | dict[str, Any] | None = None,
+    arguments: dict[str, Any] | None = None,
+) -> CallToolResult:
     """Handle xpst_analytics (G27): expose the same numbers the UI shows.
 
     Reads the persisted snapshot store by default; live=true runs a real
     collection first (network, may take seconds and consume API quota).
     """
     from xpst.analytics import AnalyticsCollector
+
+    if arguments is None:
+        if isinstance(config, dict):
+            arguments = config
+            config = None
+        else:
+            arguments = {}
+    if config is None:
+        config = XPSTConfig()
 
     platform = arguments.get("platform")
     live = bool(arguments.get("live", False))
