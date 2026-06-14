@@ -33,6 +33,7 @@ from xpst.engine import CrossPostEngine, CrossPostResult
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger, setup_logging
+from xpst.utils.pidfile import PidfileLockError
 from xpst.utils.platform import get_config_dir
 from xpst.utils.quota import QuotaManager
 
@@ -85,6 +86,15 @@ def json_output(data: object, as_json: bool) -> None:
     """
     if as_json:
         click.echo(_json.dumps(data, default=str, ensure_ascii=False))
+
+
+def _exit_for_engine_lock(exc: PidfileLockError, as_json: bool) -> None:
+    """Report an active engine lock without mutating posting state."""
+    if as_json:
+        json_output({"ok": False, "status": "locked", "error": str(exc)}, True)
+    else:
+        console.print(f"[red]Another xPST posting run is already active:[/red] {exc}")
+    raise click.exceptions.Exit(EXIT_GENERAL) from exc
 
 
 # Shared Click decorator that adds ``--json`` to every command
@@ -289,11 +299,25 @@ def run(ctx: click.Context, bidirectional: bool, dry_run: bool, as_json: bool):
     if bidirectional:
         if not as_json and not quiet:
             console.print("[bold blue]xPST - Bidirectional cross-posting check...[/bold blue]")
-        results = asyncio.run(engine.check_and_post_bidirectional())
+        try:
+            engine.acquire_pidfile()
+        except PidfileLockError as exc:
+            _exit_for_engine_lock(exc, as_json)
+        try:
+            results = asyncio.run(engine.check_and_post_bidirectional())
+        finally:
+            engine.release_pidfile()
     else:
         if not as_json and not quiet:
             console.print("[bold blue]xPST - Checking for new videos...[/bold blue]")
-        results = asyncio.run(engine.check_and_post())
+        try:
+            engine.acquire_pidfile()
+        except PidfileLockError as exc:
+            _exit_for_engine_lock(exc, as_json)
+        try:
+            results = asyncio.run(engine.check_and_post())
+        finally:
+            engine.release_pidfile()
 
     if not results:
         if as_json:
@@ -329,6 +353,10 @@ def watch(ctx: click.Context, interval: int | None, bidirectional: bool):
     console.print(f"[bold blue]xPST - {mode_label} watching every {check_interval}s (Ctrl+C to stop)[/bold blue]")
 
     engine = CrossPostEngine(config)
+    try:
+        engine.acquire_pidfile()
+    except PidfileLockError as exc:
+        _exit_for_engine_lock(exc, False)
 
     # Crash recovery check on startup
     _check_crash_recovery(engine)
@@ -368,6 +396,7 @@ def watch(ctx: click.Context, interval: int | None, bidirectional: bool):
             logger.error(f"Error in watch loop: {e}")
             console.print(f"[red]Error:[/red] {e}")
             _time.sleep(60)
+    engine.release_pidfile()
 
 
 @main.command()
@@ -2363,10 +2392,24 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
 
     existing_due = [entry for entry in due if Path(entry["video_path"]).exists()]
     engine = None
+    engine_locked = False
     if existing_due:
         try:
             engine = CrossPostEngine(config_obj)
+            engine.acquire_pidfile()
+            engine_locked = True
         except Exception as exc:
+            if isinstance(exc, PidfileLockError):
+                if as_json:
+                    json_output({
+                        "status": "locked",
+                        "count": len(due),
+                        "error": str(exc),
+                        "posts": [{"id": entry["id"], "status": "pending"} for entry in due],
+                    }, True)
+                else:
+                    console.print(f"[red]Another xPST posting run is already active:[/red] {exc}")
+                raise click.exceptions.Exit(EXIT_GENERAL) from exc
             if as_json:
                 json_output({
                     "status": "error",
@@ -2445,6 +2488,8 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
         json_output({"status": "processed", "count": len(due), "posts": processed}, True)
     else:
         console.print(f"\n[green]Processed {len(due)} scheduled post(s)[/green]")
+    if engine is not None and engine_locked:
+        engine.release_pidfile()
 
 
 @schedule.command("install")

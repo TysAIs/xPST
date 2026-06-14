@@ -241,6 +241,27 @@ class TestPostCommand:
         assert "Invalid platform(s): youtbe" in result.output
 
 
+class TestRunCommand:
+    """One-shot autoposter command safety."""
+
+    def test_run_json_reports_active_lock(self, runner, config_file, monkeypatch):
+        from xpst.utils.pidfile import PidfileLockError
+
+        class LockedEngine:
+            def acquire_pidfile(self):
+                raise PidfileLockError("already running")
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", lambda _config: LockedEngine())
+
+        result = runner.invoke(main, ["--config", config_file, "run", "--json"])
+
+        assert result.exit_code == 1
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert data["status"] == "locked"
+        assert data["error"] == "already running"
+
+
 class TestScheduleAddJson:
     """test_schedule_add_json: invoke `schedule add --json`, verify JSON."""
 
@@ -484,6 +505,12 @@ class TestScheduleRunJson:
         )
 
         class DeferredEngine:
+            def acquire_pidfile(self):
+                return None
+
+            def release_pidfile(self):
+                return None
+
             async def post_manual(self, *_args, **_kwargs):
                 return SimpleNamespace(
                     all_success=False,
@@ -515,6 +542,51 @@ class TestScheduleRunJson:
         assert reloaded["status"] == "pending"
         assert reloaded["completed_at"] is None
         assert reloaded["error"] == "instagram: Outside posting hours (8am-11pm), deferred"
+
+    def test_schedule_run_json_lock_leaves_due_post_pending(
+        self, runner, tmp_path, monkeypatch
+    ):
+        from datetime import datetime, timedelta
+
+        from xpst.schedule_manager import ScheduleManager
+        from xpst.utils.pidfile import PidfileLockError
+
+        orig_init = ScheduleManager.__init__
+        sched_dir = str(tmp_path / ".xpst_schedule")
+
+        def patched_init(self, config_dir="~/.xpst"):
+            orig_init(self, config_dir=sched_dir)
+
+        monkeypatch.setattr(ScheduleManager, "__init__", patched_init)
+
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+        mgr = ScheduleManager(config_dir=sched_dir)
+        entry = mgr.add(
+            str(video),
+            "run me",
+            datetime.now() - timedelta(minutes=1),
+            platforms=["instagram"],
+        )
+
+        class LockedEngine:
+            def acquire_pidfile(self):
+                raise PidfileLockError("already running")
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", lambda _config: LockedEngine())
+
+        result = runner.invoke(main, ["schedule", "run", "--json"])
+        assert result.exit_code == 1
+        data = extract_json(result.output)
+
+        assert data["status"] == "locked"
+        assert data["count"] == 1
+        assert data["error"] == "already running"
+        assert data["posts"] == [{"id": entry["id"], "status": "pending"}]
+
+        reloaded = ScheduleManager(config_dir=sched_dir).list()[0]
+        assert reloaded["status"] == "pending"
+        assert reloaded["error"] is None
 
 
 class TestVersionJson:
