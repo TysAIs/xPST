@@ -79,6 +79,8 @@ def test_release_workflow_guards_version_and_skips_pypi_for_rc_tags():
 
     assert "python scripts/release_version_guard.py --tag" in workflow
     assert "github.event_name == 'push' && !contains(github.ref_name, '-rc')" in workflow
+    assert "python scripts/public_release_check.py --dist release-artifacts --output-dir release-public --json" in workflow
+    assert "if: ${{ !contains(github.ref_name, '-rc') }}" in workflow
 
 
 def test_find_dist_files_accepts_desktop_only_artifact(tmp_path):

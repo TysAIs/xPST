@@ -137,6 +137,23 @@ def test_release_workflow_preserves_required_ship_gates():
     assert workflow["permissions"]["id-token"] == "write"
     assert workflow["permissions"]["attestations"] == "write"
     assert workflow["jobs"]["github-release"]["needs"] == ["build-python", "build-windows", "build-linux", "build-macos"]
+    release_step = next(
+        step for step in workflow["jobs"]["github-release"]["steps"]
+        if step.get("uses") == "softprops/action-gh-release@v2"
+    )
+    assert release_step["with"]["prerelease"] == "${{ contains(github.ref_name, '-rc') }}"
+    github_release_steps = workflow["jobs"]["github-release"]["steps"]
+    github_release_text = "\n".join(str(step) for step in github_release_steps)
+    assert "actions/setup-python@v5" in github_release_text
+    assert 'python -m pip install -e ".[full]"' in github_release_text
+    assert "python scripts/public_release_check.py --dist release-artifacts --output-dir release-public --json" in github_release_text
+    assert "public-release-evidence" in github_release_text
+    assert "secrets.WINDOWS_CERTIFICATE_BASE64" in github_release_text
+    assert "secrets.MACOS_CODESIGN_IDENTITY" in github_release_text
+    public_gate = next(step for step in github_release_steps if step.get("name") == "Public release gate")
+    public_evidence = next(step for step in github_release_steps if step.get("name") == "Upload public release evidence")
+    assert public_gate["if"] == "${{ !contains(github.ref_name, '-rc') }}"
+    assert public_evidence["if"] == "${{ !contains(github.ref_name, '-rc') }}"
 
     # W3-2: the Linux desktop release lane must build, smoke, and attest a binary.
     linux_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-linux"]["steps"])
