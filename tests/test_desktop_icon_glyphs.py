@@ -643,6 +643,9 @@ def test_settings_rate_limit_ui_matches_daily_config():
     assert "Window Duration" not in settings
     assert "rateLimitMinutes" not in settings
     assert "rateLimitMinutesError" not in settings
+    assert "property bool rateLimitDirty: false" in settings
+    assert "settings.rate_limits =" in settings
+    assert "if (rateLimitDirty)" in settings
 
 
 def test_connect_x_cookie_dialog_checks_save_result():

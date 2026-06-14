@@ -15,6 +15,8 @@ Page {
     property bool xEnabled: true
     property bool tiktokEnabled: true
     property int rateLimitPosts: 10
+    property int originalRateLimitPosts: 10
+    property bool rateLimitDirty: false
     property bool postCompletionAlerts: true
     property bool errorNotifications: true
     property bool mcpRunning: false
@@ -111,6 +113,8 @@ Page {
                     if (typeof v === "number" && v > 0) maxRate = Math.max(maxRate, v)
                 }
                 rateLimitPosts = maxRate
+                originalRateLimitPosts = maxRate
+                rateLimitDirty = false
             }
 
             // Load monitoring
@@ -171,12 +175,6 @@ Page {
             instagram: { enabled: instagramEnabled },
             x: { enabled: xEnabled },
             tiktok: { enabled: tiktokEnabled, username: tiktokUsername },
-            rate_limits: {
-                youtube: rateLimitPosts,
-                instagram: rateLimitPosts,
-                x: rateLimitPosts,
-                tiktok: rateLimitPosts
-            },
             video: {
                 download_dir: downloadDir
             },
@@ -187,6 +185,14 @@ Page {
             },
             monitoring: {
                 log_level: "INFO"
+            }
+        }
+        if (rateLimitDirty) {
+            settings.rate_limits = {
+                youtube: rateLimitPosts,
+                instagram: rateLimitPosts,
+                x: rateLimitPosts,
+                tiktok: rateLimitPosts
             }
         }
 
@@ -439,7 +445,10 @@ Page {
                                     clip: true
                                     onTextChanged: {
                                         var v = parseInt(text)
-                                        if (!isNaN(v)) settingsPage.rateLimitPosts = v
+                                        if (!isNaN(v)) {
+                                            settingsPage.rateLimitPosts = v
+                                            settingsPage.rateLimitDirty = v !== settingsPage.originalRateLimitPosts
+                                        }
                                         settingsPage.validateForm()
                                     }
                                     Accessible.name: "Daily Upload Limit input"

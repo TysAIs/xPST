@@ -565,6 +565,34 @@ def test_desktop_save_settings_uses_active_config_dir_and_local_source(tmp_path)
     assert controller._engine is None
 
 
+def test_desktop_save_settings_preserves_rate_limits_when_not_sent(tmp_path):
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.rate_limits.youtube = 3
+    config.rate_limits.instagram = 7
+    config.rate_limits.x = 11
+    config.rate_limits.tiktok = 13
+    config.save()
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        refreshData=lambda: None,
+    )
+
+    raw = AppController.saveSettings(
+        controller,
+        json.dumps({"youtube": {"enabled": False}}),
+    )
+    data = json.loads(raw)
+    reloaded = XPSTConfig.load(str(tmp_path / "config.yaml"))
+
+    assert data["ok"] is True
+    assert reloaded.rate_limits.youtube == 3
+    assert reloaded.rate_limits.instagram == 7
+    assert reloaded.rate_limits.x == 11
+    assert reloaded.rate_limits.tiktok == 13
+
+
 def test_desktop_save_settings_persists_download_dir(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)
