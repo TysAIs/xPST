@@ -387,7 +387,13 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
     )
 
     media_paths = [Path(v) for v in video]
-    platform_list = platforms.split(",") if platforms else None
+    try:
+        platform_list = _parse_destination_platforms(platforms, config)
+    except click.ClickException as exc:
+        if as_json:
+            json_output({"ok": False, "error": exc.message}, True)
+            sys.exit(EXIT_CONFIG_ERROR)
+        raise
 
     if dry_run:
         engine = CrossPostEngine(config)
@@ -2137,6 +2143,26 @@ def _valid_schedule_platforms(config: Any) -> set[str]:
 
 
 def _parse_schedule_platforms(platforms: str | None, config: Any) -> list[str] | None:
+    if not platforms:
+        return None
+    platform_list = [p.strip().lower() for p in platforms.split(",") if p.strip()]
+    if not platform_list:
+        raise click.ClickException("Select at least one platform.")
+
+    valid_platforms = _valid_schedule_platforms(config)
+    invalid = sorted(set(platform_list) - valid_platforms)
+    if invalid:
+        raise click.ClickException(
+            "Invalid platform(s): "
+            + ", ".join(invalid)
+            + ". Valid: "
+            + ", ".join(sorted(valid_platforms))
+        )
+    return platform_list
+
+
+def _parse_destination_platforms(platforms: str | None, config: Any) -> list[str] | None:
+    """Parse and validate comma-separated destination platform names."""
     if not platforms:
         return None
     platform_list = [p.strip().lower() for p in platforms.split(",") if p.strip()]

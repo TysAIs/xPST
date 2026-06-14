@@ -190,6 +190,57 @@ class TestConfigExportImport:
         assert not default_dir.joinpath("credentials").exists()
 
 
+class TestPostCommand:
+    """Manual post command validation."""
+
+    def test_post_json_rejects_invalid_platform_before_engine(
+        self, runner, config_file, tmp_path, monkeypatch
+    ):
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+
+        def fail_engine(*_args, **_kwargs):
+            raise AssertionError("CrossPostEngine should not be constructed")
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", fail_engine)
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "post",
+            "--video", str(video),
+            "--caption", "Manual post",
+            "--platforms", "youtube,youtbe",
+            "--json",
+        ])
+
+        assert result.exit_code == 4
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert "Invalid platform(s): youtbe" in data["error"]
+
+    def test_post_rejects_invalid_platform_before_engine(
+        self, runner, config_file, tmp_path, monkeypatch
+    ):
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+
+        def fail_engine(*_args, **_kwargs):
+            raise AssertionError("CrossPostEngine should not be constructed")
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", fail_engine)
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "post",
+            "--video", str(video),
+            "--caption", "Manual post",
+            "--platforms", "youtbe",
+        ])
+
+        assert result.exit_code != 0
+        assert "Invalid platform(s): youtbe" in result.output
+
+
 class TestScheduleAddJson:
     """test_schedule_add_json: invoke `schedule add --json`, verify JSON."""
 
