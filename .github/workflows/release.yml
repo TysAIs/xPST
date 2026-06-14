@@ -36,6 +36,7 @@ jobs:
           mypy src/xpst
           pip-audit
           python scripts/scan_public_safety.py --json
+          python scripts/release_version_guard.py --tag "${GITHUB_REF_NAME}" --allow-untagged
           python scripts/build_package.py
           python scripts/release_preflight.py --json
           python scripts/clean_install_smoke.py --dist dist --artifact both
@@ -55,7 +56,7 @@ jobs:
           subject-path: release/python/*
 
       - name: Publish to PyPI
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && !contains(github.ref_name, '-rc')
         # Non-blocking until PyPI trusted publishing is configured for this
         # repo (owner + PyPI side) — the GitHub release must not be held
         # hostage by the registry step.

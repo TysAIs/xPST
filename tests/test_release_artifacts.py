@@ -22,6 +22,7 @@ from scripts.release_artifacts import (
     verify_wheel,
 )
 from scripts.release_preflight import build_release_preflight
+from scripts.release_version_guard import expected_version_for_tag, validate_release_version
 from scripts.verify_macos_artifact import verify_macos_artifact
 from scripts.verify_windows_exe import verify_windows_exe
 
@@ -37,6 +38,47 @@ def _make_sdist(path: Path, tmp_path: Path) -> None:
     pyproject.write_text("[project]\nname = \"xpst\"\n", encoding="utf-8")
     with tarfile.open(path, "w:gz") as archive:
         archive.add(pyproject, arcname="xpst-0.1.0/pyproject.toml")
+
+
+def _write_versioned_project(root: Path, version: str) -> None:
+    (root / "src" / "xpst").mkdir(parents=True, exist_ok=True)
+    (root / "pyproject.toml").write_text(
+        f"[project]\nname = \"xpst\"\nversion = \"{version}\"\n",
+        encoding="utf-8",
+    )
+    (root / "src" / "xpst" / "__init__.py").write_text(
+        f"__version__ = \"{version}\"\n",
+        encoding="utf-8",
+    )
+
+
+def test_release_version_guard_maps_rc_tag_to_pep440_version():
+    assert expected_version_for_tag("v0.1.0-rc2") == "0.1.0rc2"
+
+
+def test_release_version_guard_rejects_rc_tag_with_final_package_version(tmp_path):
+    _write_versioned_project(tmp_path, "0.1.0")
+
+    result = validate_release_version("v0.1.0-rc2", root=tmp_path)
+
+    assert result["ok"] is False
+    assert result["expected_version"] == "0.1.0rc2"
+    assert "pyproject has 0.1.0" in result["error"]
+
+
+def test_release_version_guard_accepts_matching_final_and_rc_tags(tmp_path):
+    _write_versioned_project(tmp_path, "0.1.0")
+    assert validate_release_version("v0.1.0", root=tmp_path)["ok"] is True
+
+    _write_versioned_project(tmp_path, "0.1.0rc2")
+    assert validate_release_version("v0.1.0-rc2", root=tmp_path)["ok"] is True
+
+
+def test_release_workflow_guards_version_and_skips_pypi_for_rc_tags():
+    workflow = (BUILD_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    assert "python scripts/release_version_guard.py --tag" in workflow
+    assert "github.event_name == 'push' && !contains(github.ref_name, '-rc')" in workflow
 
 
 def test_find_dist_files_accepts_desktop_only_artifact(tmp_path):
