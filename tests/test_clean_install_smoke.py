@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,7 @@ from scripts.clean_install_smoke import (
     find_sdist,
     find_wheel,
     json_from_output,
+    run_clean_install_smoke,
     venv_xpst_mcp,
     write_smoke_config,
     write_smoke_kb_store,
@@ -89,3 +91,29 @@ def test_write_smoke_kb_store_seeds_substring_query_nugget(tmp_path):
     assert "packaged stdio smoke" in nugget["point"]
     assert nugget["embedding"] == []
     assert nugget["source_video_id"] == "clean-install-smoke"
+
+
+def test_clean_install_smoke_disables_pip_cache(tmp_path, monkeypatch):
+    artifact = tmp_path / "dist" / "xpst-0.1.0.tar.gz"
+    artifact.parent.mkdir()
+    artifact.write_bytes(b"sdist")
+    commands = []
+
+    class FakeBuilder:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def create(self, venv_dir):
+            (venv_dir / "Scripts").mkdir(parents=True)
+
+    def fake_run_command(cmd, env):
+        commands.append(cmd)
+        return SimpleNamespace(returncode=1, stdout="", stderr="stop after install")
+
+    monkeypatch.setattr("scripts.clean_install_smoke.venv.EnvBuilder", FakeBuilder)
+    monkeypatch.setattr("scripts.clean_install_smoke.run_command", fake_run_command)
+
+    with pytest.raises(RuntimeError):
+        run_clean_install_smoke(artifact.parent, tmp_path / "work", artifact="sdist")
+
+    assert "--no-cache-dir" in commands[0]

@@ -242,7 +242,18 @@ def _smoke_artifact(artifact_path: Path, work_dir: Path, keep: bool = False) -> 
     env["PYTHONUTF8"] = "1"
 
     install_target = f"xpst[mcp] @ {artifact_path.resolve().as_uri()}"
-    install = run_command([str(python), "-m", "pip", "install", "--disable-pip-version-check", install_target], env)
+    install = run_command(
+        [
+            str(python),
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "--no-cache-dir",
+            install_target,
+        ],
+        env,
+    )
     if install.returncode != 0:
         raise RuntimeError(f"Artifact install failed for {artifact_path.name}:\n{install.stdout}\n{install.stderr}")
 
