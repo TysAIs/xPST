@@ -5,6 +5,7 @@ Handles OS-specific differences in paths, signals, and process management.
 """
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -57,6 +58,11 @@ def get_ffmpeg_name() -> str:
     if sys.platform == "win32":
         return "ffmpeg.exe"
     return "ffmpeg"
+
+
+def ensure_ffmpeg() -> str | None:
+    """Return the ffmpeg executable path when it is available on PATH."""
+    return shutil.which(get_ffmpeg_name()) or shutil.which("ffmpeg")
 
 
 def get_ffprobe_name() -> str:
