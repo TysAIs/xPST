@@ -194,6 +194,17 @@ class ScheduleManager:
                 break
         self._save()
 
+    def mark_deferred(self, entry_id: str, error: str | None = None) -> None:
+        """Keep a scheduled post pending after a temporary posting deferral."""
+        for entry in self._entries:
+            if entry.get("id") == entry_id:
+                entry["status"] = "pending"
+                entry["completed_at"] = None
+                if error:
+                    entry["error"] = error
+                break
+        self._save()
+
     def _create_next_occurrence(self, entry: dict[str, Any]) -> None:
         """Create the next occurrence of a recurring schedule entry.
 

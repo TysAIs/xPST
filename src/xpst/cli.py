@@ -2181,6 +2181,19 @@ def _parse_destination_platforms(platforms: str | None, config: Any) -> list[str
     return platform_list
 
 
+def _scheduled_post_deferred(result: Any) -> bool:
+    """Return True when only anti-bot deferrals are blocking completion."""
+    upload_results = list(getattr(result, "results", {}).values())
+    if not upload_results:
+        return False
+    return any(
+        getattr(ur, "metadata", {}).get("deferred") for ur in upload_results
+    ) and all(
+        getattr(ur, "success", False) or getattr(ur, "metadata", {}).get("deferred")
+        for ur in upload_results
+    )
+
+
 @schedule.command("add")
 @click.argument("file", type=click.Path())
 @click.option("--caption", "-c", required=True, help="Post caption text")
@@ -2399,16 +2412,27 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
                 failed = [f"{p}: {ur.error}" for p, ur in result.results.items() if not ur.success]
                 error_msg = "; ".join(failed)
 
-            manager.mark_complete(entry_id, success=success, error=error_msg)
-            processed.append({
-                "id": entry_id,
-                "status": "completed" if success else "failed",
-                "error": error_msg,
-            })
+            deferred = _scheduled_post_deferred(result)
+            if deferred:
+                manager.mark_deferred(entry_id, error=error_msg)
+                processed.append({
+                    "id": entry_id,
+                    "status": "deferred",
+                    "error": error_msg,
+                })
+            else:
+                manager.mark_complete(entry_id, success=success, error=error_msg)
+                processed.append({
+                    "id": entry_id,
+                    "status": "completed" if success else "failed",
+                    "error": error_msg,
+                })
 
             if not as_json:
                 if success:
                     console.print(f"  [green]✓[/green] {entry_id}: posted successfully")
+                elif deferred:
+                    console.print(f"  [yellow]deferred[/yellow] {entry_id}: {error_msg}")
                 else:
                     console.print(f"  [yellow]⚠[/yellow] {entry_id}: partial — {error_msg}")
         except Exception as e:
