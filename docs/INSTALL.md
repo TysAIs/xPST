@@ -84,14 +84,14 @@ pip install xpst
 # With MCP server support (for AI agents)
 pip install "xpst[mcp]"
 
-# With desktop app support
-pip install "xpst[desktop]"
+# With native desktop app support
+pip install "xpst[pyside6]"
 
 # With Windows-specific extras
 pip install "xpst[windows]"
 
 # Everything
-pip install "xpst[mcp,desktop]"
+pip install "xpst[full]"
 ```
 
 ### Method 2: From Source (Development)
@@ -144,18 +144,18 @@ docker build -t xpst .
 ```bash
 # Run a one-shot cross-post check
 docker run --rm \
-  -v ~/.xpst:/root/.xpst \
+  -v ~/.xpst:/home/xpst/.xpst \
   xpst run
 
 # Run with config file
 docker run --rm \
-  -v ~/.xpst:/root/.xpst \
+  -v ~/.xpst:/home/xpst/.xpst \
   -v ~/Videos:/videos \
   xpst post --video /videos/clip.mp4 --caption "Hello!"
 
 # Interactive shell
 docker run --rm -it \
-  -v ~/.xpst:/root/.xpst \
+  -v ~/.xpst:/home/xpst/.xpst \
   xpst bash
 ```
 
@@ -167,7 +167,7 @@ services:
   xpst:
     build: .
     volumes:
-      - ~/.xpst:/root/.xpst
+      - ~/.xpst:/home/xpst/.xpst
       - ~/Videos:/videos:ro
     command: watch --interval 900
     restart: unless-stopped
@@ -288,7 +288,7 @@ xpst mcp
 ### Native App (PySide6 — Recommended)
 
 ```bash
-pip install PySide6
+pip install "xpst[pyside6]"
 xpst app
 ```
 

@@ -78,10 +78,17 @@ def test_dockerignore_excludes_runtime_data_and_secrets():
 
 def test_docker_assets_reference_existing_entrypoint_and_current_commands():
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    install_doc = (ROOT / "docs" / "INSTALL.md").read_text(encoding="utf-8")
     entrypoint = (ROOT / "docker-entrypoint.sh").read_text(encoding="utf-8")
     ci_workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
 
     assert "COPY docker-entrypoint.sh /docker-entrypoint.sh" in dockerfile
+    assert "COPY assets/fonts/ assets/fonts/" in dockerfile
+    volumes = compose["services"]["xpst"]["volumes"]
+    assert "xpst-data:/home/xpst/.xpst" in volumes
+    assert "/root/.xpst" not in install_doc
+    assert 'pip install "xpst[pyside6]"' in install_doc
     for command in ["diagnostics", "providers", "readiness", "schedule", "plugins"]:
         assert command in entrypoint
     assert "docker" in ci_workflow["jobs"]

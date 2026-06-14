@@ -10,7 +10,7 @@ services:
     # Mount persistent volumes
     volumes:
       # Configuration and credentials (host mount)
-      - xpst-data:/root/.xpst
+      - xpst-data:/home/xpst/.xpst
 
     # Environment variables (optional overrides)
     environment:
