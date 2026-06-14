@@ -8,6 +8,7 @@ import logging
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -421,6 +422,111 @@ class TestPostCommand:
         assert data["all_success"] is False
         assert data["platforms"]["youtube"]["error"] == "upload failed"
         assert released == [True]
+
+
+class TestWatchCommand:
+    def test_watch_runs_scheduler_cycle_and_releases_lock(
+        self, runner, config_file, monkeypatch
+    ):
+        calls: dict[str, object] = {"run_checks": []}
+
+        class FakeState:
+            def update_last_wake_check(self):
+                calls["wake_updated"] = True
+
+            def save(self):
+                calls["state_saved"] = True
+
+        class FakeEngine:
+            def __init__(self, config):
+                self.config = config
+                self.state = FakeState()
+
+            def acquire_pidfile(self):
+                calls["acquired"] = True
+
+            def release_pidfile(self):
+                calls["released"] = True
+
+        class FakeScheduler:
+            def __init__(self, engine, config):
+                calls["scheduler_config_dir"] = config.config_dir
+                self.last_results = []
+
+            def _needs_catch_up(self):
+                return False
+
+            def _run_check(self, catch_up):
+                calls["run_checks"].append(catch_up)
+
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", FakeEngine)
+        monkeypatch.setattr("xpst.cli._check_crash_recovery", lambda _engine: None)
+        monkeypatch.setattr("xpst.scheduler.Scheduler", FakeScheduler)
+        monkeypatch.setattr("time.sleep", lambda _seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "watch",
+            "--interval", "1",
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert calls["run_checks"] == [False]
+        assert calls["wake_updated"] is True
+        assert calls["state_saved"] is True
+        assert calls["acquired"] is True
+        assert calls["released"] is True
+        assert "Stopped by user" in result.output
+
+    def test_watch_bidirectional_uses_jittered_interval_and_releases_lock(
+        self, runner, config_file, monkeypatch
+    ):
+        calls: dict[str, object] = {}
+
+        class FakeState:
+            def update_last_wake_check(self):
+                calls["wake_updated"] = True
+
+            def save(self):
+                calls["state_saved"] = True
+
+        class FakeAntiBot:
+            def get_jittered_interval(self, interval):
+                calls["jitter_interval"] = interval
+                return 1
+
+        class FakeEngine:
+            def __init__(self, config):
+                self.config = config
+                self.state = FakeState()
+                self.anti_bot = FakeAntiBot()
+                self.check_and_post_bidirectional = AsyncMock(return_value=[])
+
+            def acquire_pidfile(self):
+                calls["acquired"] = True
+
+            def release_pidfile(self):
+                calls["released"] = True
+
+        engine = FakeEngine(SimpleNamespace(config_dir="unused"))
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", lambda _config: engine)
+        monkeypatch.setattr("xpst.cli._check_crash_recovery", lambda _engine: None)
+        monkeypatch.setattr("time.sleep", lambda _seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "watch",
+            "--interval", "7",
+            "--bidirectional",
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert calls["jitter_interval"] == 7
+        assert calls["wake_updated"] is True
+        assert calls["state_saved"] is True
+        assert calls["acquired"] is True
+        assert calls["released"] is True
+        engine.check_and_post_bidirectional.assert_awaited_once()
 
 
 class TestBackfillCommand:
