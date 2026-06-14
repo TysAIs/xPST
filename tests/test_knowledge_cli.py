@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -117,6 +118,13 @@ def test_kb_organize_then_areas(tmp_path, monkeypatch):
     assert areas.exit_code == 0, areas.output
     assert "Area 1" in areas.output
 
+    areas_json = runner.invoke(main, ["kb", "areas", "--json"])
+    assert areas_json.exit_code == 0, areas_json.output
+    areas_data = json.loads(areas_json.output)
+    assert areas_data["workspace"] == "default"
+    assert areas_data["area_count"] == 1
+    assert areas_data["areas"][0]["label"] == "Area 1"
+
 
 def test_kb_areas_empty_is_friendly(tmp_path, monkeypatch):
     monkeypatch.setenv("XPST_HOME", str(tmp_path))
@@ -146,9 +154,27 @@ def test_kb_course_emits_ordered_cited_outline(tmp_path, monkeypatch):
     # citation rendered alongside the point
     assert "@" in course.output
 
+    course_json = runner.invoke(main, ["kb", "course", "--json"])
+    assert course_json.exit_code == 0, course_json.output
+    course_data = json.loads(course_json.output)
+    assert course_data["workspace"] == "default"
+    assert course_data["area_count"] == 1
+    assert course_data["nugget_count"] == 1
+    assert course_data["areas"][0]["nuggets"][0]["point"] == "cli idea"
+
 
 def test_kb_course_empty_is_friendly(tmp_path, monkeypatch):
     monkeypatch.setenv("XPST_HOME", str(tmp_path))
     out = CliRunner().invoke(main, ["kb", "course"])
     assert out.exit_code == 0, out.output
     assert "Nothing to assemble" in out.output
+
+
+def test_kb_doctor_json_is_parseable(tmp_path, monkeypatch):
+    monkeypatch.setenv("XPST_HOME", str(tmp_path))
+    out = CliRunner().invoke(main, ["kb", "doctor", "--json"])
+    assert out.exit_code == 0, out.output
+    data = json.loads(out.output)
+    assert data["workspace"] == "default"
+    assert data["ok"] is True
+    assert isinstance(data["findings"], list)
