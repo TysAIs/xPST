@@ -6,8 +6,12 @@ import re
 from pathlib import Path
 from urllib.parse import unquote
 
-import tomllib
 import yaml
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
+    import tomli as tomllib
 
 from scripts.verify_desktop_package import (
     _check_desktop_fonts,
