@@ -2607,6 +2607,7 @@ def _install_os_scheduler(
         plist_path = plist_dir / "com.xpst.schedule.plist"
         interval_sec = interval * 60
         log_dir = _schedule_log_dir(config_path)
+        log_dir.mkdir(parents=True, exist_ok=True)
         plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -2666,9 +2667,11 @@ def _install_os_scheduler(
         # cron does NOT expand '~', so the log path must be fully resolved.
         import shlex
 
-        cron_log = _schedule_log_dir(config_path) / "cron.log"
+        log_dir = _schedule_log_dir(config_path)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        cron_log = log_dir / "cron.log"
         command = " ".join([shlex.quote(xpst_bin), *[shlex.quote(arg) for arg in _schedule_run_args(config_path)]])
-        cron_line = f"*/{interval} * * * * {command} >> {cron_log} 2>&1"
+        cron_line = f"*/{interval} * * * * {command} >> {shlex.quote(str(cron_log))} 2>&1"
 
         # Read existing crontab
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)

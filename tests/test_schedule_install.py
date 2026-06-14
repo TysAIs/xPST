@@ -49,6 +49,7 @@ def test_cron_line_uses_expanded_path(monkeypatch, fake_home):
     # The log path must be fully expanded — no literal '~' in the cron line.
     assert "~/.xpst" not in written
     assert str(fake_home / ".xpst" / "logs" / "cron.log") in written
+    assert (fake_home / ".xpst" / "logs").is_dir()
     # And it must still be a valid cron schedule line.
     assert "*/15 * * * *" in written
     assert "/usr/bin/xpst --quiet schedule run" in written
@@ -99,7 +100,7 @@ def test_linux_scheduler_preserves_config_path(monkeypatch, fake_home):
     monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/crontab")
     monkeypatch.setattr("subprocess.run", fake_run)
 
-    config_path = str(fake_home / "configs" / "creator one.yaml")
+    config_path = str(fake_home / "configs with space" / "creator one.yaml")
     assert cli._install_os_scheduler(
         "Linux", "/usr/bin/xpst", 15, as_json=True, config_path=config_path,
     )
@@ -107,7 +108,8 @@ def test_linux_scheduler_preserves_config_path(monkeypatch, fake_home):
     written = captured["input"]
     assert "/usr/bin/xpst --quiet --config" in written
     assert f"--config '{config_path}'" in written
-    assert str(fake_home / "configs" / "logs" / "cron.log") in written
+    assert f">> '{fake_home / 'configs with space' / 'logs' / 'cron.log'}' 2>&1" in written
+    assert (fake_home / "configs with space" / "logs").is_dir()
     assert str(fake_home / ".xpst" / "logs" / "cron.log") not in written
     assert "schedule run" in written
 
@@ -138,6 +140,7 @@ def test_macos_launchagent_preserves_config_path_and_log_dir(monkeypatch, tmp_pa
     assert f"<string>{config_path}</string>" in written["plist"]
     assert str(tmp_path / "profiles" / "logs" / "launchagent.log") in written["plist"]
     assert str(tmp_path / "profiles" / "logs" / "launchagent.err") in written["plist"]
+    assert (tmp_path / "profiles" / "logs").is_dir()
 
 
 def test_windows_task_uses_global_quiet_before_subcommand(monkeypatch):
