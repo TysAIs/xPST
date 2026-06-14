@@ -180,6 +180,107 @@ def test_connect_page_disconnect_button_calls_disconnect():
     assert "connectPage.disconnectPlatform(providerKey)" in qml
 
 
+def test_desktop_processes_due_scheduled_post(tmp_path):
+    from datetime import datetime, timedelta
+
+    from xpst.schedule_manager import ScheduleManager
+
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"fake")
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    manager = ScheduleManager(str(tmp_path))
+    entry = manager.add(
+        str(video),
+        "Scheduled post",
+        datetime.now() - timedelta(minutes=1),
+        platforms=["youtube"],
+    )
+    emitted = []
+    locks = []
+
+    class SignalSink:
+        def emit(self, payload):
+            emitted.append(payload)
+
+    class FakeEngine:
+        def acquire_pidfile(self):
+            locks.append("acquire")
+
+        def release_pidfile(self):
+            locks.append("release")
+
+        async def post_manual(self, video_path, caption, platforms):
+            assert video_path == video
+            assert caption == "Scheduled post"
+            assert platforms == ["youtube"]
+            return SimpleNamespace(
+                video_id="scheduled-video",
+                all_success=True,
+                partial_success=False,
+                results={
+                    "youtube": SimpleNamespace(
+                        success=True,
+                        error=None,
+                        metadata={},
+                    )
+                },
+            )
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=FakeEngine(),
+        _ensure_engine=lambda: True,
+        postComplete=SignalSink(),
+    )
+
+    processed = AppController._process_due_scheduled_posts_once(controller)
+
+    assert processed == [{"id": entry["id"], "status": "completed", "error": None}]
+    assert locks == ["acquire", "release"]
+    reloaded = ScheduleManager(str(tmp_path)).list()[0]
+    assert reloaded["status"] == "completed"
+    assert json.loads(emitted[0])["scheduled"] is True
+
+
+def test_desktop_process_due_scheduled_post_marks_missing_file_failed(tmp_path):
+    from datetime import datetime, timedelta
+
+    from xpst.schedule_manager import ScheduleManager
+
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    manager = ScheduleManager(str(tmp_path))
+    entry = manager.add(
+        str(tmp_path / "missing.mp4"),
+        "Scheduled post",
+        datetime.now() - timedelta(minutes=1),
+        platforms=["youtube"],
+    )
+
+    def fail_engine():
+        raise AssertionError("Engine should not be needed for missing files")
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=None,
+        _ensure_engine=fail_engine,
+        postComplete=SimpleNamespace(emit=lambda _payload: None),
+    )
+
+    processed = AppController._process_due_scheduled_posts_once(controller)
+
+    assert processed == [
+        {
+            "id": entry["id"],
+            "status": "failed",
+            "error": f"File not found: {tmp_path / 'missing.mp4'}",
+        }
+    ]
+    reloaded = ScheduleManager(str(tmp_path)).list()[0]
+    assert reloaded["status"] == "failed"
+
+
 def test_desktop_generate_encoding_sample_uses_ffmpeg_and_active_config_dir(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)

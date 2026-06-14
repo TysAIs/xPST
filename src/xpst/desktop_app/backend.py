@@ -205,11 +205,17 @@ class AppController(QObject):
         self._quota_data: str = "{}"
         self._mcp_process: subprocess.Popen | None = None
         self._mcp_last_error: str = ""
+        self._schedule_processing: bool = False
 
         # Auto-refresh timer (30s)
         self._refresh_timer = QTimer(self)
         self._refresh_timer.timeout.connect(self.refreshData)
         self._refresh_timer.start(30_000)
+
+        # Process due desktop-created scheduled posts while the app is open.
+        self._schedule_timer = QTimer(self)
+        self._schedule_timer.timeout.connect(self.processDueScheduledPosts)
+        self._schedule_timer.start(60_000)
 
         # Platform health auto-check timer (5 minutes)
         self._health_check_interval = self._get_health_check_interval()
@@ -1194,6 +1200,154 @@ class AppController(QObject):
             logger.error("scheduleNew error: %s", exc)
             self.notification.emit(str(exc), True)
             return False
+
+    @staticmethod
+    def _scheduled_post_deferred(result: Any) -> bool:
+        """Return True when only temporary anti-bot deferrals blocked a post."""
+        upload_results = list(getattr(result, "results", {}).values())
+        if not upload_results:
+            return False
+        return any(
+            getattr(ur, "metadata", {}).get("deferred") for ur in upload_results
+        ) and all(
+            getattr(ur, "success", False) or getattr(ur, "metadata", {}).get("deferred")
+            for ur in upload_results
+        )
+
+    def _process_due_scheduled_posts_once(self) -> list[dict[str, Any]]:
+        """Process all currently due scheduled posts for the desktop app."""
+        manager = AppController._schedule_manager(self)
+        if manager is None:
+            return [{"status": "error", "error": "Schedule manager is not available"}]
+
+        due = manager.get_due()
+        if not due:
+            return []
+
+        valid_platforms = AppController._valid_destination_platforms(self._config)
+        needs_engine = False
+        prepared: list[tuple[dict[str, Any], Path, list[str] | None]] = []
+        processed: list[dict[str, Any]] = []
+
+        for entry in due:
+            entry_id = entry["id"]
+            video_path = Path(entry["video_path"])
+            platforms = entry.get("platforms") or None
+            if platforms:
+                normalized = [str(p).lower() for p in platforms]
+                invalid = sorted(set(normalized) - valid_platforms)
+                if invalid:
+                    error_msg = "Invalid platform(s): " + ", ".join(invalid)
+                    manager.mark_complete(entry_id, success=False, error=error_msg)
+                    processed.append({"id": entry_id, "status": "failed", "error": error_msg})
+                    continue
+                platforms = normalized
+
+            if not video_path.exists():
+                error_msg = f"File not found: {video_path}"
+                manager.mark_complete(entry_id, success=False, error=error_msg)
+                processed.append({"id": entry_id, "status": "failed", "error": error_msg})
+                continue
+
+            needs_engine = True
+            prepared.append((entry, video_path, platforms))
+
+        if not needs_engine:
+            return processed
+
+        if not self._ensure_engine():
+            error_msg = "Posting engine is unavailable"
+            processed.extend(
+                {"id": entry["id"], "status": "pending", "error": error_msg}
+                for entry, _path, _platforms in prepared
+            )
+            return processed
+
+        try:
+            self._engine.acquire_pidfile()
+        except Exception as exc:
+            error_msg = str(exc)
+            processed.extend(
+                {"id": entry["id"], "status": "pending", "error": error_msg}
+                for entry, _path, _platforms in prepared
+            )
+            return processed
+
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            for entry, video_path, platforms in prepared:
+                entry_id = entry["id"]
+                try:
+                    result = loop.run_until_complete(
+                        self._engine.post_manual(video_path, entry["caption"], platforms)
+                    )
+                    success = bool(getattr(result, "all_success", False))
+                    failed = [
+                        f"{platform}: {getattr(upload_result, 'error', '')}"
+                        for platform, upload_result in getattr(result, "results", {}).items()
+                        if not getattr(upload_result, "success", False)
+                    ]
+                    error_msg = "; ".join(item for item in failed if item.strip()) or None
+                    deferred = AppController._scheduled_post_deferred(result)
+                    if deferred:
+                        manager.mark_deferred(entry_id, error=error_msg)
+                        processed.append({"id": entry_id, "status": "deferred", "error": error_msg})
+                    else:
+                        manager.mark_complete(entry_id, success=success, error=error_msg)
+                        processed.append({
+                            "id": entry_id,
+                            "status": "completed" if success else "failed",
+                            "error": error_msg,
+                        })
+                    self.postComplete.emit(json.dumps({
+                        "video_id": getattr(result, "video_id", entry_id),
+                        "caption": entry["caption"],
+                        "all_success": success,
+                        "partial_success": bool(getattr(result, "partial_success", False)),
+                        "scheduled": True,
+                        "schedule_id": entry_id,
+                    }, default=str))
+                except Exception as exc:
+                    manager.mark_complete(entry_id, success=False, error=str(exc))
+                    processed.append({"id": entry_id, "status": "failed", "error": str(exc)})
+        finally:
+            loop.close()
+            self._engine.release_pidfile()
+
+        return processed
+
+    @Slot(result=str)
+    def processDueScheduledPosts(self) -> str:
+        """Process due desktop scheduled posts without blocking the UI."""
+        if self._schedule_processing:
+            return json.dumps({"ok": False, "status": "busy"})
+
+        self._schedule_processing = True
+
+        def _run() -> None:
+            try:
+                processed = AppController._process_due_scheduled_posts_once(self)
+                if processed:
+                    self.refreshData()
+                    completed = sum(1 for item in processed if item.get("status") == "completed")
+                    failed = sum(1 for item in processed if item.get("status") == "failed")
+                    deferred = sum(1 for item in processed if item.get("status") == "deferred")
+                    if completed:
+                        self.notification.emit(f"Posted {completed} scheduled post(s)", False)
+                    if deferred:
+                        self.notification.emit(f"Deferred {deferred} scheduled post(s)", False)
+                    if failed:
+                        self.notification.emit(f"{failed} scheduled post(s) failed", True)
+            except Exception as exc:
+                logger.error("processDueScheduledPosts error: %s", exc)
+                self.notification.emit(str(exc), True)
+            finally:
+                self._schedule_processing = False
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        return json.dumps({"ok": True, "status": "started"})
 
     @Slot(str, str)
     def deletePost(self, post_id: str, platform: str) -> None:
