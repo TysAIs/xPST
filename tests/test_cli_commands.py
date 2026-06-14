@@ -491,6 +491,29 @@ class TestScheduleAddJson:
         assert data["caption"] == "Test post"
         assert data["status"] == "pending"
 
+    def test_schedule_add_json_accepts_timezone_aware_iso_time(self, runner, tmp_path, monkeypatch):
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+
+        from xpst.schedule_manager import ScheduleManager
+        orig_init = ScheduleManager.__init__
+
+        def patched_init(self, config_dir="~/.xpst"):
+            orig_init(self, config_dir=str(tmp_path / ".xpst_schedule"))
+
+        monkeypatch.setattr(ScheduleManager, "__init__", patched_init)
+
+        result = runner.invoke(main, [
+            "schedule", "add", str(video),
+            "--caption", "Offset post",
+            "--at", "2026-12-25T10:00:00-07:00",
+            "--json",
+        ])
+
+        assert result.exit_code == 0, result.output
+        data = extract_json(result.output)
+        assert data["scheduled_time"] == "2026-12-25T10:00:00-07:00"
+
     def test_schedule_commands_use_active_config_dir(self, runner, tmp_path, monkeypatch, config_file):
         """--config must route schedule storage to that config's directory."""
         default_dir = tmp_path / "default-xpst"
@@ -542,6 +565,52 @@ class TestScheduleAddJson:
         assert result.exit_code != 0
         assert "Invalid platform(s): youtbe" in result.output
         assert not (Path(sched_dir) / "schedule.json").exists()
+
+    def test_schedule_add_json_rejects_missing_file(self, runner, tmp_path):
+        result = runner.invoke(main, [
+            "schedule", "add", str(tmp_path / "missing.mp4"),
+            "--caption", "Missing file",
+            "--at", "2026-12-25 10:00",
+            "--json",
+        ])
+
+        assert result.exit_code == 1
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert "File not found" in data["error"]
+
+    def test_schedule_add_json_rejects_invalid_date(self, runner, tmp_path):
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+
+        result = runner.invoke(main, [
+            "schedule", "add", str(video),
+            "--caption", "Bad date",
+            "--at", "not-a-date",
+            "--json",
+        ])
+
+        assert result.exit_code == 4
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert "Invalid date format" in data["error"]
+
+    def test_schedule_add_json_rejects_invalid_platform(self, runner, tmp_path):
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+
+        result = runner.invoke(main, [
+            "schedule", "add", str(video),
+            "--caption", "Bad target",
+            "--at", "2026-12-25 10:00",
+            "--platforms", "youtube,youtbe",
+            "--json",
+        ])
+
+        assert result.exit_code == 4
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert "Invalid platform(s): youtbe" in data["error"]
 
     def test_schedule_add_rejects_disabled_platform(self, runner, tmp_path, config_file):
         video = tmp_path / "video.mp4"
@@ -974,6 +1043,21 @@ class TestScheduleInstall:
         data = extract_json(result.output)
         assert data["ok"] is False
         assert "greater than zero" in data["error"]
+
+    def test_schedule_install_json_reports_helper_errors(
+        self, runner, monkeypatch
+    ):
+        def fail_install(*_args, **_kwargs):
+            raise RuntimeError("crontab not found on PATH")
+
+        monkeypatch.setattr("xpst.cli._install_os_scheduler", fail_install)
+
+        result = runner.invoke(main, ["schedule", "install", "--json"])
+
+        assert result.exit_code == 1
+        data = extract_json(result.output)
+        assert data["ok"] is False
+        assert "crontab not found" in data["error"]
 
 
 class TestVersionJson:

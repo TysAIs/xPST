@@ -88,6 +88,11 @@ def json_output(data: object, as_json: bool) -> None:
         click.echo(_json.dumps(data, default=str, ensure_ascii=False))
 
 
+def _json_error(message: str, exit_code: int) -> None:
+    json_output({"ok": False, "error": message}, True)
+    sys.exit(exit_code)
+
+
 def _exit_for_engine_lock(exc: PidfileLockError, as_json: bool) -> None:
     """Report an active engine lock without mutating posting state."""
     if as_json:
@@ -2272,24 +2277,42 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
 
     video_path = Path(file)
     if not video_path.exists():
+        if as_json:
+            _json_error(f"File not found: {file}", EXIT_GENERAL)
         console.print(f"[red]File not found:[/red] {file}")
         sys.exit(EXIT_GENERAL)
 
     # Parse scheduled time
     dt = None
+    try:
+        dt = datetime.fromisoformat(scheduled_time)
+    except ValueError:
+        pass
     for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        if dt is not None:
+            break
         try:
             dt = datetime.strptime(scheduled_time, fmt)
             break
         except ValueError:
             continue
     if dt is None:
+        if as_json:
+            _json_error(
+                f"Invalid date format: {scheduled_time}. Use 'YYYY-MM-DD HH:MM' or ISO format.",
+                EXIT_CONFIG_ERROR,
+            )
         console.print(f"[red]Invalid date format:[/red] {scheduled_time}")
         console.print("[dim]Use: 'YYYY-MM-DD HH:MM' or ISO format[/dim]")
         sys.exit(EXIT_CONFIG_ERROR)
 
     config = load_config(ctx.obj.get("config_path"))
-    platform_list = _parse_schedule_platforms(platforms, config)
+    try:
+        platform_list = _parse_schedule_platforms(platforms, config)
+    except click.ClickException as exc:
+        if as_json:
+            _json_error(str(exc), EXIT_CONFIG_ERROR)
+        raise
 
     manager = _schedule_manager_for_context(ctx)
     effective_repeat = repeat_rule if repeat_rule and repeat_rule != "none" else None
@@ -2563,7 +2586,12 @@ def schedule_install(ctx: click.Context, interval: int, uninstall: bool, as_json
     config_path = ctx.obj.get("config_path")
 
     if uninstall:
-        result = _uninstall_os_scheduler(system, xpst_bin, as_json)
+        try:
+            result = _uninstall_os_scheduler(system, xpst_bin, as_json)
+        except Exception as exc:
+            if as_json:
+                _json_error(str(exc), EXIT_GENERAL)
+            raise
     else:
         if interval <= 0:
             message = "Schedule interval must be greater than zero minutes."
@@ -2571,7 +2599,12 @@ def schedule_install(ctx: click.Context, interval: int, uninstall: bool, as_json
                 json_output({"ok": False, "error": message}, True)
                 sys.exit(EXIT_CONFIG_ERROR)
             raise click.ClickException(message)
-        result = _install_os_scheduler(system, xpst_bin, interval, as_json, config_path=config_path)
+        try:
+            result = _install_os_scheduler(system, xpst_bin, interval, as_json, config_path=config_path)
+        except Exception as exc:
+            if as_json:
+                _json_error(str(exc), EXIT_GENERAL)
+            raise
 
     if not result:
         sys.exit(EXIT_GENERAL)
