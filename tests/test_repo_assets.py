@@ -208,7 +208,7 @@ def test_release_workflow_preserves_required_ship_gates():
         "python scripts/scan_public_safety.py --json",
         "python scripts/build_package.py",
         "python scripts/release_preflight.py --json",
-        "python scripts/clean_install_smoke.py --dist dist --artifact both",
+        "python scripts/clean_install_smoke.py --dist dist --artifact both --install-timeout 600",
         "python scripts/verify_desktop_package.py",
         "QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py",
         "python scripts/release_artifacts.py --dist dist --output-dir release/python --metadata-label python --skip-checks",
