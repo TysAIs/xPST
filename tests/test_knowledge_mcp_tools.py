@@ -147,6 +147,15 @@ def test_kb_areas_empty_when_unorganized(isolated_home):
     assert result["areas"] == []
 
 
+def test_kb_areas_missing_workspace_does_not_create(isolated_home):
+    result = kb_tools.kb_areas("ghost")
+
+    assert result["workspace"] == "ghost"
+    assert result["count"] == 0
+    assert result["areas"] == []
+    assert not (isolated_home / "knowledge" / "ghost").exists()
+
+
 # ── kb_organize ──
 
 def test_kb_organize_summarizes_result(isolated_home, monkeypatch):

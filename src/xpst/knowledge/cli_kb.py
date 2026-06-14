@@ -207,7 +207,7 @@ def kb_areas(workspace: str) -> None:
     from xpst.knowledge.store.json_store import JsonKnowledgeStore
     from xpst.knowledge.workspace import Workspace
 
-    ws = Workspace.resolve(workspace)
+    ws = Workspace.resolve(workspace, create=False)
     store = JsonKnowledgeStore(ws.nuggets_path)
     areas = order_areas(store.areas())
     if not areas:
@@ -231,7 +231,7 @@ def kb_course(workspace: str, area_id: str | None) -> None:
     from xpst.knowledge.store.json_store import JsonKnowledgeStore
     from xpst.knowledge.workspace import Workspace
 
-    ws = Workspace.resolve(workspace)
+    ws = Workspace.resolve(workspace, create=False)
     store = JsonKnowledgeStore(ws.nuggets_path)
     course = assemble_course(store, workspace=ws.name, area_id=area_id)
     if not course.areas:
@@ -266,7 +266,7 @@ def kb_doctor(workspace: str) -> None:
     )
     from xpst.knowledge.workspace import Workspace
 
-    ws = Workspace.resolve(workspace)
+    ws = Workspace.resolve(workspace, create=False)
     report = diagnose(ws)
     style = {
         SEVERITY_OK: "green",

@@ -118,7 +118,7 @@ def kb_areas(workspace: str = "default") -> dict[str, Any]:
     from xpst.knowledge.store.json_store import JsonKnowledgeStore
     from xpst.knowledge.workspace import Workspace
 
-    ws = Workspace.resolve(workspace)
+    ws = Workspace.resolve(workspace, create=False)
     store = JsonKnowledgeStore(ws.nuggets_path)
     areas = order_areas(store.areas())
     return {
