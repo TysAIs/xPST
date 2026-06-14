@@ -1251,7 +1251,7 @@ def app(ctx: click.Context, port: int | None, no_splash: bool):
     try:
         from xpst.desktop_app.main import main as pyside_main
         console.print("[bold blue]Launching xPST desktop app…[/bold blue]")
-        sys.exit(pyside_main(no_splash=no_splash))
+        sys.exit(pyside_main(no_splash=no_splash, config_dir=config_dir))
     except ImportError:
         console.print("[yellow]PySide6 not installed — trying pywebview fallback.[/yellow]")
         console.print("[dim]Install with: pip install PySide6[/dim]\n")

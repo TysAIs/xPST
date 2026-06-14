@@ -422,7 +422,7 @@ ApplicationWindow {
         function onConnectResult(jsonStr) {
             var result = JSON.parse(jsonStr)
             if (result.ok) {
-                showToast(result.platform + " connected successfully", false)
+                showToast(result.message || (result.platform + " connected successfully"), false)
             } else {
                 showToast("Connection failed: " + (result.error || "Unknown error"), true)
             }

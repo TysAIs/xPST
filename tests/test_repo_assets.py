@@ -232,6 +232,9 @@ def test_desktop_package_specs_include_runtime_assets_and_dynamic_imports():
 
     assert result["ok"] is True
     assert {"DashboardPage.qml", "ConnectPage.qml"} <= set(result["qml_pages"])
+    for spec in ("build_windows.spec", "build_macos.spec", "build_linux.spec"):
+        text = (ROOT / spec).read_text(encoding="utf-8")
+        assert "PySide6.QtMultimedia" in text
 
 
 def test_desktop_package_gate_includes_qt_lgpl_notice():

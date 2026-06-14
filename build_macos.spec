@@ -56,6 +56,7 @@ a = Analysis(
         "PySide6.QtQuickControls2",
         "PySide6.QtQml",
         "PySide6.QtWidgets",
+        "PySide6.QtMultimedia",
     ],
     hookspath=[],
     hooksconfig={},

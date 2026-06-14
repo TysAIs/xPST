@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -188,6 +189,19 @@ def test_desktop_main_exposes_notification_model_to_sidebar():
     assert "notif_model = NotificationListModel()" in main_py
     assert "controller.notification.connect(notif_model.add_notification)" in main_py
     assert 'setContextProperty("notifModel", notif_model)' in main_py
+
+
+def test_connect_result_success_toast_uses_backend_message():
+    main_qml = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "main.qml"
+    ).read_text(encoding="utf-8-sig")
+
+    assert 'showToast(result.message || (result.platform + " connected successfully"), false)' in main_qml
 
 
 def test_analytics_uses_theme_icons_for_empty_state_and_metrics():

@@ -803,6 +803,24 @@ class TestDesktopCommand:
         assert "Launch xPST as a native desktop app" in result.output
         assert "--no-splash" in result.output
 
+    def test_native_desktop_app_uses_active_config_dir(self, runner, config_file, monkeypatch):
+        captured = {}
+
+        def fake_pyside_main(*, no_splash=False, config_dir=None):
+            captured["no_splash"] = no_splash
+            captured["config_dir"] = config_dir
+            return 0
+
+        monkeypatch.setattr("xpst.desktop_app.main.main", fake_pyside_main)
+
+        result = runner.invoke(main, ["--config", config_file, "app", "--no-splash"])
+
+        assert result.exit_code == 0, result.output
+        assert captured == {
+            "no_splash": True,
+            "config_dir": str(Path(config_file).parent),
+        }
+
 
 class TestMcpCommand:
     """test_mcp_command: invoke `mcp` without starting a real stdio server."""

@@ -6,6 +6,7 @@ controllers with QML engine, sets up system tray, and runs the event loop.
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -305,8 +306,11 @@ def _load_ui_font() -> bool:
     return True
 
 
-def main(no_splash: bool = False) -> int:
+def main(no_splash: bool = False, config_dir: str | None = None) -> int:
     """Launch the xPST desktop application."""
+    if config_dir:
+        os.environ["XPST_CONFIG_DIR"] = str(Path(config_dir).expanduser())
+
     # Must use QApplication (not QGuiApplication) for system tray support
     app = QApplication(sys.argv)
     app.setApplicationName("xPST")
@@ -318,7 +322,6 @@ def main(no_splash: bool = False) -> int:
     if QQuickStyle is not None:
         QQuickStyle.setStyle("Material")
     else:
-        import os
         os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Material")
 
     # Apply a platform-aware default UI font so text metrics don't drift on
@@ -359,14 +362,17 @@ def main(no_splash: bool = False) -> int:
     # Create backend objects (lightweight - defer heavy init)
     controller = AppController()
     post_model = PostListModel()
-    post_model.load_from_state()
+    active_config_dir = str(AppController._active_config_dir(controller))
+    post_model.load_from_state(active_config_dir)
     notif_model = NotificationListModel()
     if splash:
         splash.showMessage("Loading plugins...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
     app.processEvents()
 
     # Connect controller refresh to model reload
-    controller.dataChanged.connect(lambda: post_model.load_from_state())
+    controller.dataChanged.connect(
+        lambda: post_model.load_from_state(str(AppController._active_config_dir(controller)))
+    )
     controller.notification.connect(notif_model.add_notification)
     app.aboutToQuit.connect(controller.stopMcpServer)
 
