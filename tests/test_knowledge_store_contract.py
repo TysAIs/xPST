@@ -88,6 +88,23 @@ def test_search_empty_store(store):
     assert store.search([1.0, 0.0], k=5) == []
 
 
+def test_search_with_scores_returns_similarity_scores(store):
+    near = _nugget(point="near", embedding=(1.0, 0.0, 0.0))
+    far = _nugget(point="far", embedding=(0.0, 1.0, 0.0))
+    store.add_nugget(near)
+    store.add_nugget(far)
+
+    hits = store.search_with_scores([0.9, 0.1, 0.0], k=2)
+
+    assert len(hits) == 2
+    assert hits[0][0].point == "near"
+    scores = [score for _nugget, score in hits]
+    assert all(score is not None for score in scores)
+    assert scores[0] is not None
+    assert scores[1] is not None
+    assert scores[0] >= scores[1]
+
+
 def test_upsert_and_list_areas_ordered(store):
     a = Area.create(label="Second", order_index=1, nugget_ids=("n2",))
     b = Area.create(label="First", order_index=0, nugget_ids=("n1",))
