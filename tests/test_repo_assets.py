@@ -153,8 +153,11 @@ def test_release_workflow_preserves_required_ship_gates():
     assert "secrets.MACOS_CODESIGN_IDENTITY" in github_release_text
     public_gate = next(step for step in github_release_steps if step.get("name") == "Public release gate")
     public_evidence = next(step for step in github_release_steps if step.get("name") == "Upload public release evidence")
+    stage_public_evidence = next(step for step in github_release_steps if step.get("name") == "Stage public release evidence")
     assert public_gate["if"] == "${{ !contains(github.ref_name, '-rc') }}"
     assert public_evidence["if"] == "${{ !contains(github.ref_name, '-rc') }}"
+    assert stage_public_evidence["if"] == "${{ !contains(github.ref_name, '-rc') }}"
+    assert "cp release-public/* release-artifacts/" in stage_public_evidence["run"]
 
     # W3-2: the Linux desktop release lane must build, smoke, and attest a binary.
     linux_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-linux"]["steps"])

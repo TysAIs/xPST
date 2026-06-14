@@ -259,6 +259,11 @@ jobs:
           name: public-release-evidence
           path: release-public/*
 
+      - name: Stage public release evidence
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        run: |
+          cp release-public/* release-artifacts/
+
       - name: Aggregate checksums
         run: |
           cd release-artifacts
