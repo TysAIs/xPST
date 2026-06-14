@@ -161,13 +161,13 @@ class ScheduleManager:
         Returns:
             List of due schedule entries.
         """
-        now = datetime.now()
         due = []
         for entry in self._entries:
             if entry.get("status") != "pending":
                 continue
             try:
                 scheduled = datetime.fromisoformat(entry["scheduled_time"])
+                now = datetime.now(scheduled.tzinfo) if scheduled.tzinfo else datetime.now()
                 if scheduled <= now:
                     due.append(entry)
             except (ValueError, KeyError):

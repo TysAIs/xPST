@@ -1,6 +1,6 @@
 """Comprehensive tests for ScheduleManager (item 29)."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -107,6 +107,20 @@ class TestGetDue:
 
         due = manager.get_due()
         assert len(due) == 0
+
+    def test_get_due_handles_timezone_aware_entries(self, manager):
+        """Timezone-aware ISO timestamps compare without crashing."""
+        past = datetime.now(timezone.utc) - timedelta(minutes=5)
+        future = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+        due_entry = manager.add("/tmp/aware-due.mp4", "due", past)
+        future_entry = manager.add("/tmp/aware-future.mp4", "future", future)
+
+        due = manager.get_due()
+        due_ids = {entry["id"] for entry in due}
+
+        assert due_entry["id"] in due_ids
+        assert future_entry["id"] not in due_ids
 
 
 class TestMarkComplete:
