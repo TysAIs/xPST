@@ -299,6 +299,27 @@ class TestPostCommand:
         assert data["ok"] is False
         assert "Invalid platform(s): youtube" in data["error"]
 
+    def test_global_json_post_dry_run_uses_json(
+        self, runner, config_file, tmp_path
+    ):
+        video = tmp_path / "video.mp4"
+        video.write_bytes(b"fake")
+
+        result = runner.invoke(main, [
+            "--config", config_file,
+            "--json",
+            "post",
+            "--video", str(video),
+            "--caption", "Manual post",
+            "--platforms", "youtube",
+            "--dry-run",
+        ])
+
+        assert result.exit_code == 0, result.output
+        data = extract_json(result.output)
+        assert data["dry_run"] is True
+        assert data["targets"] == ["youtube"]
+
     def test_post_json_failed_upload_exits_nonzero(
         self, runner, config_file, tmp_path, monkeypatch
     ):
@@ -389,6 +410,15 @@ class TestRunCommand:
         assert data["ok"] is False
         assert data["status"] == "locked"
         assert data["error"] == "already running"
+
+
+class TestFailuresCommand:
+    def test_global_json_failures_list_uses_json(self, runner, config_file):
+        result = runner.invoke(main, ["--config", config_file, "--json", "failures", "list"])
+
+        assert result.exit_code == 0, result.output
+        data = extract_json(result.output)
+        assert data == {"failures": []}
 
 
 class TestScheduleAddJson:
@@ -517,6 +547,26 @@ class TestScheduleListJson:
         data = extract_json(result.output)
         assert isinstance(data, list)
         assert len(data) >= 1
+
+    def test_global_json_schedule_list_uses_json(self, runner, tmp_path, monkeypatch):
+        from xpst.schedule_manager import ScheduleManager
+        orig_init = ScheduleManager.__init__
+        sched_dir = str(tmp_path / ".xpst_schedule")
+
+        def patched_init(self, config_dir="~/.xpst"):
+            orig_init(self, config_dir=sched_dir)
+
+        monkeypatch.setattr(ScheduleManager, "__init__", patched_init)
+
+        mgr = ScheduleManager(config_dir=sched_dir)
+        mgr.add("/tmp/test.mp4", "listing test", __import__("datetime").datetime(2026, 12, 1))
+
+        result = runner.invoke(main, ["--json", "schedule", "list"])
+
+        assert result.exit_code == 0
+        data = extract_json(result.output)
+        assert isinstance(data, list)
+        assert data[0]["caption"] == "listing test"
 
 
 class TestScheduleRemoveJson:
@@ -1061,3 +1111,14 @@ class TestPluginsCommand:
         assert data["count"] == 1
         assert data["plugins"][0]["name"] == "custom_plugin"
         assert not (default_dir / "plugins").exists()
+
+    def test_global_json_plugins_list_uses_json(self, runner, tmp_path, monkeypatch, config_file):
+        default_dir = tmp_path / "default-xpst"
+        default_dir.mkdir()
+        monkeypatch.setenv("XPST_CONFIG_DIR", str(default_dir))
+
+        result = runner.invoke(main, ["--config", config_file, "--json", "plugins", "list"])
+
+        assert result.exit_code == 0, result.output
+        data = extract_json(result.output)
+        assert data == {"plugins": [], "count": 0}

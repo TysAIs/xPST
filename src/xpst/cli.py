@@ -97,9 +97,14 @@ def _exit_for_engine_lock(exc: PidfileLockError, as_json: bool) -> None:
     raise click.exceptions.Exit(EXIT_GENERAL) from exc
 
 
+def _json_option_value(ctx: click.Context, _param: click.Parameter, value: bool) -> bool:
+    """Honor either command-level ``--json`` or the top-level ``xpst --json`` flag."""
+    return bool(value or (ctx.obj or {}).get("json", False))
+
+
 # Shared Click decorator that adds ``--json`` to every command
 json_option = click.option(
-    "--json", "as_json", is_flag=True, help="Machine-readable JSON output"
+    "--json", "as_json", is_flag=True, callback=_json_option_value, help="Machine-readable JSON output"
 )
 
 
@@ -1640,7 +1645,7 @@ def failures(ctx: click.Context):
 
 
 @failures.command("list")
-@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@json_option
 @click.pass_context
 def failures_list(ctx: click.Context, as_json: bool) -> None:
     """List failed uploads recorded in the dead-letter queue."""
