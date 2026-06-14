@@ -30,6 +30,7 @@ class InstagramUploader(PlatformUploader):
     # Instagram limits
     MAX_CAPTION_LENGTH = 2200
     MAX_HASHTAGS = 30
+    MAX_VIDEO_DURATION_SECONDS = 90
 
     # User agent to mimic official Instagram app
     USER_AGENT = (
@@ -65,6 +66,7 @@ class InstagramUploader(PlatformUploader):
                 "content": ("video", "image", "carousel"),
                 "max_caption_length": self.MAX_CAPTION_LENGTH,
                 "max_carousel_items": 10,
+                "max_duration_seconds": self.MAX_VIDEO_DURATION_SECONDS,
             },
         )
 

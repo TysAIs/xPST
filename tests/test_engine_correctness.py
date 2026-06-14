@@ -398,6 +398,26 @@ class TestDurationLimits:
         uploader.upload.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_duration_limit_instagram_reels_manifest(self, tmp_path):
+        from xpst.config import XPSTConfig
+        from xpst.platforms.instagram import InstagramUploader
+
+        video = tmp_path / "long_instagram.mp4"
+        video.write_bytes(b"v" * 2048)
+        service = self._service_with_duration(tmp_path, 91.0)
+        uploader = InstagramUploader(XPSTConfig())
+        uploader.upload = AsyncMock(side_effect=AssertionError("upload should be skipped"))
+
+        result = await service.upload_to_platform(
+            uploader=uploader, video_path=video, caption="c",
+            platform_name="instagram", video_id="long_instagram",
+        )
+        assert result.success is False
+        assert "90" in (result.error or "")
+        assert result.metadata.get("preflight") is True
+        uploader.upload.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_duration_limit_reads_property_manifest(self, tmp_path):
         from types import SimpleNamespace
 
