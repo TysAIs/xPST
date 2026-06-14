@@ -1,6 +1,7 @@
 """MCP server provider catalog tests."""
 
 import json
+import os
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -128,3 +129,47 @@ async def test_mcp_analytics_uses_active_config_dir(tmp_path, monkeypatch):
         "shares": 2,
     }
     assert not (default_dir / "analytics.db").exists()
+
+
+@pytest.mark.asyncio
+async def test_mcp_kb_query_uses_active_config_dir(tmp_path, monkeypatch):
+    default_dir = tmp_path / "default-profile"
+    custom_dir = tmp_path / "custom-profile"
+    monkeypatch.setenv("XPST_HOME", str(default_dir))
+
+    from xpst.knowledge.models import Nugget
+    from xpst.knowledge.store.json_store import JsonKnowledgeStore
+
+    default_store = JsonKnowledgeStore(default_dir / "knowledge" / "default" / "nuggets.json")
+    default_store.add_nugget(
+        Nugget.create(
+            point="default profile only",
+            source_video_id="default-video",
+            timestamp_start=0.0,
+            timestamp_end=1.0,
+        )
+    )
+    custom_store = JsonKnowledgeStore(custom_dir / "knowledge" / "default" / "nuggets.json")
+    custom_store.add_nugget(
+        Nugget.create(
+            point="custom profile only",
+            source_video_id="custom-video",
+            timestamp_start=0.0,
+            timestamp_end=1.0,
+        )
+    )
+
+    config = XPSTConfig()
+    config.config_dir = str(custom_dir)
+    fake_server = mcp_server.XPSTMCPServer(config)
+
+    with patch.object(mcp_server, "_server", fake_server):
+        result = await mcp_server.handle_call_tool("kb_query", {"text": "custom"})
+
+    data = _text_payload(result)
+
+    assert result.isError is not True
+    assert data["count"] == 1
+    assert data["nuggets"][0]["point"] == "custom profile only"
+    assert "default profile only" not in json.dumps(data)
+    assert os.environ["XPST_HOME"] == str(default_dir)

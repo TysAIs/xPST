@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
@@ -578,7 +579,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             engine = server.get_engine()
             return await _handle_delete(engine, arguments)
         elif name in {"kb_add", "kb_query", "kb_organize", "kb_areas", "kb_course"}:
-            return await _handle_kb_tool(name, arguments)
+            return await _handle_kb_tool(name, arguments, server.config)
         else:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"Unknown tool: {name}")],
@@ -968,7 +969,7 @@ async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallT
     )
 
 
-async def _handle_kb_tool(name: str, args: dict[str, Any]) -> CallToolResult:
+async def _handle_kb_tool(name: str, args: dict[str, Any], config: XPSTConfig) -> CallToolResult:
     """Dispatch a knowledge-base tool call.
 
     The heavy KB subsystem (faster-whisper / fastembed / lancedb) is imported
@@ -991,23 +992,27 @@ async def _handle_kb_tool(name: str, args: dict[str, Any]) -> CallToolResult:
             isError=True,
         )
 
-    workspace = args.get("workspace", "default")
-    if name == "kb_add":
-        payload = await asyncio.to_thread(kb_tools.kb_add, args["source"], workspace)
-    elif name == "kb_query":
-        payload = await asyncio.to_thread(
-            kb_tools.kb_query, args["text"], workspace, args.get("limit", 8)
-        )
-    elif name == "kb_organize":
-        payload = await asyncio.to_thread(
-            kb_tools.kb_organize, workspace, args.get("threshold")
-        )
-    elif name == "kb_areas":
-        payload = await asyncio.to_thread(kb_tools.kb_areas, workspace)
-    else:  # kb_course
-        payload = await asyncio.to_thread(
-            kb_tools.kb_course, workspace, args.get("area_id")
-        )
+    def run_active_profile_kb_tool() -> dict[str, Any]:
+        previous_home = os.environ.get("XPST_HOME")
+        os.environ["XPST_HOME"] = str(config.config_dir)
+        try:
+            workspace = args.get("workspace", "default")
+            if name == "kb_add":
+                return kb_tools.kb_add(args["source"], workspace)
+            if name == "kb_query":
+                return kb_tools.kb_query(args["text"], workspace, args.get("limit", 8))
+            if name == "kb_organize":
+                return kb_tools.kb_organize(workspace, args.get("threshold"))
+            if name == "kb_areas":
+                return kb_tools.kb_areas(workspace)
+            return kb_tools.kb_course(workspace, args.get("area_id"))
+        finally:
+            if previous_home is None:
+                os.environ.pop("XPST_HOME", None)
+            else:
+                os.environ["XPST_HOME"] = previous_home
+
+    payload = await asyncio.to_thread(run_active_profile_kb_tool)
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
