@@ -183,6 +183,13 @@ Page {
         controller.connectPlatformAsync(platformName.toLowerCase())
     }
 
+    function disconnectPlatform(platformName) {
+        if (typeof controller === "undefined" || !controller.disconnectPlatform) return
+        connectPage.connectingPlatforms[platformName.toLowerCase()] = true
+        connectPage.connectingPlatformsChanged()
+        controller.disconnectPlatform(platformName.toLowerCase())
+    }
+
     function saveFirstRunChoices() {
         if (typeof controller === "undefined" || !controller.saveOnboarding)
             return
@@ -886,7 +893,9 @@ Page {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
                                     enabled: !isConnecting
-                                    onClicked: connectPage.connectPlatform(providerKey)
+                                    onClicked: platformStatus.connected
+                                               ? connectPage.disconnectPlatform(providerKey)
+                                               : connectPage.connectPlatform(providerKey)
                                     Accessible.name: (isConnecting ? "Connecting" : (platformStatus.connected ? "Disconnect from " : "Connect to ")) + providerName
                                     Accessible.role: Accessible.Button
                                 }

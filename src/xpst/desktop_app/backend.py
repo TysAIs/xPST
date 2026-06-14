@@ -1485,6 +1485,53 @@ class AppController(QObject):
         t = threading.Thread(target=_run, daemon=True)
         t.start()
 
+    @Slot(str)
+    def disconnectPlatform(self, platform: str) -> None:
+        """Disable a platform and remove its local credential file."""
+        platform = (platform or "").strip().lower()
+        try:
+            account = getattr(self._config, platform, None)
+            if account is None:
+                self.connectResult.emit(json.dumps({
+                    "ok": False,
+                    "platform": platform,
+                    "error": f"Unknown platform: {platform}",
+                }))
+                return
+
+            if hasattr(account, "enabled"):
+                account.enabled = False
+
+            removed_credentials = False
+            for field in ("token_file", "cookies_file", "session_file"):
+                path_value = getattr(account, field, None)
+                if not path_value:
+                    continue
+                path = Path(path_value).expanduser()
+                try:
+                    if path.exists():
+                        path.unlink()
+                        removed_credentials = True
+                except OSError as exc:
+                    logger.warning("Failed to remove %s credential %s: %s", platform, path, exc)
+
+            self._config.save()
+            self._engine = None
+            self.refreshData()
+            self.connectResult.emit(json.dumps({
+                "ok": True,
+                "platform": platform,
+                "message": f"Disconnected {platform}",
+                "removed_credentials": removed_credentials,
+            }))
+        except Exception as exc:
+            logger.error("disconnectPlatform(%s) error: %s", platform, exc)
+            self.connectResult.emit(json.dumps({
+                "ok": False,
+                "platform": platform,
+                "error": str(exc),
+            }))
+
     @Slot(str, result=str)
     def getAnalytics(self, platform: str = "") -> str:
         """Get analytics data for a specific platform or all platforms.

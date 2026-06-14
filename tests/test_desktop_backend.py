@@ -60,6 +60,59 @@ def test_desktop_get_readiness_returns_report(tmp_path):
     assert "checks" in data["readiness"]
 
 
+def test_desktop_disconnect_platform_disables_and_removes_credentials(tmp_path):
+    token = tmp_path / "credentials" / "youtube_token.json"
+    token.parent.mkdir(parents=True)
+    token.write_text("{}", encoding="utf-8")
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.youtube.enabled = True
+    config.youtube.token_file = str(token)
+    config.save()
+
+    emitted = []
+    refreshed = []
+
+    class SignalSink:
+        def emit(self, payload):
+            emitted.append(payload)
+
+    controller = SimpleNamespace(
+        _config=config,
+        _engine=object(),
+        connectResult=SignalSink(),
+        refreshData=lambda: refreshed.append(True),
+    )
+
+    AppController.disconnectPlatform(controller, "youtube")
+
+    data = json.loads(emitted[-1])
+    assert data["ok"] is True
+    assert data["platform"] == "youtube"
+    assert data["removed_credentials"] is True
+    assert not token.exists()
+    assert controller._engine is None
+    assert refreshed == [True]
+
+    reloaded = XPSTConfig.load(str(tmp_path / "config.yaml"))
+    assert reloaded.youtube.enabled is False
+
+
+def test_connect_page_disconnect_button_calls_disconnect():
+    qml = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "qml"
+        / "pages"
+        / "ConnectPage.qml"
+    ).read_text(encoding="utf-8")
+
+    assert "function disconnectPlatform(platformName)" in qml
+    assert "connectPage.disconnectPlatform(providerKey)" in qml
+
+
 def test_desktop_generate_encoding_sample_uses_ffmpeg_and_active_config_dir(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)
