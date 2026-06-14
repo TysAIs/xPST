@@ -13,7 +13,7 @@ pytest.importorskip("PySide6", reason="desktop extra not installed")
 
 from xpst.config import XPSTConfig
 from xpst.desktop_app.backend import AppController
-from xpst.desktop_app.models import PostListModel
+from xpst.desktop_app.models import NotificationListModel, PostListModel
 from xpst.state import StateManager
 
 
@@ -678,3 +678,24 @@ def test_desktop_post_complete_notifications_match_autoposter_result():
         ("No new posts were ready", False),
         ("Post partially completed", True),
     ]
+
+
+def test_notification_list_model_records_and_clears_notifications():
+    model = NotificationListModel()
+
+    model.add_notification("Post failed", True)
+    model.add_notification("Post scheduled", False)
+
+    roles = {bytes(name).decode(): role for role, name in model.roleNames().items()}
+    assert model.rowCount() == 2
+    first = model.index(0, 0)
+    second = model.index(1, 0)
+    assert model.data(first, roles["message"]) == "Post scheduled"
+    assert model.data(first, roles["isError"]) is False
+    assert model.data(second, roles["message"]) == "Post failed"
+    assert model.data(second, roles["isError"]) is True
+    assert model.data(first, roles["timestamp"])
+
+    model.clear()
+
+    assert model.rowCount() == 0

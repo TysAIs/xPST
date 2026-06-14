@@ -173,6 +173,23 @@ def test_sidebar_notification_popup_uses_capped_height_for_position():
     assert "y: -notifPopupContent.implicitHeight - 8" not in sidebar
 
 
+def test_desktop_main_exposes_notification_model_to_sidebar():
+    from pathlib import Path
+
+    main_py = (
+        Path(__file__).parent.parent
+        / "src"
+        / "xpst"
+        / "desktop_app"
+        / "main.py"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "NotificationListModel" in main_py
+    assert "notif_model = NotificationListModel()" in main_py
+    assert "controller.notification.connect(notif_model.add_notification)" in main_py
+    assert 'setContextProperty("notifModel", notif_model)' in main_py
+
+
 def test_analytics_uses_theme_icons_for_empty_state_and_metrics():
     from pathlib import Path
 

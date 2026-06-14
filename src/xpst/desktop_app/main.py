@@ -43,7 +43,7 @@ from xpst.desktop_app.backend import (
     ThemeProvider,
     _default_ui_font,
 )
-from xpst.desktop_app.models import PostListModel
+from xpst.desktop_app.models import NotificationListModel, PostListModel
 
 
 def _find_qml_path() -> Path:
@@ -360,12 +360,14 @@ def main(no_splash: bool = False) -> int:
     controller = AppController()
     post_model = PostListModel()
     post_model.load_from_state()
+    notif_model = NotificationListModel()
     if splash:
         splash.showMessage("Loading plugins...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
     app.processEvents()
 
     # Connect controller refresh to model reload
     controller.dataChanged.connect(lambda: post_model.load_from_state())
+    controller.notification.connect(notif_model.add_notification)
     app.aboutToQuit.connect(controller.stopMcpServer)
 
     # Expose to QML
@@ -373,6 +375,7 @@ def main(no_splash: bool = False) -> int:
     theme_provider = ThemeProvider()
     engine.rootContext().setContextProperty("theme", theme_provider)
     engine.rootContext().setContextProperty("postModel", post_model)
+    engine.rootContext().setContextProperty("notifModel", notif_model)
     # Named xpstNoSplash because a root QML property of the same name would
     # shadow the context property and self-bind (G40).
     engine.rootContext().setContextProperty("xpstNoSplash", no_splash)
