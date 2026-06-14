@@ -127,9 +127,31 @@ Encoding targets (defaults, all configurable): 1920px long edge, H.264 High prof
 
 ## Quick Start
 
-### Install from source (recommended today)
+### Install
 
-xPST is not yet published to PyPI. Until it is, install from source. With [uv](https://docs.astral.sh/uv/) (fastest):
+**Recommended for most users: download a binary from GitHub Releases.**
+
+1. Open the [xPST Releases page](https://github.com/TysAIs/xPST/releases).
+2. Download the asset for your OS:
+   - Windows: `xPST.exe`
+   - macOS: `.dmg`, `.zip`, or `.app` bundle when available
+   - Linux: Linux desktop binary or archive when available
+3. Run the app, then complete setup from the desktop onboarding flow or:
+
+```bash
+xpst setup
+xpst health
+```
+
+**Python wheel install:** use this when you want the CLI/MCP server from a release artifact instead of a desktop binary.
+
+```bash
+python -m pip install "./xpst-<version>-py3-none-any.whl[mcp,knowledge]"
+xpst setup
+xpst run
+```
+
+**Source install:** use this for development, local patches, or testing unreleased code. With [uv](https://docs.astral.sh/uv/) (fastest):
 
 ```bash
 git clone https://github.com/TysAIs/xPST.git
@@ -151,12 +173,6 @@ xpst run
 ```
 
 Optional extras: `mcp` (MCP server), `knowledge` (KB transcription/embeddings/LanceDB), `pyside6` (desktop GUI), `dashboard` (web dashboard), `full` (everything).
-
-### Once published to PyPI
-
-```bash
-pip install "xpst[mcp,knowledge]"   # not yet available; watch the Releases page
-```
 
 ### Configure and run
 
