@@ -77,7 +77,7 @@ mcp = [
     "mcp[cli]>=1.0.0,<2.0.0",
 ]
 desktop = [
-    "pywebview>=4.0,<6.0.0",
+    "pywebview>=4.0,<7.0.0",
 ]
 windows = [
     "pywin32>=306; platform_system == 'Windows'",
