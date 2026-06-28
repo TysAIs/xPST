@@ -1,0 +1,60 @@
+name: Install failure
+description: Report pip, desktop app, Docker, FFmpeg, or first-run setup failures.
+title: "[Install]: "
+labels: ["install", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste secrets, cookies, tokens, or full local folder dumps.
+        If xPST is installed, run `xpst diagnostics --json` and review the bundle before attaching it.
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - pip install xpst
+        - pip install from GitHub/source
+        - uv
+        - Docker
+        - Windows executable
+        - macOS app/DMG
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command or action
+      description: What exact command or installer action failed?
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Error output
+      description: Paste the relevant redacted output.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "python --version"
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11, macOS 15, Ubuntu 24.04, etc."
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks tried
+      options:
+        - label: I installed or verified FFmpeg is available.
+        - label: I ran `xpst readiness --json` if the CLI is available.
+        - label: I reviewed logs/diagnostics for secrets before sharing.

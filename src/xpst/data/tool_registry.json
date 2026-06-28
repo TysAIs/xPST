@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "description": "xPST MCP Tool Registry — explicit mapping of all MCP tools",
+  "tools": [
+    {"name": "xpst_run", "handler": "handle_run", "mutating": true, "rate_limit": "30/min", "description": "Check for new videos and cross-post them"},
+    {"name": "xpst_post", "handler": "handle_post", "mutating": true, "rate_limit": "20/min", "description": "Post a specific video to platforms"},
+    {"name": "xpst_analytics", "handler": "handle_analytics", "mutating": false, "rate_limit": "60/min", "description": "Get analytics for platforms"},
+    {"name": "xpst_cross_post_analytics", "handler": "handle_cross_post_analytics", "mutating": false, "rate_limit": "60/min", "description": "Cross-post correlation analytics"},
+    {"name": "xpst_followers", "handler": "handle_followers", "mutating": false, "rate_limit": "60/min", "description": "Get follower counts"},
+    {"name": "xpst_best_time", "handler": "handle_best_time", "mutating": false, "rate_limit": "60/min", "description": "Get best posting times"},
+    {"name": "xpst_security_audit", "handler": "handle_security_audit", "mutating": false, "rate_limit": "10/min", "description": "Run security audit"},
+    {"name": "xpst_suggest_caption", "handler": "handle_suggest_caption", "mutating": false, "rate_limit": "30/min", "description": "Generate caption suggestions"},
+    {"name": "xpst_transcript", "handler": "handle_transcript", "mutating": false, "rate_limit": "30/min", "description": "Get video transcript"},
+    {"name": "xpst_search", "handler": "handle_search", "mutating": false, "rate_limit": "60/min", "description": "Search transcripts and content"},
+    {"name": "xpst_schedule_list", "handler": "handle_schedule_list", "mutating": false, "rate_limit": "60/min", "description": "List scheduled posts"},
+    {"name": "xpst_schedule_add", "handler": "handle_schedule_add", "mutating": true, "rate_limit": "20/min", "description": "Add a scheduled post"},
+    {"name": "xpst_health", "handler": "handle_health", "mutating": false, "rate_limit": "60/min", "description": "Health check all platforms"},
+    {"name": "xpst_status", "handler": "handle_status", "mutating": false, "rate_limit": "60/min", "description": "Get system status"},
+    {"name": "xpst_backfill", "handler": "handle_backfill", "mutating": true, "rate_limit": "10/min", "description": "Retry failed posts"},
+    {"name": "xpst_config_show", "handler": "handle_config_show", "mutating": false, "rate_limit": "60/min", "description": "Show configuration"},
+    {"name": "xpst_auth_status", "handler": "handle_auth_status", "mutating": false, "rate_limit": "60/min", "description": "Show auth status"},
+    {"name": "xpst_providers", "handler": "handle_providers", "mutating": false, "rate_limit": "60/min", "description": "Show provider modes"},
+    {"name": "xpst_delete", "handler": "handle_delete", "mutating": true, "rate_limit": "20/min", "description": "Delete a post from a platform"},
+    {"name": "kb_add", "handler": "handle_kb_add", "mutating": true, "rate_limit": "30/min", "description": "Add to knowledge base (deprecated)"},
+    {"name": "kb_query", "handler": "handle_kb_query", "mutating": false, "rate_limit": "60/min", "description": "Query knowledge base (deprecated)"},
+    {"name": "kb_organize", "handler": "handle_kb_organize", "mutating": true, "rate_limit": "10/min", "description": "Organize knowledge base (deprecated)"},
+    {"name": "kb_areas", "handler": "handle_kb_areas", "mutating": false, "rate_limit": "60/min", "description": "List knowledge base areas (deprecated)"}
+  ],
+  "total_tools": 23
+}

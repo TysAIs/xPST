@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "feat/knowledge-base", "codex/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # setup-ffmpeg@v3 is x64-only; macos-latest runners are ARM64
+      - name: Install FFmpeg
+        if: runner.os != 'macOS'
+        uses: FedericoCarboni/setup-ffmpeg@v3
+      - name: Install FFmpeg (macOS arm64)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install package
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e ".[full,dev]" build pip-audit
+
+      - name: Test
+        run: python -m pytest
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Type check
+        run: mypy src/xpst
+
+      - name: Security scan (Bandit)
+        run: bandit -r src/xpst/ -ll
+
+      - name: Vulnerability audit
+        run: pip-audit
+
+      - name: Public safety scan
+        run: python scripts/scan_public_safety.py --json
+
+      - name: Build package
+        run: |
+          python scripts/build_package.py
+          python scripts/release_preflight.py --json
+
+      - name: Install Qt runtime libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libpulse0
+
+      - name: Desktop QML smoke
+        shell: bash
+        run: |
+          python scripts/verify_desktop_package.py
+          QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py
+
+      - name: CLI smoke
+        shell: bash
+        run: |
+          xpst version --json
+          xpst health --json
+
+  docker:
+    name: Docker build smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t xpst:ci .
+
+      - name: Smoke Docker CLI
+        run: docker run --rm xpst:ci version --json
