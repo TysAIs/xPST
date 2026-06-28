@@ -57,7 +57,7 @@ xpst setup
 
 This will:
 1. Ask for your TikTok username
-2. Ask which platforms to enable
+2. Ask which platforms to enable (YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn)
 3. Create configuration file at `~/.xpst/config.yaml`
 4. Create credentials directory at `~/.xpst/credentials/`
 
@@ -97,6 +97,12 @@ mv cookies.json ~/.xpst/credentials/x_cookies.json
 
 #### Instagram Reels
 
+The **primary** Instagram auth is the official **Meta Graph API** (`auth_mode: graph_api`), which uses a `graph_access_token` and `graph_ig_user_id`. The instagrapi session method below is an unofficial **fallback** (carries ban risk).
+
+**Option A: Meta Graph API (recommended)**
+Set `graph_access_token` and `graph_ig_user_id` in `~/.xpst/config.yaml` under the `instagram` account.
+
+**Option B: instagrapi session (fallback)**
 1. Log into [instagram.com](https://instagram.com) in your browser
 2. Open DevTools (F12) → Application → Cookies
 3. Find the cookie named `sessionid`
@@ -110,6 +116,35 @@ mv cookies.json ~/.xpst/credentials/x_cookies.json
     }
 }
 ```
+
+> **Note:** Instagram max caption 2200 chars, carousels up to 10 items.
+
+#### TikTok (Source + Destination)
+
+TikTok is both a **source** (xPST pulls videos from it) and now a **destination** — it supports posting via the official **Content Posting API (Direct Post)**.
+
+1. **Source:** log into [tiktok.com](https://tiktok.com) in your browser for HD / no-watermark downloads, or run `xpst auth tiktok`
+2. **Destination (posting):** configure OAuth 2.0 with `client_key` / `client_secret` / `access_token` (+ `refresh_token`) in `~/.xpst/config.yaml`
+
+> **Note:** TikTok destination max caption 2200 chars, 6 posts/min.
+
+#### Threads
+
+Threads is a **destination** using the official **Meta Threads API** (OAuth, container-publish model).
+
+1. Configure the Threads OAuth credentials in `~/.xpst/config.yaml`
+2. Run `xpst auth threads` if guided setup is available
+
+> **Note:** Max caption 500 chars, video up to 300s, 250 posts/day.
+
+#### LinkedIn
+
+LinkedIn is a **destination** using the official LinkedIn `/v2/posts` endpoint (OAuth).
+
+1. Configure the LinkedIn OAuth credentials in `~/.xpst/config.yaml`
+2. Run `xpst auth linkedin` if guided setup is available
+
+> **Note:** Max caption 3000 chars, 150 posts/day.
 
 ### Step 3: Verify Setup
 
@@ -190,7 +225,21 @@ accounts:
   
   instagram:
     enabled: true
-    session_file: "~/.xpst/credentials/instagram_session.json"
+    auth_mode: "graph_api"  # primary; use "session" for the instagrapi fallback
+    graph_access_token: "YOUR_GRAPH_ACCESS_TOKEN"
+    graph_ig_user_id: "YOUR_IG_USER_ID"
+    session_file: "~/.xpst/credentials/instagram_session.json"  # used when auth_mode: session
+
+  tiktok:
+    enabled: true  # destination via official Content Posting API
+    client_key: "YOUR_TIKTOK_CLIENT_KEY"
+    client_secret: "YOUR_TIKTOK_CLIENT_SECRET"
+
+  threads:
+    enabled: true
+
+  linkedin:
+    enabled: true
 
 video:
   download_dir: "~/.xpst/downloads"

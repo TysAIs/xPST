@@ -4,7 +4,7 @@ This document describes the high-level architecture of xPST, designed for enterp
 
 ## Overview
 
-xPST is a modular, plugin-based system for cross-posting video content across social media platforms. It supports multiple sources (TikTok, Instagram Reels, YouTube, local files) and distributes to multiple destinations (YouTube, Instagram, X/Twitter, Threads).
+xPST is a modular, plugin-based system for cross-posting video content across social media platforms. It supports multiple sources (TikTok, Instagram Reels, YouTube, local files) and distributes to multiple destinations (YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -13,8 +13,9 @@ xPST is a modular, plugin-based system for cross-posting video content across so
 │  Sources                Destinations                       │
 │  ┌──────────────┐       ┌──────────────┐ ┌──────────────┐  │
 │  │ TikTok       │       │ YouTube      │ │ Instagram    │  │
-│  │ IG Reels     │──────▶│ X/Twitter    │ │ Threads      │  │
-│  │ YouTube      │       └──────────────┘ └──────────────┘  │
+│  │ IG Reels     │──────▶│ X/Twitter    │ │ TikTok       │  │
+│  │ YouTube      │       │ Threads      │ │ LinkedIn     │  │
+│  │ X/Twitter    │       └──────────────┘ └──────────────┘  │
 │  │ Local Files  │                                            │
 │  └──────────────┘                                            │
 │         │                                                     │
@@ -33,7 +34,7 @@ xPST is a modular, plugin-based system for cross-posting video content across so
 │  └──────────────────────────────────────────────────────┘   │
 │                                                              │
 │  Surfaces: CLI (28 cmds) │ Desktop (10 QML pages)          │
-│            Dashboard (FastAPI) │ MCP Server (16 tools)      │
+│            Dashboard (FastAPI) │ MCP Server (23 tools)      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -42,7 +43,7 @@ xPST is a modular, plugin-based system for cross-posting video content across so
 ### 1. Separation of Concerns
 Each component has a single responsibility:
 - **Sources**: Fetch/download videos (TikTok, Instagram Reels, YouTube, local files)
-- **Platforms**: Upload videos (YouTube, Instagram, X/Twitter, Threads)
+- **Platforms**: Upload videos (YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn)
 - **Engine**: Orchestrate workflow via dependency-injected use-cases
 - **State**: Persist data atomically (write-then-rename, thread-safe)
 - **Config**: Pydantic settings with auto-migration (v1→v4)
@@ -358,11 +359,15 @@ WantedBy=multi-user.target
 
 ## Future Roadmap
 
+### Shipped
+- [x] Threads support (official Meta Threads API)
+- [x] LinkedIn video support (official LinkedIn /v2/posts)
+- [x] TikTok posting (official Content Posting API)
+- [x] Web dashboard (FastAPI)
+
 ### Phase 2
 - [ ] Facebook Reels support
-- [ ] LinkedIn video support
 - [ ] Bluesky video support
-- [ ] Web dashboard (Flask/FastAPI)
 
 ### Phase 3
 - [ ] AI-powered caption generation

@@ -1,9 +1,9 @@
 # TikTok Setup
 
-> **Role in xPST:** Source only — xPST downloads videos *from* TikTok to cross-post elsewhere. (TikTok posting as a destination uses the Content Posting API; see the note at the bottom.)
-> **Auth:** None required for downloads. Optional **browser cookies** enable HD quality without watermarks.
+> **Role in xPST:** Both a **source** and a **posting destination**. xPST can download videos *from* TikTok to cross-post elsewhere, and (with the official Content Posting API configured) post *to* TikTok as well.
+> **Auth:** None required for downloads. Optional **browser cookies** enable HD quality without watermarks. Posting to TikTok requires a TikTok developer app and OAuth 2.0 (see [TikTok as a destination](#tiktok-as-a-destination-content-posting-api)).
 
-TikTok is primarily a **source** in xPST: you tell xPST a TikTok username to watch, and it downloads that creator's new videos using `yt-dlp` so they can be re-encoded and posted to YouTube/Instagram/X/Threads/LinkedIn. Downloads work without any login, but enabling browser cookies unlocks higher-quality, watermark-free downloads.
+TikTok works as **both a source and a destination** in xPST. As a **source**, you tell xPST a TikTok username to watch, and it downloads that creator's new videos using `yt-dlp` so they can be re-encoded and posted to YouTube, Instagram, X/Twitter, Threads, and LinkedIn. Downloads work without any login, but enabling browser cookies unlocks higher-quality, watermark-free downloads. As a **destination**, xPST can upload videos directly to TikTok via the official Content Posting API (Direct Post) once a developer app and OAuth credentials are configured.
 
 ---
 
@@ -151,7 +151,30 @@ xpst run --dry-run --json
 
 ## TikTok as a destination (Content Posting API)
 
-TikTok posting (xPST *uploading to* TikTok) is supported via the official **Content Posting API (Direct Post)** when configured. This requires a TikTok developer app with `client_key`/`client_secret` and a user OAuth flow — a heavier setup than source-mode. To enable destination mode, populate the TikTok account config:
+TikTok posting (xPST *uploading to* TikTok) is supported via the official **Content Posting API (Direct Post)**. This is the official, ToS-compliant path and uses `provider_mode: official`. It requires a heavier setup than source-mode: a TikTok developer app plus a per-user OAuth 2.0 flow.
+
+### Step 1 — Create a TikTok developer app
+
+1. Go to <https://developers.tiktok.com/> and sign in with your TikTok account.
+2. Create an app and request access to the **Content Posting API** product (Direct Post).
+3. From the app's credentials page, note your **`client_key`** and **`client_secret`**.
+
+### Step 2 — Authorize and obtain tokens (OAuth 2.0)
+
+The Content Posting API uses OAuth 2.0. After completing the authorization flow for the TikTok account you want to post to, you receive:
+
+- an **`access_token`** — used to publish posts, and
+- a **`refresh_token`** — used by xPST to automatically refresh the access token before it expires.
+
+You can run the connection wizard to walk through this:
+
+```bash
+xpst connect tiktok
+```
+
+### Step 3 — Configure the TikTok destination
+
+The wizard saves the credentials for you, or you can populate the TikTok account config directly:
 
 ```yaml
 accounts:
@@ -159,9 +182,18 @@ accounts:
     enabled: true                       # destination enabled
     client_key: "your_tiktok_client_key"
     client_secret: "your_tiktok_client_secret"
+    access_token: "your_oauth_access_token"
+    refresh_token: "your_oauth_refresh_token"   # enables auto-refresh
 ```
 
-See TikTok's Direct Post docs at <https://developers.tiktok.com/doc/content-posting-api-direct-post> for registering an app and obtaining a user access token. For most users, TikTok is best used as a **source** (this guide's main path) and the other 6 platforms as destinations.
+> Tokens are mirrored into the encrypted credential store. See [getting-started.md](getting-started.md#where-your-credentials-live) for the security model.
+
+### Limits
+
+- **Caption:** max 2200 characters.
+- **Rate:** approximately 6 posts per minute.
+
+See TikTok's Direct Post docs at <https://developers.tiktok.com/doc/content-posting-api-direct-post> for registering an app and the full OAuth flow. TikTok can be used as a **source** (this guide's main path), as a **destination**, or both at once.
 
 ---
 

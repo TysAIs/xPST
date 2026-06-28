@@ -129,7 +129,7 @@ Each platform has its own setup guide with screenshots-level detail:
 | **YouTube** | OAuth 2.0 (Google Cloud) | [setup-youtube.md](setup-youtube.md) |
 | **Instagram** | Meta Graph API (recommended) | [setup-instagram.md](setup-instagram.md) |
 | **X / Twitter** | Login via twikit (cookies saved) | [setup-x-twitter.md](setup-x-twitter.md) |
-| **TikTok** | yt-dlp browser cookies (source only) | [setup-tiktok.md](setup-tiktok.md) |
+| **TikTok** | yt-dlp cookies (source) · Content Posting API OAuth (destination) | [setup-tiktok.md](setup-tiktok.md) |
 | **Threads** | Meta Threads API (long-lived token) | [setup-threads.md](setup-threads.md) |
 | **LinkedIn** | LinkedIn OAuth 2.0 | See platform setup docs for current auth instructions |
 
@@ -245,7 +245,7 @@ xpst diagnostics          # Export a REDACTED support bundle (secrets stripped)
 - 📺 [YouTube setup](setup-youtube.md) — Google Cloud OAuth, one-time
 - 📸 [Instagram setup](setup-instagram.md) — Meta Graph API (ban-safe)
 - 🐦 [X/Twitter setup](setup-x-twitter.md) — login-based, no cookie export
-- 🎵 [TikTok setup](setup-tiktok.md) — source only, browser cookies
+- 🎵 [TikTok setup](setup-tiktok.md) — source (browser cookies) and destination (Content Posting API)
 - 🧵 [Threads setup](setup-threads.md) — Meta Threads API
 - 💼 [LinkedIn setup](setup-linkedin.md) — LinkedIn OAuth 2.0
 - 🛠️ [Troubleshooting](troubleshooting.md) — common errors and fixes

@@ -6,5 +6,6 @@ This section is being updated. For platform-specific issues right now, use the i
 - [X/Twitter setup](setup-x-twitter.md)
 - [TikTok setup](setup-tiktok.md)
 - [Threads setup](setup-threads.md)
+- [LinkedIn setup](setup-linkedin.md)
 
 For general deploy/integration guidance, see [INSTALL.md](INSTALL.md) and [QUICKSTART.md](QUICKSTART.md).

@@ -108,14 +108,20 @@ The **Connect** page has detailed setup guides for each platform. Here's a summa
 
 > **Note:** 2FA/2SV on your Google account works fine — the OAuth flow handles it. Default quota: 10,000 units/day.
 
-### Instagram (Session-based)
+### Instagram (Meta Graph API, session fallback)
 
+The **primary** Instagram auth is the official Meta Graph API (`auth_mode: graph_api`), using a `graph_access_token` and `graph_ig_user_id`. The instagrapi session method (`auth_mode: session`) is an unofficial **fallback** that carries ban risk.
+
+**Graph API (recommended):**
+1. Configure your `graph_access_token` and `graph_ig_user_id` in `~/.xpst/config.yaml`
+
+**Session fallback:**
 1. Log into [instagram.com](https://instagram.com) in your browser first
 2. Enter your Instagram username and password in the Connect page fields
 3. Click **Connect Instagram**
 4. Credentials are stored encrypted in `~/.xpst/credentials/`
 
-> **Note:** Use a dedicated account. Carousel uploads support up to 10 images/videos.
+> **Note:** Use a dedicated account for the session method. Max caption 2200 chars. Carousel uploads support up to 10 images/videos.
 
 ### X / Twitter (Cookie-based)
 
@@ -125,15 +131,35 @@ The **Connect** page has detailed setup guides for each platform. Here's a summa
 4. Or click **Paste Cookies** in the app and paste the JSON
 5. Alternatively, run `xpst auth x` in terminal for guided setup
 
-> **Note:** X API tier limits apply. Free tier allows limited posts/day.
+> **Note:** X destination uses twikit cookies (community/unofficial mode). Max caption 280 chars, video up to 140s. Carousels post as threads.
 
-### TikTok (Source Only)
+### TikTok (Source + Destination)
 
-TikTok is a **source** — xPST monitors it for new videos to cross-post, but does not post TO TikTok.
+TikTok works as both a **source** (xPST monitors it for new videos to cross-post) and a **destination** — TikTok now supports posting via the official **Content Posting API (Direct Post)**.
 
-1. Log into [tiktok.com](https://tiktok.com) in your browser
-2. Export cookies to `~/.xpst/credentials/tiktok_cookies.json`
-3. Or run `xpst auth tiktok` in terminal
+1. Log into [tiktok.com](https://tiktok.com) in your browser to enable cookie-based source downloads (HD / no-watermark)
+2. Export cookies to `~/.xpst/credentials/tiktok_cookies.json`, or run `xpst auth tiktok` in terminal
+3. To post TO TikTok, configure the official Content Posting API (OAuth 2.0 with `client_key` / `client_secret` / `access_token`)
+
+> **Note:** TikTok destination max caption 2200 chars, 6 posts/min.
+
+### Threads (OAuth)
+
+Threads is a **destination** using the official Meta Threads API (container-publish model).
+
+1. Configure OAuth credentials for the Meta Threads API
+2. Run `xpst auth threads` or set credentials in `~/.xpst/config.yaml`
+
+> **Note:** Max caption 500 chars, video up to 300s, 250 posts/day.
+
+### LinkedIn (OAuth)
+
+LinkedIn is a **destination** using the official LinkedIn `/v2/posts` endpoint.
+
+1. Configure OAuth credentials for the LinkedIn API
+2. Run `xpst auth linkedin` or set credentials in `~/.xpst/config.yaml`
+
+> **Note:** Max caption 3000 chars, 150 posts/day.
 
 ---
 
@@ -146,7 +172,7 @@ The **Compose** page is where you create new posts from local video files.
 1. **Select a video folder** — Click "Browse" to pick a folder containing your videos
 2. **Choose a video** — The grid shows thumbnails of all video files in the folder
 3. **Write a caption** — Enter your post caption in the text area (character count shown)
-4. **Select platforms** — Check the boxes for which platforms to post to (YouTube, Instagram, X, TikTok)
+4. **Select platforms** — Check the boxes for which platforms to post to (YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn)
 5. **Click "Post Now"** — The upload begins
 
 ### Upload Progress
@@ -311,9 +337,11 @@ export XPST_FFMPEG_PATH=/path/to/ffmpeg
 ### Platform connection fails
 
 - **YouTube**: Ensure the OAuth consent screen is configured. Check that `youtube_client_secret.json` is at `~/.xpst/credentials/`
-- **Instagram**: Make sure you're logged into instagram.com in your browser first
+- **Instagram**: For the Graph API, verify `graph_access_token` and `graph_ig_user_id` are valid. For the session fallback, make sure you're logged into instagram.com in your browser first
 - **X**: Verify cookies are valid and not expired. Re-export if needed
-- **TikTok**: Same as X — cookies expire, re-export periodically
+- **TikTok**: For source downloads, cookies expire — re-export periodically. For posting, ensure the Content Posting API OAuth tokens are valid
+- **Threads**: Verify the Meta Threads API OAuth credentials are valid
+- **LinkedIn**: Verify the LinkedIn API OAuth credentials are valid
 
 ### Thumbnails not showing
 
