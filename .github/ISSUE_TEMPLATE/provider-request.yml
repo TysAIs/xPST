@@ -1,0 +1,49 @@
+name: Provider request
+description: Request a new source, destination, or analytics provider.
+title: "[Provider request]: "
+labels: ["provider-request", "needs-triage"]
+body:
+  - type: input
+    id: provider
+    attributes:
+      label: Provider name
+      placeholder: "Bluesky, LinkedIn, Facebook Reels, Pinterest, etc."
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Requested role
+      options:
+        - Source
+        - Destination
+        - Analytics
+        - Source and destination
+        - Full provider
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Creator workflow
+      description: What should a user be able to do with this provider?
+    validations:
+      required: true
+  - type: textarea
+    id: api
+    attributes:
+      label: API/auth information
+      description: Link official docs if available. Note whether OAuth, cookies, local files, or another auth method is expected.
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Known constraints
+      description: Mention rate limits, media requirements, Terms of Service concerns, or unsupported regions if known.
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution interest
+      options:
+        - label: I can help test this provider.
+        - label: I can contribute code or docs.
+        - label: I have access to official API documentation or a developer account.

@@ -1,0 +1,78 @@
+name: Bug report
+description: Report something that is broken or behaving unexpectedly
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report!
+        **Never paste tokens, cookies, session files, OAuth secrets, or raw
+        credential files.** If the bug is security-related, follow
+        [SECURITY.md](../SECURITY.md) instead of opening a public issue.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the unexpected behavior. Include the exact command you ran.
+      placeholder: "I ran `xpst run --dry-run` and ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal reproduction steps. Include config (with secrets removed).
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - CLI
+        - Desktop app (PySide6/QML)
+        - Dashboard (FastAPI)
+        - MCP server
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: xPST version
+      description: Output of `xpst version --json` (paste the `version` field).
+      placeholder: "0.x.y"
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS / platform
+      placeholder: "macOS 14, Ubuntu 22.04, Windows 11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / diagnostics
+      description: Relevant log output or `xpst diagnostics` bundle (redacted). Paste between the backticks.
+      render: shell
+    validations:
+      required: false

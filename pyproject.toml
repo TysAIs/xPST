@@ -1,0 +1,247 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xpst"
+version = "1.0.0"
+description = "Enterprise-grade, open-source cross-posting for short-form video"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    {name = "xPST Contributors"}
+]
+keywords = ["cross-posting", "tiktok", "youtube-shorts", "instagram-reels", "x-twitter", "automation", "social-media"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+]
+dependencies = [
+    # Core
+    "click>=8.1.0,<9.0.0",
+    "pyyaml>=6.0,<7.0.0",
+    "rich>=13.0.0,<14.0.0",
+    
+    # Video downloading (yt-dlp stays unpinned — must track platform changes)
+    "yt-dlp>=2025.1.1",
+    
+    # Platform APIs
+    "google-api-python-client>=2.0.0,<3.0.0",
+    "google-auth-oauthlib>=1.0.0,<2.0.0",
+    "google-auth-httplib2>=0.1.0,<1.0.0",
+    "twikit>=2.0.0,<3.0.0",
+    "instagrapi>=2.0.0,<3.0.0",
+    
+    # Monitoring
+    "structlog>=23.0.0,<25.0.0",
+    "prometheus-client>=0.19.0,<1.0.0",
+    
+    # Security
+    "keyring>=25.0.0,<26.0.0",
+    "bcrypt>=4.0.0,<5.0.0",
+    "cryptography>=41.0.0,<46.0.0",
+    
+    # Dashboard API server
+    "fastapi>=0.100.0,<1.0.0",
+    "uvicorn>=0.23.0,<1.0.0",
+    
+    # HTTP (knowledge-base LLM client)
+    "httpx>=0.24.0,<1.0.0",
+    
+    # Config management (CVE fix: >=2.14.2)
+    "pydantic-settings>=2.14.2,<3.0.0",
+    
+    # Transitive dep constraint (CVE fix: GHSA-6v7p-g79w-8964)
+    "msgpack>=1.2.1,<2.0.0",
+]
+
+[project.optional-dependencies]
+anti-ban = [
+    # TLS fingerprint hardening — mimics real browser JA3/JA4 to avoid
+    # bot detection on Instagram/X. Falls back gracefully if not installed.
+    "curl_cffi>=0.7.0,<1.0.0",
+]
+mcp = [
+    "mcp[cli]>=1.0.0,<2.0.0",
+]
+desktop = [
+    "pywebview>=4.0,<6.0.0",
+]
+windows = [
+    "pywin32>=306; platform_system == 'Windows'",
+    "winshell>=0.6; platform_system == 'Windows'",
+]
+dashboard = [
+    "nicegui>=1.4.0,<4.0.0",
+    "plotly>=5.18.0,<7.0.0",
+]
+pyside6 = [
+    "PySide6>=6.5.0,<7.0.0",
+]
+knowledge = [
+    # Upper bounds (G48): these are data-coupled deps — an uncapped major
+    # bump can break persisted index/embedding formats silently.
+    "faster-whisper>=1.0.0,<2.0",
+    "fastembed>=0.3,<1.0",
+    "sqlite-vec>=0.1.0,<1.0",  # Phase D3: default vector backend (<1MB vs LanceDB ~50MB)
+    "lancedb>=0.5,<1.0",  # Legacy backend, still available
+]
+full = [
+    "xpst[mcp,desktop,pyside6,dashboard,windows,knowledge]",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "types-PyYAML>=6.0.0",
+    "import-linter>=2.0",
+]
+
+[project.scripts]
+xpst = "xpst.cli:main"
+xpst-mcp = "xpst.mcp:cli_main"
+
+[project.urls]
+Homepage = "https://github.com/TysAIs/xPST"
+Documentation = "https://github.com/TysAIs/xPST/wiki"
+Repository = "https://github.com/TysAIs/xPST"
+Issues = "https://github.com/TysAIs/xPST/issues"
+Changelog = "https://github.com/TysAIs/xPST/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xpst"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "TCH"]
+ignore = ["E501", "E402", "SIM105", "SIM117", "SIM102", "B904"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/xpst/desktop_app/backend.py" = ["N802", "N815"]
+"src/xpst/desktop_app/models.py" = ["N802"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_return_any = false
+warn_unused_ignores = true
+disallow_untyped_defs = false
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "call-overload",
+    "dict-item",
+    "import-not-found",
+    "import-untyped",
+    "misc",
+    "no-any-return",
+    "no-redef",
+    "operator",
+    "override",
+    "return-value",
+    "union-attr",
+    "unused-ignore",
+    "valid-type",
+    "var-annotated",
+]
+
+# ── Architectural wall enforcement (import-linter / `lint-imports`) ──
+# Two structural guarantees the KB design depends on:
+#   1. The heavy KB dependencies (faster-whisper, fastembed, lancedb, torch,
+#      PySide6) never reach the cold path. They are imported ONLY inside the
+#      three adapter functions listed in `ignore_imports` (the lazy seams).
+#      Adding a new module-load-time heavy import anywhere on the cold path
+#      breaks this contract. The runtime `sys.modules` wall is additionally
+#      proven by tests/test_knowledge_wall.py and friends.
+#   2. The cross-poster core (engine/platforms/sources) never imports the
+#      optional `xpst.knowledge` subsystem — dependency direction is one-way.
+[tool.importlinter]
+root_package = "xpst"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "KB heavy deps stay off the cold path (lazy-load wall)"
+type = "forbidden"
+source_modules = [
+    "xpst.cli",
+    "xpst.mcp.server",
+    "xpst.knowledge.cli_kb",
+    "xpst.knowledge.mcp.tools",
+    "xpst.knowledge.queue",
+    "xpst.knowledge.doctor",
+    "xpst.knowledge.course.assemble",
+    "xpst.knowledge.organize.pipeline",
+    "xpst.knowledge.organize.cluster",
+    "xpst.knowledge.organize.router",
+    "xpst.knowledge.organize.difficulty",
+    "xpst.knowledge.models",
+    "xpst.knowledge.manifest",
+    "xpst.knowledge.workspace",
+    "xpst.knowledge.config",
+    "xpst.knowledge.store.json_store",
+    "xpst.knowledge.ingest.pipeline",
+]
+forbidden_modules = [
+    "faster_whisper",
+    "fastembed",
+    "lancedb",
+    "torch",
+    "PySide6",
+]
+# The three intentional lazy seams: heavy deps are imported INSIDE adapter
+# functions here, never at module load. These edges are the wall's pressure
+# valve; everything else routed to a heavy dep is a wall breach.
+ignore_imports = [
+    "xpst.knowledge.ingest.transcribe -> faster_whisper",
+    "xpst.knowledge.llm.embeddings -> fastembed",
+    "xpst.knowledge.store.vector_lancedb -> lancedb",
+    # open_default_store probes for the lancedb extra inside the function
+    # (try/ImportError, G32). Grimp sees function-local imports statically;
+    # the runtime wall tests prove it never loads on the cold path.
+    "xpst.knowledge.store -> lancedb",
+    # The desktop GUI's own lazy seam: `xpst desktop` lazily imports the
+    # PySide6 app subtree inside the command, never at CLI load. Cutting this
+    # one edge keeps the whole desktop/PySide6 subtree off the CLI cold path.
+    "xpst.cli -> xpst.desktop_app.main",
+]
+
+[[tool.importlinter.contracts]]
+name = "Cross-poster core never imports the optional knowledge subsystem"
+type = "forbidden"
+source_modules = [
+    "xpst.engine",
+    "xpst.platforms",
+    "xpst.sources",
+    "xpst.scheduler",
+]
+forbidden_modules = [
+    "xpst.knowledge",
+]

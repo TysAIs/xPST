@@ -1,0 +1,18 @@
+module xpst.desktop_app.qml
+singleton Icons 1.0 Icons.qml
+main 1.0 main.qml
+Sidebar 1.0 Sidebar.qml
+DashboardPage 1.0 pages/DashboardPage.qml
+ContentPage 1.0 pages/ContentPage.qml
+AnalyticsPage 1.0 pages/AnalyticsPage.qml
+ConnectPage 1.0 pages/ConnectPage.qml
+SettingsPage 1.0 pages/SettingsPage.qml
+SchedulePage 1.0 pages/SchedulePage.qml
+AboutPage 1.0 pages/AboutPage.qml
+ComposePage 1.0 pages/ComposePage.qml
+DetailPanel 1.0 pages/DetailPanel.qml
+OnboardingPage 1.0 pages/OnboardingPage.qml
+
+# Reusable components (Phase 3)
+AnimatedNumber 1.0 components/AnimatedNumber.qml
+LoadingSkeleton 1.0 components/LoadingSkeleton.qml
