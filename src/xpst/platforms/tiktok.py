@@ -87,15 +87,9 @@ class TikTokUploader(PlatformUploader):
         if self._access_token:
             return self._access_token
 
-        if self._session_manager:
-            token = await self._session_manager.get_tiktok_token(
-                self.config.tiktok.client_key,
-                self.config.tiktok.client_secret,
-                self.config.tiktok.refresh_token,
-            )
-        else:
-            # Fallback for direct instantiation (testing)
-            token = self.config.tiktok.access_token
+        # Use the access_token from config (set via xpst connect tiktok)
+        token = self.config.tiktok.access_token
+
         if not token:
             raise ValueError(
                 "TIKTOK_NOT_CONFIGURED: Set access_token (and client_key/client_secret/"
