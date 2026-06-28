@@ -79,7 +79,7 @@ Contributors should place new code in the matching layer:
 | Knowledge base | `src/xpst/knowledge/` | Transcription, cited nuggets, embeddings, vector search (Phase 3) |
 | Desktop | `src/xpst/desktop_app/` | PySide6/QML (10 pages), splash, i18n, plugins |
 | Dashboard | `src/xpst/dashboard/server.py` | FastAPI + WebSocket, bcrypt auth |
-| MCP | `src/xpst/mcp/server.py` | 16 tools (fetch, post, health, config, state, platforms, scheduling, analytics, KB) |
+| MCP | `src/xpst/mcp/server.py` | 23 tools (post, health, config, state, platforms, scheduling, analytics, KB, captions, transcripts, search) |
 
 ### Phase 1–5 feature map
 

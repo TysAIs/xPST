@@ -2,7 +2,7 @@
 
 **Free, local-first, provider-agnostic cross-posting for short-form video**
 
-Automatically distribute short-form video from configured sources to connected destinations. xPST currently includes local files, TikTok, YouTube, Instagram, and X source adapters plus YouTube Shorts, Instagram Reels, and X destination adapters.
+Automatically distribute short-form video from configured sources to connected destinations. xPST supports 6 platforms — YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn — as both sources and destinations, with local file support for manual posting and carousels.
 
 ---
 
@@ -221,11 +221,30 @@ xpst auth x
 
 ### Instagram
 
-Session-based via instagrapi:
+Graph API (recommended) or session-based via instagrapi:
 
 ```bash
 xpst auth instagram
-# Enter username/password, saves session file
+# Graph API: enter IG user ID + access token
+# Session mode: enter username/password, saves session file
+```
+
+### Threads
+
+Meta Threads API:
+
+```bash
+xpst auth threads
+# Enter Threads API token + user ID
+```
+
+### LinkedIn
+
+LinkedIn API (OAuth 2.0):
+
+```bash
+xpst auth linkedin
+# Enter LinkedIn access token + user ID
 ```
 
 ---
@@ -384,6 +403,8 @@ xpst mcp
 
 ### Available Tools
 
+xPST exposes 23 MCP tools (19 `xpst_*` + 4 `kb_*`). See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
+
 | Tool | Description |
 |------|-------------|
 | `xpst_run` | Check and cross-post new videos |
@@ -393,7 +414,22 @@ xpst mcp
 | `xpst_backfill` | Retry failed posts |
 | `xpst_config_show` | Show configuration |
 | `xpst_auth_status` | Auth status |
-| `xpst_delete` | Delete post from state |
+| `xpst_delete` | Delete post from platform |
+| `xpst_providers` | List sources and destinations |
+| `xpst_analytics` | Per-post engagement metrics |
+| `xpst_cross_post_analytics` | Cross-post correlation |
+| `xpst_followers` | Follower counts |
+| `xpst_best_time` | Best posting times |
+| `xpst_security_audit` | Run security audit |
+| `xpst_suggest_caption` | Generate caption suggestions |
+| `xpst_transcript` | Get video transcript |
+| `xpst_search` | Search transcripts and content |
+| `xpst_schedule_list` | List scheduled posts |
+| `xpst_schedule_add` | Add a scheduled post |
+| `kb_add` | Add to knowledge base |
+| `kb_query` | Query knowledge base |
+| `kb_organize` | Organize knowledge base |
+| `kb_areas` | List knowledge areas |
 
 ### Example: Using with Claude Desktop
 
@@ -458,44 +494,56 @@ xpst/
 ├── cli.py              # Click-based CLI with JSON/TTY detection
 ├── config.py           # Configuration management (YAML + env + defaults)
 ├── engine.py           # Canonical CrossPostEngine (orchestration + services)
-├── state.py            # StateManager (legacy API)
+├── state.py            # StateManager compat wrapper
 ├── state_manager.py    # Business logic for state
 ├── state_store.py      # Atomic I/O, locking, corruption recovery
-├── platforms/          # Platform uploaders
+├── analytics.py        # Cross-platform analytics collector
+├── analytics_store.py # Persistent analytics (SQLite)
+├── anti_bot.py         # Anti-bot pacing and human-like behavior
+├── connect.py          # Platform connection wizards
+├── platforms/          # Platform uploaders (6 platforms)
 │   ├── base.py         # Abstract base + registry
-│   ├── youtube.py      # YouTube Shorts (OAuth2)
-│   ├── instagram.py    # Instagram Reels (instagrapi)
-│   └── x.py            # X/Twitter (twikit)
-├── sources/            # Video sources
+│   ├── youtube.py      # YouTube (OAuth2, Data API v3)
+│   ├── instagram.py    # Instagram (Graph API / instagrapi)
+│   ├── x.py            # X/Twitter (twikit cookies / API v2)
+│   ├── tiktok.py       # TikTok (Content Posting API v2)
+│   ├── threads.py      # Threads (Meta API)
+│   └── linkedin.py     # LinkedIn (OAuth 2.0)
+├── sources/            # Video sources (yt-dlp based)
 │   ├── base.py         # Abstract base + registry
-│   ├── tiktok.py       # TikTok (yt-dlp)
-│   ├── youtube.py      # YouTube (yt-dlp)
-│   ├── x.py            # X (yt-dlp)
-│   ├── instagram.py    # Instagram (instagrapi)
+│   ├── tiktok.py       # TikTok source
+│   ├── youtube.py      # YouTube source
+│   ├── x.py            # X source
+│   ├── instagram.py    # Instagram source
 │   └── local.py        # Local files
-├── usecases/           # Business logic layer
-│   ├── base.py         # Protocols and result DTOs
-│   ├── fetch_videos.py
-│   ├── cross_post.py
-│   ├── manual_post.py
-│   ├── backfill.py
-│   ├── health_check.py
-│   ├── delete_post.py
-│   └── factory.py      # DI factory
+├── services/           # Service layer
+│   ├── source_service.py  # Source video discovery
+│   └── upload_service.py  # Upload orchestration
 ├── utils/              # Shared utilities
-│   ├── logger.py       # Structured logging (rich + JSON)
+│   ├── logger.py       # Structured logging
 │   ├── credentials.py  # OS keychain + encrypted fallback
 │   ├── circuit_breaker.py
 │   ├── quota.py        # API quota tracking
-│   ├── metrics.py      # Prometheus metrics
+│   ├── retry.py        # Retry with backoff
+│   ├── retry_policy.py # @retryable decorator
+│   ├── audit_logger.py # MCP audit logging
 │   ├── sessions.py     # SessionManager (auth consolidation)
-│   ├── video.py        # FFmpeg encoding
+│   ├── video.py        # FFmpeg encoding per platform
 │   └── platform.py     # Cross-platform paths
-├── mcp/                # MCP server
-│   └── server.py       # stdio MCP server
+├── mcp/                # MCP server (23 tools)
+│   └── server.py       # stdio MCP server with audit logging
 ├── dashboard/          # Web API dashboard
 │   ├── server.py       # FastAPI server
-│   └── analytics.py    # Analytics collector
+│   └── analytics.py    # Analytics aggregator
+├── desktop_app/        # PySide6/QML desktop app
+│   ├── backend.py      # QML bridge
+│   ├── main.py         # App entry point
+│   └── qml/            # QML pages (8 + DetailPanel)
+├── knowledge/          # Content knowledge base
+│   ├── ingest/         # Transcription + extraction
+│   ├── organize/       # Clustering + difficulty
+│   ├── store/          # Vector + JSON storage
+│   └── llm/            # LLM client + embeddings
 └── config_migration.py # Config version migrations
 ```
 
