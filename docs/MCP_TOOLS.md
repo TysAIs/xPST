@@ -2,7 +2,9 @@
 
 The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, run posting workflows, and query the personal content knowledge base without scraping CLI text.
 
-This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **16 tools total: 12 `xpst_*` + 4 `kb_*`.**
+This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **23 tools total: 19 `xpst_*` + 4 `kb_*`.**
+
+xPST posts to six destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
 
 ## Setup
 
@@ -41,6 +43,16 @@ Metadata-only tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) n
 | `xpst_auth_status` | Credential storage status and quota remaining | No | None |
 | `xpst_status` | Local state statistics and health | Yes | None (read-only) |
 | `xpst_health` | Live source/platform connectivity checks | Yes | Touches credentials, no uploads |
+| `xpst_analytics` | Per-post & per-platform engagement metrics | Yes | None (read-only) |
+| `xpst_cross_post_analytics` | One video across platforms, aggregated | Yes | None (read-only) |
+| `xpst_followers` | Follower counts per platform with growth history | Yes | None (read-only) |
+| `xpst_best_time` | Best time to post per platform | Yes | None (read-only) |
+| `xpst_security_audit` | Automated security check on the install | No | None |
+| `xpst_suggest_caption` | Generate AI caption suggestions for a video | No | None |
+| `xpst_transcript` | Get transcript for a video by hash or ID | Yes | None (read-only) |
+| `xpst_search` | Search the knowledge base | Yes | None (read-only) |
+| `xpst_schedule_list` | List scheduled posts | Yes | None (read-only) |
+| `xpst_schedule_add` | Schedule a post for a future time | Yes | **SCHEDULES REAL POSTS** |
 | `xpst_run` | Fetch new content and cross-post it | Yes | **POSTS TO REAL ACCOUNTS** |
 | `xpst_post` | Manually post a local video or carousel | Yes | **POSTS TO REAL ACCOUNTS** |
 | `xpst_backfill` | Retry failed or incomplete posts | Yes | **POSTS TO REAL ACCOUNTS** |
@@ -54,7 +66,7 @@ Metadata-only tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) n
 
 ## xpst_providers
 
-Lists all discovered content sources and posting destinations with auth modes and capabilities. Call this first so the agent adapts to the installed provider set instead of assuming a fixed platform list. Note that TikTok appears only under `sources`: xPST does not post to TikTok.
+Lists all discovered content sources and posting destinations with auth modes and capabilities. Call this first so the agent adapts to the installed provider set instead of assuming a fixed platform list. Destinations are YouTube Shorts, Instagram Reels, X, TikTok, Threads, and LinkedIn; sources are TikTok, YouTube, Instagram, X, and local files. TikTok now appears under both `sources` and `destinations` (posting via the official Content Posting API).
 
 Arguments: none.
 
@@ -185,7 +197,7 @@ Dry-run response shape:
   "dry_run": true,
   "fetch_count": 2,
   "videos": [
-    { "video_id": "7301...", "caption": "First 100 chars...", "source": "tiktok", "targets": ["youtube", "instagram", "x"] }
+    { "video_id": "7301...", "caption": "First 100 chars...", "source": "tiktok", "targets": ["youtube", "instagram", "x", "tiktok", "threads", "linkedin"] }
   ]
 }
 ```
@@ -200,7 +212,7 @@ Manually posts a local video file, or a carousel when `carousel_paths` is given.
 |----------|------|----------|---------|-------------|
 | `video_path` | string | yes | — | Path to the video (or first carousel item). |
 | `caption` | string | yes | — | Caption/title for the post. |
-| `platforms` | string[] | no | all configured | Subset of `youtube`, `x`, `instagram`. |
+| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`, `linkedin`. |
 | `carousel_paths` | string[] | no | `[]` | Additional image/video paths for a carousel. |
 | `dry_run` | boolean | no | `false` | Preview without uploading. Always use first. |
 
@@ -241,7 +253,7 @@ Retries failed or incomplete posts from history. **Live mode posts to real accou
 |----------|------|----------|---------|-------------|
 | `max_count` | integer | no | `10` | Maximum videos to backfill. |
 | `source` | string | no | `"tiktok"` | Source provider name. |
-| `platforms` | string[] | no | all configured | Subset of `youtube`, `x`, `instagram`. |
+| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`, `linkedin`. |
 | `dry_run` | boolean | no | `false` | Preview what would be backfilled. |
 
 Example call:
@@ -267,7 +279,7 @@ Removes a post **record** from local state. This is state-only: it does NOT call
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
 | `video_id` | string | yes | — | Video ID to remove from state. |
-| `platform` | string | no | `"all"` | `youtube`, `x`, `instagram`, or `all`. |
+| `platform` | string | no | `"all"` | `youtube`, `instagram`, `x`, `tiktok`, `threads`, `linkedin`, or `all`. |
 
 Example call:
 
@@ -280,6 +292,173 @@ Example response:
 ```json
 { "video_id": "7301234567890", "platform": "all", "removed": ["youtube", "x"], "success": true }
 ```
+
+## xpst_analytics
+
+Returns per-post and per-platform engagement metrics with snapshot history. Read-only; does not upload.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `platform` | string | no | all | `youtube`, `instagram`, `x`, `tiktok`, `threads`, or `linkedin`. |
+| `live` | boolean | no | `false` | Fetch fresh metrics from platforms instead of stored snapshots. |
+
+Example call:
+
+```json
+{ "name": "xpst_analytics", "arguments": { "platform": "youtube", "live": false } }
+```
+
+Response shape: per-platform engagement metrics (views, likes, comments, shares) with snapshot history.
+
+## xpst_cross_post_analytics
+
+Cross-post correlation analytics: aggregates how a single video performed across every platform it was posted to. Read-only.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_cross_post_analytics", "arguments": {} }
+```
+
+Response shape: per-video records correlating one source video against its destination posts and their aggregated engagement.
+
+## xpst_followers
+
+Returns follower counts per platform with growth history. Read-only.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_followers", "arguments": {} }
+```
+
+Response shape: per-platform follower counts plus historical growth points.
+
+## xpst_best_time
+
+Recommends the best time to post per platform based on engagement history. Read-only.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `platform` | string | no | all | Limit the recommendation to one platform. |
+
+Example call:
+
+```json
+{ "name": "xpst_best_time", "arguments": { "platform": "instagram" } }
+```
+
+Response shape: recommended posting windows per platform derived from past engagement.
+
+## xpst_security_audit
+
+Runs an automated security check on the xPST installation (credential storage, file permissions, configuration hygiene). Read-only.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_security_audit", "arguments": {} }
+```
+
+Response shape: a list of audit findings with severity and remediation hints.
+
+## xpst_suggest_caption
+
+Generates AI caption suggestions for a video file, optionally tuned for a target platform.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `video_path` | string | yes | — | Path to the video to caption. |
+| `platform` | string | no | `"instagram"` | Target platform to tune the caption for. |
+
+Example call:
+
+```json
+{ "name": "xpst_suggest_caption", "arguments": { "video_path": "/home/user/clips/demo.mp4", "platform": "instagram" } }
+```
+
+Response shape: one or more suggested captions.
+
+## xpst_transcript
+
+Returns the transcript for a video identified by content hash or video ID. Read-only.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `video_id` | string | yes | — | Video ID or content hash to fetch the transcript for. |
+
+Example call:
+
+```json
+{ "name": "xpst_transcript", "arguments": { "video_id": "7301234567890" } }
+```
+
+Response shape: the transcript text (and timing segments when available) for the requested video.
+
+## xpst_search
+
+Searches the knowledge base for nuggets, clips, and topics. Read-only.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `query` | string | yes | — | Search text. |
+| `limit` | integer | no | `10` | Maximum results to return. |
+
+Example call:
+
+```json
+{ "name": "xpst_search", "arguments": { "query": "best thumbnail tips", "limit": 10 } }
+```
+
+Response shape: matching knowledge nuggets/clips with provenance.
+
+## xpst_schedule_list
+
+Lists scheduled posts (pending, completed, and failed). Read-only.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_schedule_list", "arguments": {} }
+```
+
+Response shape: a list of scheduled posts with their status, target platforms, and scheduled times.
+
+## xpst_schedule_add
+
+Schedules a post for a future time: video + caption + ISO-8601 time, with an optional repeat rule. Creates a pending scheduled post.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `video_path` | string | yes | — | Path to the video to schedule. |
+| `caption` | string | yes | — | Caption/title for the post. |
+| `scheduled_time` | string | yes | — | ISO-8601 timestamp for publishing. |
+| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`, `linkedin`. |
+| `repeat_rule` | string | no | none | `daily`, `weekly`, or `monthly`. |
+
+Example call:
+
+```json
+{
+  "name": "xpst_schedule_add",
+  "arguments": {
+    "video_path": "/home/user/clips/demo.mp4",
+    "caption": "Scheduled demo!",
+    "scheduled_time": "2026-07-01T14:00:00Z",
+    "platforms": ["youtube", "instagram", "threads"]
+  }
+}
+```
+
+Response shape: a confirmation with the scheduled post's ID and stored details.
 
 ---
 

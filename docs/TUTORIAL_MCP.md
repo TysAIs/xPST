@@ -1,6 +1,6 @@
 # xPST MCP (Model Context Protocol) Tutorial
 
-> **Complete guide** to using xPST's 16 MCP tools with AI agents. Drive the entire cross-posting workflow from Claude Desktop, Cursor, or any MCP-compatible client.
+> **Complete guide** to using xPST's 23 MCP tools with AI agents. Drive the entire cross-posting workflow from Claude Desktop, Cursor, or any MCP-compatible client.
 
 ---
 
@@ -14,7 +14,7 @@
 | 1 | `docs/assets/screenshot-mcp-claude.png` | Claude Desktop MCP config and tool invocation |
 | 2 | `docs/assets/screenshot-mcp-cursor.png` | Cursor agent calling an xPST MCP tool |
 | 3 | `docs/assets/screenshot-mcp-health.png` | `xpst_health` tool output in an agent session |
-| 4 | `docs/assets/screenshot-mcp-post.png` | `xpst_post_video` cross-posting workflow result |
+| 4 | `docs/assets/screenshot-mcp-post.png` | `xpst_post` cross-posting workflow result |
 
 ---
 
@@ -33,7 +33,7 @@
 
 ## What is MCP?
 
-The **Model Context Protocol** (MCP) is an open standard that lets AI assistants interact with external tools and data sources. xPST exposes 16 MCP tools that let any MCP-compatible AI agent:
+The **Model Context Protocol** (MCP) is an open standard that lets AI assistants interact with external tools and data sources. xPST exposes 23 MCP tools that let any MCP-compatible AI agent:
 
 - Fetch and post videos across platforms
 - Check platform health and auth status
@@ -115,7 +115,7 @@ If running from a source checkout:
 
 ## Tool Reference
 
-xPST exposes 16 MCP tools organized into 4 categories:
+xPST exposes 23 MCP tools organized into 5 categories: Core Operations (6), Analytics & Insights (5), Content & Knowledge (4), Configuration & Scheduling (4), and Knowledge Base (4). All posting destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn — are valid `platforms` values.
 
 ### Core Operations (6 tools)
 
@@ -141,7 +141,7 @@ Manually post a video file to selected platforms.
 {
   "video_path": "/path/to/video.mp4",
   "caption": "Check out this video!",
-  "platforms": ["youtube", "x"]  // optional, defaults to all enabled
+  "platforms": ["youtube", "x", "threads", "linkedin"]  // optional; any of youtube, instagram, x, tiktok, threads, linkedin; defaults to all enabled
 }
 ```
 
@@ -149,12 +149,12 @@ Manually post a video file to selected platforms.
 
 #### `xpst_delete`
 
-Delete a post from a specific platform.
+Remove a post record from local state (does not call a platform delete API).
 
 ```json
 {
-  "post_id": "video-abc123",
-  "platform": "youtube"
+  "video_id": "video-abc123",
+  "platform": "youtube"  // youtube | instagram | x | tiktok | threads | linkedin | all
 }
 ```
 
@@ -166,7 +166,9 @@ Retry failed or incomplete posts.
 
 ```json
 {
-  "max_retries": 3
+  "max_count": 10,
+  "source": "tiktok",
+  "platforms": ["youtube", "instagram", "x", "tiktok", "threads", "linkedin"]
 }
 ```
 
@@ -194,24 +196,56 @@ Show overall xPST status — engine state, platform availability, recent activit
 
 ---
 
-### Analytics & Monitoring (2 tools)
+### Analytics & Insights (5 tools)
 
 #### `xpst_analytics`
 
-Retrieve cross-platform analytics summary.
+Retrieve per-post and per-platform engagement metrics with snapshot history.
 
 ```json
 {
-  "platform": "youtube",  // optional, defaults to "all"
-  "days": 30              // optional, defaults to 30
+  "platform": "youtube",  // optional; youtube | instagram | x | tiktok | threads | linkedin; defaults to all
+  "live": false           // optional; fetch fresh metrics instead of stored snapshots
 }
 ```
 
 **Returns:** Analytics data with views, likes, comments, shares per platform.
 
+#### `xpst_cross_post_analytics`
+
+Cross-post correlation analytics: how one video performed across every platform it was posted to, aggregated.
+
+```json
+{}
+```
+
+**Returns:** Per-video records correlating a source video against its destination posts.
+
+#### `xpst_followers`
+
+Follower counts per platform with growth history.
+
+```json
+{}
+```
+
+**Returns:** Per-platform follower counts plus historical growth points.
+
+#### `xpst_best_time`
+
+Best time to post per platform, derived from engagement history.
+
+```json
+{
+  "platform": "instagram"  // optional; limit to one platform
+}
+```
+
+**Returns:** Recommended posting windows per platform.
+
 #### `xpst_schedule_list`
 
-List all scheduled posts.
+List all scheduled posts (pending, completed, failed).
 
 ```json
 {}
@@ -221,7 +255,59 @@ List all scheduled posts.
 
 ---
 
-### Configuration (4 tools)
+### Content & Knowledge (4 tools)
+
+#### `xpst_suggest_caption`
+
+Generate AI caption suggestions for a video file.
+
+```json
+{
+  "video_path": "/path/to/video.mp4",
+  "platform": "instagram"  // optional; tune for a target platform
+}
+```
+
+**Returns:** One or more suggested captions.
+
+#### `xpst_transcript`
+
+Get the transcript for a video by content hash or video ID.
+
+```json
+{
+  "video_id": "7301234567890"
+}
+```
+
+**Returns:** Transcript text (with timing segments when available).
+
+#### `xpst_search`
+
+Search the knowledge base for nuggets, clips, and topics.
+
+```json
+{
+  "query": "best thumbnail tips",
+  "limit": 10
+}
+```
+
+**Returns:** Matching knowledge nuggets/clips with provenance.
+
+#### `xpst_security_audit`
+
+Run an automated security check on the xPST installation.
+
+```json
+{}
+```
+
+**Returns:** Audit findings with severity and remediation hints.
+
+---
+
+### Configuration & Scheduling (4 tools)
 
 #### `xpst_config_show`
 
@@ -261,9 +347,9 @@ Schedule a new post for future publishing.
 {
   "video_path": "/path/to/video.mp4",
   "caption": "Scheduled post",
-  "platforms": ["youtube", "instagram"],
+  "platforms": ["youtube", "instagram", "threads", "linkedin"],
   "scheduled_time": "2026-06-20T14:00:00Z",
-  "recurrence": "one-time"  // one-time | daily | weekly
+  "repeat_rule": "weekly"  // optional; daily | weekly | monthly
 }
 ```
 
@@ -334,7 +420,7 @@ List all knowledge areas and their entries.
 
 Set `XPST_MCP_READONLY=true` to restrict the MCP server to read-only tools only:
 
-- ✅ `xpst_status`, `xpst_health`, `xpst_analytics`, `xpst_config_show`, `xpst_auth_status`, `xpst_providers`, `xpst_schedule_list`, `kb_query`, `kb_areas`
+- ✅ `xpst_status`, `xpst_health`, `xpst_analytics`, `xpst_cross_post_analytics`, `xpst_followers`, `xpst_best_time`, `xpst_security_audit`, `xpst_suggest_caption`, `xpst_transcript`, `xpst_search`, `xpst_config_show`, `xpst_auth_status`, `xpst_providers`, `xpst_schedule_list`, `kb_query`, `kb_areas`
 - ❌ `xpst_run`, `xpst_post`, `xpst_delete`, `xpst_backfill`, `xpst_schedule_add`, `kb_add`, `kb_organize`
 
 ### Confirmation Mode

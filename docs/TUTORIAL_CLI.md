@@ -132,7 +132,7 @@ xpst setup
 ```
 
 The wizard will:
-1. Ask which platforms you want to connect (YouTube, Instagram, X, TikTok)
+1. Ask which platforms you want to connect (YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn)
 2. Guide you through authentication for each selected platform
 3. Create the `~/.xpst/` directory structure
 4. Write a starter `config.yaml` with safe defaults
@@ -144,10 +144,12 @@ The wizard will:
 Welcome to xPST setup!
 
 Which platforms would you like to connect?
-  [x] YouTube   (OAuth 2.0 — official API)
-  [x] Instagram (session-based)
+  [x] YouTube   (OAuth 2.0 — official Data API v3)
+  [x] Instagram (official Meta Graph API; instagrapi session fallback)
   [x] X/Twitter  (cookie-based)
-  [x] TikTok    (source only — downloads)
+  [x] TikTok    (OAuth 2.0 — official Content Posting API; source + destination)
+  [x] Threads   (OAuth 2.0 — official Meta Threads API)
+  [x] LinkedIn  (OAuth 2.0 — official LinkedIn API)
 
 YouTube Authentication:
 1. Go to Google Cloud Console: https://console.cloud.google.com
@@ -161,7 +163,9 @@ Press Enter when ready...
 ✅ YouTube connected
 ✅ Instagram connected
 ✅ X connected
-✅ TikTok configured
+✅ TikTok connected
+✅ Threads connected
+✅ LinkedIn connected
 
 Setup complete! Run `xpst health` to verify, then `xpst run` to start.
 ```
@@ -177,9 +181,12 @@ xpst connect              # connect all platforms interactively
 xpst connect youtube       # connect YouTube only
 xpst connect instagram     # connect Instagram only
 xpst connect x             # connect X only
-xpst connect tiktok        # connect TikTok (source)
+xpst connect tiktok        # connect TikTok (source + destination)
 xpst connect --test        # test existing connections only
 ```
+
+The `connect` wizard covers `tiktok`, `youtube`, `x`, and `instagram`. Threads and
+LinkedIn are configured through `xpst auth` and your `~/.xpst/config.yaml`.
 
 Use `--test` to verify that your existing connections are still working without going through the wizard again.
 
@@ -207,10 +214,21 @@ Authenticate with a specific platform or check auth status.
 ```bash
 xpst auth youtube       # guide YouTube OAuth setup
 xpst auth x              # guide X cookie setup
-xpst auth instagram      # guide Instagram session setup
-xpst auth tiktok         # guide TikTok cookie configuration
+xpst auth instagram      # guide Instagram auth setup (Graph API or session)
+xpst auth tiktok         # guide TikTok OAuth (Content Posting API) + source cookies
+xpst auth threads        # guide Threads OAuth setup
+xpst auth linkedin       # guide LinkedIn OAuth setup
 xpst auth status         # show auth + quota status for all platforms
 ```
+
+**Instagram auth modes.** The recommended/primary mode is the official Meta Graph
+API (`auth_mode: "graph_api"`, using a `graph_access_token` and `graph_ig_user_id`).
+An instagrapi session (`auth_mode: "session"`) is available as a fallback; it uses
+the unofficial private API and carries account-ban risk.
+
+**TikTok auth.** TikTok now posts as a destination via the official Content Posting
+API. Destination auth is OAuth 2.0 (`client_key` / `client_secret` / `access_token`,
+plus `refresh_token`); source downloads still use yt-dlp cookies.
 
 ### `xpst auth status`
 
@@ -264,7 +282,7 @@ $ xpst auth status --json
 The one-shot command: check a source for new videos and cross-post them to all connected destinations.
 
 ```bash
-xpst run                          # default: TikTok → YouTube, Instagram, X
+xpst run                          # default source: TikTok → all connected destinations
 xpst run --source tiktok           # explicit TikTok source
 xpst run --source local            # post from local files
 xpst run --source all              # bidirectional: ALL sources → ALL destinations
@@ -274,6 +292,11 @@ xpst run --json                   # machine-readable output
 ```
 
 **Source choices:** `tiktok`, `youtube`, `x`, `instagram`, `local`, `all`
+
+**Destinations:** xPST posts to up to six platforms — YouTube Shorts, Instagram Reels,
+X/Twitter, TikTok, Threads, and LinkedIn — for every connected destination not equal to
+the source. The example outputs below show a few destinations for brevity; your run posts
+to whichever destinations you have connected.
 
 #### Example: default run
 
@@ -301,9 +324,12 @@ $ xpst run --dry-run
 
 ```
 Dry run — would post:
-  abc123: My latest video about cooking... → youtube, instagram, x
-  def456: Another great video... → youtube, instagram, x
+  abc123: My latest video about cooking... → youtube, instagram, x, threads, linkedin
+  def456: Another great video... → youtube, instagram, x, threads, linkedin
 ```
+
+(With a non-TikTok source, `tiktok` is also a destination. The list always reflects the
+connected platforms other than the source.)
 
 #### Example: bidirectional
 
@@ -314,11 +340,16 @@ $ xpst run --source all
 ```
 xPST - Bidirectional cross-posting check...
 
-In bidirectional mode, xPST monitors ALL connected sources:
-- Post a Reel on Instagram → goes to YouTube Shorts and X
-- Upload a Short on YouTube → goes to Instagram Reels and X
-- Post a video on X → goes to YouTube Shorts and Instagram Reels
-- Post on TikTok → goes to YouTube Shorts, Instagram Reels, and X (TikTok is source-only)
+In bidirectional mode, xPST monitors ALL connected sources and fans each new video out
+to every other connected destination (YouTube Shorts, Instagram Reels, X, TikTok,
+Threads, and LinkedIn):
+- Post a Reel on Instagram → goes to YouTube Shorts, X, TikTok, Threads, and LinkedIn
+- Upload a Short on YouTube → goes to Instagram Reels, X, TikTok, Threads, and LinkedIn
+- Post a video on X → goes to YouTube Shorts, Instagram Reels, TikTok, Threads, and LinkedIn
+- Post on TikTok → goes to YouTube Shorts, Instagram Reels, X, Threads, and LinkedIn
+
+TikTok is both a source and a destination: it can be posted to via the official TikTok
+Content Posting API (Direct Post), so it participates in cross-posting in both directions.
 
 The engine deduplicates across platforms so content is not double-posted.
 ```
@@ -697,7 +728,9 @@ xPST Health Check
 YouTube:       ✅ OK (authenticated, quota: 5/5)
 Instagram:    ✅ OK (authenticated, quota: 5/5)
 X:            ✅ OK (authenticated, quota: 5/5)
-TikTok:       ✅ OK (source configured)
+TikTok:       ✅ OK (authenticated — source + Content Posting API)
+Threads:      ✅ OK (authenticated, quota: 5/5)
+LinkedIn:     ✅ OK (authenticated, quota: 5/5)
 
 All platforms healthy.
 ```
@@ -949,14 +982,18 @@ Sources (where xPST pulls from):
 | Local      | files    | Folders, videos, carousels  |
 
 Destinations (where xPST posts):
-| Provider   | API type        | Auth method           |
-|------------|----------------|----------------------|
-| YouTube    | Data API v3 (official) | OAuth 2.0      |
-| Instagram  | instagrapi (unofficial) | Session         |
-| X          | twikit (unofficial) | Cookies          |
+| Provider   | API type                          | Auth method           |
+|------------|-----------------------------------|----------------------|
+| YouTube    | Data API v3 (official)            | OAuth 2.0            |
+| Instagram  | Meta Graph API (official, primary); instagrapi session (fallback) | OAuth token / Session |
+| X          | twikit (unofficial)               | Cookies              |
+| TikTok     | Content Posting API — Direct Post (official) | OAuth 2.0     |
+| Threads    | Meta Threads API (official)       | OAuth 2.0            |
+| LinkedIn   | /v2/posts (official)              | OAuth 2.0            |
 ```
 
-> **TikTok is a source only.** xPST does not post to TikTok.
+> **TikTok now posts as a destination.** It uses the official TikTok Content Posting
+> API (Direct Post), so TikTok is both a source and a destination.
 
 ---
 
@@ -1242,9 +1279,12 @@ $ xpst run --dry-run --source tiktok
 
 ```
 Dry run — would post:
-  abc123: My latest video about cooking... → youtube, instagram, x
-  def456: Another great video... → youtube, instagram, x
+  abc123: My latest video about cooking... → youtube, instagram, x, threads, linkedin
+  def456: Another great video... → youtube, instagram, x, threads, linkedin
 ```
+
+The destination list reflects the connected platforms other than the source (here, TikTok).
+With all six platforms connected, a non-TikTok source would also include `tiktok`.
 
 ```bash
 $ xpst run --dry-run --json --source tiktok | jq '.videos | length'

@@ -189,7 +189,7 @@ xpst setup
 
 The wizard walks you through:
 
-1. **Choose platforms** — enable YouTube, Instagram, X/Twitter, TikTok
+1. **Choose platforms** — enable YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn
 2. **Authenticate each platform** — guided instructions for each
 3. **Set rate limits** — defaults to 5 uploads/day per platform
 4. **Configure notifications** — optional Discord/Telegram webhooks
