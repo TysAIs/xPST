@@ -102,7 +102,7 @@ class VideoSource(ABC):
 
 Responsible for uploading videos to target platforms.
 
-**Current**: YouTube, X/Twitter, Instagram
+**Current**: YouTube, X/Twitter, Instagram, TikTok, Threads, LinkedIn
 
 **Interface**:
 ```python
@@ -252,7 +252,10 @@ ffmpeg -i input.mp4 \
 ### API Security
 - OAuth2 for YouTube (industry standard)
 - Cookie-based for X/Twitter (via twikit)
-- Session-based for Instagram (via instagrapi)
+- Graph API for Instagram (recommended), session-based via instagrapi (fallback)
+- Content Posting API v2 for TikTok
+- Meta Threads API for Threads
+- OAuth 2.0 for LinkedIn
 
 ### Data Privacy
 - No data sent to external servers (except target platforms)

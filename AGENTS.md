@@ -27,7 +27,7 @@ python -m pytest tests/        # 1322 tests (core 327 pass fast)
 | **Config** | `src/xpst/config.py` | Pydantic settings, bcrypt dashboard auth, auto-migration v1→v4 |
 | **Desktop** | `src/xpst/desktop_app/` | PySide6/QML (10 pages), splash, i18n, plugins |
 | **Dashboard** | `src/xpst/dashboard/server.py` | FastAPI + WebSocket, bcrypt auth |
-| **MCP** | `src/xpst/mcp/server.py` | 16 tools (fetch, post, health, config, state, platforms, scheduling, analytics, KB) |
+| **MCP** | `src/xpst/mcp/server.py` | 23 tools (post, health, config, state, platforms, scheduling, analytics, KB, captions, transcripts, search) |
 
 ## Key Principles
 
