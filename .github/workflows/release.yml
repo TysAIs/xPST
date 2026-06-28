@@ -44,7 +44,7 @@ jobs:
           python scripts/release_artifacts.py --dist dist --output-dir release/python --skip-checks --lane python
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: python-release
           path: release/python/*
@@ -116,7 +116,7 @@ jobs:
           python scripts/release_artifacts.py --dist dist --output-dir release/windows --skip-checks --lane windows
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-release
           path: release/windows/*
@@ -158,7 +158,7 @@ jobs:
           python scripts/release_artifacts.py --dist dist --output-dir release/linux --skip-checks --lane linux
 
       - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-release
           path: release/linux/*
@@ -196,7 +196,7 @@ jobs:
           bash scripts/verify_macos.sh "${macos_args[@]}"
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-release
           path: release/*
