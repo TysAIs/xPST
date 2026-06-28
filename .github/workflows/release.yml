@@ -217,7 +217,7 @@ jobs:
           merge-multiple: true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release-artifacts/*
           generate_release_notes: true
@@ -230,7 +230,7 @@ jobs:
           sha512sum * > SHA512SUMS
 
       - name: Upload aggregate checksums
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             release-artifacts/SHA256SUMS
