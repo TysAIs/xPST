@@ -269,6 +269,15 @@ def run(ctx: click.Context, source: str, bidirectional: bool, dry_run: bool, as_
 
     engine = CrossPostEngine(config)
 
+    # R1 fix: enforce single instance to prevent double-posting
+    try:
+        engine.acquire_pidfile()
+    except Exception as e:
+        if not quiet:
+            console.print(f"[bold red]Error:[/bold red] Another xPST instance is already running. {e}")
+        ctx.exit(1)
+        return
+
     # --source all implies bidirectional
     if source == "all":
         bidirectional = True
