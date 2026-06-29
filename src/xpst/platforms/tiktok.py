@@ -211,10 +211,8 @@ class TikTokUploader(PlatformUploader):
                         platform="tiktok",
                     )
 
-                # Step 2: Upload video bytes to the upload_url (single chunk)
-                logger.info(f"TikTok: uploading video bytes to upload URL (publish_id={publish_id})")
-                with open(video_path, "rb") as f:
-                    video_bytes = f.read()
+                # Step 2: Upload video bytes to the upload_url (stream file, not load into RAM)
+                logger.info(f"TikTok: uploading video to upload URL (publish_id={publish_id})")
 
                 upload_resp = await client.put(
                     upload_url,
@@ -222,7 +220,7 @@ class TikTokUploader(PlatformUploader):
                         "Content-Range": f"bytes 0-{file_size - 1}/{file_size}",
                         "Content-Length": str(file_size),
                     },
-                    content=video_bytes,
+                    content=open(video_path, "rb"),  # noqa: SIM115 — httpx manages the file lifecycle
                 )
                 upload_resp.raise_for_status()
 

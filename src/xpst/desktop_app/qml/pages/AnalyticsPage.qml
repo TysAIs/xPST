@@ -618,6 +618,7 @@ Page {
                                                 ctx.moveTo(lwBx, lwBy + s)
                                                 ctx.lineTo(lwBx + barWidth, lwBy + s)
                                                 ctx.stroke()
+                                            }
                                         }
                                         ctx.globalAlpha = 1.0
                                     }

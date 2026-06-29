@@ -1602,6 +1602,30 @@ class AppController(QObject):
             return json.dumps({"ok": False, "error": str(exc)})
 
     @Slot(str, result=str)
+    def getFileInfo(self, video_path: str) -> str:
+        """Get file size info for a video file.
+
+        Returns a human-readable size string, or empty string on failure.
+        """
+        try:
+            from pathlib import Path
+
+            p = Path(video_path)
+            if not p.exists():
+                return ""
+            size = p.stat().st_size
+            if size < 1024:
+                return f"{size} B"
+            elif size < 1024 * 1024:
+                return f"{size / 1024:.1f} KB"
+            elif size < 1024 * 1024 * 1024:
+                return f"{size / (1024 * 1024):.1f} MB"
+            else:
+                return f"{size / (1024 * 1024 * 1024):.1f} GB"
+        except Exception:
+            return ""
+
+    @Slot(str, result=str)
     def getThumbnail(self, video_path: str) -> str:
         """Generate or retrieve a cached thumbnail for a video file/URL.
 

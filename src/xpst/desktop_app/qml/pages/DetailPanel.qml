@@ -276,21 +276,20 @@ Page {
                     }
 
                     // Source platform
-                    if (sourcePlatform) {
-                        Rectangle {
-                            width: sourceLabel.implicitWidth + 16
-                            height: sourceLabel.implicitHeight + 6
-                            radius: theme.radiusSm
-                            color: theme.accentMuted
+                    Rectangle {
+                        visible: sourcePlatform
+                        width: sourceLabel.implicitWidth + 16
+                        height: sourceLabel.implicitHeight + 6
+                        radius: theme.radiusSm
+                        color: theme.accentMuted
 
-                            Text {
-                                id: sourceLabel
-                                anchors.centerIn: parent
-                                text: sourcePlatform
-                                font.pixelSize: 11
-                                color: theme.accent
-                                font.capitalization: Font.Capitalize
-                            }
+                        Text {
+                            id: sourceLabel
+                            anchors.centerIn: parent
+                            text: sourcePlatform
+                            font.pixelSize: 11
+                            color: theme.accent
+                            font.capitalization: Font.Capitalize
                         }
                     }
                     Item { Layout.fillWidth: true }
@@ -414,17 +413,16 @@ Page {
                         Item { Layout.fillWidth: true }
 
                         // Post URL
-                        if (platformDetailsCol.currentData.post_url) {
-                            Text {
-                                text: Icons.external + " Open"
-                                font.family: theme.iconFontFamily
-                                font.pixelSize: 13
-                                color: theme.accent
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: Qt.openUrlExternally(platformDetailsCol.currentData.post_url)
-                                }
+                        Text {
+                            visible: platformDetailsCol.currentData.post_url
+                            text: Icons.external + " Open"
+                            font.family: theme.iconFontFamily
+                            font.pixelSize: 13
+                            color: theme.accent
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Qt.openUrlExternally(platformDetailsCol.currentData.post_url)
                             }
                         }
                     }
@@ -530,22 +528,21 @@ Page {
                     }
 
                     // Error message if failed
-                    if (platformDetailsCol.currentData.error) {
-                        Rectangle {
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: errorText.implicitHeight + 16
-                            color: "#fce8e6"
-                            radius: theme.radiusSm
+                    Rectangle {
+                        visible: platformDetailsCol.currentData.error
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: errorText.implicitHeight + 16
+                        color: "#fce8e6"
+                        radius: theme.radiusSm
 
-                            Text {
-                                id: errorText
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                text: "Error: " + (platformDetailsCol.currentData.error || "Unknown")
-                                font.pixelSize: 12
-                                color: "#c5221f"
-                                wrapMode: Text.Wrap
-                            }
+                        Text {
+                            id: errorText
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            text: "Error: " + (platformDetailsCol.currentData.error || "Unknown")
+                            font.pixelSize: 12
+                            color: "#c5221f"
+                            wrapMode: Text.Wrap
                         }
                     }
 
