@@ -14,15 +14,158 @@ Upload specs:
 - Recommended: 1080p @ 10 Mbps, High@L4.0
 """
 
+from __future__ import annotations
+
+import re
+import urllib.parse
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from xpst.anti_bot import AntiBotProtection
-from xpst.config import XPSTConfig
 from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
 
+if TYPE_CHECKING:
+    from xpst.config import XPSTConfig
+
 logger = get_logger(__name__)
+
+
+# ─── twikit compatibility patches ─────────────────────────────────────────────
+# twikit 2.3.3 is broken as of March 2026: X changed their ondemand.s JS
+# structure (issue #408 on d60/twikit) and deprecated the 1.1 API.
+# These patches fix both issues at import time.
+# TODO: Remove when twikit publishes a fixed release (2.4.0+).
+# -------------------------------------------------------------------------------
+
+def _apply_twikit_patches() -> None:
+    """Monkey-patch twikit to work with X's current API."""
+
+    import importlib
+
+    # Patch 1: Fix ON_DEMAND_FILE_REGEX (GitHub issue #408)
+    try:
+        _tx_mod = importlib.import_module("twikit.x_client_transaction.transaction")
+        _tx_mod.ON_DEMAND_FILE_REGEX = re.compile(
+            r""",(\d+):["']ondemand\.s["']""", flags=(re.VERBOSE | re.MULTILINE)
+        )
+        _tx_mod.ON_DEMAND_HASH_PATTERN = r',{}:"([0-9a-f]+)"'
+
+        async def _patched_get_indices(self, home_page_response, session, headers):  # type: ignore[no-untyped-def]
+            key_byte_indices: list[str] = []
+            response = self.validate_response(home_page_response) or self.home_page_response
+            match = _tx_mod.ON_DEMAND_FILE_REGEX.search(str(response))
+            if not match:
+                raise Exception("Couldn't find ondemand.s index")
+            on_demand_file_index = match.group(1)
+            regex = re.compile(_tx_mod.ON_DEMAND_HASH_PATTERN.format(on_demand_file_index))
+            hash_match = regex.search(str(response))
+            if not hash_match:
+                raise Exception("Couldn't find ondemand.s hash")
+            filename = hash_match.group(1)
+            on_demand_file_url = (
+                f"https://abs.twimg.com/responsive-web/client-web/ondemand.s.{filename}a.js"
+            )
+            on_demand_file_response = await session.request(
+                method="GET", url=on_demand_file_url, headers=headers
+            )
+            key_byte_indices_match = _tx_mod.INDICES_REGEX.finditer(str(on_demand_file_response.text))
+            for item in key_byte_indices_match:
+                key_byte_indices.append(item.group(2))
+            if not key_byte_indices:
+                raise Exception("Couldn't get KEY_BYTE indices")
+            key_byte_indices = list(map(int, key_byte_indices))
+            return key_byte_indices[0], key_byte_indices[1:]
+
+        _tx_mod.ClientTransaction.get_indices = _patched_get_indices
+    except Exception as e:
+        logger.debug("twikit transaction patch failed: %s", e)
+
+    # Patch 2: Fix user_id() to use twid cookie (1.1 API is deprecated)
+    try:
+        from twikit.client.client import Client
+
+        async def _patched_user_id(self):  # type: ignore[no-untyped-def]
+            if self._user_id is not None:
+                return self._user_id
+            twid = self.get_cookies().get("twid", "")
+            if twid:
+                decoded = urllib.parse.unquote(twid)
+                if "=" in decoded:
+                    user_id = decoded.split("=")[-1]
+                    self._user_id = user_id
+                    return user_id
+            # Fallback to original method (may 404 on deprecated 1.1 API)
+            response, _ = await self.v11.settings()
+            screen_name = response["screen_name"]
+            self._user_id = (await self.get_user_by_screen_name(screen_name)).id
+            return self._user_id
+
+        Client.user_id = _patched_user_id
+    except Exception as e:
+        logger.debug("twikit user_id patch failed: %s", e)
+
+    # Patch 3: Fix User.__init__ to handle missing legacy keys
+    try:
+        from twikit.user import User
+
+        _original_init = User.__init__
+
+        def _safe_init(self, client, data):  # type: ignore[no-untyped-def]
+            legacy = data.get("legacy", {})
+            defaults = {
+                "can_dm": False,
+                "can_media_tag": False,
+                "created_at": "",
+                "default_profile": False,
+                "default_profile_image": False,
+                "description": "",
+                "entities": {"description": {"urls": []}, "url": {"urls": []}},
+                "fast_followers_count": 0,
+                "favourites_count": 0,
+                "followers_count": 0,
+                "friends_count": 0,
+                "has_custom_timelines": False,
+                "is_translator": False,
+                "listed_count": 0,
+                "location": "",
+                "media_count": 0,
+                "name": "",
+                "normal_followers_count": 0,
+                "pinned_tweet_ids_str": [],
+                "possibly_sensitive": False,
+                "profile_image_url_https": "",
+                "screen_name": "",
+                "statuses_count": 0,
+                "translator_type": "",
+                "verified": False,
+                "want_retweets": False,
+                "withheld_in_countries": [],
+            }
+            for key, default in defaults.items():
+                if key not in legacy:
+                    legacy[key] = default
+            entities = legacy.get("entities", {})
+            if "description" not in entities:
+                entities["description"] = {"urls": []}
+            elif "urls" not in entities.get("description", {}):
+                entities["description"]["urls"] = []
+            if "url" not in entities:
+                entities["url"] = {"urls": []}
+            elif "urls" not in entities.get("url", {}):
+                entities["url"]["urls"] = []
+            legacy["entities"] = entities
+            data["legacy"] = legacy
+            _original_init(self, client, data)
+
+        User.__init__ = _safe_init
+    except Exception as e:
+        logger.debug("twikit User patch failed: %s", e)
+
+
+_apply_twikit_patches()
+# ─── end twikit compatibility patches ──────────────────────────────────────────
 
 
 class XUploader(PlatformUploader):
