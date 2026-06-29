@@ -626,18 +626,36 @@ def _guardrail_block(name: str, arguments: dict[str, Any]) -> CallToolResult | N
                      "Unset it to allow posting/mutating tools.",
             )],
         )
-    if os.environ.get("XPST_MCP_REQUIRE_CONFIRM", "").lower() in {"1", "true", "yes"}:
-        if not arguments.get("confirm"):
-            return CallToolResult(
-                isError=True,
-                content=[TextContent(
-                    type="text",
-                    text=f"{name} posts to or mutates REAL accounts and "
-                         "XPST_MCP_REQUIRE_CONFIRM is set. Re-call with "
-                         '"confirm": true to proceed.',
-                )],
-            )
-        arguments.pop("confirm", None)
+    # M1 security fix: mutating tools are secure-by-default.
+    # They require either:
+    #   1. XPST_MCP_ALLOW_MUTATIONS=1 (explicit opt-in), OR
+    #   2. confirm=True in arguments AND XPST_MCP_REQUIRE_CONFIRM is set
+    # This prevents prompt-injected MCP clients from posting/deleting without consent.
+    allow_mutations = os.environ.get("XPST_MCP_ALLOW_MUTATIONS", "").lower() in {"1", "true", "yes"}
+    require_confirm = os.environ.get("XPST_MCP_REQUIRE_CONFIRM", "").lower() in {"1", "true", "yes"}
+
+    if not allow_mutations and not require_confirm:
+        # Default: fail-open is NOT the default anymore. Require explicit opt-in.
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(
+                type="text",
+                text=f"{name} posts to or mutates REAL accounts. "
+                     "Set XPST_MCP_ALLOW_MUTATIONS=1 to allow, or "
+                     "XPST_MCP_REQUIRE_CONFIRM=1 to require per-call confirmation.",
+            )],
+        )
+    if require_confirm and not arguments.get("confirm"):
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(
+                type="text",
+                text=f"{name} posts to or mutates REAL accounts and "
+                     "XPST_MCP_REQUIRE_CONFIRM is set. Re-call with "
+                     '"confirm": true to proceed.',
+            )],
+        )
+    arguments.pop("confirm", None)
     return None
 
 
@@ -1134,7 +1152,19 @@ async def _handle_transcript(arguments: dict[str, Any]) -> CallToolResult:
     """Handle xpst_transcript (F2.4 / D2)."""
     video_id = arguments.get("video_id", "")
 
-    from xpst.knowledge.workspace import Workspace
+    from xpst.knowledge.workspace import Workspace, _validate_name
+    # Sanitize video_id to prevent path traversal (M2 security fix)
+    try:
+        _validate_name(video_id, "video_id")
+    except ValueError as exc:
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(
+                type="text",
+                text=f"Invalid video_id: {exc}",
+            )],
+        )
+
     ws = Workspace.resolve("default", create=False)
 
     # Try direct content_hash lookup
