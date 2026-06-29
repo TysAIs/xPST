@@ -168,124 +168,145 @@ class TikTokUploader(PlatformUploader):
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8"}
         file_size = video_path.stat().st_size
 
-        try:
-            async with httpx.AsyncClient(timeout=300) as client:
-                # Step 1: Initialize upload (chunked upload via FILE_UPLOAD)
-                logger.info(f"TikTok: initializing upload ({file_size} bytes)")
-                init_resp = await client.post(
-                    f"{TIKTOK_API_BASE}/v2/post/publish/video/init/",
-                    headers=headers,
-                    json={
-                        "post_info": {
-                            "title": caption[:150],
-                            "privacy_level": "PUBLIC_TO_EVERYONE",
-                            "disable_duet": False,
-                            "disable_comment": False,
-                            "disable_stitch": False,
+        # P2 fix: retry once with refreshed token on 401
+        for _attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=300) as client:
+                    # Step 1: Initialize upload (chunked upload via FILE_UPLOAD)
+                    logger.info(f"TikTok: initializing upload ({file_size} bytes)")
+                    init_resp = await client.post(
+                        f"{TIKTOK_API_BASE}/v2/post/publish/video/init/",
+                        headers=headers,
+                        json={
+                            "post_info": {
+                                "title": caption[:150],
+                                "privacy_level": "PUBLIC_TO_EVERYONE",
+                                "disable_duet": False,
+                                "disable_comment": False,
+                                "disable_stitch": False,
+                            },
+                            "source_info": {
+                                "source": "FILE_UPLOAD",
+                                "video_size": file_size,
+                                "chunk_size": file_size,
+                                "total_chunk_count": 1,
+                            },
                         },
-                        "source_info": {
-                            "source": "FILE_UPLOAD",
-                            "video_size": file_size,
-                            "chunk_size": file_size,
-                            "total_chunk_count": 1,
+                    )
+                    init_resp.raise_for_status()
+                    init_data = init_resp.json()
+
+                    if init_data.get("error", {}).get("code") and init_data["error"]["code"] != "ok":
+                        return UploadResult(
+                            success=False,
+                            error=f"TIKTOK_INIT_ERROR: {init_data.get('error', {}).get('message', '')[:200]}",
+                            platform="tiktok",
+                        )
+
+                    publish_id = init_data.get("data", {}).get("publish_id")
+                    upload_url = init_data.get("data", {}).get("upload_url")
+
+                    if not publish_id or not upload_url:
+                        return UploadResult(
+                            success=False,
+                            error=f"TIKTOK_INIT_ERROR: No publish_id/upload_url in response: {init_resp.text[:200]}",
+                            platform="tiktok",
+                        )
+
+                    # Step 2: Upload video bytes to the upload_url (stream file, not load into RAM)
+                    logger.info(f"TikTok: uploading video to upload URL (publish_id={publish_id})")
+
+                    upload_resp = await client.put(
+                        upload_url,
+                        headers={
+                            "Content-Range": f"bytes 0-{file_size - 1}/{file_size}",
+                            "Content-Length": str(file_size),
                         },
-                    },
-                )
-                init_resp.raise_for_status()
-                init_data = init_resp.json()
+                        content=open(video_path, "rb"),  # noqa: SIM115 — httpx manages the file lifecycle
+                    )
+                    upload_resp.raise_for_status()
 
-                if init_data.get("error", {}).get("code") and init_data["error"]["code"] != "ok":
+                    # Step 3: Fetch publish status
+                    logger.info(f"TikTok: fetching publish status (publish_id={publish_id})")
+                    status_resp = await client.post(
+                        f"{TIKTOK_API_BASE}/v2/post/publish/status/fetch/",
+                        headers=headers,
+                        json={"publish_id": publish_id},
+                    )
+                    status_resp.raise_for_status()
+                    status_data = status_resp.json()
+
+                    status = status_data.get("data", {}).get("status", "")
+                    # Possible statuses: PROCESSING_UPLOAD, PROCESSING_DOWNLOAD,
+                    # SEND_TO_CDN, SUCCESS, FAIL
+                    if status == "FAIL":
+                        fail_reason = status_data.get("data", {}).get("fail_reason", "unknown")
+                        return UploadResult(
+                            success=False,
+                            error=f"TIKTOK_PUBLISH_FAILED: {fail_reason[:200]}",
+                            platform="tiktok",
+                            metadata={"publish_id": publish_id, "sandbox": self._is_sandbox()},
+                        )
+
+                    # SUCCESS or in-progress; TikTok returns a public URL on SUCCESS
+                    public_url = status_data.get("data", {}).get("publicaly_available_post_url", "") or ""
+
+                    logger.info(f"Posted to TikTok: publish_id={publish_id} status={status}")
                     return UploadResult(
-                        success=False,
-                        error=f"TIKTOK_INIT_ERROR: {init_data.get('error', {}).get('message', '')[:200]}",
+                        success=True,
+                        post_id=str(publish_id),
+                        post_url=public_url or "https://www.tiktok.com/",
                         platform="tiktok",
+                        metadata={
+                            "publish_id": publish_id,
+                            "status": status,
+                            "caption_length": len(caption),
+                            "sandbox": self._is_sandbox(),
+                        },
                     )
 
-                publish_id = init_data.get("data", {}).get("publish_id")
-                upload_url = init_data.get("data", {}).get("upload_url")
-
-                if not publish_id or not upload_url:
-                    return UploadResult(
-                        success=False,
-                        error=f"TIKTOK_INIT_ERROR: No publish_id/upload_url in response: {init_resp.text[:200]}",
-                        platform="tiktok",
-                    )
-
-                # Step 2: Upload video bytes to the upload_url (stream file, not load into RAM)
-                logger.info(f"TikTok: uploading video to upload URL (publish_id={publish_id})")
-
-                upload_resp = await client.put(
-                    upload_url,
-                    headers={
-                        "Content-Range": f"bytes 0-{file_size - 1}/{file_size}",
-                        "Content-Length": str(file_size),
-                    },
-                    content=open(video_path, "rb"),  # noqa: SIM115 — httpx manages the file lifecycle
-                )
-                upload_resp.raise_for_status()
-
-                # Step 3: Fetch publish status
-                logger.info(f"TikTok: fetching publish status (publish_id={publish_id})")
-                status_resp = await client.post(
-                    f"{TIKTOK_API_BASE}/v2/post/publish/status/fetch/",
-                    headers=headers,
-                    json={"publish_id": publish_id},
-                )
-                status_resp.raise_for_status()
-                status_data = status_resp.json()
-
-                status = status_data.get("data", {}).get("status", "")
-                # Possible statuses: PROCESSING_UPLOAD, PROCESSING_DOWNLOAD,
-                # SEND_TO_CDN, SUCCESS, FAIL
-                if status == "FAIL":
-                    fail_reason = status_data.get("data", {}).get("fail_reason", "unknown")
-                    return UploadResult(
-                        success=False,
-                        error=f"TIKTOK_PUBLISH_FAILED: {fail_reason[:200]}",
-                        platform="tiktok",
-                        metadata={"publish_id": publish_id, "sandbox": self._is_sandbox()},
-                    )
-
-                # SUCCESS or in-progress; TikTok returns a public URL on SUCCESS
-                public_url = status_data.get("data", {}).get("publicaly_available_post_url", "") or ""
-
-                logger.info(f"Posted to TikTok: publish_id={publish_id} status={status}")
+            except httpx.HTTPStatusError as e:
+                error_body = e.response.text[:300] if e.response else str(e)
+                status_code = e.response.status_code if e.response else 0
+                # P2 fix: on 401, refresh token and retry once
+                if status_code == 401 and _attempt == 0:
+                    logger.warning("TikTok: 401 during upload, attempting token refresh...")
+                    try:
+                        token = await self._refresh_access_token()
+                        self._access_token = token
+                        headers["Authorization"] = f"Bearer {token}"
+                        continue  # retry
+                    except Exception as refresh_err:
+                        logger.error(f"TikTok: token refresh failed: {refresh_err}")
+                logger.error(f"TikTok HTTP error: {e}")
+                return self._handle_http_error(e, error_body)
+            except httpx.HTTPError as e:
+                logger.error(f"TikTok network error: {e}")
                 return UploadResult(
-                    success=True,
-                    post_id=str(publish_id),
-                    post_url=public_url or "https://www.tiktok.com/",
+                    success=False,
+                    error=f"TIKTOK_NETWORK_ERROR: {str(e)[:200]}",
                     platform="tiktok",
-                    metadata={
-                        "publish_id": publish_id,
-                        "status": status,
-                        "caption_length": len(caption),
-                        "sandbox": self._is_sandbox(),
-                    },
+                )
+            except Exception as e:
+                logger.error(f"TikTok upload failed: {e}")
+                return UploadResult(
+                    success=False,
+                    error=f"TIKTOK_UPLOAD_ERROR: {str(e)[:200]}",
+                    platform="tiktok",
                 )
 
-        except httpx.HTTPStatusError as e:
-            error_body = e.response.text[:300] if e.response else str(e)
-            logger.error(f"TikTok HTTP error: {e}")
-            return self._handle_http_error(e, error_body)
-        except httpx.HTTPError as e:
-            logger.error(f"TikTok network error: {e}")
-            return UploadResult(
-                success=False,
-                error=f"TIKTOK_NETWORK_ERROR: {str(e)[:200]}",
-                platform="tiktok",
-            )
-        except Exception as e:
-            logger.error(f"TikTok upload failed: {e}")
-            return UploadResult(
-                success=False,
-                error=f"TIKTOK_UPLOAD_ERROR: {str(e)[:200]}",
-                platform="tiktok",
-            )
+        return UploadResult(
+            success=False,
+            error="TIKTOK_UPLOAD_ERROR: Max retries exceeded",
+            platform="tiktok",
+        )
 
     def _handle_http_error(self, e: httpx.HTTPStatusError, error_body: str) -> UploadResult:
         """Map an HTTPStatusError to a typed UploadResult."""
         status_code = e.response.status_code if e.response else 0
         if status_code == 401:
+            # P2 fix: attempt token refresh on 401 during upload
+            # (refresh is called by the upload method which has retry logic)
             return UploadResult(
                 success=False,
                 error=f"TIKTOK_AUTH_EXPIRED: Access token expired or invalid. {error_body}",
