@@ -718,7 +718,7 @@ class AppController(QObject):
             }
             enabled_platforms = [
                 name
-                for name in ("youtube", "instagram", "x")
+                for name in PLATFORMS
                 if getattr(getattr(config, name), "enabled", False)
             ]
             targets = requested_platforms or enabled_platforms
@@ -868,7 +868,7 @@ class AppController(QObject):
         def _run() -> None:
             try:
                 # Emit 0% progress for all platforms at start
-                for plat in ("youtube", "instagram", "x", "tiktok"):
+                for plat in PLATFORMS:
                     self.progressChanged.emit(plat, 0.0)
 
                 loop = asyncio.new_event_loop()
@@ -1094,7 +1094,7 @@ class AppController(QObject):
                 self._config.tiktok.username = str(data["tiktok"].get("username", self._config.tiktok.username)).strip()
 
             if isinstance(data.get("destinations"), dict):
-                for name in ("youtube", "instagram", "x"):
+                for name in PLATFORMS:
                     if name in data["destinations"]:
                         getattr(self._config, name).enabled = bool(data["destinations"][name])
 
@@ -1956,7 +1956,7 @@ class AppController(QObject):
 
         try:
             # Check encoding configs
-            for name in ("youtube", "instagram", "x"):
+            for name in PLATFORMS:
                 enc = getattr(self._config.video, f"encoding_{name}", None)
                 if enc is not None:
                     if enc.resolution and enc.resolution not in (360, 480, 720, 1080, 1440, 1920, 2160):
@@ -1990,7 +1990,7 @@ class AppController(QObject):
             # Check rate limits
             if hasattr(self._config, "rate_limits"):
                 rl = self._config.rate_limits
-                for plat in ("youtube", "instagram", "x", "tiktok"):
+                for plat in PLATFORMS:
                     limit = getattr(rl, plat, None)
                     if limit is not None and (limit < 0 or limit > 100):
                         warnings.append(f"Unusual rate limit for {plat}: {limit}")

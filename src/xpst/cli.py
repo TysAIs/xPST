@@ -866,7 +866,7 @@ def health(ctx: click.Context, as_json: bool):
 # ──────────────────────────────────────────────
 
 @main.command()
-@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram"]))
+@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "linkedin"]))
 @click.option("--test", "test_only", is_flag=True, help="Test existing connections only")
 @click.pass_context
 def connect(ctx: click.Context, platform: str | None, test_only: bool):
@@ -901,7 +901,7 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         _show_auth_status(ctx, as_json)
         return
 
-    valid_platforms = {"tiktok", "youtube", "x", "instagram"}
+    valid_platforms = {"tiktok", "youtube", "x", "instagram", "threads", "linkedin"}
     if platform not in valid_platforms:
         click.echo(f"Unknown platform: {platform}")
         click.echo(f"Valid platforms: {', '.join(sorted(valid_platforms))}")
@@ -920,6 +920,10 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         _auth_instagram(config)
     elif platform == "tiktok":
         _auth_tiktok(config)
+    elif platform == "threads":
+        _auth_threads(config)
+    elif platform == "linkedin":
+        _auth_linkedin(config)
 
 
 def _show_auth_status(ctx: click.Context, as_json: bool):
@@ -942,7 +946,15 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
         yt_creds = cred_store.retrieve("youtube_token")
         x_creds = cred_store.retrieve_json("x_cookies")
         ig_creds = cred_store.retrieve_json("instagram_session")
-        for plat, creds in [("youtube", yt_creds), ("x", x_creds), ("instagram", ig_creds)]:
+        threads_creds = cred_store.retrieve("threads_access_token")
+        linkedin_creds = cred_store.retrieve("linkedin_access_token")
+        for plat, creds in [
+            ("youtube", yt_creds),
+            ("x", x_creds),
+            ("instagram", ig_creds),
+            ("threads", threads_creds),
+            ("linkedin", linkedin_creds),
+        ]:
             remaining = quota_mgr.get_remaining(plat)
             data["platforms"][plat] = {
                 "authenticated": bool(creds),
@@ -1006,6 +1018,32 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
         str(quota_mgr.quotas.get("instagram", {}).daily_limit if hasattr(quota_mgr.quotas.get("instagram", {}), "daily_limit") else "N/A"),
         str(ig_quota.get("daily", "N/A")),
         "Keyring" if ig_creds else ("File" if ig_file.exists() else "Not configured"),
+    )
+
+    # Threads
+    threads_creds = cred_store.retrieve("threads_access_token")
+    threads_token = bool(threads_creds or config.threads.graph_access_token)
+    threads_auth = "✅" if threads_token else "❌"
+    threads_quota = quota_mgr.get_remaining("threads")
+    table.add_row(
+        "Threads",
+        threads_auth,
+        str(quota_mgr.quotas.get("threads", {}).daily_limit if hasattr(quota_mgr.quotas.get("threads", {}), "daily_limit") else "N/A"),
+        str(threads_quota.get("daily", "N/A")),
+        "Keyring" if threads_creds else ("Config" if config.threads.graph_access_token else "Not configured"),
+    )
+
+    # LinkedIn
+    linkedin_creds = cred_store.retrieve("linkedin_access_token")
+    linkedin_token = bool(linkedin_creds or config.linkedin.access_token)
+    linkedin_auth = "✅" if linkedin_token else "❌"
+    linkedin_quota = quota_mgr.get_remaining("linkedin")
+    table.add_row(
+        "LinkedIn",
+        linkedin_auth,
+        str(quota_mgr.quotas.get("linkedin", {}).daily_limit if hasattr(quota_mgr.quotas.get("linkedin", {}), "daily_limit") else "N/A"),
+        str(linkedin_quota.get("daily", "N/A")),
+        "Keyring" if linkedin_creds else ("Config" if config.linkedin.access_token else "Not configured"),
     )
 
     console.print(table)
@@ -1593,6 +1631,28 @@ Option 2: Export cookies manually
 2. Save cookies to a file
 3. Set cookies_file in config.yaml
 """)
+
+
+def _auth_threads(config: XPSTConfig) -> None:
+    """Guide Threads (Meta Threads API) authentication.
+
+    Args:
+        config: Loaded xPST configuration.
+    """
+    from xpst.connect import connect_threads
+
+    connect_threads(config)
+
+
+def _auth_linkedin(config: XPSTConfig) -> None:
+    """Guide LinkedIn (OAuth 2.0) authentication.
+
+    Args:
+        config: Loaded xPST configuration.
+    """
+    from xpst.connect import connect_linkedin
+
+    connect_linkedin(config)
 
 
 # ──────────────────────────────────────────────
