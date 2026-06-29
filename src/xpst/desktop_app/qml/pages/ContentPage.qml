@@ -182,7 +182,6 @@ Page {
         if (idx < 0) editingCaptions[platformKey].push(text)
     }
 
-    function captionForPost(post, platformKey) {
     function postSelected() {
         if (selectedItems.length === 0) return
         if (selectedItems.length === 1) {

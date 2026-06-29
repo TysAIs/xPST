@@ -22,6 +22,7 @@ Each entry:
 
 import calendar
 import json
+import os
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -83,10 +84,26 @@ class ScheduleManager:
             self._entries = []
 
     def _save(self) -> None:
-        """Persist schedule entries to disk."""
+        """Persist schedule entries to disk atomically."""
+        import tempfile
+
         self.schedule_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.schedule_file, "w", encoding="utf-8") as f:
-            json.dump(self._entries, f, indent=2, ensure_ascii=False, default=str)
+        # Write to temp file then atomic rename (same pattern as state_store)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=self.schedule_file.parent, suffix=".tmp", prefix=".schedule_"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self._entries, f, indent=2, ensure_ascii=False, default=str)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.schedule_file)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def add(
         self,

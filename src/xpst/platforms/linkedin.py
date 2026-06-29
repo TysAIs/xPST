@@ -193,10 +193,8 @@ class LinkedInUploader(PlatformUploader):
                         platform="linkedin",
                     )
 
-                # Step 2: Upload video bytes to S3 upload URL
-                logger.info(f"LinkedIn: uploading video bytes to S3 (asset={asset_urn})")
-                with open(video_path, "rb") as f:
-                    video_bytes = f.read()
+                # Step 2: Upload video bytes to S3 upload URL (stream file, not load into RAM)
+                logger.info(f"LinkedIn: uploading video to S3 (asset={asset_urn})")
 
                 upload_resp = await client.put(
                     upload_url,
@@ -205,7 +203,7 @@ class LinkedInUploader(PlatformUploader):
                         "Content-Type": "video/mp4",
                         "Content-Length": str(file_size),
                     },
-                    content=video_bytes,
+                    content=open(video_path, "rb"),  # noqa: SIM115 — httpx manages the file lifecycle
                 )
                 upload_resp.raise_for_status()
 
