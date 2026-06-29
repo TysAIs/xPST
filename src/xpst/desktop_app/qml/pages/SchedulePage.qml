@@ -17,7 +17,7 @@ Page {
     // Form state for the "Create Schedule" card
     property string formVideoPath: ""
     property string formCaption: ""
-    property var formPlatforms: ({ youtube: true, instagram: false, x: false, tiktok: false })
+    property var formPlatforms: ({ youtube: true, instagram: false, x: false, tiktok: false, threads: false, linkedin: false })
     property string formDatetime: ""        // 'YYYY-MM-DD HH:MM'
     property int formRecurrence: 0          // 0=One-time, 1=Daily, 2=Weekly
     property string formError: ""
@@ -67,6 +67,8 @@ Page {
         if (formPlatforms.instagram) platforms.push("instagram")
         if (formPlatforms.x) platforms.push("x")
         if (formPlatforms.tiktok) platforms.push("tiktok")
+        if (formPlatforms.threads) platforms.push("threads")
+        if (formPlatforms.linkedin) platforms.push("linkedin")
         if (platforms.length === 0) {
             formError = "Select at least one platform"
             return
@@ -453,7 +455,9 @@ Page {
                                 { key: "youtube", name: "YouTube", color: theme.youtube },
                                 { key: "instagram", name: "Instagram", color: theme.instagram },
                                 { key: "x", name: "X", color: theme.xtwitter },
-                                { key: "tiktok", name: "TikTok", color: theme.tiktok }
+                                { key: "tiktok", name: "TikTok", color: theme.tiktok },
+                                { key: "threads", name: "Threads", color: theme.threads },
+                                { key: "linkedin", name: "LinkedIn", color: theme.linkedin }
                             ]
                             RowLayout {
                                 spacing: theme.spacingXs

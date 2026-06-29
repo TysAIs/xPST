@@ -385,7 +385,7 @@ class StateManager:
         state = self._state
 
         # Count by platform
-        by_platform = {"youtube": 0, "x": 0, "instagram": 0, "tiktok": 0}
+        by_platform = {"youtube": 0, "x": 0, "instagram": 0, "tiktok": 0, "threads": 0, "linkedin": 0}
         total_videos = len(state["posted_videos"])
         total_processed = state["health"].get("total_processed", 0)
         cross_posted_count = 0

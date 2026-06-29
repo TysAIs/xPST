@@ -125,7 +125,7 @@ That's it. Your videos are now cross-posted to every connected platform.
 ### Prerequisites
 
 - **Python 3.10+** (3.11–3.13 recommended)
-- **FFmpeg** on PATH (or set `XPST_FFMPEG_PATH`)
+- **FFmpeg** on PATH (or set `FFMPEG_BINARY` in your config)
 - **uv** (recommended) or plain pip
 
 ### Option 1: Install from source with uv (recommended)
@@ -174,9 +174,22 @@ pip install -e .
 pip install "xpst[full]"   # not yet available; watch the Releases page
 ```
 
-### Docker (planned)
+### Docker
 
-A Dockerfile is on the roadmap for containerized CLI and MCP server usage. For now, install from source.
+xPST ships with a `Dockerfile` and `docker-compose.yml` for containerized CLI and MCP server usage:
+
+```bash
+# Build the image
+docker build -t xpst .
+
+# Run the MCP server
+docker run -i xpst xpst mcp
+
+# Or use docker-compose
+docker-compose up
+```
+
+See `Dockerfile` and `docker-compose.yml` for details.
 
 ---
 
@@ -654,7 +667,7 @@ xpst config validate
 xpst config fix
 ```
 
-Every key can be overridden by an environment variable. Nested keys use `__` as the separator — for example `XPST_ACCOUNTS_THREADS__GRAPH_ACCESS_TOKEN`, `XPST_RATE_LIMITS__YOUTUBE`.
+Every config key can be overridden by a flat environment variable with the `XPST_` prefix. For example: `XPST_THREADS_GRAPH_ACCESS_TOKEN`, `XPST_INSTAGRAM_AUTH_MODE`, `XPST_YOUTUBE_ENABLED`. Rate limits are set via the config file only (no env override).
 
 ---
 

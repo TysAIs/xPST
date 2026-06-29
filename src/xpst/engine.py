@@ -1083,6 +1083,7 @@ class CrossPostEngine:
                 }
 
         # Check platforms (connectivity test, no uploads)
+        all_known_platforms = {"youtube", "instagram", "x", "tiktok", "threads", "linkedin"}
         for name, uploader in self._platforms.items():
             try:
                 platform_health = await uploader.check_health()
@@ -1098,5 +1099,14 @@ class CrossPostEngine:
                     "session_valid": False,
                     "error": str(e),
                 }
+
+        # Report disabled platforms (not initialized but known)
+        for name in all_known_platforms - set(self._platforms.keys()):
+            health["platforms"][name] = {
+                "authenticated": False,
+                "session_valid": False,
+                "error": "disabled",
+                "details": {},
+            }
 
         return health
