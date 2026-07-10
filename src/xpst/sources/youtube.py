@@ -110,8 +110,8 @@ class YouTubeSource(VideoSource):
         """
         cmd = [self._yt_dlp_path]
 
-        # Try browser cookies if configured
-        if getattr(self.config.tiktok, 'cookies_from_browser', False):
+        # YouTube config for cookies
+        if self.config.youtube.cookies_from_browser:
             from xpst.utils.platform import get_browser_list
             for browser in get_browser_list():
                 try:

@@ -53,8 +53,7 @@ class Scheduler:
         return self._last_results
 
     def run(self, interval: int | None = None) -> None:
-        """
-        Run the scheduler in watch mode.
+        """Run the scheduler in watch mode (sync wrapper for CLI).
 
         Args:
             interval: Check interval in seconds (default: from config)
@@ -70,9 +69,9 @@ class Scheduler:
                 # Check if we need catch-up
                 if self._needs_catch_up():
                     logger.info("Mac was asleep. Running catch-up...")
-                    self._run_check(catch_up=True)
+                    asyncio.run(self.engine.check_and_post(catch_up=True))
                 else:
-                    self._run_check(catch_up=False)
+                    asyncio.run(self.engine.check_and_post(catch_up=False))
 
                 # Update wake check
                 self._last_wake_check = datetime.now()
@@ -89,6 +88,43 @@ class Scheduler:
             except Exception as e:
                 logger.error(f"Error in scheduler loop: {e}")
                 time.sleep(60)  # Wait before retry
+
+    async def run_async(self, interval: int | None = None) -> None:
+        """Run the scheduler in watch mode (async version, preferred).
+
+        Uses asyncio.sleep() instead of time.sleep() to avoid blocking
+        the event loop. Creates one event loop and reuses it.
+
+        Args:
+            interval: Check interval in seconds (default: from config)
+        """
+        check_interval = interval or self.config.schedule.check_interval
+
+        logger.info(f"Starting async scheduler (interval: {check_interval}s)")
+
+        self._running = True
+
+        while self._running:
+            try:
+                if self._needs_catch_up():
+                    logger.info("Mac was asleep. Running catch-up...")
+                    await self.engine.check_and_post(catch_up=True)
+                else:
+                    await self.engine.check_and_post(catch_up=False)
+
+                self._last_wake_check = datetime.now()
+                self.engine.state.update_last_wake_check()
+                self.engine.state.save()
+
+                logger.debug(f"Next check in {check_interval}s")
+                await asyncio.sleep(check_interval)
+
+            except KeyboardInterrupt:
+                logger.info("Scheduler stopped by user")
+                break
+            except Exception as e:
+                logger.error(f"Error in scheduler loop: {e}")
+                await asyncio.sleep(60)
 
     def stop(self) -> None:
         """Stop the scheduler"""
