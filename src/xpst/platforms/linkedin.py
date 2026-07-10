@@ -75,8 +75,8 @@ class LinkedInUploader(PlatformUploader):
     async def _get_access_token(self) -> str:
         """Return a valid LinkedIn access token.
 
-        Delegates to SessionManager when available, otherwise uses the
-        access_token configured in LinkedInAccountConfig.
+        Checks the encrypted credential store first, then falls back to
+        the access_token configured in LinkedInAccountConfig.
 
         Returns:
             Valid access token string.
@@ -87,8 +87,16 @@ class LinkedInUploader(PlatformUploader):
         if self._access_token:
             return self._access_token
 
-        # LinkedIn uses a simple OAuth 2.0 access token stored in config.
-        # No SessionManager method needed — token is read directly from config.
+        # Try credential store first (encrypted, preferred)
+        from xpst.utils.credentials import CredentialStore
+
+        cred_store = CredentialStore(self.config.config_dir)
+        stored_token = cred_store.retrieve("linkedin_access_token")
+        if stored_token:
+            self._access_token = stored_token
+            return self._access_token
+
+        # Fallback to config.yaml
         token = self.config.linkedin.access_token
         if not token:
             raise ValueError(
