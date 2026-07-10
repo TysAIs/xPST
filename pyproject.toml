@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["cross-posting", "tiktok", "youtube-shorts", "instagram-reels", "x-twitter", "automation", "social-media"]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: End Users/Desktop",
     "License :: OSI Approved :: MIT License",
@@ -42,8 +42,6 @@ dependencies = [
     "google-auth-oauthlib>=1.0.0,<2.0.0",
     "google-auth-httplib2>=0.1.0,<1.0.0",
     "twikit>=2.0.0,<3.0.0",
-    "instagrapi>=2.0.0,<3.0.0",
-    
     # Monitoring
     "structlog>=23.0.0,<25.0.0",
     "prometheus-client>=0.19.0,<1.0.0",
@@ -72,6 +70,10 @@ anti-ban = [
     # TLS fingerprint hardening — mimics real browser JA3/JA4 to avoid
     # bot detection on Instagram/X. Falls back gracefully if not installed.
     "curl_cffi>=0.7.0,<1.0.0",
+    # Instagrapi (session-based Instagram API, ban risk) — optional
+    # to avoid forced install of unofficial lib. Ignored gracefully
+    # when not installed (Instagram falls back to Graph API mode).
+    "instagrapi>=2.0.0,<3.0.0",
 ]
 mcp = [
     "mcp[cli]>=1.0.0,<2.0.0",
