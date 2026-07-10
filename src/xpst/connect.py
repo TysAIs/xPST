@@ -922,8 +922,8 @@ async def test_connections(config: XPSTConfig) -> dict[str, bool]:
                     console.print(f"  ✅ X/Twitter: @{user.screen_name}")
                     results["x"] = True
                 except Exception:
-                    console.print("  ⚠️  X/Twitter: Cookies present but may be expired")
-                    results["x"] = True  # Mark as present, just expired
+                    console.print("  ⚠️  X/Twitter: Cookies present but expired — run 'xpst connect x'")
+                    results["x"] = False  # Expired = not ready to post
         except Exception as e:
             console.print(f"  ❌ X/Twitter: {str(e)[:80]}")
             results["x"] = False
