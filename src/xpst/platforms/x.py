@@ -243,6 +243,17 @@ class XUploader(PlatformUploader):
         client = twikit.Client("en-US", user_agent=anti_bot.get_user_agent())
         client.load_cookies(str(cookies_file))
 
+        # Validate cookies — if user() fails or returns no username, cookies are stale
+        try:
+            user = await client.user()
+            if not user or not getattr(user, "screen_name", None):
+                raise ValueError("X session expired — cookies returned no user data")
+        except Exception as e:
+            raise ValueError(
+                "X_SESSION_EXPIRED: X cookies are stale or expired. "
+                "Run 'xpst connect x' to re-authenticate."
+            ) from e
+
         # Apply proxy if configured
         if self.config.x.proxy:
             AntiBotProtection.apply_proxy_to_twikit(client, self.config.x.proxy)
