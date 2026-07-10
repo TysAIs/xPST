@@ -87,13 +87,31 @@ class TikTokUploader(PlatformUploader):
         if self._access_token:
             return self._access_token
 
-        # Use the access_token from config (set via xpst connect tiktok)
+        # Try credential store first via SessionManager
+        if self._session_manager:
+            stored = self._session_manager.credentials.retrieve("tiktok_access_token")
+            if stored:
+                self._access_token = str(stored)
+                # Also sync client_key/client_secret/refresh_token from credential store
+                # for refresh operations
+                stored_client_key = self._session_manager.credentials.retrieve("tiktok_client_key")
+                stored_client_secret = self._session_manager.credentials.retrieve("tiktok_client_secret")
+                stored_refresh = self._session_manager.credentials.retrieve("tiktok_refresh_token")
+                if stored_client_key and not self.config.tiktok.client_key:
+                    self.config.tiktok.client_key = stored_client_key
+                if stored_client_secret and not self.config.tiktok.client_secret:
+                    self.config.tiktok.client_secret = stored_client_secret
+                if stored_refresh and not self.config.tiktok.refresh_token:
+                    self.config.tiktok.refresh_token = stored_refresh
+                return self._access_token
+
+        # Fallback: access_token from config.yaml
         token = self.config.tiktok.access_token
 
         if not token:
             raise ValueError(
                 "TIKTOK_NOT_CONFIGURED: Set access_token (and client_key/client_secret/"
-                "refresh_token for refresh) in config, or run: xpst auth tiktok"
+                "refresh_token for refresh) in config, or run: xpst connect tiktok"
             )
         self._access_token = token
         return self._access_token

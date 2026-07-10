@@ -572,6 +572,56 @@ class InstagramUploader(PlatformUploader):
         Returns:
             PlatformHealth with authentication status
         """
+        # Graph API mode (preferred, ban-safe)
+        if self.config.instagram.auth_mode == "graph_api":
+            import httpx
+            token = self.config.instagram.graph_access_token
+            ig_user_id = self.config.instagram.graph_ig_user_id
+            if not token or not ig_user_id:
+                # Try credential store
+                if self._session_manager:
+                    token = self._session_manager.credentials.retrieve("instagram_graph_token") or ""
+                    ig_user_id = self._session_manager.credentials.retrieve("instagram_graph_user_id") or ""
+            if token and ig_user_id:
+                try:
+                    r = httpx.get(
+                        f"https://graph.facebook.com/v21.0/{ig_user_id}",
+                        params={"fields": "username,followers_count,media_count", "access_token": token},
+                        timeout=10,
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        return PlatformHealth(
+                            platform="instagram",
+                            authenticated=True,
+                            session_valid=True,
+                            details={
+                                "username": data.get("username", "?"),
+                                "user_id": ig_user_id,
+                                "auth_mode": "graph_api",
+                            },
+                        )
+                    return PlatformHealth(
+                        platform="instagram",
+                        authenticated=False,
+                        session_valid=False,
+                        error=f"Graph API returned {r.status_code}",
+                    )
+                except Exception as e:
+                    return PlatformHealth(
+                        platform="instagram",
+                        authenticated=False,
+                        session_valid=False,
+                        error=str(e),
+                    )
+            return PlatformHealth(
+                platform="instagram",
+                authenticated=False,
+                session_valid=False,
+                error="Graph API not configured",
+            )
+
+        # Session mode (instagrapi, unofficial)
         try:
             client = await self._get_client()
 

@@ -90,11 +90,18 @@ class ThreadsUploader(PlatformUploader):
         if self._access_token:
             return self._access_token
 
+        token = None
         if self._session_manager:
-            token = await self._session_manager.get_threads_token()
+            creds = await self._session_manager.get_threads_token()
+            if creds:
+                token, user_id = creds
+                # Sync the user_id from credential store into config if not set
+                if user_id and not self.config.threads.threads_user_id:
+                    self.config.threads.threads_user_id = user_id
         else:
             # Fallback for direct instantiation (testing)
             token = self.config.threads.graph_access_token
+
         if not token:
             raise ValueError(
                 "THREADS_NOT_CONFIGURED: Set graph_access_token and threads_user_id in config, "
@@ -106,6 +113,11 @@ class ThreadsUploader(PlatformUploader):
     async def _refresh_access_token(self) -> str:
         """Refresh the long-lived Threads access token.
 
+        Uses Meta's OAuth token refresh endpoint:
+        POST graph.facebook.com/v21.0/oauth/access_token
+          ?grant_type=th_refresh_token
+          &access_token=...
+
         Returns:
             New access token string.
 
@@ -115,7 +127,7 @@ class ThreadsUploader(PlatformUploader):
         token = await self._get_access_token()
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
-                f"{THREADS_API_BASE}/{THREADS_API_VERSION}/refresh_access_token",
+                "https://graph.facebook.com/v21.0/oauth/access_token",
                 params={
                     "grant_type": "th_refresh_token",
                     "access_token": token,

@@ -479,6 +479,8 @@ class SessionManager:
     async def get_threads_token(self) -> tuple[str, str] | None:
         """Get Threads Graph API credentials.
 
+        Checks credential store first, then falls back to config.yaml.
+
         Returns:
             Tuple of (access_token, threads_user_id) or None.
         """
@@ -486,6 +488,16 @@ class SessionManager:
         user_id = self.credentials.retrieve("threads_user_id") or ""
         if token and user_id:
             return (token, user_id)
+
+        # Fall back to config.yaml
+        try:
+            from xpst.config import XPSTConfig
+            config = XPSTConfig.load()
+            if config.threads.graph_access_token and config.threads.threads_user_id:
+                return (config.threads.graph_access_token, config.threads.threads_user_id)
+        except Exception:
+            pass
+
         return None
 
     async def check_threads_health(self) -> dict:

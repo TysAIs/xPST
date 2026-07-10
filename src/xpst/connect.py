@@ -572,6 +572,83 @@ def connect_tiktok(config: XPSTConfig) -> bool:
     console.print(f"[green]✅ TikTok source configured for @{current_username}[/green]")
     if config.tiktok.cookies_from_browser:
         console.print("[dim]   Browser cookies will be used automatically for downloads.[/dim]")
+
+    # ── TikTok Destination Posting (Content Posting API) ──────────────
+    console.print()
+    console.print(Panel("[bold]TikTok Destination Posting (optional)[/bold]", style="cyan"))
+    console.print(
+        "[dim]Configure destination posting to upload videos to TikTok using\n"
+        "the official Content Posting API (Direct Post). Requires a developer\n"
+        "app from the TikTok Developer Portal.[/dim]\n"
+    )
+    console.print("[bold]Setup:[/bold]")
+    console.print("  1. Go to: [link=https://developers.tiktok.com/apps]https://developers.tiktok.com/apps[/link]")
+    console.print("  2. Create or select an app with 'Content Posting' permission")
+    console.print("  3. Get your Client Key and Client Secret")
+    console.print("  4. Complete OAuth to get an access token and refresh token\n")
+
+    if _confirm("Configure TikTok destination posting?", default=False):
+        if _confirm("Open TikTok Developer Portal in browser?", default=True):
+            import webbrowser
+            webbrowser.open("https://developers.tiktok.com/apps")
+
+        client_key = console.input("[cyan]Client Key (from TikTok Dev Portal): [/cyan]").strip()
+        if not client_key:
+            console.print("[yellow]Skipping destination posting setup (no client key).[/yellow]")
+        else:
+            client_secret = _input_secret("Client Secret: ")
+            if not client_secret:
+                console.print("[yellow]Skipping destination posting setup (no client secret).[/yellow]")
+            else:
+                access_token = _input_secret("Access Token (from OAuth): ")
+                if not access_token:
+                    console.print("[yellow]Skipping destination posting setup (no access token).[/yellow]")
+                else:
+                    refresh_token = _input_secret("Refresh Token (from OAuth): ")
+
+                    # Verify the token works
+                    console.print("\\n[bold]Verifying token...[/bold]")
+                    try:
+                        import httpx
+                        r = httpx.get(
+                            "https://open.tiktokapis.com/v2/user/info/",
+                            headers={"Authorization": f"Bearer {access_token}"},
+                            params={"fields": "open_id,display_name,follower_count"},
+                            timeout=15,
+                        )
+                        if r.status_code == 200:
+                            data = r.json()
+                            user_data = data.get("data", {})
+                            display_name = user_data.get("display_name", "?")
+                            open_id = user_data.get("open_id", "?")
+                            console.print(f"[green]✅ TikTok destination configured: @{display_name} (open_id: {open_id})[/green]")
+
+                            # Save to config
+                            config.tiktok.client_key = client_key
+                            config.tiktok.client_secret = client_secret
+                            config.tiktok.access_token = access_token
+                            config.tiktok.refresh_token = refresh_token or ""
+                            config.save()
+
+                            # Also store in encrypted credential store
+                            cred_store = CredentialStore(config.config_dir)
+                            try:
+                                cred_store.store("tiktok_access_token", access_token)
+                                cred_store.store("tiktok_refresh_token", refresh_token or "")
+                                cred_store.store("tiktok_client_key", client_key)
+                                cred_store.store("tiktok_client_secret", client_secret)
+                            except Exception as e:
+                                logger.debug("Unexpected error: %s", e)
+
+                            console.print("[green]   TikTok destination posting configured successfully![/green]")
+                        else:
+                            console.print(f"[red]❌ Token verification failed: {r.status_code} {r.text[:200]}[/red]")
+                            console.print("[dim]Make sure the token has the 'user.info.basic' scope.[/dim]")
+                            # Don't return False — source setup already succeeded
+                            console.print("[yellow]Source setup succeeded. Destination posting not configured.[/yellow]")
+                    except Exception as e:
+                        console.print(f"[red]❌ Verification error: {e}[/red]")
+                        console.print("[yellow]Source setup succeeded. Destination posting not configured.[/yellow]")
     return True
 
 
@@ -610,6 +687,30 @@ def connect_threads(config: XPSTConfig) -> bool:
     access_token = _input_secret("Long-lived access token: ")
     if not access_token:
         console.print("[red]❌ Access token required.[/red]")
+        return False
+
+    # Verify the token works
+    console.print("\\n[bold]Verifying token...[/bold]")
+    try:
+        import httpx
+        r = httpx.get(
+            f"https://graph.threads.net/v1.0/me",
+            params={
+                "fields": "id,username,threads_profile_picture_url",
+                "access_token": access_token,
+            },
+            timeout=15,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            threads_user_id = data.get("id", threads_user_id)
+            console.print(f"[green]✅ Connected as @{data.get('username', '?')} (ID: {threads_user_id})[/green]")
+        else:
+            console.print(f"[red]❌ Token verification failed: {r.status_code} {r.text[:200]}[/red]")
+            console.print("[dim]Make sure the token has the 'threads_manage' scope.[/dim]")
+            return False
+    except Exception as e:
+        console.print(f"[red]❌ Verification error: {e}[/red]")
         return False
 
     config.threads.enabled = True
