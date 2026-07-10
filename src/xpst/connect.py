@@ -766,6 +766,35 @@ def connect_linkedin(config: XPSTConfig) -> bool:
         console.print("[red]❌ Access token required.[/red]")
         return False
 
+    # Verify the token works
+    console.print("\\n[bold]Verifying token...[/bold]")
+    try:
+        import httpx
+        r = httpx.get(
+            "https://api.linkedin.com/v2/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            sub = data.get("sub", "")
+            name = data.get("name", "?")
+            if not sub or not sub.startswith("urn:li:person:"):
+                console.print(
+                    f"[red]❌ Token verified but no valid member URN found. "
+                    f"Got '{sub}'. Expected 'urn:li:person:...'[/red]"
+                )
+                return False
+            linkedin_user_id = sub
+            console.print(f"[green]✅ Connected as {name} ({sub})[/green]")
+        else:
+            console.print(f"[red]❌ Token verification failed: {r.status_code} {r.text[:200]}[/red]")
+            console.print("[dim]Make sure the token has the 'w_member_social' scope.[/dim]")
+            return False
+    except Exception as e:
+        console.print(f"[red]❌ Verification error: {e}[/red]")
+        return False
+
     config.linkedin.enabled = True
     config.linkedin.access_token = access_token
     config.linkedin.linkedin_user_id = linkedin_user_id
