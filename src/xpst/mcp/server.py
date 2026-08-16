@@ -42,8 +42,13 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
         """
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
+            # Real CallToolResult/ListToolsResult stubs used as call-result
+            # stand-ins: default isError=False so ``not isError`` assertions on
+            # success paths behave like the real pydantic mcp types.
+            is_error = kwargs.pop("isError", False)
             for key, value in kwargs.items():
                 setattr(self, key, value)
+            self.isError = is_error
 
         def __call__(self, *args: Any, **kwargs: Any) -> Any:
             # Used for ``@app.list_tools()`` style decorators: return the
