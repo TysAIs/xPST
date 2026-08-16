@@ -587,3 +587,29 @@ def test_cli_auth_recognizes_messenger_platform() -> None:
     # Invoking with an invalid platform lists the valid set — messenger must appear.
     result = runner.invoke(main, ["auth", "bogus"])
     assert "messenger" in result.output
+
+
+def test_messenger_not_in_cross_posting_engine(tmp_path: Path) -> None:
+    """Messenger is webhook-driven, not a video-posting destination.
+
+    Even when enabled, it must NOT appear in the engine's `_platforms` — otherwise
+    `check_and_post` would send the caption as a text message to the page on every
+    cross-post.
+    """
+    from xpst.engine import CrossPostEngine
+
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.dump({
+        "accounts": {
+            "youtube": {"enabled": False},
+            "x": {"enabled": False},
+            "instagram": {"enabled": False},
+            "tiktok": {"enabled": False},
+            "threads": {"enabled": False},
+            "linkedin": {"enabled": False},
+            "messenger": {"enabled": True, "page_access_token": "t", "page_id": "1"},
+        },
+    }))
+    config = XPSTConfig.load(str(cfg_file))
+    engine = CrossPostEngine(config)
+    assert "messenger" not in engine._platforms
