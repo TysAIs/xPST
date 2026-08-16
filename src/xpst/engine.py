@@ -344,6 +344,15 @@ class CrossPostEngine:
             except Exception as e:
                 logger.error(f"Failed to initialize LinkedIn uploader: {e}")
 
+        # Messenger (opt-in; disabled by default)
+        if self.config.messenger.enabled:
+            try:
+                from xpst.platforms.messenger import MessengerAdapter
+                self._platforms["messenger"] = MessengerAdapter(self.config)
+                logger.info("Messenger adapter initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Messenger adapter: {e}")
+
     async def check_and_post(
         self,
         catch_up: bool = False,
