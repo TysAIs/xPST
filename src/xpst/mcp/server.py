@@ -1111,10 +1111,9 @@ async def _handle_security_audit(config: XPSTConfig) -> CallToolResult:
 
     # FFmpeg
     try:
-        import shutil
+        from xpst.utils.platform import resolve_ffmpeg_path
 
-        from xpst.utils.platform import get_ffmpeg_name
-        ffmpeg_ok = shutil.which(get_ffmpeg_name()) is not None
+        ffmpeg_ok = resolve_ffmpeg_path() is not None
     except Exception:
         ffmpeg_ok = False
     checks.append({"check": "ffmpeg_available", "passed": ffmpeg_ok})

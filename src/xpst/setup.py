@@ -9,7 +9,6 @@ Guides users through:
 5. Connectivity testing
 """
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,7 +18,7 @@ from rich.panel import Panel
 
 from xpst.config import XPSTConfig
 from xpst.utils.logger import get_logger
-from xpst.utils.platform import get_ffmpeg_name
+from xpst.utils.platform import resolve_ffmpeg_path
 
 console = Console()
 logger = get_logger(__name__)
@@ -40,7 +39,7 @@ def check_ffmpeg() -> bool:
         True if ffmpeg binary is found, False otherwise.
     """
 
-    return shutil.which(get_ffmpeg_name()) is not None
+    return resolve_ffmpeg_path() is not None
 
 
 def check_python_version() -> tuple[bool, str]:
@@ -117,7 +116,7 @@ def check_system_requirements() -> bool:
     if check_ffmpeg():
         try:
             result = subprocess.run(
-                [get_ffmpeg_name(), "-version"],
+                [resolve_ffmpeg_path(), "-version"],
                 capture_output=True, text=True, timeout=10,
             )
             first_line = result.stdout.split("\n")[0] if result.stdout else "unknown"

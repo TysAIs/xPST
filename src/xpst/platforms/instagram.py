@@ -472,10 +472,10 @@ class InstagramUploader(PlatformUploader):
                 try:
                     import subprocess
 
-                    from xpst.utils.platform import get_ffmpeg_name
+                    from xpst.utils.platform import get_ffmpeg_name, resolve_ffmpeg_path
                     # NOTE: This blocks briefly. Could be moved to thread pool if needed.
                     subprocess.run(
-                        [get_ffmpeg_name(), "-y", "-i", str(video_path), "-ss", "1",
+                        [resolve_ffmpeg_path() or get_ffmpeg_name(), "-y", "-i", str(video_path), "-ss", "1",
                          "-vframes", "1", "-q:v", "2", str(thumb_path)],
                         capture_output=True, timeout=30,
                     )
