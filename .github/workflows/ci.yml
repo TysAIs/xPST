@@ -25,13 +25,17 @@ jobs:
 
       # setup-ffmpeg@v3 has an open upstream breakage ("TypeError: fetch
       # failed") affecting all runners since mid-2025; apt carries ffmpeg on
-      # the ubuntu image. macos-latest runners are ARM64 → brew.
+      # the ubuntu image. macos-latest runners are ARM64 → brew. Windows
+      # runners ship chocolatey elevated, so choco is used there.
       - name: Install FFmpeg
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Install FFmpeg (macOS arm64)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
 
       - name: Install package
         shell: bash
