@@ -433,24 +433,37 @@ class XPSTConfig:
                 shutil.move(str(old_dir), str(new_dir))
             config_path = os.path.expanduser("~/.xpst/config.yaml")
 
-        config_path = Path(config_path)
-        if not config_path.exists():
-            raise FileNotFoundError(
-                f"XPST config file not found: {config_path} "
-                f"(expected ~/.xpst/config.yaml or a path passed via --config)"
-            )
-        with open(config_path, encoding="utf-8-sig") as f:
+        cfg_path: Path = Path(config_path)
+        if not cfg_path.exists():
+            # First run: materialize the default location so a fresh install
+            # works without a manual config step (dashboard, desktop, engine
+            # all expect the file). An explicit --config path must exist —
+            # that is a user error and still raises.
+            default_path = Path(os.path.expanduser("~/.xpst/config.yaml"))
+            if cfg_path == default_path:
+                cfg_path.parent.mkdir(parents=True, exist_ok=True)
+                cfg_path.write_text(
+                    yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False),
+                    encoding="utf-8",
+                )
+                logger.info("Created default config at %s", cfg_path)
+            else:
+                raise FileNotFoundError(
+                    f"XPST config file not found: {cfg_path} "
+                    f"(expected ~/.xpst/config.yaml or a path passed via --config)"
+                )
+        with open(cfg_path, encoding="utf-8-sig") as f:
             file_config = yaml.safe_load(f) or {}
         if file_config is None:
             raise ValueError(
-                f"XPST config file is empty or invalid: {config_path}"
+                f"XPST config file is empty or invalid: {cfg_path}"
             )
         if not isinstance(file_config, dict):
             raise ValueError(
-                f"XPST config must be a mapping, got {type(file_config).__name__}: {config_path}"
+                f"XPST config must be a mapping, got {type(file_config).__name__}: {cfg_path}"
             )
         config = cls._merge_config(config, file_config)
-        config.config_dir = str(config_path.parent)
+        config.config_dir = str(cfg_path.parent)
 
         # Auto-migrate config from older versions
         from xpst.config_migration import auto_migrate
