@@ -7,7 +7,7 @@
 ```bash
 cd ~/XPST
 source .venv/bin/activate
-python -m xpst --help          # CLI with 28 commands
+python -m xpst --help          # CLI with 34 commands
 python -m xpst run             # Run the cross-posting engine
 python -m xpst dashboard       # Start FastAPI dashboard (port 8080)
 python -m xpst desktop         # Launch PySide6/QML desktop app
@@ -18,21 +18,21 @@ python -m pytest tests/        # 1322 tests (core 327 pass fast)
 
 | Layer | Location | Responsibility |
 |-------|----------|----------------|
-| **CLI** | `src/xpst/cli.py` | 28 commands, `--json`, `--dry-run`, structured exit codes |
+| **CLI** | `src/xpst/cli.py` | 34 commands, `--json`, `--dry-run`, structured exit codes |
 | **Engine v2** | `src/xpst/engine_v2.py` | Orchestrates use-cases via DI |
 | **Use-Cases** | `src/xpst/usecases/` | `FetchNewVideos`, `CrossPostVideo`, `ManualPost`, `Backfill`, `HealthCheck`, `DeletePost` |
 | **Platforms** | `src/xpst/platforms/` | YouTube, X, Instagram uploaders (auth via SessionManager) |
 | **Sources** | `src/xpst/sources/` | TikTok, Instagram Reels, Local files |
 | **State** | `src/xpst/state_store.py` + `state_manager.py` | Atomic I/O + business logic (thread-safe) |
 | **Config** | `src/xpst/config.py` | Pydantic settings, bcrypt dashboard auth, auto-migration v1→v4 |
-| **Desktop** | `src/xpst/desktop_app/` | PySide6/QML (10 pages), splash, i18n, plugins |
+| **Desktop** | `src/xpst/desktop_app/` | PySide6/QML (8 core pages + onboarding/detail panel), splash, i18n, plugins |
 | **Dashboard** | `src/xpst/dashboard/server.py` | FastAPI + WebSocket, bcrypt auth |
 | **MCP** | `src/xpst/mcp/server.py` | 23 tools (post, health, config, state, platforms, scheduling, analytics, KB, captions, transcripts, search) |
 
 ## Key Principles
 
 - **FREE + OPEN SOURCE** — Zero personal data in distributable tools
-- **Enterprise-grade quality** — 1322 tests, thread-safe, encrypted credentials, bcrypt passwords
+- **Enterprise-grade quality** — 1431 tests collected (1419 passing), thread-safe, encrypted credentials, bcrypt passwords
 - **Agent-friendly CLI** — Auto-JSON on non-TTY, `--quiet`, `--dry-run`, exit codes 0/1/2/3/4/10
 - **No hardcoded secrets** — All via `~/.xpst/` or env vars
 - **Apple-like UI standard** — Light/dark mode, Inter font, accessibility (Accessible.role/name)
