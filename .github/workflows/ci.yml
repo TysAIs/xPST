@@ -23,10 +23,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      # setup-ffmpeg@v3 is x64-only; macos-latest runners are ARM64
+      # setup-ffmpeg@v3 has an open upstream breakage ("TypeError: fetch
+      # failed") affecting all runners since mid-2025; apt carries ffmpeg on
+      # the ubuntu image. macos-latest runners are ARM64 → brew.
       - name: Install FFmpeg
-        if: runner.os != 'macOS'
-        uses: FedericoCarboni/setup-ffmpeg@v3
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Install FFmpeg (macOS arm64)
         if: runner.os == 'macOS'
         run: brew install ffmpeg
