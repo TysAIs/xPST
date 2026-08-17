@@ -11,7 +11,7 @@ python -m xpst --help          # CLI with 34 commands
 python -m xpst run             # Run the cross-posting engine
 python -m xpst dashboard       # Start FastAPI dashboard (port 8080)
 python -m xpst desktop         # Launch PySide6/QML desktop app
-python -m pytest tests/        # 1322 tests (core 327 pass fast)
+python -m pytest tests/        # full suite (1431 collected)
 ```
 
 ## Architecture
