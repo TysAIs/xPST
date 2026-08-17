@@ -194,11 +194,32 @@ class TestStoreSelection:
         store = open_default_store(ws)
         assert isinstance(store, JsonKnowledgeStore)
 
-    def test_lancedb_default_for_fresh_workspace_when_installed(
+    def test_sqlitevec_default_for_fresh_workspace_when_available(
         self, tmp_path, monkeypatch
     ):
+        """D3: a fresh workspace selects sqlite-vec when it can load."""
+        pytest.importorskip("sqlite_vec")
+        monkeypatch.setenv("XPST_HOME", str(tmp_path))
+        monkeypatch.setattr(
+            "xpst.knowledge.store.vector_sqlite.vec0_available",
+            lambda: True,
+        )
+        ws = Workspace.resolve("fresh")
+
+        from xpst.knowledge.store import open_default_store
+        from xpst.knowledge.store.vector_sqlite import SQLiteVecStore
+        assert isinstance(open_default_store(ws), SQLiteVecStore)
+
+    def test_lancedb_fallback_when_sqlitevec_unavailable(
+        self, tmp_path, monkeypatch
+    ):
+        """A broken/unloadable sqlite-vec falls through to LanceDB (legacy)."""
         pytest.importorskip("lancedb")
         monkeypatch.setenv("XPST_HOME", str(tmp_path))
+        monkeypatch.setattr(
+            "xpst.knowledge.store.vector_sqlite.vec0_available",
+            lambda: False,
+        )
         ws = Workspace.resolve("fresh")
 
         from xpst.knowledge.store import open_default_store
