@@ -64,7 +64,7 @@ Contributors should place new code in the matching layer:
 
 | Layer | Location | Responsibility |
 |-------|----------|----------------|
-| CLI | `src/xpst/cli.py` | 28 commands; `--json`, `--dry-run`, structured exit codes |
+| CLI | `src/xpst/cli.py` | 34 commands; `--json`, `--dry-run`, structured exit codes |
 | Engine v2 | `src/xpst/engine.py` (+ `services/` DI use-cases) | Orchestrates the fetch → encode → upload → track pipeline via dependency-injected `UploadService` and `SourceService`; the single entry point the CLI, desktop app, and MCP server share |
 | Providers (destinations) | `src/xpst/platforms/` | YouTube, Instagram, X uploaders; auth via `SessionManager` (`utils/sessions.py`) |
 | Provider metadata | `src/xpst/providers.py` | `ProviderManifest` / role / capability enums shared by sources and destinations |
