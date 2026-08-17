@@ -110,6 +110,7 @@ dev = [
     "mypy>=1.0.0",
     "types-PyYAML>=6.0.0",
     "import-linter>=2.0",
+    "bandit>=1.7.0",
 ]
 
 [project.scripts]
@@ -149,7 +150,7 @@ ignore = ["E501", "E402", "SIM105", "SIM117", "SIM102", "B904"]
 quote-style = "double"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 ignore_missing_imports = true
 warn_return_any = false
 warn_unused_ignores = true
