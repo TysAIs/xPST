@@ -11,12 +11,13 @@ def open_default_store(workspace):
 
     Resolution order (D3):
     1. If ``vector_backend`` config says ``"lancedb"``, use LanceDBStore
-    2. If sqlite-vec is available, use SQLiteVecStore (default, new)
-    3. If sqlite-vec not installed but lancedb is, use LanceDBStore (legacy)
-    4. Fall back to JsonKnowledgeStore (no vectors, substring search only)
-
-    An existing JSON store is never silently stranded — migration is
-    explicit via ``xpst kb migrate-store``.
+    2. If existing JSON nuggets are present, keep JsonKnowledgeStore —
+       existing data is never silently stranded; migration is explicit
+       via ``xpst kb migrate-store``.
+    3. If sqlite-vec is installed AND its vec0 extension actually loads,
+       use SQLiteVecStore (default, new)
+    4. If lancedb is available, use LanceDBStore (legacy)
+    5. Fall back to JsonKnowledgeStore (no vectors, substring search only)
     """
     import os
 
@@ -33,23 +34,32 @@ def open_default_store(workspace):
         except ImportError:
             pass
 
-    # Default: sqlite-vec
+    # Existing JSON data is never silently stranded.
+    if json_has_data:
+        from xpst.knowledge.store.json_store import JsonKnowledgeStore
+        return JsonKnowledgeStore(workspace.nuggets_path)
+
+    # Default: sqlite-vec — package present is not enough; the C extension
+    # must actually load (some wheels import fine but fail at vec0 init).
     if backend == "sqlite-vec":
         try:
-            import sqlite_vec  # noqa: F401
+            from xpst.knowledge.store.vector_sqlite import (
+                SQLiteVecStore,
+                vec0_available,
+            )
 
-            from xpst.knowledge.store.vector_sqlite import SQLiteVecStore
-            vec_path = workspace.root / "vectors.db"
-            return SQLiteVecStore(vec_path)
-        except ImportError:
+            if not vec0_available():
+                raise RuntimeError("sqlite-vec extension unavailable (vec0)")
+            return SQLiteVecStore(workspace.root / "vectors.db")
+        except (ImportError, RuntimeError):
             pass  # fall through to lancedb or json
 
-    # Legacy: lancedb if available and data exists
+    # Legacy: lancedb if available
     try:
         import lancedb  # noqa: F401
-        if workspace.lancedb_path.exists() or not json_has_data:
-            from xpst.knowledge.store.vector_lancedb import LanceDBStore
-            return LanceDBStore(workspace.lancedb_path)
+
+        from xpst.knowledge.store.vector_lancedb import LanceDBStore
+        return LanceDBStore(workspace.lancedb_path)
     except ImportError:
         pass
 
