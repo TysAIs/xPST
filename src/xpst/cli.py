@@ -70,7 +70,11 @@ def _session_health(config) -> dict[str, dict]:
         info: dict = {"present": path.exists(), "age_days": None}
         if info["present"]:
             try:
-                info["age_days"] = int((time.time() - path.stat().st_mtime) // 86400)
+                # Age can never be negative: clock skew or coarse filesystem
+                # timestamps can put st_mtime marginally ahead of now.
+                info["age_days"] = max(
+                    0, int((time.time() - path.stat().st_mtime) // 86400)
+                )
             except OSError:
                 pass
         sessions[name] = info

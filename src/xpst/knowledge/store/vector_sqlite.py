@@ -52,6 +52,26 @@ def _payload_to_nugget(payload: str) -> Nugget:
     return Nugget.from_dict(json.loads(payload))
 
 
+def vec0_available() -> bool:
+    """True only if the sqlite-vec extension can actually load.
+
+    Importing ``sqlite_vec`` is not enough — the native library may be
+    missing or incompatible with the platform/Python build, in which case
+    ``sqlite_vec.load()`` raises. Callers use this to select a store that
+    will not crash at schema time.
+    """
+    try:
+        import sqlite_vec
+
+        probe = sqlite3.connect(":memory:")
+        probe.enable_load_extension(True)
+        sqlite_vec.load(probe)
+        probe.close()
+        return True
+    except Exception:
+        return False
+
+
 class SQLiteVecStore(KnowledgeStore):
     """sqlite-vec vector store — the default from Phase D3 onward.
 
@@ -63,6 +83,7 @@ class SQLiteVecStore(KnowledgeStore):
         self._path = Path(path)
         self._dim = dim
         self._conn: sqlite3.Connection | None = None
+        self._vec_available = vec0_available()
 
     def _db(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -70,15 +91,16 @@ class SQLiteVecStore(KnowledgeStore):
             conn = sqlite3.connect(str(self._path))
             conn.row_factory = sqlite3.Row
             conn.executescript(_SCHEMA)
-            # Load sqlite-vec extension
-            try:
+            # Load sqlite-vec extension. When unavailable, the vec virtual
+            # table is simply not created and every vector op degrades to a
+            # linear scan — never a hard crash.
+            if self._vec_available:
                 import sqlite_vec
+
                 conn.enable_load_extension(True)
                 sqlite_vec.load(conn)
                 conn.enable_load_extension(False)
-            except Exception:
-                pass  # sqlite-vec not installed — search will fall back
-            conn.executescript(_VEC_SCHEMA.format(dim=self._dim))
+                conn.executescript(_VEC_SCHEMA.format(dim=self._dim))
             self._conn = conn
         return self._conn
 
@@ -93,7 +115,7 @@ class SQLiteVecStore(KnowledgeStore):
             "INSERT OR IGNORE INTO nuggets (id, payload, embedded) VALUES (?, ?, ?)",
             (nugget.id, _nugget_to_payload(nugget), embedded),
         )
-        if nugget.embedding:
+        if nugget.embedding and self._vec_available:
             vec = list(nugget.embedding)
             db.execute(
                 "INSERT OR REPLACE INTO nugget_vec (nugget_id, embedding) VALUES (?, ?)",
@@ -125,7 +147,8 @@ class SQLiteVecStore(KnowledgeStore):
     def replace_nugget(self, nugget: Nugget) -> None:
         db = self._db()
         db.execute("DELETE FROM nuggets WHERE id = ?", (nugget.id,))
-        db.execute("DELETE FROM nugget_vec WHERE nugget_id = ?", (nugget.id,))
+        if self._vec_available:
+            db.execute("DELETE FROM nugget_vec WHERE nugget_id = ?", (nugget.id,))
         self.add_nugget(nugget)
 
     def search(self, embedding: Sequence[float], k: int) -> list[Nugget]:
