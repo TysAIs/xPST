@@ -344,6 +344,13 @@ class CrossPostEngine:
             except Exception as e:
                 logger.error(f"Failed to initialize LinkedIn uploader: {e}")
 
+        # NOTE: Messenger is intentionally NOT registered here. It is a
+        # webhook-driven auto-reply adapter (ManyChat-lite), not a video-posting
+        # destination — adding it to `_platforms` would make `check_and_post`
+        # send the caption as a text message to the page on every cross-post.
+        # It is reachable via the dashboard webhook, `xpst auth messenger`, and
+        # the MCP `messenger_send` / `messenger_set_rules` tools instead.
+
     async def check_and_post(
         self,
         catch_up: bool = False,

@@ -57,7 +57,7 @@ xpst setup
 
 This will:
 1. Ask for your TikTok username
-2. Ask which platforms to enable (YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn)
+2. Ask which platforms to enable (YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn, and Messenger)
 3. Create configuration file at `~/.xpst/config.yaml`
 4. Create credentials directory at `~/.xpst/credentials/`
 
@@ -145,6 +145,16 @@ LinkedIn is a **destination** using the official LinkedIn `/v2/posts` endpoint (
 2. Run `xpst auth linkedin` if guided setup is available
 
 > **Note:** Max caption 3000 chars, 150 posts/day.
+
+#### Messenger
+
+Messenger is an **opt-in auto-reply/chatbot** destination (ManyChat-lite) using the official **Messenger Platform** (static Page Access Token).
+
+1. Run `xpst auth messenger` and paste your Page Access Token + App Secret
+2. Set up the webhook (see [setup-messenger.md](setup-messenger.md))
+3. Configure `auto_reply` + `reply_rules` for keyword auto-replies
+
+> **Note:** Max 640 chars/message, 24h standard messaging window. Disabled by default.
 
 ### Step 3: Verify Setup
 
@@ -240,6 +250,11 @@ accounts:
 
   linkedin:
     enabled: true
+
+  messenger:
+    enabled: false  # opt-in auto-reply (ManyChat-lite)
+    auto_reply: false
+    reply_rules: {}
 
 video:
   download_dir: "~/.xpst/downloads"

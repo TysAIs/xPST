@@ -523,6 +523,42 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    Tool(
+        name="messenger_send",
+        description=(
+            "Send a text message to a Messenger recipient (page-scoped PSID) via the "
+            "Meta Graph API. Requires a configured Messenger Page Access Token "
+            "(run 'xpst auth messenger'). Returns the message_id."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
+                "recipient": {"type": "string", "description": "Page-scoped PSID of the recipient"},
+                "text": {"type": "string", "description": "Message body (max 640 chars)"},
+            },
+            "required": ["recipient", "text"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="messenger_set_rules",
+        description=(
+            "Configure the Messenger ManyChat-lite auto-reply rules. Provide a "
+            "keyword->reply map (the '*' key is the catch-all) and optionally toggle "
+            "auto_reply. Persists to config."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
+                "rules": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Keyword -> reply map ('*' = catch-all)"},
+                "auto_reply": {"type": "boolean", "description": "Enable/disable auto-reply", "default": True},
+            },
+            "required": ["rules"],
+            "additionalProperties": False,
+        },
+    ),
     # ── Knowledge-base tools (optional 'knowledge' extra) ──
     # These mirror the `xpst kb ...` CLI. Their handlers lazy-import the heavy KB
     # subsystem (faster-whisper / fastembed / lancedb) only when invoked, so
@@ -613,6 +649,7 @@ TOOLS: list[Tool] = [
 _MUTATING_TOOLS = {
     "xpst_run", "xpst_post", "xpst_backfill", "xpst_delete",
     "xpst_schedule_add",
+    "messenger_send", "messenger_set_rules",
     "kb_add", "kb_organize",
 }
 
@@ -725,6 +762,10 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         elif name == "xpst_delete":
             engine = server.get_engine()
             result = await _handle_delete(engine, arguments)
+        elif name == "messenger_send":
+            result = await _handle_messenger_send(server.config, arguments)
+        elif name == "messenger_set_rules":
+            result = await _handle_messenger_set_rules(server.config, arguments)
         elif name in {"kb_add", "kb_query", "kb_organize", "kb_areas"}:
             result = await _handle_kb_tool(name, arguments)
         else:
@@ -1218,7 +1259,7 @@ async def _handle_config_show(config: XPSTConfig) -> CallToolResult:
     masked = _mask_sensitive_values({
         "accounts": {
             platform: _section(getattr(config, platform))
-            for platform in ("tiktok", "youtube", "x", "instagram", "local")
+            for platform in ("tiktok", "youtube", "x", "instagram", "threads", "linkedin", "messenger", "local")
             if hasattr(config, platform)
         },
         "video": _section(config.video),
@@ -1263,6 +1304,14 @@ async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
             "quota_remaining": remaining.get("daily", "N/A"),
         }
 
+    # Messenger (static page token; token lives in CredentialStore)
+    messenger_creds = cred_store.retrieve("messenger_page_token") or config.messenger.page_access_token
+    result["platforms"]["messenger"] = {
+        "authenticated": bool(messenger_creds),
+        "auto_reply": bool(config.messenger.auto_reply),
+        "quota_remaining": quota_mgr.get_remaining("messenger").get("daily", "N/A"),
+    }
+
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
     )
@@ -1296,6 +1345,45 @@ def build_provider_catalog(config: XPSTConfig) -> dict[str, Any]:
             for manifest in sorted(destinations, key=lambda item: item.name)
         ],
     }
+
+
+async def _handle_messenger_send(config: XPSTConfig, args: dict[str, Any]) -> CallToolResult:
+    """Handle messenger_send tool — send a text message to a PSID."""
+    import httpx
+
+    from xpst.platforms.messenger import MessengerAdapter, MessengerError
+    from xpst.utils.sessions import SessionManager
+
+    adapter = MessengerAdapter(config)
+    adapter._session_manager = SessionManager(config.config_dir)
+    try:
+        data = await adapter.send_text(args["recipient"], args["text"])
+    except (ValueError, MessengerError, httpx.HTTPError) as exc:
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"Error: {exc}")],
+            isError=True,
+        )
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps({"ok": True, "response": data}, default=str))],
+    )
+
+
+async def _handle_messenger_set_rules(config: XPSTConfig, args: dict[str, Any]) -> CallToolResult:
+    """Handle messenger_set_rules tool — persist ManyChat-lite reply rules."""
+    rules = args.get("rules") or {}
+    config.messenger.auto_reply = bool(args.get("auto_reply", True))
+    config.messenger.reply_rules = {str(k): str(v) for k, v in rules.items()}
+    config.save()
+    return CallToolResult(
+        content=[TextContent(
+            type="text",
+            text=json.dumps({
+                "ok": True,
+                "auto_reply": config.messenger.auto_reply,
+                "reply_rules": config.messenger.reply_rules,
+            }, indent=2),
+        )],
+    )
 
 
 async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallToolResult:
