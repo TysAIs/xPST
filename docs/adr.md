@@ -233,3 +233,29 @@ Configurable delays with jitter:
 - ✅ Configurable per environment
 - ⚠️ Slower throughput
 - ⚠️ Not a guarantee
+
+---
+
+## ADR-011: Messenger Adapter — Native httpx vs. Stale Libraries
+
+**Status**: Accepted
+**Date**: 2026-08-15
+
+### Context
+Adding a Facebook Messenger auto-reply option. The obvious candidates were
+`fbmq` (deprecated 2019) and `pymessenger` (stale 2016, send-only), both
+built on `requests`/Flask-era webhook handlers. xPST is async-first and already
+speaks the Meta Graph API in `platforms/threads.py` via `httpx.AsyncClient`.
+
+### Decision
+Implement the Messenger adapter natively with `httpx`, mirroring the existing
+`ThreadsUploader` pattern (typed results, error mapping, health check). No new
+dependency. Auth is a static Page Access Token (no refresh) + App Secret for
+`appsecret_proof` (outbound) and `X-Hub-Signature-256` (inbound webhook).
+
+### Consequences
+- ✅ Zero new dependencies (httpx already required)
+- ✅ Async-native (webhook handler is async FastAPI, not Flask+requests)
+- ✅ Avoids pinning xPST to 2016–2018 Graph API semantics
+- ✅ The Graph API surface for Messenger is tiny (5 endpoints) — a wrapper buys little
+- ⚠️ We own the (small) surface area ourselves rather than leaning on a library

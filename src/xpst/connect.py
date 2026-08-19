@@ -682,6 +682,71 @@ def connect_linkedin(config: XPSTConfig) -> bool:
 
 
 # ──────────────────────────────────────────────
+# Messenger (static Page Access Token)
+# ──────────────────────────────────────────────
+
+def connect_messenger(config: XPSTConfig) -> bool:
+    """Connect Messenger via a static Page Access Token (no refresh flow).
+
+    Flow:
+    1. Prompt for the Page Access Token (+ optional App Secret / verify token)
+    2. Enable the account and persist credentials in the encrypted store
+    """
+    console.print(Panel("[bold]Messenger Connection[/bold]", style="blue"))
+    console.print(
+        "[dim]Messenger uses a static Page Access Token (long-lived) plus an App "
+        "Secret for webhook signature verification. Both are stored encrypted in "
+        "the CredentialStore.[/dim]\n"
+    )
+    console.print("[bold]Quick setup:[/bold]")
+    console.print("  1. Go to: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
+    console.print("  2. Select your app → Messenger → Settings → generate a Page Access Token")
+    console.print("  3. Copy your App ID + App Secret from App → Settings → Basic")
+    console.print("  4. Pick a webhook verify token (any string) and set it in the webhook config\n")
+
+    if _confirm("Open Meta Developer console in browser?", default=True):
+        import webbrowser
+        webbrowser.open("https://developers.facebook.com/apps")
+
+    page_token = _input_secret("Page Access Token (starts EAAG...): ")
+    if not page_token:
+        console.print("[red]❌ Page Access Token required.[/red]")
+        return False
+
+    app_secret = _input_secret("App Secret (optional, for webhook signatures): ")
+    verify_token = console.input("[cyan]Webhook verify token (any string, optional): [/cyan]").strip()
+    page_id = console.input("[cyan]Page ID (numeric, optional): [/cyan]").strip()
+    app_id = console.input("[cyan]App ID (numeric, optional): [/cyan]").strip()
+
+    config.messenger.enabled = True
+    config.messenger.page_access_token = page_token
+    if app_secret:
+        config.messenger.app_secret = app_secret
+    if verify_token:
+        config.messenger.verify_token = verify_token
+    if page_id:
+        config.messenger.page_id = page_id
+    if app_id:
+        config.messenger.app_id = app_id
+    config.save()
+
+    cred_store = CredentialStore(config.config_dir)
+    try:
+        cred_store.store("messenger_page_token", page_token)
+        if app_secret:
+            cred_store.store("messenger_app_secret", app_secret)
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+
+    console.print("[green]✅ Messenger configured![/green]")
+    console.print(
+        "[dim]Auto-reply is OFF by default. Enable it via config: "
+        "accounts.messenger.auto_reply: true (plus reply_rules).[/dim]"
+    )
+    return True
+
+
+# ──────────────────────────────────────────────
 # Test connections
 # ──────────────────────────────────────────────
 
@@ -855,7 +920,7 @@ def run_connect(platforms: list[str] | None = None, test_only: bool = False) -> 
         return all(results.values())
 
     # Determine which platforms to connect
-    all_platforms = ["tiktok", "youtube", "instagram", "x", "threads", "linkedin"]
+    all_platforms = ["tiktok", "youtube", "instagram", "x", "threads", "linkedin", "messenger"]
     target_platforms = platforms or all_platforms
 
     # Enable platforms in config
@@ -871,6 +936,7 @@ def run_connect(platforms: list[str] | None = None, test_only: bool = False) -> 
         "x": connect_x,
         "threads": connect_threads,
         "linkedin": connect_linkedin,
+        "messenger": connect_messenger,
     }
 
     for platform in target_platforms:

@@ -60,6 +60,17 @@ DEFAULT_CONFIG = {
             "graph_access_token": "",
             "threads_user_id": "",
         },
+        "messenger": {
+            "enabled": False,
+            "page_id": "",
+            "page_access_token": "",
+            "app_id": "",
+            "app_secret": "",
+            "verify_token": "",
+            "webhook_path": "/webhook/messenger",
+            "auto_reply": False,
+            "reply_rules": {},
+        },
         "linkedin": {
             "enabled": False,
             "access_token": "",
@@ -235,6 +246,38 @@ class ThreadsAccountConfig(AccountConfig):
 
 
 @dataclass
+class MessengerAccountConfig(AccountConfig):
+    """Messenger (Facebook Messenger Platform) account config — OPT-IN.
+
+    Disabled by default; the adapter stays idle until ``enabled`` is set and
+    a Page Access Token exists. The token/secret live encrypted in the
+    CredentialStore; these fields are a write-through convenience.
+
+
+    Fields:
+        enabled: Master on/off switch (default False).
+        page_id: Numeric Page ID (also used as upload() test recipient).
+        page_access_token: Convenience fallback; CredentialStore is primary.
+        app_id: Meta App ID (informational).
+        app_secret: App secret (proof/signature); CredentialStore is primary.
+        verify_token: Developer-chosen webhook verify token.
+        webhook_path: Dashboard webhook URL path (default /webhook/messenger).
+        auto_reply: ManyChat-lite master switch.
+        reply_rules: Keyword → reply text map; "*" is catch-all.
+    """
+
+    enabled: bool = False
+    page_id: str = ""
+    page_access_token: str = ""
+    app_id: str = ""
+    app_secret: str = ""
+    verify_token: str = ""
+    webhook_path: str = "/webhook/messenger"
+    auto_reply: bool = False
+    reply_rules: dict = field(default_factory=dict)
+
+
+@dataclass
 class LinkedInAccountConfig(AccountConfig):
     """LinkedIn account configuration — destination only."""
     # OAuth 2.0 access token
@@ -361,6 +404,7 @@ class XPSTConfig:
     x: XAccountConfig = field(default_factory=XAccountConfig)
     instagram: InstagramAccountConfig = field(default_factory=InstagramAccountConfig)
     threads: ThreadsAccountConfig = field(default_factory=ThreadsAccountConfig)
+    messenger: MessengerAccountConfig = field(default_factory=MessengerAccountConfig)
     linkedin: LinkedInAccountConfig = field(default_factory=LinkedInAccountConfig)
     local: LocalAccountConfig = field(default_factory=LocalAccountConfig)
 
@@ -560,6 +604,22 @@ class XPSTConfig:
                 config.threads.graph_access_token = th.get("graph_access_token", config.threads.graph_access_token)
                 config.threads.threads_user_id = th.get("threads_user_id", config.threads.threads_user_id)
                 config.threads.proxy = th.get("proxy", config.threads.proxy)
+
+        # Messenger
+        if "accounts" in file_config and "messenger" in file_config["accounts"]:
+            ms = file_config["accounts"]["messenger"]
+            if ms and isinstance(ms, dict):
+                config.messenger.enabled = ms.get("enabled", config.messenger.enabled)
+                config.messenger.page_id = ms.get("page_id", config.messenger.page_id)
+                config.messenger.page_access_token = ms.get("page_access_token", config.messenger.page_access_token)
+                config.messenger.app_id = ms.get("app_id", config.messenger.app_id)
+                config.messenger.app_secret = ms.get("app_secret", config.messenger.app_secret)
+                config.messenger.verify_token = ms.get("verify_token", config.messenger.verify_token)
+                config.messenger.webhook_path = ms.get("webhook_path", config.messenger.webhook_path)
+                config.messenger.auto_reply = ms.get("auto_reply", config.messenger.auto_reply)
+                if isinstance(ms.get("reply_rules"), dict):
+                    config.messenger.reply_rules = ms.get("reply_rules", config.messenger.reply_rules)
+                config.messenger.proxy = ms.get("proxy", config.messenger.proxy)
 
         # LinkedIn
         if "accounts" in file_config and "linkedin" in file_config["accounts"]:
@@ -762,6 +822,33 @@ class XPSTConfig:
         if v := os.getenv("XPST_THREADS_PROXY"):
             config.threads.proxy = v
 
+        # Messenger
+        if v := os.getenv("XPST_MESSENGER_ENABLED"):
+            config.messenger.enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_MESSENGER_PAGE_ACCESS_TOKEN"):
+            config.messenger.page_access_token = v
+        if v := os.getenv("XPST_MESSENGER_APP_ID"):
+            config.messenger.app_id = v
+        if v := os.getenv("XPST_MESSENGER_APP_SECRET"):
+            config.messenger.app_secret = v
+        if v := os.getenv("XPST_MESSENGER_VERIFY_TOKEN"):
+            config.messenger.verify_token = v
+        if v := os.getenv("XPST_MESSENGER_PAGE_ID"):
+            config.messenger.page_id = v
+        if v := os.getenv("XPST_MESSENGER_AUTO_REPLY"):
+            config.messenger.auto_reply = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_MESSENGER_REPLY_RULES"):
+            import json
+
+            try:
+                parsed = json.loads(v)
+            except json.JSONDecodeError:
+                parsed = {}
+            if isinstance(parsed, dict):
+                config.messenger.reply_rules = parsed
+        if v := os.getenv("XPST_MESSENGER_PROXY"):
+            config.messenger.proxy = v
+
         # LinkedIn
         if v := os.getenv("XPST_LINKEDIN_ENABLED"):
             config.linkedin.enabled = v.lower() in ("true", "1", "yes")
@@ -956,6 +1043,18 @@ class XPSTConfig:
                     "graph_access_token": self.threads.graph_access_token,
                     "threads_user_id": self.threads.threads_user_id,
                     "proxy": self.threads.proxy,
+                },
+                "messenger": {
+                    "enabled": self.messenger.enabled,
+                    "page_id": self.messenger.page_id,
+                    "page_access_token": self.messenger.page_access_token,
+                    "app_id": self.messenger.app_id,
+                    "app_secret": self.messenger.app_secret,
+                    "verify_token": self.messenger.verify_token,
+                    "webhook_path": self.messenger.webhook_path,
+                    "auto_reply": self.messenger.auto_reply,
+                    "reply_rules": self.messenger.reply_rules,
+                    "proxy": self.messenger.proxy,
                 },
                 "linkedin": {
                     "enabled": self.linkedin.enabled,

@@ -5,6 +5,17 @@ All notable changes to xPST will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Facebook Messenger platform** (opt-in, disabled by default) — a ManyChat-lite
+  auto-reply/chatbot option. Static Page Access Token auth (no refresh), direct
+  `httpx` against the Graph API (`v22.0/me/messages`), `appsecret_proof` on
+  outbound calls, and `X-Hub-Signature-256` verification on inbound webhooks in
+  the dashboard. Includes `auto_reply` + `reply_rules` keyword matching, an
+  `xpst auth messenger` wizard, and `messenger_send` / `messenger_set_rules`
+  MCP tools.
+
 ## [1.0.0] - 2026-06-20
 
 First public release. xPST is an open-source, cross-platform suite for posting

@@ -2,9 +2,9 @@
 
 The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, run posting workflows, and query the personal content knowledge base without scraping CLI text.
 
-This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **23 tools total: 19 `xpst_*` + 4 `kb_*`.**
+This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **25 tools total: 21 `xpst_*` + 4 `kb_*`.**
 
-xPST posts to six destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
+xPST posts to seven destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn, and Messenger (messaging/auto-reply) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
 
 ## Setup
 
@@ -57,6 +57,8 @@ Metadata-only tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) n
 | `xpst_post` | Manually post a local video or carousel | Yes | **POSTS TO REAL ACCOUNTS** |
 | `xpst_backfill` | Retry failed or incomplete posts | Yes | **POSTS TO REAL ACCOUNTS** |
 | `xpst_delete` | Remove a post record from local state | Yes | Destructive to local state |
+| `messenger_send` | Send a text message to a Messenger PSID | No | **SENDS REAL MESSAGES** |
+| `messenger_set_rules` | Configure Messenger auto-reply rules | No | Rewrites config |
 | `kb_add` | Ingest a file/URL into the knowledge base | No | Downloads + transcribes locally |
 | `kb_query` | Search stored knowledge nuggets | No | None (read-only) |
 | `kb_organize` | Cluster nuggets into areas, tag difficulty | No | Rewrites KB area assignments |
@@ -66,7 +68,7 @@ Metadata-only tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) n
 
 ## xpst_providers
 
-Lists all discovered content sources and posting destinations with auth modes and capabilities. Call this first so the agent adapts to the installed provider set instead of assuming a fixed platform list. Destinations are YouTube Shorts, Instagram Reels, X, TikTok, Threads, and LinkedIn; sources are TikTok, YouTube, Instagram, X, and local files. TikTok now appears under both `sources` and `destinations` (posting via the official Content Posting API).
+Lists all discovered content sources and posting destinations with auth modes and capabilities. Call this first so the agent adapts to the installed provider set instead of assuming a fixed platform list. Destinations are YouTube Shorts, Instagram Reels, X, TikTok, Threads, LinkedIn, and Messenger (messaging/auto-reply); sources are TikTok, YouTube, Instagram, X, and local files. TikTok now appears under both `sources` and `destinations` (posting via the official Content Posting API).
 
 Arguments: none.
 
@@ -292,6 +294,40 @@ Example response:
 ```json
 { "video_id": "7301234567890", "platform": "all", "removed": ["youtube", "x"], "success": true }
 ```
+
+## messenger_send
+
+Sends a text message to a Messenger recipient (page-scoped PSID) via the Meta Graph API. Requires a configured Messenger Page Access Token (`xpst auth messenger`). Returns the `message_id`.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `recipient` | string | yes | — | Page-scoped PSID of the recipient. |
+| `text` | string | yes | — | Message body (max 640 chars). |
+
+Example call:
+
+```json
+{ "name": "messenger_send", "arguments": { "recipient": "100234567890123", "text": "Hello from xPST!" } }
+```
+
+Response shape: `{ "ok": true, "response": { "message_id": "mid.1", ... } }`.
+
+## messenger_set_rules
+
+Configures the Messenger ManyChat-lite auto-reply rules. Provide a keyword → reply map (the `*` key is the catch-all) and optionally toggle `auto_reply`. Persists to `~/.xpst/config.yaml`.
+
+| Argument | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `rules` | object | yes | — | Keyword → reply map (`*` = catch-all). |
+| `auto_reply` | boolean | no | `true` | Enable/disable auto-reply. |
+
+Example call:
+
+```json
+{ "name": "messenger_set_rules", "arguments": { "rules": { "pricing": "Our pricing starts at $X", "*": "Thanks for writing!" }, "auto_reply": true } }
+```
+
+Response shape: `{ "ok": true, "auto_reply": true, "reply_rules": { ... } }`.
 
 ## xpst_analytics
 
