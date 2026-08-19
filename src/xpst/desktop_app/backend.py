@@ -1632,7 +1632,6 @@ class AppController(QObject):
         Returns a file:// URL to the thumbnail image, or empty string on failure.
         """
         import hashlib
-        import shutil
 
         if not video_path:
             return ""
@@ -1646,7 +1645,9 @@ class AppController(QObject):
             return thumb_path.as_uri()
 
         # Check if ffmpeg is available
-        ffmpeg = shutil.which("ffmpeg")
+        from xpst.utils.platform import resolve_ffmpeg_path
+
+        ffmpeg = resolve_ffmpeg_path()
         if not ffmpeg:
             return ""
 
