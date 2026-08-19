@@ -4,23 +4,6 @@
 
 ---
 
-## Screenshots
-
-> Screenshots are referenced from `docs/assets/`. Capture and replace the
-> placeholders below before a public release.
-
-| Step | Placeholder | Description |
-|------|-------------|-------------|
-| 1 | `docs/assets/screenshot-onboarding.png` | First-run welcome dialog routing to the Connect page |
-| 2 | `docs/assets/screenshot-dashboard.png` | Dashboard page with platform health and readiness |
-| 3 | `docs/assets/screenshot-connect.png` | Connect page with platform auth options |
-| 4 | `docs/assets/screenshot-compose.png` | Compose page with video selection and platform toggles |
-| 5 | `docs/assets/screenshot-content.png` | Content page with fetched/source videos |
-| 6 | `docs/assets/screenshot-analytics.png` | Analytics page with per-platform metrics |
-| 7 | `docs/assets/screenshot-schedule.png` | Schedule calendar with upcoming posts |
-
----
-
 ## Table of Contents
 
 1. [Installation](#installation)
