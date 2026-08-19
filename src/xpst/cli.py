@@ -879,7 +879,7 @@ def health(ctx: click.Context, as_json: bool):
 # ──────────────────────────────────────────────
 
 @main.command()
-@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "linkedin"]))
+@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "linkedin", "messenger"]))
 @click.option("--test", "test_only", is_flag=True, help="Test existing connections only")
 @click.pass_context
 def connect(ctx: click.Context, platform: str | None, test_only: bool):
@@ -914,7 +914,7 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         _show_auth_status(ctx, as_json)
         return
 
-    valid_platforms = {"tiktok", "youtube", "x", "instagram", "threads", "linkedin"}
+    valid_platforms = {"tiktok", "youtube", "x", "instagram", "threads", "linkedin", "messenger"}
     if platform not in valid_platforms:
         click.echo(f"Unknown platform: {platform}")
         click.echo(f"Valid platforms: {', '.join(sorted(valid_platforms))}")
@@ -937,6 +937,8 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         _auth_threads(config)
     elif platform == "linkedin":
         _auth_linkedin(config)
+    elif platform == "messenger":
+        _auth_messenger(config)
 
 
 def _show_auth_status(ctx: click.Context, as_json: bool):
@@ -961,12 +963,14 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
         ig_creds = cred_store.retrieve_json("instagram_session")
         threads_creds = cred_store.retrieve("threads_access_token")
         linkedin_creds = cred_store.retrieve("linkedin_access_token")
+        messenger_creds = cred_store.retrieve("messenger_page_token")
         for plat, creds in [
             ("youtube", yt_creds),
             ("x", x_creds),
             ("instagram", ig_creds),
             ("threads", threads_creds),
             ("linkedin", linkedin_creds),
+            ("messenger", messenger_creds),
         ]:
             remaining = quota_mgr.get_remaining(plat)
             data["platforms"][plat] = {
@@ -1057,6 +1061,22 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
         str(quota_mgr.quotas.get("linkedin", {}).daily_limit if hasattr(quota_mgr.quotas.get("linkedin", {}), "daily_limit") else "N/A"),
         str(linkedin_quota.get("daily", "N/A")),
         "Keyring" if linkedin_creds else ("Config" if config.linkedin.access_token else "Not configured"),
+    )
+
+    # Messenger
+    messenger_creds = cred_store.retrieve("messenger_page_token")
+    messenger_token = bool(messenger_creds or config.messenger.page_access_token)
+    messenger_auth = "✅" if messenger_token else "❌"
+    messenger_quota = quota_mgr.get_remaining("messenger")
+    messenger_detail = "Not configured"
+    if messenger_token:
+        messenger_detail = "Auto-reply" if config.messenger.auto_reply else "Messaging"
+    table.add_row(
+        "Messenger",
+        messenger_auth,
+        str(quota_mgr.quotas.get("messenger", {}).daily_limit if hasattr(quota_mgr.quotas.get("messenger", {}), "daily_limit") else "N/A"),
+        str(messenger_quota.get("daily", "N/A")),
+        messenger_detail,
     )
 
     console.print(table)
@@ -1666,6 +1686,17 @@ def _auth_linkedin(config: XPSTConfig) -> None:
     from xpst.connect import connect_linkedin
 
     connect_linkedin(config)
+
+
+def _auth_messenger(config: XPSTConfig) -> None:
+    """Guide Messenger (static Page Access Token) authentication.
+
+    Args:
+        config: Loaded xPST configuration.
+    """
+    from xpst.connect import connect_messenger
+
+    connect_messenger(config)
 
 
 # ──────────────────────────────────────────────

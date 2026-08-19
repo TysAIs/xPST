@@ -2,7 +2,7 @@
 
 **Free, local-first, provider-agnostic cross-posting for short-form video**
 
-Automatically distribute short-form video from configured sources to connected destinations. xPST supports 6 platforms — YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn — as both sources and destinations, with local file support for manual posting and carousels.
+Automatically distribute short-form video from configured sources to connected destinations. xPST supports 7 platforms — YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn, and Messenger (messaging/auto-reply) — as sources and destinations, with local file support for manual posting and carousels.
 
 ---
 
@@ -246,6 +246,17 @@ LinkedIn API (OAuth 2.0):
 xpst auth linkedin
 # Enter LinkedIn access token + user ID
 ```
+
+### Messenger
+
+Facebook Messenger Platform (static Page Access Token):
+
+```bash
+xpst auth messenger
+# Enter Page Access Token + App Secret + verify token
+```
+
+Messenger is an **opt-in auto-reply/chatbot** option (ManyChat-lite), not a video-posting target. See [setup-messenger.md](setup-messenger.md).
 
 ---
 
@@ -508,7 +519,8 @@ xpst/
 │   ├── x.py            # X/Twitter (twikit cookies / API v2)
 │   ├── tiktok.py       # TikTok (Content Posting API v2)
 │   ├── threads.py      # Threads (Meta API)
-│   └── linkedin.py     # LinkedIn (OAuth 2.0)
+│   ├── linkedin.py     # LinkedIn (OAuth 2.0)
+│   └── messenger.py    # Messenger (static page token, auto-reply)
 ├── sources/            # Video sources (yt-dlp based)
 │   ├── base.py         # Abstract base + registry
 │   ├── tiktok.py       # TikTok source

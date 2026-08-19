@@ -4,6 +4,16 @@ This roadmap tracks what shipped in v1.0.0 and what's planned next. It is a
 living document — priorities may shift based on community feedback. Open an
 issue to propose or upvote an item.
 
+## Unreleased
+
+- ✅ **Facebook Messenger platform** (opt-in, disabled by default) — ManyChat-lite
+  auto-reply/chatbot. Static Page Access Token auth, `appsecret_proof` on
+  outbound calls, `X-Hub-Signature-256` webhook verification, `auto_reply` +
+  `reply_rules` keyword matching, `xpst auth messenger` wizard, and
+  `messenger_send` / `messenger_set_rules` MCP tools.
+
+---
+
 ## Shipped in v1.0.0
 
 - ✅ **Six-platform posting** — YouTube Shorts, X, Instagram Reels, TikTok,
