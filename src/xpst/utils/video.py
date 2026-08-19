@@ -29,7 +29,12 @@ from pathlib import Path
 
 from xpst.config import EncodingConfig
 from xpst.utils.logger import get_logger
-from xpst.utils.platform import get_ffmpeg_name, get_ffprobe_name
+from xpst.utils.platform import (
+    get_ffmpeg_name,
+    get_ffprobe_name,
+    resolve_ffmpeg_path,
+    resolve_ffprobe_path,
+)
 
 logger = get_logger(__name__)
 
@@ -132,7 +137,7 @@ class VideoProcessor:
         Args:
             ffmpeg_path: Path to ffmpeg binary. Defaults to platform-specific name.
         """
-        self.ffmpeg_path = ffmpeg_path or get_ffmpeg_name()
+        self.ffmpeg_path = ffmpeg_path or resolve_ffmpeg_path() or get_ffmpeg_name()
         self._verify_ffmpeg()
 
     def _verify_ffmpeg(self) -> None:
@@ -167,7 +172,7 @@ class VideoProcessor:
             Dictionary with video info (width, height, duration, etc.)
         """
         cmd = [
-            get_ffprobe_name(),
+            resolve_ffprobe_path() or get_ffprobe_name(),
             "-v", "quiet",
             "-print_format", "json",
             "-show_format",
