@@ -10,7 +10,7 @@
   <a href="https://www.python.org"><img alt="Python" src="https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green"></a>
   <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-1419%20passing-brightgreen"></a>
-  <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-6-blue"></a>
+  <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-7-blue"></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/os-Linux%20|%20macOS%20|%20Windows-lightgrey"></a>
   <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-23%20tools-orange"></a>
   <a href="#"><img alt="Desktop" src="https://img.shields.io/badge/desktop-PySide6%2FQML-blueviolet"></a>
@@ -26,6 +26,7 @@
 - [Installation](#installation)
 - [CLI Reference](#cli-reference)
 - [Desktop App Guide](#desktop-app-guide)
+- [Dashboard Guide](#dashboard-guide)
 - [MCP Integration Guide](#mcp-integration-guide)
 - [Platform Setup Guides](#platform-setup-guides)
 - [Configuration Reference](#configuration-reference)
@@ -41,7 +42,7 @@
 
 **xPST** (Cross-Posting Suite) is a local-first, open-source automation tool that takes a creator's short-form video from one source platform and republishes it — at full native fidelity — to every other platform they own. It tracks per-post performance across all of them in one place, and feeds the creator's published content into a personal knowledge base that any connected AI agent can semantically query.
 
-xPST works across **six platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn — and every one of them is supported end-to-end: in the posting engine, the desktop UI, the analytics layer, and the connection wizard.
+xPST works across **seven platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn, and (opt-in) Facebook Messenger — and every one of them is supported end-to-end: in the posting engine, the desktop UI, the analytics layer, and the connection wizard.
 
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
@@ -50,12 +51,19 @@ It runs three ways:
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
 
+**Privacy: zero personal data in the distributable tools.** xPST ships no
+telemetry, analytics endpoint, or hosted account. Everything — videos,
+captions, upload state, cookies, OAuth tokens — lives on your machine under
+`~/.xpst/` (credentials in the OS keychain, encrypted-file fallback). The only
+network traffic is the platform API calls you configure. See
+[docs/PRIVACY.md](docs/PRIVACY.md) for the full model.
+
 ---
 
 ## Features
 
 ### Core Cross-Posting
-- **Six platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn, all fully supported as posting destinations
+- **Six video platforms + Messenger** — YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn as posting destinations, plus opt-in Facebook Messenger auto-reply
 - **Full-fidelity fan-out** — One source video downloads once and uploads to every connected destination, with orientation-aware encoding that never degrades quality
 - **Bidirectional cross-posting** — Monitor ALL connected sources for new content and distribute to every connected destination (not just one direction)
 - **Smart passthrough** — A probe checks whether the source already satisfies the platform profile and skips the re-encode entirely, saving a generation loss
@@ -105,7 +113,7 @@ No subscriptions, no cloud servers, no vendor lock-in. Your content and credenti
 Three commands to get going:
 
 ```bash
-# 1. Install
+# 1. Install (uv recommended)
 git clone https://github.com/TysAIs/xPST.git && cd xPST
 uv venv && uv pip install -e ".[full]"
 
@@ -117,6 +125,15 @@ xpst run
 ```
 
 That's it. Your videos are now cross-posted to every connected platform.
+
+Other entry points:
+
+```bash
+xpst dashboard    # local web dashboard at http://localhost:8080
+xpst app          # native desktop app (PySide6/QML)
+xpst mcp          # MCP server for AI agents (stdio)
+xpst auth status  # check which platforms are connected
+```
 
 ---
 
@@ -168,11 +185,15 @@ pip install -e .
 | `dev` | pytest, ruff, mypy, import-linter |
 | `full` | Everything (`mcp,desktop,pyside6,dashboard,windows,knowledge`) |
 
-### Once published to PyPI
+### PyPI (v1.0.0 and later)
 
 ```bash
-pip install "xpst[full]"   # not yet available; watch the Releases page
+pip install "xpst[full]"
+xpst setup
 ```
+
+The wheel is a pure-Python `py3-none-any` package; the `xpst` and `xpst-mcp`
+console scripts are installed with it.
 
 ### Docker
 
@@ -367,6 +388,38 @@ On first launch, a welcome dialog guides you to the Connect page to set up your 
 
 ---
 
+## Dashboard Guide
+
+xPST ships a lightweight web API dashboard (FastAPI + uvicorn, no extra UI
+framework needed). It is loopback-only by default (`127.0.0.1`) and protects
+all endpoints with HTTP Basic auth when dashboard credentials are configured.
+
+```bash
+xpst dashboard                # http://127.0.0.1:8080
+xpst dashboard --port 9000    # custom port
+```
+
+| Endpoint | Auth | Purpose |
+|----------|------|---------|
+| `GET /health` | none | Aggregated per-platform health (`healthy` / `degraded`) |
+| `GET /metrics` | none | Prometheus text-format metrics |
+| `GET /state` | Basic | Posting summary: totals, per-platform counts, health, best platform |
+| `GET /webhook/messenger` | none | Meta webhook handshake (only when Messenger is enabled) |
+| `POST /webhook/messenger` | none | Messenger events, verified with `X-Hub-Signature-256` |
+
+Set the dashboard password (stored as a bcrypt hash):
+
+```bash
+xpst config set monitoring.dashboard_password mypassword
+```
+
+For the full graphical experience use the native desktop app (`xpst app`,
+requires the `pyside6` extra) or the NiceGUI dashboard (requires the
+`dashboard` extra). Endpoints, auth, and response shapes are documented in
+[docs/DASHBOARD.md](docs/DASHBOARD.md).
+
+---
+
 ## MCP Integration Guide
 
 xPST is designed to be driven end-to-end by AI agents over the [Model Context Protocol](https://modelcontextprotocol.io).
@@ -461,7 +514,7 @@ See [docs/TUTORIAL_MCP.md](docs/TUTORIAL_MCP.md) for a full MCP walkthrough with
 
 ## Platform Setup Guides
 
-xPST supports six platforms. Each setup guide lives in `docs/`:
+xPST supports seven platforms. Each setup guide lives in `docs/`:
 
 | Platform | Role | Auth method | Guide |
 |----------|------|-------------|-------|
@@ -471,6 +524,7 @@ xPST supports six platforms. Each setup guide lives in `docs/`:
 | TikTok | Source + Destination | yt-dlp (source) / Content Posting API (destination) | [docs/setup-tiktok.md](docs/setup-tiktok.md) |
 | Threads | Destination | Meta Threads API (official) | [docs/setup-threads.md](docs/setup-threads.md) |
 | LinkedIn | Destination | LinkedIn API (OAuth 2.0) | [docs/setup-linkedin.md](docs/setup-linkedin.md) |
+| Messenger | Destination (opt-in) | Facebook Page Access Token + appsecret | [docs/setup-messenger.md](docs/setup-messenger.md) |
 
 ### YouTube (OAuth 2.0 — official API)
 
@@ -585,6 +639,39 @@ accounts:
 
 Limits: ~150 posts/day, recommended MP4 (H.264) up to ~200 MB. See [docs/setup-linkedin.md](docs/setup-linkedin.md).
 
+### Messenger (opt-in — ManyChat-lite auto-reply)
+
+Messenger is **disabled by default**. It turns a Facebook Page into a keyword
+auto-responder: xPST receives Page webhooks (verified with
+`X-Hub-Signature-256`), matches incoming messages against your `reply_rules`,
+and answers through the Graph API with `appsecret_proof` on every outbound call.
+
+1. Create a Meta app + a Facebook Page you manage
+2. Generate a **Page Access Token** with `pages_messaging` + `pages_manage_metadata`
+3. Run `xpst auth messenger` (wizard) or set the config:
+
+```yaml
+accounts:
+  messenger:
+    enabled: true
+    page_id: "1234567890"
+    page_access_token: "PAGETOKEN..."
+    app_id: "META_APP_ID"
+    app_secret: "APPSECRET..."
+    verify_token: "ANYTHING-SECRET"      # developer-chosen; xPST verifies it on GET
+    auto_reply: true                     # master switch for ManyChat-lite mode
+    reply_rules:                         # keyword -> reply; "*" is the catch-all
+      price: "Our prices are on the website."
+      "*": "Thanks for the message — a human will follow up soon."
+```
+
+4. Point your Page webhook at `https://your-host/webhook/messenger` — the
+   dashboard verifies inbound events with `X-Hub-Signature-256` and answers via
+   the Graph API with `appsecret_proof` on every outbound call.
+
+MCP tools: `messenger_send`, `messenger_set_rules`. See
+[docs/setup-messenger.md](docs/setup-messenger.md) for the full walkthrough.
+
 ### Local Files
 
 Use local folders as a source for manual posting and carousels:
@@ -629,6 +716,15 @@ accounts:
     enabled: false
     access_token: ""
     linkedin_user_id: ""
+  messenger:                     # opt-in ManyChat-lite auto-reply (off by default)
+    enabled: false
+    page_id: ""
+    page_access_token: ""
+    app_id: ""
+    app_secret: ""
+    verify_token: ""
+    auto_reply: false
+    reply_rules: {}              # keyword -> reply; "*" catch-all
 
 rate_limits:                      # max uploads per day, per platform
   youtube: 5
