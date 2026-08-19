@@ -488,6 +488,70 @@ class SessionManager:
             return (token, user_id)
         return None
 
+    # ── Messenger ──────────────────────────────────────────────────────
+
+    async def get_messenger_token(self) -> str | None:
+        """Return the Messenger Page Access Token from the CredentialStore.
+
+        Static (long-lived) credential; no refresh flow required. Returns
+        None when not stored.
+
+        Returns:
+            Page Access Token string or None.
+        """
+        return self.credentials.retrieve("messenger_page_token") or None
+
+    async def get_messenger_secret(self) -> str | None:
+        """Return the Messenger App Secret from the CredentialStore.
+
+        Used for appsecret_proof on outbound calls and X-Hub-Signature-256
+        verification on inbound webhooks.
+
+        Returns:
+            App Secret string or None.
+        """
+        return self.credentials.retrieve("messenger_app_secret") or None
+
+    async def store_messenger_credentials(self, page_token: str, app_secret: str = "") -> None:
+        """Persist Messenger credentials in the encrypted CredentialStore.
+
+        Args:
+            page_token: Page Access Token (required).
+            app_secret: Optional App Secret for signature/proof.
+        """
+        self.credentials.store("messenger_page_token", page_token)
+        if app_secret:
+            self.credentials.store("messenger_app_secret", app_secret)
+        logger.info("Messenger credentials stored (encrypted)")
+
+    async def check_messenger_health(self) -> dict:
+        """Check Messenger authentication health via GET /me."""
+        try:
+            import httpx
+            token = await self.get_messenger_token()
+            if not token:
+                return {"status": "error", "error": "Messenger not configured"}
+            secret = await self.get_messenger_secret()
+            params = {"fields": "id,name", "access_token": token}
+            if secret:
+                import hashlib
+                import hmac
+
+                proof = hmac.new(secret.encode(), token.encode(), hashlib.sha256).hexdigest()
+                params["appsecret_proof"] = proof
+            r = httpx.get(
+                "https://graph.facebook.com/v22.0/me",
+                params=params,
+                timeout=10,
+            )
+            if r.status_code == 200:
+                return {"status": "ok", "id": r.json().get("id", "?"), "name": r.json().get("name", "?")}
+            if r.status_code == 401:
+                return {"status": "error", "error": "Page Access Token invalid or expired"}
+            return {"status": "error", "error": f"API returned {r.status_code}"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
     async def check_threads_health(self) -> dict:
         """Check Threads authentication health."""
         try:
