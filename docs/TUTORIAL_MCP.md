@@ -4,20 +4,6 @@
 
 ---
 
-## Screenshots
-
-> Client integration screenshots are referenced from `docs/assets/`. Capture
-> and replace the placeholders below before a public release.
-
-| Step | Placeholder | Description |
-|------|-------------|-------------|
-| 1 | `docs/assets/screenshot-mcp-claude.png` | Claude Desktop MCP config and tool invocation |
-| 2 | `docs/assets/screenshot-mcp-cursor.png` | Cursor agent calling an xPST MCP tool |
-| 3 | `docs/assets/screenshot-mcp-health.png` | `xpst_health` tool output in an agent session |
-| 4 | `docs/assets/screenshot-mcp-post.png` | `xpst_post` cross-posting workflow result |
-
----
-
 ## Table of Contents
 
 1. [What is MCP?](#what-is-mcp)
