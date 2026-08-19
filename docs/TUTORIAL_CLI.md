@@ -2,23 +2,8 @@
 
 > **In-depth tutorial for every xPST CLI command with examples.**
 >
- xPST provides 27+ top-level commands covering the entire cross-posting workflow.
+ xPST provides 34 top-level commands covering the entire cross-posting workflow.
 > This guide explains each one with real examples, flags, and expected output.
-
----
-
-## Screenshots
-
-> Terminal screenshots are referenced from `docs/assets/`. Capture and replace
-> the placeholders below before a public release.
-
-| Step | Placeholder | Description |
-|------|-------------|-------------|
-| 1 | `docs/assets/screenshot-cli-help.png` | `xpst --help` top-level command tree |
-| 2 | `docs/assets/screenshot-cli-readiness.png` | `xpst readiness --json` first-run setup check |
-| 3 | `docs/assets/screenshot-cli-run.png` | `xpst run` cross-posting engine output |
-| 4 | `docs/assets/screenshot-cli-dashboard.png` | `xpst dashboard` FastAPI dashboard launch |
-| 5 | `docs/assets/screenshot-cli-health.png` | `xpst health --json` platform health report |
 
 ---
 
