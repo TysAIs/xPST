@@ -17,17 +17,15 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import importlib.metadata
+import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
-
-if TYPE_CHECKING:
-    from fastapi import Request
 
 logger = logging.getLogger(__name__)
 
@@ -174,7 +172,129 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
         app.add_middleware(BasicAuthMiddleware)
         logger.info("Dashboard auth enabled for user: %s", username)
 
+    _setup_messenger_webhook(app, config_dir)
+
     return app
+
+
+def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
+    """Register the opt-in Messenger webhook routes.
+
+    Two handlers on the (configurable) webhook path:
+      - GET  /webhook/messenger  → hub.verify_token handshake, echoes challenge
+      - POST /webhook/messenger  → X-Hub-Signature-256 verified event dispatch
+
+    Both degrade gracefully when the Messenger account is disabled (default);
+    nothing is registered that can fail for users who never opt in.
+    """
+    path = "/webhook/messenger"
+    try:
+        from xpst.config import XPSTConfig
+        config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+        path = config.messenger.webhook_path or path
+    except Exception:
+        pass
+
+    def _verify_token() -> str:
+        try:
+            from xpst.config import XPSTConfig
+            config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+            return config.messenger.verify_token or ""
+        except Exception:
+            return ""
+
+    def _app_secrets() -> list[str]:
+        """Candidate app secrets (config + CredentialStore), deduped."""
+        secrets: list[str] = []
+        try:
+            from xpst.config import XPSTConfig
+            config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+            if config.messenger.app_secret:
+                secrets.append(config.messenger.app_secret)
+        except Exception:
+            pass
+        try:
+            from xpst.utils.sessions import SessionManager
+            session_manager = SessionManager(config_dir)
+            stored = session_manager.credentials.retrieve("messenger_app_secret")
+            if stored:
+                secrets.append(stored)
+        except Exception:
+            pass
+        return list(dict.fromkeys(secrets))
+
+    @app.get(path, name="messenger_webhook_verify", include_in_schema=False, response_model=None)
+    async def _messenger_verify(request: Request) -> PlainTextResponse | JSONResponse:
+        """Handle Meta's webhook subscription verification (GET)."""
+        params = request.query_params
+        if params.get("hub.mode") != "subscribe":
+            return JSONResponse({"detail": "hub.mode must be 'subscribe'"}, status_code=403)
+        expected = _verify_token()
+        token = params.get("hub.verify_token", "")
+        if expected and (not token or not hmac.compare_digest(token, expected)):
+            return JSONResponse({"detail": "Invalid hub.verify_token"}, status_code=403)
+        return PlainTextResponse(params.get("hub.challenge", ""))
+
+    @app.post(path, name="messenger_webhook", include_in_schema=False, response_model=None)
+    async def _messenger_webhook(request: Request) -> JSONResponse:
+        """Handle a verified Messenger webhook event (POST)."""
+        raw = await request.body()
+        signature = request.headers.get("X-Hub-Signature-256", "")
+        secrets = _app_secrets()
+        if signature:
+            matched = False
+            for secret in secrets:
+                expected = "sha256=" + hmac.new(
+                    secret.encode("utf-8"), raw or b"", hashlib.sha256
+                ).hexdigest()
+                if hmac.compare_digest(expected, signature):
+                    matched = True
+                    break
+            if not matched:
+                if secrets:
+                    logger.warning("Messenger webhook signature mismatch")
+                    return JSONResponse({"detail": "Invalid signature"}, status_code=403)
+                logger.warning(
+                    "Messenger webhook carries X-Hub-Signature-256 but no app secret "
+                    "is configured — body accepted unverified"
+                )
+        elif secrets:
+            logger.warning("Messenger webhook missing X-Hub-Signature-256 header")
+        try:
+            payload = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+        await _dispatch_messenger_payload(payload, config_dir)
+        return JSONResponse({"status": "ok"})
+
+
+async def _dispatch_messenger_payload(payload: dict, config_dir: str) -> None:
+    """Dispatch a verified webhook payload to the Messenger adapter.
+
+    Never raises: webhook failures are logged so Meta's retry policy is not
+    triggered by adapter-side errors. No-op while messenger is disabled.
+    """
+    try:
+        from typing import cast
+
+        from xpst.config import XPSTConfig
+        from xpst.platforms.base import PlatformRegistry
+        from xpst.platforms.messenger import MessengerAdapter  # noqa: TC001
+        from xpst.utils.sessions import SessionManager
+
+        cfg = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+        if not cfg.messenger.enabled:
+            return
+        adapter = cast("MessengerAdapter", PlatformRegistry.get("messenger", cfg))
+    except Exception as e:
+        logger.error("Messenger webhook dispatch aborted before handling: %s", e)
+        return
+
+    try:
+        adapter._session_manager = SessionManager(config_dir)
+        await adapter.handle_webhook_payload(payload)
+    except Exception as e:
+        logger.error("Messenger webhook dispatch failed: %s", e)
 
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
