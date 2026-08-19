@@ -6,7 +6,6 @@ xPST package itself.
 """
 
 import importlib
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -249,7 +248,7 @@ def check_updates() -> list[PackageInfo]:
 
 def check_helper_tools() -> list[UpdateComponent]:
     """Check local helper tools without installing or reaching the network."""
-    from xpst.utils.platform import get_ffmpeg_name
+    from xpst.utils.platform import resolve_ffmpeg_path
 
     helpers: list[UpdateComponent] = []
 
@@ -267,8 +266,7 @@ def check_helper_tools() -> list[UpdateComponent]:
         )
     )
 
-    ffmpeg_name = get_ffmpeg_name()
-    ffmpeg_path = shutil.which(ffmpeg_name)
+    ffmpeg_path = resolve_ffmpeg_path()
     ffmpeg = UpdateComponent(
         name="FFmpeg",
         component_type="helper",
@@ -279,7 +277,7 @@ def check_helper_tools() -> list[UpdateComponent]:
     if ffmpeg_path:
         try:
             result = subprocess.run(
-                [ffmpeg_name, "-version"],
+                [ffmpeg_path, "-version"],
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -532,13 +530,13 @@ def display_version_info() -> None:
     table.add_row("Python", f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}", "[green]✓[/green]")
 
     # FFmpeg
-    import shutil
+    from xpst.utils.platform import resolve_ffmpeg_path
 
-    from xpst.utils.platform import get_ffmpeg_name
-    if shutil.which(get_ffmpeg_name()):
+    ffmpeg_path = resolve_ffmpeg_path()
+    if ffmpeg_path:
         try:
             result = subprocess.run(
-                [get_ffmpeg_name(), "-version"],
+                [ffmpeg_path, "-version"],
                 capture_output=True, text=True, timeout=5,
             )
             first_line = result.stdout.split("\n")[0] if result.stdout else "installed"

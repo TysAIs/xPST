@@ -3693,16 +3693,14 @@ def security_audit(ctx: click.Context, as_json: bool):
 
     # Check 5: FFmpeg available
     try:
-        import shutil
-
-        from xpst.utils.platform import get_ffmpeg_name
-        ffmpeg_ok = shutil.which(get_ffmpeg_name()) is not None
+        from xpst.utils.platform import resolve_ffmpeg_path
+        ffmpeg_ok = resolve_ffmpeg_path() is not None
     except Exception:
         ffmpeg_ok = False
     checks.append({
         "check": "ffmpeg_available",
         "passed": ffmpeg_ok,
-        "detail": "FFmpeg found on PATH" if ffmpeg_ok else "FFmpeg not found — video processing will fail",
+        "detail": "FFmpeg found" if ffmpeg_ok else "FFmpeg not found — video processing will fail",
     })
     if not ffmpeg_ok:
         all_pass = False

@@ -5,6 +5,7 @@ Handles OS-specific differences in paths, signals, and process management.
 """
 
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -64,6 +65,25 @@ def get_ffprobe_name() -> str:
     if sys.platform == "win32":
         return "ffprobe.exe"
     return "ffprobe"
+
+
+def resolve_ffmpeg_path() -> str | None:
+    """
+    Resolve the ffmpeg binary path, honoring the XPST_FFMPEG_PATH override.
+
+    Returns the path from ``XPST_FFMPEG_PATH`` when set and pointing at an
+    existing file; otherwise falls back to ``shutil.which(get_ffmpeg_name())``.
+    Returns None when no ffmpeg binary can be found.
+    """
+    env_path = os.environ.get("XPST_FFMPEG_PATH")
+    if env_path and os.path.exists(env_path):
+        return env_path
+    return shutil.which(get_ffmpeg_name())
+
+
+def resolve_ffprobe_path() -> str | None:
+    """Resolve the ffprobe binary path via PATH lookup (no env override)."""
+    return shutil.which(get_ffprobe_name())
 
 
 def get_ytdlp_fallback_path() -> Path:

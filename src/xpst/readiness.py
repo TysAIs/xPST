@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import shutil
+import shutil  # noqa: F401  (kept so tests can patch xpst.readiness.shutil.which)
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,7 +11,7 @@ from typing import Any
 from xpst.config import XPSTConfig
 from xpst.setup import REQUIRED_DIRS, check_ffmpeg, check_yt_dlp
 from xpst.updater import check_update_components
-from xpst.utils.platform import get_ffmpeg_name
+from xpst.utils.platform import get_ffmpeg_name, resolve_ffmpeg_path
 
 
 @dataclass
@@ -168,7 +168,7 @@ def _ffmpeg_check() -> ReadinessCheck:
         severity="error",
         message="FFmpeg is available." if ok else "FFmpeg is required for video processing.",
         action="" if ok else "Install FFmpeg and make sure it is on PATH.",
-        details={"binary": get_ffmpeg_name(), "path": shutil.which(get_ffmpeg_name())},
+        details={"binary": get_ffmpeg_name(), "path": resolve_ffmpeg_path()},
     )
 
 
