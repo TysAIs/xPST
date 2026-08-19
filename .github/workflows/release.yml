@@ -56,11 +56,17 @@ jobs:
 
       - name: Publish to PyPI
         if: github.event_name == 'push'
-        # Non-blocking until PyPI trusted publishing is configured for this
-        # repo (owner + PyPI side) — the GitHub release must not be held
+        # Two mechanisms, tried in order:
+        #   1. A PYPI_API_TOKEN secret (repo Settings > Secrets > Actions).
+        #   2. PyPI trusted publishing (requires the repo's `id-token: write`
+        #      permission, already granted, plus the owner configuring the PyPI
+        #      side for this repo).
+        # Non-blocking (continue-on-error) so the GitHub release is never held
         # hostage by the registry step.
         continue-on-error: true
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
 
   build-windows:
     runs-on: windows-latest

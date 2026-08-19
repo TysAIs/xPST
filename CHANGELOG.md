@@ -7,25 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **Facebook Messenger platform** (opt-in, disabled by default) — a ManyChat-lite
-  auto-reply/chatbot option. Static Page Access Token auth (no refresh), direct
-  `httpx` against the Graph API (`v22.0/me/messages`), `appsecret_proof` on
-  outbound calls, and `X-Hub-Signature-256` verification on inbound webhooks in
-  the dashboard. Includes `auto_reply` + `reply_rules` keyword matching, an
-  `xpst auth messenger` wizard, and `messenger_send` / `messenger_set_rules`
-  MCP tools.
+No changes since 1.0.0.
 
-## [1.0.0] - 2026-06-20
+## [1.0.0] - 2026-08-18
 
 First public release. xPST is an open-source, cross-platform suite for posting
 short-form video to every major platform from one place, with built-in
 analytics, scheduling, a desktop app, and AI-agent integration.
 
 ### Added
-- **Six-platform posting**: YouTube Shorts, X, Instagram Reels, TikTok, Threads,
-  and LinkedIn — supported across the engine, scheduler, web dashboard, desktop
-  app, analytics, and connection flow.
+- **Seven-platform posting**: YouTube Shorts, X, Instagram Reels, TikTok,
+  Threads, and LinkedIn — supported across the engine, scheduler, web
+  dashboard, desktop app, analytics, and connection flow.
+- **Facebook Messenger platform** (opt-in, disabled by default) — a
+  ManyChat-lite auto-reply/chatbot option. Static Page Access Token auth (no
+  refresh), direct `httpx` against the Graph API (`v22.0/me/messages`),
+  `appsecret_proof` on outbound calls, and `X-Hub-Signature-256` verification
+  on inbound webhooks in the dashboard. Includes `auto_reply` + `reply_rules`
+  keyword matching, an `xpst auth messenger` wizard, and
+  `messenger_send` / `messenger_set_rules` MCP tools.
 - **TikTok posting** via the official Content Posting API v2 (previously
   source-only).
 - **Per-video analytics**: views, likes, comments, and shares broken out by
