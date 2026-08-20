@@ -627,7 +627,10 @@ xpst auth instagram
 
 #### "YouTube credentials expired"
 ```bash
-# Re-authenticate (auto-refreshes token)
+# Re-authenticate — xPST auto-refreshes the ACCESS token silently; this is only
+# needed if the REFRESH token died (e.g. app still in Google "Testing" mode,
+# which expires refresh tokens ~7 days — publish it to production instead,
+# see docs/setup-youtube.md Step 7), or if you revoked xPST's access.
 xpst auth youtube
 ```
 
