@@ -80,7 +80,23 @@ jobs:
         shell: bash
         run: |
           xpst version --json
-          xpst health --json
+          # On a clean CI runner no platform is authenticated, so `xpst health`
+          # must exit 3 (EXIT_AUTH_FAILURE) while still emitting machine-readable
+          # JSON. Both the exit code and the JSON shape are asserted here; a
+          # non-zero exit other than 3 means the health check itself broke.
+          set +e
+          HEALTH_JSON="$(xpst health --json)"
+          HEALTH_RC=$?
+          set -e
+          echo "$HEALTH_JSON"
+          [ "$HEALTH_RC" -eq 3 ] || { echo "xpst health exited $HEALTH_RC (expected 3 on unauthenticated runner)"; exit 1; }
+          python - "$HEALTH_JSON" <<'PY'
+          import json, sys
+          data = json.loads(sys.argv[1])
+          assert "platforms" in data and "all_ok" in data, data.keys()
+          assert data["all_ok"] is False
+          print("CLI health smoke OK: exit 3 + valid JSON on unauthenticated runner")
+          PY
 
   docker:
     name: Docker build smoke
