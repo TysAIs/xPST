@@ -207,11 +207,14 @@ class TestAuthStatusSourceOfTruth:
 
         import logging
         import os
-        import pty
         import select
         import subprocess
         import sys
         import time
+
+        pty = pytest.importorskip(
+            "pty", reason="pty-based TTY check is POSIX-only"
+        )
 
         logging.disable(logging.CRITICAL)
         try:
