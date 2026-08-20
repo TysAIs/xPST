@@ -296,10 +296,17 @@ class SessionManager:
         client = twikit.Client("en-US")
 
         try:
-            # Try cookie-based auth. The twikit cookie file written by the
-            # connect wizard and the uploader's direct path are a JSON list,
-            # so load the file directly (load_cookies handles the format).
-            client.load_cookies(str(cookies_path))
+            # Try cookie-based auth. twikit's cookie format is a JSON dict
+            # (``get_cookies``/``set_cookies``). A dict from the store is
+            # applied directly via set_cookies — this is what makes
+            # store-only installs (XPST_USE_KEYRING=1, or .enc fallback
+            # without a cookies dump on disk) work. Otherwise fall back
+            # to the file: load_cookies json.loads it and applies it via
+            # set_cookies.
+            if isinstance(stored_cookies, dict):
+                client.set_cookies(stored_cookies)
+            else:
+                client.load_cookies(str(cookies_path))
 
             # Verify cookies are valid
             try:
