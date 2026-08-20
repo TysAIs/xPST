@@ -93,6 +93,30 @@ def json_output(data: object, as_json: bool) -> None:
         click.echo(_json.dumps(data, default=str, ensure_ascii=False))
 
 
+def emit_json_error(exit_code: int, message: str, category: str = "error",
+                    details: Any = None) -> None:
+    """Print a machine-readable ``{"error": {...}}`` object to stdout.
+
+    Guarded to only fire when stdout is not a TTY (the same auto-JSON
+    condition as normal JSON output), so interactive use is unaffected and
+    existing tests (which assert on raw ``result.output`` under the CLI
+    runner) see no change. This closes the success-vs-failure asymmetry:
+    agents can now parse error payloads instead of only reading the exit code.
+    """
+    if sys.stdout.isatty():
+        return
+    payload = {
+        "error": {
+            "code": exit_code,
+            "message": message,
+            "category": category,
+        }
+    }
+    if details is not None:
+        payload["error"]["details"] = details
+    click.echo(_json.dumps(payload, default=str, ensure_ascii=False))
+
+
 # Shared Click decorator that adds ``--json`` to every command.
 # Respects group-level ``--json`` and auto-JSON-on-pipe (non-TTY).
 json_option = click.option(
@@ -100,6 +124,20 @@ json_option = click.option(
     callback=lambda ctx, param, value: value or (ctx.obj.get("json", False) if ctx.obj else False),
     help="Machine-readable JSON output"
 )
+
+
+def _report_config_error(message: str) -> None:
+    """Report a config load error.
+
+    Non-TTY (agent) mode: emit a single parseable ``{"error":...}`` object on
+    stdout and the human-facing message on stderr, so stdout stays a clean
+    JSON stream. Interactive (TTY) mode: print the human message to stdout.
+    """
+    if sys.stdout.isatty():
+        console.print(f"[red]Configuration error:[/red] {message}")
+        return
+    emit_json_error(EXIT_CONFIG_ERROR, message, category="config_error")
+    click.echo(message, err=True)
 
 
 def load_config(config_path: str | None = None) -> XPSTConfig:
@@ -119,11 +157,61 @@ def load_config(config_path: str | None = None) -> XPSTConfig:
     try:
         return XPSTConfig.load(config_path)
     except ValueError as e:
-        console.print(f"[red]Configuration error:[/red] {e}")
+        _report_config_error(str(e))
         sys.exit(EXIT_CONFIG_ERROR)
     except Exception as e:
-        console.print(f"[red]Failed to load config:[/red] {e}")
+        _report_config_error(str(e))
         sys.exit(EXIT_CONFIG_ERROR)
+
+
+def _agent_credentials(
+    username: str | None = None,
+    email: str | None = None,
+    password: str | None = None,
+    user_id: str | None = None,
+    access_token: str | None = None,
+    page_token: str | None = None,
+    app_secret: str | None = None,
+    auth_mode: str | None = None,
+) -> dict:
+    """Build the agent-mode credentials dict consumed by ``run_connect``.
+
+    Shared by the ``connect`` and ``auth`` commands so both map their
+    flags/env vars onto the same wizard override parameters.
+
+    ``auth_mode`` selects the Instagram strategy: ``"graph_api"`` (default,
+    ban-safe) or ``"session"`` (instagrapi username/password).
+    """
+    ig_use_graph = None
+    if auth_mode:
+        ig_use_graph = "true" if auth_mode == "graph_api" else "false"
+    return {
+        "tiktok": {"username": username or ""},
+        "x": {
+            "username": username or "",
+            "email": email or "",
+            "password": password or "",
+        },
+        "instagram": {
+            "user_id": user_id or "",
+            "access_token": access_token or "",
+            "username": username or "",
+            "password": password or "",
+            "use_graph": ig_use_graph,
+        },
+        "threads": {
+            "user_id": user_id or "",
+            "access_token": access_token or "",
+        },
+        "linkedin": {
+            "user_id": user_id or "",
+            "access_token": access_token or "",
+        },
+        "messenger": {
+            "page_token": page_token or "",
+            "app_secret": app_secret or "",
+        },
+    }
 
 
 @click.group()
@@ -158,10 +246,46 @@ def main(ctx: click.Context, config: str | None, verbose: bool, quiet: bool, jso
 # ──────────────────────────────────────────────
 
 @main.command()
-def setup():
-    """Interactive first-time setup wizard"""
+@click.option("--platforms", "-p", "platforms_csv", default=None,
+              help="Comma-separated platforms to enable in non-interactive mode")
+@click.option("--tiktok-user", "tiktok_user", default=None,
+              help="TikTok source username (non-interactive mode)")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmations, take defaults (non-interactive mode)")
+@click.option("--no-input", is_flag=True, help="Non-interactive: use --platforms/--tiktok-user/--yes; exit 3 if a value is missing")
+@json_option
+@click.pass_context
+def setup(ctx: click.Context, platforms_csv: str | None, tiktok_user: str | None,
+          yes: bool, no_input: bool, as_json: bool):
+    """First-time setup wizard (or non-interactive bootstrap with --no-input)"""
     from xpst.setup import run_setup
-    run_setup()
+
+    non_interactive = no_input or yes
+    platforms = (
+        [p.strip() for p in platforms_csv.split(",") if p.strip()]
+        if platforms_csv else None
+    )
+    if platforms:
+        valid = {"youtube", "x", "instagram"}
+        bad = [p for p in platforms if p not in valid]
+        if bad:
+            emit_json_error(EXIT_CONFIG_ERROR,
+                            f"invalid --platforms entries: {', '.join(bad)}",
+                            category="usage_error")
+            sys.exit(EXIT_CONFIG_ERROR)
+
+    config = run_setup(
+        non_interactive=non_interactive,
+        platforms=platforms,
+        tiktok_username=tiktok_user,
+    )
+
+    if as_json:
+        json_output({
+            "ok": True,
+            "config_dir": config.config_dir,
+            "config_file": f"{config.config_dir}/config.yaml",
+            "non_interactive": non_interactive,
+        }, True)
 
 
 # ──────────────────────────────────────────────
@@ -743,7 +867,13 @@ def providers(ctx: click.Context, as_json: bool):
 @json_option
 @click.pass_context
 def health(ctx: click.Context, as_json: bool):
-    """Test connectivity to all platforms (no uploads)"""
+    """Test connectivity to all platforms (no uploads)
+
+    Exit codes: 0 when every enabled platform is healthy, 3 (auth
+    failure) when any enabled platform is unauthenticated, has an
+    expired session, or fails its connectivity check. Disabled
+    platforms are not checked and never affect the exit code.
+    """
     config = load_config(ctx.obj.get("config_path"))
     setup_logging(
         log_level=config.monitoring.log_level,
@@ -752,14 +882,33 @@ def health(ctx: click.Context, as_json: bool):
 
     if not as_json:
         console.print("[bold blue]xPST - Platform Health Check[/bold blue]\n")
-        console.print("[dim]Testing connectivity to all platforms (no uploads)...[/dim]\n")
+        console.print("[dim]Testing connectivity to all platforms (no uploads)...\n")
 
     engine = CrossPostEngine(config)
     health_data = asyncio.run(engine.check_health())
     health_data["sessions"] = _session_health(config)
 
+    # ── Overall verdict (exit-code source of truth) ──
+    # Every ENABLED platform must be authenticated with a valid session.
+    # Disabled platforms are excluded from the verdict: opting out of a
+    # platform is not a health failure.
+    platforms = health_data.get("platforms", {})
+    enabled_platforms = {
+        name: info
+        for name, info in platforms.items()
+        if getattr(getattr(config, name, None), "enabled", False)
+    }
+    unhealthy = {
+        name: info
+        for name, info in enabled_platforms.items()
+        if not (info.get("authenticated") and info.get("session_valid"))
+    }
+    health_data["all_ok"] = not unhealthy
+
     if as_json:
         json_output(health_data, True)
+        if unhealthy:
+            sys.exit(EXIT_AUTH_FAILURE)
         return
 
     # ── Stored sessions (G53: expired sessions fail silently otherwise) ──
@@ -798,8 +947,11 @@ def health(ctx: click.Context, as_json: bool):
     # ── Platforms ──
     console.print("\n[bold]Platforms:[/bold]")
 
-    all_ok = True
-    for platform_name, platform_health in health_data.get("platforms", {}).items():
+    for platform_name, platform_health in platforms.items():
+        if platform_name not in enabled_platforms:
+            console.print(f"  ⚪ {platform_name.title()}: disabled (not checked)")
+            continue
+
         authenticated = platform_health.get("authenticated", False)
         session_valid = platform_health.get("session_valid", False)
 
@@ -809,11 +961,9 @@ def health(ctx: click.Context, as_json: bool):
         elif authenticated:
             icon = "⚠️"
             status_text = "[yellow]Session may be expired[/yellow]"
-            all_ok = False
         else:
             icon = "❌"
             status_text = "[red]Not authenticated[/red]"
-            all_ok = False
 
         console.print(f"  {icon} {platform_name.title()}: {status_text}")
 
@@ -864,14 +1014,23 @@ def health(ctx: click.Context, as_json: bool):
     else:
         console.print("\n[dim]Notifications: disabled[/dim]")
 
-    # ── Summary ──
+    # ── Summary (agent-facing line: stable "all_ok" prefix for log parsing) ──
     console.print()
-    if all_ok and health_data.get("platforms"):
-        console.print("[bold green]✅ All platforms healthy![/bold green]")
-    elif not health_data.get("platforms"):
-        console.print("[yellow]⚠️ No platforms configured[/yellow]")
+    if not unhealthy and platforms:
+        console.print("[bold green]✅ all_ok: all enabled platforms healthy[/bold green]")
+    elif not enabled_platforms:
+        console.print("[yellow]⚠️ all_ok: no platforms enabled (nothing to check)[/yellow]")
     else:
-        console.print("[yellow]⚠️ Some platforms need attention[/yellow]")
+        console.print("[bold red]❌ all_ok: some platforms need attention[/bold red]")
+        for name, info in unhealthy.items():
+            remediation = "xpst connect" if info.get("authenticated") else "xpst auth"
+            console.print(
+                f"     [dim]{name.title()}: {info.get('error') or 'not authenticated'} "
+                f"→ run `xpst {remediation} {name}`[/dim]"
+            )
+
+    if unhealthy:
+        sys.exit(EXIT_AUTH_FAILURE)
 
 
 # ──────────────────────────────────────────────
@@ -881,13 +1040,83 @@ def health(ctx: click.Context, as_json: bool):
 @main.command()
 @click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
 @click.option("--test", "test_only", is_flag=True, help="Test existing connections only")
+@click.option("--no-input", is_flag=True, help="Non-interactive: no prompts; missing credentials exit 3 (YouTube still needs its human browser step)")
+@click.option("--username", "cred_username", default=None, help="Agent mode: username (X, Instagram, TikTok)")
+@click.option("--email", "cred_email", default=None, help="Agent mode: X email address")
+@click.option("--password", "cred_password", default=None,
+              envvar="XPST_AUTH_PASSWORD", help="Agent mode: password (X, Instagram)")
+@click.option("--user-id", "cred_user_id", default=None, help="Agent mode: IG user ID / Threads user ID / LinkedIn URN")
+@click.option("--access-token", "cred_access_token", default=None,
+              envvar="XPST_AUTH_ACCESS_TOKEN", help="Agent mode: long-lived access token (IG Graph, Threads, LinkedIn)")
+@click.option("--page-token", "cred_page_token", default=None,
+              envvar="XPST_MESSENGER_PAGE_TOKEN", help="Agent mode: Messenger Page Access Token")
+@click.option("--app-secret", "cred_app_secret", default=None,
+              envvar="XPST_MESSENGER_APP_SECRET", help="Agent mode: Messenger App Secret")
+@click.option("--auth-mode", "cred_auth_mode",
+              type=click.Choice(["graph_api", "session"]),
+              default=None, help="Agent mode: Instagram strategy (default: graph_api)")
+@json_option
 @click.pass_context
-def connect(ctx: click.Context, platform: str | None, test_only: bool):
-    """Connect social media accounts (streamlined wizard)"""
-    from xpst.connect import run_connect
+def connect(ctx: click.Context, platform: str | None, test_only: bool,
+            no_input: bool, cred_username: str | None, cred_email: str | None,
+            cred_password: str | None, cred_user_id: str | None,
+            cred_access_token: str | None, cred_page_token: str | None,
+            cred_app_secret: str | None, cred_auth_mode: str | None,
+            as_json: bool):
+    """Connect social media accounts (streamlined wizard).
 
+    Non-interactive (agent) mode with --no-input: values come from the
+    flags above (or their XPST_AUTH_* env vars), and YouTube — which needs
+    a human browser for OAuth — succeeds only when a token is already
+    stored. Missing values exit 3 without prompting.
+    """
+    from xpst import connect as connect_module
+
+    config_path = ctx.obj.get("config_path")
+    config = load_config(config_path)
     platforms = [platform] if platform else None
-    success = run_connect(platforms=platforms, test_only=test_only)
+
+    if test_only:
+        results = connect_module.test_connections(config)
+        if platforms:
+            results = {p: ok for p, ok in results.items() if p in platforms}
+        success = bool(results) and all(results.values())
+        if as_json:
+            json_output({"all_ok": success, "platforms": results}, True)
+        elif not success:
+            failed = [p for p, ok in results.items() if not ok]
+            click.echo(f"⚠️  issues with: {', '.join(failed)}")
+        if not success:
+            sys.exit(EXIT_AUTH_FAILURE)
+        return
+
+    credentials = _agent_credentials(
+        cred_username, cred_email, cred_password, cred_user_id,
+        cred_access_token, cred_page_token, cred_app_secret,
+        auth_mode=cred_auth_mode,
+    )
+
+    success = connect_module.run_connect(
+        platforms=platforms,
+        test_only=False,
+        interactive=not no_input,
+        credentials=credentials,
+        config=config,
+    )
+
+    if as_json:
+        # Report what is now enabled/configured on the same config object.
+        json_output({
+            "all_ok": success,
+            "platforms": platforms or "all",
+            "non_interactive": no_input,
+            "enabled": {
+                name: getattr(getattr(config, name, None), "enabled", False)
+                for name in ("youtube", "x", "instagram", "tiktok",
+                             "threads", "linkedin", "messenger")
+            },
+        }, True)
+
     if not success:
         sys.exit(EXIT_AUTH_FAILURE)
 
@@ -898,9 +1127,38 @@ def connect(ctx: click.Context, platform: str | None, test_only: bool):
 
 @main.command()
 @click.argument("platform", required=False)
+@click.option("--no-input", is_flag=True,
+              help="Non-interactive: no prompts; credentials come from flags/env; missing values exit 3 (YouTube still needs its human browser step)")
+@click.option("--username", "cred_username", default=None,
+              help="Agent mode: username (X, Instagram, TikTok)")
+@click.option("--email", "cred_email", default=None,
+              help="Agent mode: X email address")
+@click.option("--password", "cred_password", default=None,
+              envvar="XPST_AUTH_PASSWORD",
+              help="Agent mode: password (X, Instagram)")
+@click.option("--user-id", "cred_user_id", default=None,
+              help="Agent mode: IG user ID / Threads user ID / LinkedIn URN")
+@click.option("--access-token", "cred_access_token", default=None,
+              envvar="XPST_AUTH_ACCESS_TOKEN",
+              help="Agent mode: long-lived access token (IG Graph, Threads, LinkedIn)")
+@click.option("--page-token", "cred_page_token", default=None,
+              envvar="XPST_MESSENGER_PAGE_TOKEN",
+              help="Agent mode: Messenger Page Access Token")
+@click.option("--app-secret", "cred_app_secret", default=None,
+              envvar="XPST_MESSENGER_APP_SECRET",
+              help="Agent mode: Messenger App Secret")
+@click.option("--auth-mode", "cred_auth_mode",
+              type=click.Choice(["graph_api", "session"]),
+              default=None,
+              help="Agent mode: Instagram strategy (default: graph_api)")
 @json_option
 @click.pass_context
-def auth(ctx: click.Context, platform: str | None, as_json: bool):
+def auth(ctx: click.Context, platform: str | None, no_input: bool,
+         cred_username: str | None, cred_email: str | None,
+         cred_password: str | None, cred_user_id: str | None,
+         cred_access_token: str | None, cred_page_token: str | None,
+         cred_app_secret: str | None, cred_auth_mode: str | None,
+         as_json: bool):
     """Authenticate with a platform or check auth status.
 
     Usage:
@@ -909,6 +1167,10 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         xpst auth instagram   # Authenticate with Instagram
         xpst auth tiktok      # Authenticate with TikTok
         xpst auth status      # Show auth status for all platforms
+
+    Non-interactive (agent) mode with --no-input: credentials come from
+    the flags above (or their XPST_AUTH_* env vars) and missing values
+    exit 3 without prompting.
     """
     if platform is None or platform == "status":
         _show_auth_status(ctx, as_json)
@@ -922,6 +1184,31 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         return
 
     config = load_config(ctx.obj.get("config_path"))
+
+    if no_input:
+        # Agent mode: delegate to the same consolidated connect flow so
+        # SessionManager stays the single source of truth for auth.
+        from xpst.connect import run_connect
+
+        credentials = _agent_credentials(
+            cred_username, cred_email, cred_password, cred_user_id,
+            cred_access_token, cred_page_token, cred_app_secret,
+            auth_mode=cred_auth_mode,
+        )
+        success = run_connect(
+            platforms=[platform], test_only=False,
+            interactive=False, credentials=credentials,
+            config=config,
+        )
+        if as_json:
+            json_output({
+                "all_ok": success,
+                "platform": platform,
+                "enabled": getattr(getattr(config, platform, None), "enabled", False),
+            }, True)
+        if not success:
+            sys.exit(EXIT_AUTH_FAILURE)
+        return
 
     console.print(f"[bold blue]Authenticating with {platform.title()}...[/bold blue]")
 

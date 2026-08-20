@@ -69,6 +69,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Thin-path marker: a lean CLI/core install pulls only the base
+# ``dependencies`` above (no heavy GUI/ML/vector extras). This is the
+# default whenever you install xpst without extra brackets:
+#   pip install xpst            #  → core CLI only (small footprint)
+#   pip install "xpst[all]"     #  → everything (heavy; ~2GB on disk)
+cli = [
+    # Empty marker extra. Kept so ``pip install xpst[cli]`` is a no-op alias
+    # that signals "thin" without silently pulling optional weight.
+]
+all = [
+    "xpst[mcp,desktop,pyside6,dashboard,windows,knowledge,knowledge-lancedb]",
+]
 anti-ban = [
     # TLS fingerprint hardening — mimics real browser JA3/JA4 to avoid
     # bot detection on Instagram/X. Falls back gracefully if not installed.
@@ -86,17 +98,24 @@ windows = [
     "pywin32>=306; platform_system == 'Windows'",
     "winshell>=0.6; platform_system == 'Windows'",
 ]
+# The API dashboard itself is served by FastAPI, already a core dependency.
+# The `dashboard` extra adds the *graphical* NiceGUI web UI (plotly was a
+# dead dependency, removed — see audit 08-19: zero imports, 40MB).
 dashboard = [
     "nicegui>=1.4.0,<4.0.0",
-    "plotly>=5.18.0,<7.0.0",
 ]
 knowledge = [
     # Upper bounds (G48): these are data-coupled deps — an uncapped major
     # bump can break persisted index/embedding formats silently.
     "faster-whisper>=1.0.0,<2.0",
     "fastembed>=0.3,<1.0",
-    "sqlite-vec>=0.1.0,<1.0",  # Phase D3: default vector backend (<1MB vs LanceDB ~50MB)
-    "lancedb>=0.5,<1.0",  # Legacy backend, still available
+    "sqlite-vec>=0.1.0,<1.0",  # Default vector backend (<1MB)
+]
+# Legacy LanceDB backend (≈254MB with pyarrow) kept optional: only install
+# when you explicitly need it — the sqlite-vec default never requires it.
+knowledge-lancedb = [
+    "lancedb>=0.5,<1.0",
+    "pyarrow>=14.0,<26.0",
 ]
 full = [
     "xpst[mcp,desktop,dashboard,windows,knowledge]",

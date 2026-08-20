@@ -33,6 +33,7 @@ from xpst.config import XPSTConfig
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger
 from xpst.utils.secure_io import write_text_0600
+from xpst.utils.sessions import SessionManager
 
 console = Console()
 logger = get_logger(__name__)
@@ -55,17 +56,20 @@ def _get_creds_dir(config: XPSTConfig) -> Path:
     return creds_dir
 
 
-def _confirm(message: str, default: bool = True) -> bool:
+def _confirm(message: str, default: bool = True, interactive: bool = True) -> bool:
     """Prompt the user for a yes/no confirmation with a default.
 
     Args:
         message: Question to display.
         default: Value to use if user presses Enter.
+        interactive: False in agent mode — return the default without
+            prompting (never hang on piped/closed stdin).
 
     Returns:
         True if confirmed, False otherwise.
     """
-
+    if not interactive:
+        return default
     suffix = " [Y/n]: " if default else " [y/N]: "
     response = console.input(f"[cyan]{message}{suffix}[/cyan]").strip().lower()
     if not response:
@@ -73,16 +77,61 @@ def _confirm(message: str, default: bool = True) -> bool:
     return response in ("y", "yes")
 
 
-def _input_secret(prompt: str) -> str:
+class NonInteractiveError(Exception):
+    """A wizard value is required but agent mode has no value for it.
+
+    Raised by ``_prompt_text`` / ``_input_secret`` in non-interactive
+    mode when the value is not supplied via the wizard's override
+    parameters. The CLI turns this into exit code 3 (auth failure) with
+    the missing field named — the documented "missing input" contract.
+    """
+
+    def __init__(self, label: str, hint: str = ""):
+        msg = f"{label} is required in non-interactive mode"
+        if hint:
+            msg += f" ({hint})"
+        super().__init__(msg)
+        self.label = label
+
+
+def _prompt_text(prompt: str, override: str = "", interactive: bool = True,
+                 optional: bool = False) -> str:
+    """Read a value from the user, or use *override* when supplied.
+
+    Non-interactive mode with no override raises
+    :class:`NonInteractiveError` — unless *optional*, in which case an
+    empty string is returned (an optional field never blocks agents).
+    """
+    if override:
+        return override
+    if not interactive:
+        if optional:
+            return ""
+        raise NonInteractiveError(prompt.rstrip(": "))
+    return console.input(f"[cyan]{prompt}[/cyan]").strip()
+
+
+def _input_secret(prompt: str, override: str = "", interactive: bool = True,
+                  optional: bool = False) -> str:
     """Prompt for a secret value without echoing to terminal.
 
     Args:
         prompt: Prompt text to display.
+        override: Value supplied by the caller (agent mode; skips prompt).
+        interactive: False in agent mode — a missing required *override*
+            raises :class:`NonInteractiveError` instead of reading stdin;
+            an *optional* missing value returns "".
+        optional: Field is optional — never raises in non-interactive mode.
 
     Returns:
-        The entered secret string.
+        The secret string.
     """
-
+    if override:
+        return override
+    if not interactive:
+        if optional:
+            return ""
+        raise NonInteractiveError(prompt.rstrip(": "))
     console.print(f"[cyan]{prompt}[/cyan]", end="")
     import getpass
     return getpass.getpass("")
@@ -92,7 +141,7 @@ def _input_secret(prompt: str) -> str:
 # YouTube OAuth (browser-based)
 # ──────────────────────────────────────────────
 
-def connect_youtube(config: XPSTConfig) -> bool:
+def connect_youtube(config: XPSTConfig, interactive: bool = True) -> bool:
     """
     Connect YouTube using OAuth2 browser flow.
 
@@ -102,11 +151,32 @@ def connect_youtube(config: XPSTConfig) -> bool:
     3. Use InstalledAppFlow.run_local_server() to open browser
     4. User authorizes in browser
     5. Token is saved automatically
+
+    Non-interactive (``interactive=False``): the OAuth flow requires a
+    human in a browser. Idempotent success when a token already exists;
+    otherwise a clear remediation message and False.
     """
     console.print(Panel("[bold]YouTube Shorts Connection[/bold]", style="red"))
     creds_dir = _get_creds_dir(config)
     secrets_path = creds_dir / "youtube_client_secrets.json"
     token_path = creds_dir / "youtube_token.json"
+
+    if not interactive:
+        if token_path.exists():
+            try:
+                cred_store = CredentialStore(config.config_dir)
+                cred_store.store("youtube_token", token_path.read_text())
+            except Exception as e:
+                logger.debug("Unexpected error: %s", e)
+            console.print("[green]✅ YouTube token present (no action needed)[/green]")
+            return True
+        console.print(
+            "[red]❌ YouTube OAuth needs a human browser step.[/red] "
+            "Run `xpst connect youtube` in an interactive terminal "
+            "(or place a valid token at "
+            f"[bold]{token_path}[/bold])."
+        )
+        return False
 
     # Check for client_secrets.json
     if not secrets_path.exists():
@@ -190,7 +260,15 @@ def connect_youtube(config: XPSTConfig) -> bool:
 # Instagram (Graph API preferred, instagrapi fallback)
 # ──────────────────────────────────────────────
 
-def connect_instagram(config: XPSTConfig) -> bool:
+def connect_instagram(
+    config: XPSTConfig,
+    use_graph: bool | None = None,
+    ig_user_id: str = "",
+    access_token: str = "",
+    username: str = "",
+    password: str = "",
+    interactive: bool = True,
+) -> bool:
     """
     Connect Instagram. Defaults to the official Graph API (ban-safe).
     Falls back to instagrapi session auth only if the user explicitly chooses it.
@@ -205,29 +283,38 @@ def connect_instagram(config: XPSTConfig) -> bool:
     2. Prompt for username and password
     3. Login via instagrapi.Client.login()
     4. Save session for persistence
+
+    Agent mode: pass the values directly (``use_graph`` + the
+    matching credentials) — nothing is prompted.
     """
     console.print(Panel("[bold]Instagram Reels Connection[/bold]", style="magenta"))
 
-    console.print(
-        "\n[bold green]Recommended:[/bold green] Use the official Meta Graph API (ban-safe, ToS-compliant).\n"
-        "[bold red]Not recommended:[/bold red] instagrapi session auth (risks account bans).\n"
-    )
-    console.print(
-        "[dim]Graph API requires an Instagram Creator/Business account + Facebook Page.\n"
-        "If you don't have those yet, see: https://developers.facebook.com/docs/instagram-api/getting-started[/dim]\n"
-    )
-
-    use_graph = _confirm("Use Graph API (recommended)?", default=True)
+    if use_graph is None:
+        console.print(
+            "\n[bold green]Recommended:[/bold green] Use the official Meta Graph API (ban-safe, ToS-compliant).\n"
+            "[bold red]Not recommended:[/bold red] instagrapi session auth (risks account bans).\n"
+        )
+        console.print(
+            "[dim]Graph API requires an Instagram Creator/Business account + Facebook Page.\n"
+            "If you don't have those yet, see: https://developers.facebook.com/docs/instagram-api/getting-started[/dim]\n"
+        )
+        use_graph = _confirm("Use Graph API (recommended)?", default=True,
+                             interactive=interactive)
 
     if use_graph:
-        return _connect_instagram_graph_api(config)
-    else:
-        console.print("[yellow]⚠️  instagrapi uses Instagram's private API and can get your account BANNED.[/yellow]")
-        console.print("[yellow]   Instagram actively detects and blocks automated clients.[/yellow]\n")
-        if not _confirm("Continue with instagrapi anyway?", default=False):
-            console.print("[dim]Cancelled. Set up Graph API for ban-safe posting.[/dim]")
-            return False
-        return _connect_instagram_session(config)
+        return _connect_instagram_graph_api(
+            config, ig_user_id, access_token, interactive=interactive
+        )
+
+    console.print("[yellow]⚠️  instagrapi uses Instagram's private API and can get your account BANNED.[/yellow]")
+    console.print("[yellow]   Instagram actively detects and blocks automated clients.[/yellow]\n")
+    if not _confirm("Continue with instagrapi anyway?", default=False,
+                    interactive=interactive):
+        console.print("[dim]Cancelled. Set up Graph API for ban-safe posting.[/dim]")
+        return False
+    return _connect_instagram_session(
+        config, username, password, interactive=interactive
+    )
 
 
 GRAPH_API_BASE = "https://graph.facebook.com/v21.0"
@@ -383,15 +470,13 @@ def _connect_instagram_graph_api(config: XPSTConfig) -> bool:
     console.print("  4. In the Graph API Explorer, pick your IG business account and generate a token")
     console.print("  5. Paste the token below — xPST verifies it and finds your IG user ID automatically\n")
 
-    if _confirm("Open Meta Developer console in browser?", default=True):
-        import webbrowser
-        webbrowser.open("https://developers.facebook.com/apps")
-
     if _confirm("Generate token in browser (Graph API Explorer)?", default=True):
         import webbrowser
         webbrowser.open(GRAPH_EXPLORER_URL)
 
-    access_token = _input_secret("Long-lived access token: ")
+    access_token = _input_secret(
+        "Long-lived access token: ", override=access_token, interactive=interactive
+    )
     if not access_token:
         console.print("[red]❌ Access token required.[/red]")
         return False
@@ -441,19 +526,29 @@ def _connect_instagram_graph_api(config: XPSTConfig) -> bool:
     return True
 
 
-def _connect_instagram_session(config: XPSTConfig) -> bool:
+def _connect_instagram_session(
+    config: XPSTConfig,
+    username: str = "",
+    password: str = "",
+    interactive: bool = True,
+) -> bool:
     """Connect via instagrapi session auth (NOT recommended, ban risk)."""
     creds_dir = _get_creds_dir(config)
     session_path = creds_dir / "instagram_session.json"
 
-    console.print("[dim]Enter your Instagram credentials. We'll save a session file so you don't need to re-enter them.[/dim]\n")
+    if not (username or password):
+        console.print("[dim]Enter your Instagram credentials. We'll save a session file so you don't need to re-enter them.[/dim]\n")
 
-    username = console.input("[cyan]Instagram username: [/cyan]").strip()
+    username = _prompt_text(
+        "Instagram username: ", override=username, interactive=interactive
+    )
     if not username:
         console.print("[red]❌ Username required.[/red]")
         return False
 
-    password = _input_secret("Instagram password: ")
+    password = _input_secret(
+        "Instagram password: ", override=password, interactive=interactive
+    )
     if not password:
         console.print("[red]❌ Password required.[/red]")
         return False
@@ -486,7 +581,7 @@ def _connect_instagram_session(config: XPSTConfig) -> bool:
             if "two_factor" in error_str or "verification" in error_str or "challenge" in error_str:
                 console.print("[yellow]⚠️  Two-factor authentication required.[/yellow]")
                 console.print("[dim]Enter the code from your authenticator app (Google Authenticator, Authy, etc.)[/dim]\n")
-                verification_code = console.input("[cyan]2FA code: [/cyan]").strip()
+                verification_code = _prompt_text("2FA code: ", interactive=interactive)
 
                 if not verification_code:
                     console.print("[red]❌ Verification code required.[/red]")
@@ -501,7 +596,7 @@ def _connect_instagram_session(config: XPSTConfig) -> bool:
                 # Instagram challenge (unusual login, SMS code, etc.)
                 console.print("[yellow]⚠️  Instagram requires additional verification.[/yellow]")
                 console.print("[dim]Check your Instagram app or email for a security code.[/dim]\n")
-                code = console.input("[cyan]Security code: [/cyan]").strip()
+                code = _prompt_text("Security code: ", interactive=interactive)
                 if not code:
                     console.print("[red]❌ Code required.[/red]")
                     return False
@@ -565,7 +660,13 @@ def _connect_instagram_session(config: XPSTConfig) -> bool:
 # X/Twitter (official X API v2 or twikit cookies)
 # ──────────────────────────────────────────────
 
-def connect_x(config: XPSTConfig) -> bool:
+def connect_x(
+    config: XPSTConfig,
+    username: str = "",
+    email: str = "",
+    password: str = "",
+    interactive: bool = True,
+) -> bool:
     """
     Connect X/Twitter via the official X API v2 (recommended) or twikit cookies.
 
@@ -593,7 +694,8 @@ def _connect_x_cookies(config: XPSTConfig) -> bool:
     Connect X/Twitter using username/email/password via twikit (unofficial).
 
     Flow:
-    1. Prompt for username, email, and password
+    1. Prompt for username, email, and password (or accept them as
+       overrides in agent mode)
     2. Login via twikit.Client.login()
     3. Cookies are auto-saved
     4. Test connection
@@ -601,21 +703,24 @@ def _connect_x_cookies(config: XPSTConfig) -> bool:
     creds_dir = _get_creds_dir(config)
     cookies_path = creds_dir / "x_cookies.json"
 
-    console.print("[dim]Enter your X/Twitter credentials. No cookie export needed![/dim]\n")
+    if not (username or email or password):
+        console.print("[dim]Enter your X/Twitter credentials. No cookie export needed![/dim]\n")
 
-    username = console.input("[cyan]X username (without @): [/cyan]").strip()
+    username = _prompt_text(
+        "X username (without @): ", override=username, interactive=interactive
+    )
     if username.startswith("@"):
         username = username[1:]
     if not username:
         console.print("[red]❌ Username required.[/red]")
         return False
 
-    email = console.input("[cyan]X email address: [/cyan]").strip()
+    email = _prompt_text("X email address: ", override=email, interactive=interactive)
     if not email:
         console.print("[red]❌ Email required (X needs it for login verification).[/red]")
         return False
 
-    password = _input_secret("X password: ")
+    password = _input_secret("X password: ", override=password, interactive=interactive)
     if not password:
         console.print("[red]❌ Password required.[/red]")
         return False
@@ -1102,6 +1207,8 @@ def connect_tiktok(config: XPSTConfig) -> bool:
     1. Check if yt-dlp is installed
     2. Enable cookies_from_browser in config
     3. Test by fetching a video
+
+    Agent mode: pass ``username`` directly — nothing is prompted.
     """
     console.print(Panel("[bold]TikTok Source[/bold]", style="cyan"))
     console.print("[dim]TikTok doesn't require authentication for downloads.[/dim]")
@@ -1115,23 +1222,26 @@ def connect_tiktok(config: XPSTConfig) -> bool:
         console.print("Install with: [cyan]pip install yt-dlp[/cyan]\n")
 
     # Get TikTok username
-    current_username = config.tiktok.username
+    current_username = username or config.tiktok.username
     if current_username:
         console.print(f"[dim]Current TikTok username: @{current_username}[/dim]")
-        if not _confirm(f"Keep using @{current_username}?", default=True):
+        if not _confirm(f"Keep using @{current_username}?", default=True,
+                        interactive=interactive):
             current_username = ""
 
     if not current_username:
-        username = console.input("[cyan]TikTok username to watch (without @): [/cyan]").strip()
-        if username.startswith("@"):
-            username = username[1:]
-        if not username:
+        current_username = _prompt_text(
+            "TikTok username to watch (without @): ", interactive=interactive
+        )
+        if current_username.startswith("@"):
+            current_username = current_username[1:]
+        if not current_username:
             console.print("[red]❌ Username required.[/red]")
             return False
-        current_username = username
 
     # Enable browser cookies
-    if _confirm("Enable browser cookies for HD quality? (recommended)", default=True):
+    if _confirm("Enable browser cookies for HD quality? (recommended)", default=True,
+                interactive=interactive):
         config.tiktok.cookies_from_browser = True
         console.print("[dim]Will auto-extract cookies from your browser (Chrome, Safari, Firefox, etc.)[/dim]")
 
@@ -1156,35 +1266,43 @@ def connect_tiktok(config: XPSTConfig) -> bool:
 # Threads (Meta Threads API — long-lived access token)
 # ──────────────────────────────────────────────
 
-def connect_threads(config: XPSTConfig) -> bool:
+def connect_threads(
+    config: XPSTConfig,
+    user_id: str = "",
+    access_token: str = "",
+    interactive: bool = True,
+) -> bool:
     """
     Connect Threads via the Meta Threads API.
 
     Flow:
     1. Prompt for the Threads user ID and a long-lived access token
+       (or accept them as overrides in agent mode)
     2. Store credentials in config + encrypted credential store
     """
     console.print(Panel("[bold]Threads Connection[/bold]", style="white"))
-    console.print(
-        "[dim]Threads uses the Meta Threads API. You need a long-lived access "
-        "token and your numeric Threads user ID.[/dim]\n"
+
+    if not (user_id and access_token):
+        console.print(
+            "[dim]Threads uses the Meta Threads API. You need a long-lived access "
+            "token and your numeric Threads user ID.[/dim]\n"
+        )
+        console.print("[bold]Quick setup:[/bold]")
+        console.print("  1. Go to: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
+        console.print("  2. Create or select an app and add the 'Threads API' use case")
+        console.print("  3. Generate a long-lived access token")
+        console.print("  4. Get your Threads user ID from the Graph API Explorer\n")
+
+    threads_user_id = _prompt_text(
+        "Threads user ID (numbers): ", override=user_id, interactive=interactive
     )
-    console.print("[bold]Quick setup:[/bold]")
-    console.print("  1. Go to: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
-    console.print("  2. Create or select an app and add the 'Threads API' use case")
-    console.print("  3. Generate a long-lived access token")
-    console.print("  4. Get your Threads user ID from the Graph API Explorer\n")
-
-    if _confirm("Open Meta Developer console in browser?", default=True):
-        import webbrowser
-        webbrowser.open("https://developers.facebook.com/apps")
-
-    threads_user_id = console.input("[cyan]Threads user ID (numbers): [/cyan]").strip()
     if not threads_user_id:
         console.print("[red]❌ Threads user ID required.[/red]")
         return False
 
-    access_token = _input_secret("Long-lived access token: ")
+    access_token = _input_secret(
+        "Long-lived access token: ", override=access_token, interactive=interactive
+    )
     if not access_token:
         console.print("[red]❌ Access token required.[/red]")
         return False
@@ -1208,38 +1326,60 @@ def connect_threads(config: XPSTConfig) -> bool:
 # Messenger (static Page Access Token)
 # ──────────────────────────────────────────────
 
-def connect_messenger(config: XPSTConfig) -> bool:
+def connect_messenger(
+    config: XPSTConfig,
+    page_token: str = "",
+    app_secret: str = "",
+    verify_token: str = "",
+    page_id: str = "",
+    app_id: str = "",
+    interactive: bool = True,
+) -> bool:
     """Connect Messenger via a static Page Access Token (no refresh flow).
 
     Flow:
     1. Prompt for the Page Access Token (+ optional App Secret / verify token)
+       — or accept them as overrides in agent mode
     2. Enable the account and persist credentials in the encrypted store
     """
     console.print(Panel("[bold]Messenger Connection[/bold]", style="blue"))
-    console.print(
-        "[dim]Messenger uses a static Page Access Token (long-lived) plus an App "
-        "Secret for webhook signature verification. Both are stored encrypted in "
-        "the CredentialStore.[/dim]\n"
+
+    if not page_token:
+        console.print(
+            "[dim]Messenger uses a static Page Access Token (long-lived) plus an App "
+            "Secret for webhook signature verification. Both are stored encrypted in "
+            "the CredentialStore.[/dim]\n"
+        )
+        console.print("[bold]Quick setup:[/bold]")
+        console.print("  1. Go to: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
+        console.print("  2. Select your app → Messenger → Settings → generate a Page Access Token")
+        console.print("  3. Copy your App ID + App Secret from App → Settings → Basic")
+        console.print("  4. Pick a webhook verify token (any string) and set it in the webhook config\n")
+
+    page_token = _input_secret(
+        "Page Access Token (starts EAAG...): ",
+        override=page_token, interactive=interactive,
     )
-    console.print("[bold]Quick setup:[/bold]")
-    console.print("  1. Go to: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
-    console.print("  2. Select your app → Messenger → Settings → generate a Page Access Token")
-    console.print("  3. Copy your App ID + App Secret from App → Settings → Basic")
-    console.print("  4. Pick a webhook verify token (any string) and set it in the webhook config\n")
-
-    if _confirm("Open Meta Developer console in browser?", default=True):
-        import webbrowser
-        webbrowser.open("https://developers.facebook.com/apps")
-
-    page_token = _input_secret("Page Access Token (starts EAAG...): ")
     if not page_token:
         console.print("[red]❌ Page Access Token required.[/red]")
         return False
 
-    app_secret = _input_secret("App Secret (optional, for webhook signatures): ")
-    verify_token = console.input("[cyan]Webhook verify token (any string, optional): [/cyan]").strip()
-    page_id = console.input("[cyan]Page ID (numeric, optional): [/cyan]").strip()
-    app_id = console.input("[cyan]App ID (numeric, optional): [/cyan]").strip()
+    app_secret = _input_secret(
+        "App Secret (optional, for webhook signatures): ",
+        override=app_secret, interactive=interactive, optional=True,
+    )
+    verify_token = _prompt_text(
+        "Webhook verify token (any string, optional): ",
+        override=verify_token, interactive=interactive, optional=True,
+    )
+    page_id = _prompt_text(
+        "Page ID (numeric, optional): ",
+        override=page_id, interactive=interactive, optional=True,
+    )
+    app_id = _prompt_text(
+        "App ID (numeric, optional): ",
+        override=app_id, interactive=interactive, optional=True,
+    )
 
     config.messenger.enabled = True
     config.messenger.page_access_token = page_token
@@ -1273,9 +1413,90 @@ def connect_messenger(config: XPSTConfig) -> bool:
 # Test connections
 # ──────────────────────────────────────────────
 
-async def test_connections(config: XPSTConfig) -> dict[str, bool]:
+def _run_coro(coro):
+    """Run *coro* to completion from sync code.
+
+    Uses ``asyncio.run`` when no event loop is running, or schedules on the
+    current loop (``run_until_complete``) when called from within one — e.g.
+    tests that drive a sync function from inside their own event loop.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    return asyncio.get_event_loop().run_until_complete(coro)
+
+
+def _test_youtube(config: XPSTConfig) -> bool:
+    """Verify YouTube auth via SessionManager's health check.
+
+    Token load/refresh and the 0600 write-back live in SessionManager
+    (the single source of truth the engine uses at runtime) — the
+    connect wizard no longer re-implements any of that (AUDIT A).
+    """
+    sm = SessionManager(config.config_dir)
+    result = _run_coro(sm.check_youtube_health(
+        config.youtube.client_secrets, config.youtube.token_file
+    ))
+    return result["status"] == "ok"
+
+
+def _test_instagram(config: XPSTConfig) -> bool:
+    """Verify Instagram auth (Graph API or instagrapi session).
+
+    Graph API mode: live token check (the only implementation of the
+    Meta Graph verification, shared with SessionManager).
+    Session mode: session presence via SessionManager.
+    """
+    if config.instagram.auth_mode == "graph_api":
+        result = _run_coro(
+            SessionManager(config.config_dir).check_instagram_health(
+                config.instagram.session_file, config
+            )
+        )
+        return result["status"] == "ok"
+
+    try:
+        _run_coro(
+            SessionManager(config.config_dir).get_instagram_client(
+                config.instagram.session_file
+            )
+        )
+        return True
+    except Exception as e:
+        logger.debug("Instagram session check failed: %s", e)
+        return False
+
+
+def _test_x(config: XPSTConfig) -> bool:
+    """Verify X auth via SessionManager's cookie load + user check.
+
+    Returns True when cookies load (even if the session is stale — the
+    user can re-run ``xpst connect x``); False when no cookies exist at
+    all or the client cannot be constructed.
+    """
+    sm = SessionManager(config.config_dir)
+    if not (sm.credentials.retrieve_json("x_cookies")
+            or Path(config.x.cookies_file).expanduser().exists()):
+        return False
+    try:
+        _run_coro(sm.get_x_client(config.x.cookies_file,
+                                  config.x.username, config.x.password))
+        return True
+    except Exception as e:
+        logger.debug("X cookie check failed: %s", e)
+        # Cookies present but stale/expired — session files survive for
+        # a while and are re-usable via ``xpst connect x``.
+        return True
+
+
+def test_connections(config: XPSTConfig) -> dict[str, bool]:
     """
     Test all configured platform connections.
+
+    Platform credential/auth logic lives in SessionManager (and, where a
+    live API check is needed, the platform uploader's health check) so the
+    connect wizard never re-implements auth handling.
 
     Returns dict of platform_name -> success_bool
     """
@@ -1285,74 +1506,34 @@ async def test_connections(config: XPSTConfig) -> dict[str, bool]:
 
     # YouTube
     if config.youtube.enabled:
-        try:
-            token_file = Path(config.youtube.token_file).expanduser()
-            if not token_file.exists():
-                console.print("  ⚠️  YouTube: No token found")
-                results["youtube"] = False
-            else:
-                from google.auth.transport.requests import Request
-                from google.oauth2.credentials import Credentials
-                from googleapiclient.discovery import build
-
-                creds = Credentials.from_authorized_user_file(str(token_file))
-                if creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                    # Save refreshed token with owner-only perms (see SECURITY.md)
-                    write_text_0600(token_file, creds.to_json())
-
-                service = build("youtube", "v3", credentials=creds)
-                response = service.channels().list(part="snippet", mine=True).execute()
-                channels = response.get("items", [])
-                if channels:
-                    name = channels[0]["snippet"]["title"]
-                    console.print(f"  ✅ YouTube: {name}")
-                    results["youtube"] = True
-                else:
-                    console.print("  ⚠️  YouTube: No channel found")
-                    results["youtube"] = False
-        except Exception as e:
-            console.print(f"  ❌ YouTube: {str(e)[:80]}")
+        token_file = Path(config.youtube.token_file).expanduser()
+        if not token_file.exists() and not _has_stored_credential(
+            config.config_dir, "youtube_token"
+        ):
+            console.print("  ⚠️  YouTube: No token found")
             results["youtube"] = False
+        else:
+            try:
+                ok = _test_youtube(config)
+                if ok:
+                    console.print("  ✅ YouTube: connected")
+                else:
+                    console.print("  ❌ YouTube: auth check failed")
+                results["youtube"] = ok
+            except Exception as e:
+                console.print(f"  ❌ YouTube: {str(e)[:80]}")
+                results["youtube"] = False
 
     # Instagram — supports both Graph API and instagrapi session
     if config.instagram.enabled:
         try:
-            if config.instagram.auth_mode == "graph_api":
-                token = config.instagram.graph_access_token
-                ig_user_id = config.instagram.graph_ig_user_id
-                if not token or not ig_user_id:
-                    # Try encrypted store
-                    cred_store = CredentialStore(config.config_dir)
-                    token = cred_store.retrieve("instagram_graph_token") or ""
-                    ig_user_id = cred_store.retrieve("instagram_graph_user_id") or ""
-                if not token or not ig_user_id:
-                    console.print("  ⚠️  Instagram: No Graph API token configured")
-                    results["instagram"] = False
-                else:
-                    import httpx
-                    r = httpx.get(
-                        f"https://graph.facebook.com/v21.0/{ig_user_id}",
-                        params={"fields": "username", "access_token": token},
-                        timeout=10,
-                    )
-                    if r.status_code == 200:
-                        console.print(f"  ✅ Instagram: @{r.json().get('username', '?')} (Graph API)")
-                        results["instagram"] = True
-                    else:
-                        console.print(f"  ❌ Instagram: Token invalid ({r.status_code})")
-                        results["instagram"] = False
+            ok = _test_instagram(config)
+            label = "Graph API" if config.instagram.auth_mode == "graph_api" else "session"
+            if ok:
+                console.print(f"  ✅ Instagram: connected ({label})")
             else:
-                # Session mode — check encrypted store first, then file
-                cred_store = CredentialStore(config.config_dir)
-                stored = cred_store.retrieve_json("instagram_session")
-                session_file = Path(config.instagram.session_file).expanduser()
-                if not stored and not session_file.exists():
-                    console.print("  ⚠️  Instagram: No session found")
-                    results["instagram"] = False
-                else:
-                    console.print("  ✅ Instagram: Session file present (instagrapi mode)")
-                    results["instagram"] = True
+                console.print(f"  ⚠️  Instagram: not configured ({label})")
+            results["instagram"] = ok
         except Exception as e:
             console.print(f"  ❌ Instagram: {str(e)[:80]}")
             results["instagram"] = False
@@ -1360,28 +1541,12 @@ async def test_connections(config: XPSTConfig) -> dict[str, bool]:
     # X/Twitter — check encrypted store first, then file
     if config.x.enabled:
         try:
-            cred_store = CredentialStore(config.config_dir)
-            stored_cookies = cred_store.retrieve_json("x_cookies")
-            cookies_file = Path(config.x.cookies_file).expanduser()
-            if not stored_cookies and not cookies_file.exists():
-                console.print("  ⚠️  X/Twitter: No cookies found")
-                results["x"] = False
+            ok = _test_x(config)
+            if ok:
+                console.print("  ✅ X/Twitter: cookies present")
             else:
-                # Try actual verification
-                import twikit
-                client = twikit.Client("en-US")
-                if stored_cookies:
-                    import json as _json
-                    client.load_cookies(_json.dumps(stored_cookies))
-                else:
-                    client.load_cookies(str(cookies_file))
-                try:
-                    user = await client.user()
-                    console.print(f"  ✅ X/Twitter: @{user.screen_name}")
-                    results["x"] = True
-                except Exception:
-                    console.print("  ⚠️  X/Twitter: Cookies present but may be expired")
-                    results["x"] = True  # Mark as present, just expired
+                console.print("  ⚠️  X/Twitter: No cookies found")
+            results["x"] = ok
         except Exception as e:
             console.print(f"  ❌ X/Twitter: {str(e)[:80]}")
             results["x"] = False
@@ -1402,23 +1567,56 @@ async def test_connections(config: XPSTConfig) -> dict[str, bool]:
     return results
 
 
+def _has_stored_credential(config_dir: str, key: str) -> bool:
+    """True when the encrypted CredentialStore holds *key*."""
+    try:
+        return bool(CredentialStore(config_dir).retrieve(key))
+    except Exception:
+        return False
+
+
 # ──────────────────────────────────────────────
 # Main connect wizard
 # ──────────────────────────────────────────────
 
-def run_connect(platforms: list[str] | None = None, test_only: bool = False) -> bool:
+_CONNECTORS = {
+    "tiktok": connect_tiktok,
+    "instagram": connect_instagram,
+    "x": connect_x,
+    "threads": connect_threads,
+    "messenger": connect_messenger,
+}
+
+
+def run_connect(
+    platforms: list[str] | None = None,
+    test_only: bool = False,
+    interactive: bool = True,
+    credentials: dict | None = None,
+    config: XPSTConfig | None = None,
+) -> bool:
     """
     Run the connection wizard.
 
     Args:
         platforms: List of platforms to connect (None = all)
         test_only: If True, only test existing connections
+        interactive: False for agents — no prompts; required values come
+            from *credentials* and missing ones are errors, not hangs.
+        credentials: Agent-supplied values keyed by platform name, e.g.
+            ``{"x": {"username": ..., "email": ..., "password": ...},
+            "threads": {"user_id": ..., "access_token": ...}}``.
+        config: Loaded XPSTConfig to operate on. When omitted, the default
+            config is loaded. Callers that resolve the config path (``-c``/
+            env) must pass their instance so the wizard saves to the same
+            config dir instead of re-loading ``~/.xpst/config.yaml``.
 
     Returns:
         True if all selected platforms connected successfully
     """
-    config = XPSTConfig.load()
+    config = config if config is not None else XPSTConfig.load()
     _get_creds_dir(config)
+    credentials = credentials or {}
 
     console.print()
     console.print(Panel.fit(
@@ -1430,7 +1628,7 @@ def run_connect(platforms: list[str] | None = None, test_only: bool = False) -> 
     console.print()
 
     if test_only:
-        results = asyncio.run(test_connections(config))
+        results = test_connections(config)
         # Filter results to requested platforms
         if platforms:
             results = {p: ok for p, ok in results.items() if p in platforms}
@@ -1462,13 +1660,17 @@ def run_connect(platforms: list[str] | None = None, test_only: bool = False) -> 
     }
 
     for platform in target_platforms:
-        connector = platform_connectors.get(platform)
-        if not connector:
-            console.print(f"[yellow]Unknown platform: {platform}[/yellow]")
-            continue
-
         try:
-            results[platform] = connector(config)
+            if platform == "youtube":
+                results[platform] = connect_youtube(config, interactive=interactive)
+            else:
+                connector = _CONNECTORS[platform]
+                args = dict(connector_args[platform])
+                args["interactive"] = interactive
+                results[platform] = connector(config, **args)
+        except NonInteractiveError as e:
+            console.print(f"[red]❌ {e}[/red]")
+            results[platform] = False
         except KeyboardInterrupt:
             console.print(f"\n[yellow]Skipped {platform}[/yellow]")
             results[platform] = False

@@ -13,6 +13,7 @@ Upload specs:
 - Category: 28 (Science & Technology) - configurable
 """
 
+import asyncio
 from pathlib import Path
 
 from xpst.config import XPSTConfig
@@ -264,8 +265,18 @@ class YouTubeUploader(PlatformUploader):
                 platform="youtube",
             )
 
-    def _execute_upload(self, request):
-        """Blocking upload execution for thread pool."""
+    async def _execute_upload(self, request):
+        """Run the blocking resumable upload in a thread pool.
+
+        ``request.next_chunk()`` blocks on network + disk I/O, so per the
+        project's async non-negotiable we never run it on the event loop.
+        """
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(None, self._upload_blocking, request)
+        return response
+
+    def _upload_blocking(self, request):
+        """Blocking resumable-upload loop (runs in a worker thread)."""
         response = None
         while response is None:
             status, response = request.next_chunk()
@@ -273,6 +284,11 @@ class YouTubeUploader(PlatformUploader):
                 progress = int(status.progress() * 100)
                 logger.info(f"YouTube upload: {progress}%")
         return response
+
+    async def _execute(self, request):
+        """Run a blocking Google API call in a thread pool (async-compliant)."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, request.execute)
 
     async def check_health(self) -> PlatformHealth:
         """Check YouTube authentication health.
@@ -285,7 +301,7 @@ class YouTubeUploader(PlatformUploader):
 
             # Try to list channels to verify auth works
             request = service.channels().list(part="snippet", mine=True)
-            response = request.execute()
+            response = await self._execute(request)
 
             channels = response.get("items", [])
             if not channels:
@@ -336,7 +352,7 @@ class YouTubeUploader(PlatformUploader):
         """Delete a video from YouTube"""
         try:
             service = await self._get_service()
-            service.videos().delete(id=post_id).execute()
+            await self._execute(service.videos().delete(id=post_id))
             logger.info(f"Deleted YouTube video: {post_id}")
             return True
         except Exception as e:
@@ -348,7 +364,7 @@ class YouTubeUploader(PlatformUploader):
         try:
             service = await self._get_service()
             request = service.channels().list(part="statistics", mine=True)
-            response = request.execute()
+            response = await self._execute(request)
             items = response.get("items", [])
             if items:
                 return int(items[0].get("statistics", {}).get("subscriberCount", 0))

@@ -342,9 +342,20 @@ def test_connectivity(config: XPSTConfig) -> bool:
     return all_ok
 
 
-def run_setup() -> XPSTConfig:
+def run_setup(
+    non_interactive: bool = False,
+    platforms: list[str] | None = None,
+    tiktok_username: str | None = None,
+) -> XPSTConfig:
     """
-    Run the full interactive setup wizard.
+    Run the setup wizard (interactive) or a non-interactive bootstrap.
+
+    Args:
+        non_interactive: Agent/CI mode — no prompts. Values come from the
+            other parameters; missing optional values are skipped, not hung on.
+        platforms: Platforms to enable (e.g. ``["youtube", "x"]``). In
+            non-interactive mode, ``None`` enables all three core platforms.
+        tiktok_username: TikTok source username (non-interactive mode).
 
     Returns:
         Configured XPSTConfig instance
@@ -353,14 +364,17 @@ def run_setup() -> XPSTConfig:
     console.print(Panel.fit(
         "[bold blue]xPST Setup Wizard[/bold blue]\n"
         "Enterprise-grade cross-posting for short-form video\n\n"
-        "[dim]This wizard will guide you through first-time configuration.[/dim]",
+        "[dim]This wizard will guide you through first-time configuration.[/dim]"
+        if not non_interactive else
+        "[bold blue]xPST Setup[/bold blue]\n"
+        "[dim]Non-interactive bootstrap — no prompts.[/dim]",
         border_style="blue",
     ))
     console.print()
 
     # Step 1: System requirements
     sys_ok = check_system_requirements()
-    if not sys_ok:
+    if not sys_ok and not non_interactive:
         console.print("[yellow]⚠️  Some requirements are missing. You can still continue.[/yellow]\n")
         if not _confirm("Continue anyway?", default=True):
             console.print("[red]Setup aborted. Please install missing requirements and try again.[/red]")
@@ -376,28 +390,58 @@ def run_setup() -> XPSTConfig:
     console.print()
 
     # Step 3: TikTok source
-    tiktok_username = prompt_tiktok_username()
+    if non_interactive:
+        tiktok_username = (tiktok_username or "").lstrip("@")
+        if tiktok_username:
+            console.print(f"  ✅ TikTok source: @{tiktok_username}")
+        else:
+            console.print("  ⚠️  TikTok source: no username supplied (run `xpst connect tiktok` later)")
+    else:
+        tiktok_username = prompt_tiktok_username()
 
     # Step 4: Platform selection
-    platforms = prompt_platform_enable()
+    if non_interactive:
+        requested = platforms or ["youtube", "x", "instagram"]
+        platforms_enabled = {p: (p in requested) for p in ("youtube", "x", "instagram")}
+        console.print("  ✅ Platforms enabled: " + ", ".join(
+            p for p, on in platforms_enabled.items() if on
+        ) + ("" if any(platforms_enabled.values()) else " (none)"))
+    else:
+        platforms_enabled = prompt_platform_enable()
 
-    # Step 5: Platform-specific setup
+    # Step 5: Platform-specific setup (interactive guidance only)
     setup_results = {}
-    if platforms.get("youtube"):
-        setup_results["youtube"] = prompt_youtube_setup(creds_dir)
-    if platforms.get("x"):
-        setup_results["x"] = prompt_x_setup(creds_dir)
-    if platforms.get("instagram"):
-        setup_results["instagram"] = prompt_instagram_setup(creds_dir)
+    if not non_interactive:
+        if platforms_enabled.get("youtube"):
+            setup_results["youtube"] = prompt_youtube_setup(creds_dir)
+        if platforms_enabled.get("x"):
+            setup_results["x"] = prompt_x_setup(creds_dir)
+        if platforms_enabled.get("instagram"):
+            setup_results["instagram"] = prompt_instagram_setup(creds_dir)
 
     # Step 6: Generate config
-    console.print(Panel("[bold]Generating Configuration[/bold]", style="green"))
+    if non_interactive:
+        console.print(Panel("[bold]Applying Configuration[/bold]", style="green"))
+    else:
+        console.print(Panel("[bold]Generating Configuration[/bold]", style="green"))
 
-    config = XPSTConfig()
+    # In non-interactive mode, merge into any existing config so we don't
+    # clobber credentials/settings an agent already has. Interactive first-run
+    # still writes a fresh config (existing behaviour).
+    existing = None
+    try:
+        if non_interactive:
+            config_file = config_dir / "config.yaml"
+            if config_file.exists():
+                existing = XPSTConfig.load()
+    except Exception:
+        existing = None
+
+    config = existing if existing is not None else XPSTConfig()
     config.tiktok.username = tiktok_username
-    config.youtube.enabled = platforms.get("youtube", False)
-    config.x.enabled = platforms.get("x", False)
-    config.instagram.enabled = platforms.get("instagram", False)
+    config.youtube.enabled = platforms_enabled.get("youtube", False)
+    config.x.enabled = platforms_enabled.get("x", False)
+    config.instagram.enabled = platforms_enabled.get("instagram", False)
     config.config_dir = str(config_dir)
 
     # Save config

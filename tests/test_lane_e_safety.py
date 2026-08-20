@@ -9,6 +9,11 @@ from click.testing import CliRunner
 
 from xpst.cli import main as cli
 
+# Repo root anchored to this test file (tests/ is one level below the root).
+# These tests read repo files by relative path; anchoring them here makes the
+# suite independent of pytest's cwd (avoids false failures when run off-root).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
 
 class TestUpdaterGuards:
     def test_updater_frozen_guard(self, monkeypatch):
@@ -61,7 +66,7 @@ class TestUpdaterGuards:
     def test_updater_no_unconstrained_blind_upgrade_path(self):
         """G45: every successful upgrade is followed by a smoke check in
         source — no blind 'pip install --upgrade and hope'."""
-        src = Path("src/xpst/updater.py").read_text(encoding="utf-8")
+        src = (_REPO_ROOT / "src/xpst/updater.py").read_text(encoding="utf-8")
         assert "_smoke_check" in src
         assert "sys.frozen" in src  # G44 probe (ISC-168)
 
@@ -71,7 +76,7 @@ class TestPins:
         """G48 probe (ISC-172): no unbounded data-coupled deps."""
         tomllib = pytest.importorskip("tomllib")  # stdlib 3.11+
 
-        with open("pyproject.toml", "rb") as f:
+        with open(_REPO_ROOT / "pyproject.toml", "rb") as f:
             data = tomllib.load(f)
         unbounded = [
             spec for spec in data["project"]["optional-dependencies"]["knowledge"]
@@ -81,13 +86,13 @@ class TestPins:
 
     def test_stale_authlib_dropped_from_notices(self):
         # standalone row only — google-auth-oauthlib legitimately remains
-        assert "| authlib |" not in Path("NOTICES.md").read_text()
+        assert "| authlib |" not in (_REPO_ROOT / "NOTICES.md").read_text()
 
 
 class TestDeadCode:
     def test_usecases_layer_removed(self):
         """G10 probe (ISC-74): the dead ~600-line usecases layer is gone."""
-        assert not Path("src/xpst/usecases").exists()
+        assert not (_REPO_ROOT / "src/xpst/usecases").exists()
         from xpst import engine
         src = Path(engine.__file__).read_text()
         assert "usecases" not in src
