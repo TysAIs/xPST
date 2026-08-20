@@ -51,6 +51,12 @@ Acquire/release the pidfile lock that prevents concurrent instances.
 
 ## Use-Case Factory
 
+> **Deprecated:** the standalone use-case layer was replaced by the services
+> (`src/xpst/services/source_service.py` and `upload_service.py`) driven by
+> `CrossPostEngine` above. The methods below are historical and no longer
+> exist as a separate factory; they are folded into `engine.py`. See
+> `src/xpst/engine.py` and `src/xpst/services/`.
+
 ### `UseCaseFactory(deps: UseCaseDependencies)`
 
 Factory for creating use-case instances with shared dependencies.

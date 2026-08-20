@@ -176,6 +176,7 @@ pip install -e .
 
 | Extra | What it adds |
 |-------|-------------|
+| `cli` | (alias) Nothing extra — explicitly signals a thin CLI/core install |
 | `mcp` | MCP server (`xpst mcp`, `xpst-mcp`) |
 | `knowledge` | KB transcription/embeddings/LanceDB |
 | `dashboard` | Web dashboard (FastAPI + WebSocket) |
