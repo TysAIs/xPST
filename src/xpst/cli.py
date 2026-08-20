@@ -956,17 +956,28 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
             "stored_credentials": stored_keys,
             "platforms": {},
         }
+        # Source of truth must match both the TTY rendering below and the
+        # runtime (SessionManager/uploader): credentials live in the
+        # CredentialStore AND/OR the config-file paths (token/cookie/session
+        # files). Checking only the store reported authenticated:false for
+        # platforms whose (valid) credentials sit in the config-file paths,
+        # while the TTY view reported them healthy.
         yt_creds = cred_store.retrieve("youtube_token")
         x_creds = cred_store.retrieve_json("x_cookies")
         ig_creds = cred_store.retrieve_json("instagram_session")
         threads_creds = cred_store.retrieve("threads_access_token")
         messenger_creds = cred_store.retrieve("messenger_page_token")
+        yt_file_exists = Path(config.youtube.client_secrets).expanduser().exists()
+        x_file_exists = Path(config.x.cookies_file).expanduser().exists()
+        ig_file_exists = Path(config.instagram.session_file).expanduser().exists()
+        threads_token = bool(threads_creds or config.threads.graph_access_token)
+        messenger_token = bool(messenger_creds or config.messenger.page_access_token)
         for plat, creds in [
-            ("youtube", yt_creds),
-            ("x", x_creds),
-            ("instagram", ig_creds),
-            ("threads", threads_creds),
-            ("messenger", messenger_creds),
+            ("youtube", yt_creds or yt_file_exists),
+            ("x", x_creds or x_file_exists),
+            ("instagram", ig_creds or ig_file_exists),
+            ("threads", threads_token),
+            ("messenger", messenger_token),
         ]:
             remaining = quota_mgr.get_remaining(plat)
             data["platforms"][plat] = {
