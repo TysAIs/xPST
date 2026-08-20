@@ -19,6 +19,7 @@ X/Twitter:
 - Automatic re-login on cookie expiry
 """
 
+import asyncio
 import contextlib
 import json
 from pathlib import Path
@@ -295,11 +296,10 @@ class SessionManager:
         client = twikit.Client("en-US")
 
         try:
-            # Try cookie-based auth
-            if isinstance(stored_cookies, dict):
-                client.set_cookies(stored_cookies)
-            else:
-                client.load_cookies(str(cookies_path))
+            # Try cookie-based auth. The twikit cookie file written by the
+            # connect wizard and the uploader's direct path are a JSON list,
+            # so load the file directly (load_cookies handles the format).
+            client.load_cookies(str(cookies_path))
 
             # Verify cookies are valid
             try:
@@ -354,9 +354,10 @@ class SessionManager:
         try:
             service = await self.get_youtube_service(client_secrets_path, token_path)
 
-            # Try to list channels
+            # Try to list channels (blocking googleapiclient call → thread pool)
             request = service.channels().list(part="snippet", mine=True)
-            response = request.execute()
+            loop = asyncio.get_running_loop()
+            response = await loop.run_in_executor(None, request.execute)
 
             channels = response.get("items", [])
             if not channels:
@@ -365,8 +366,8 @@ class SessionManager:
             channel = channels[0]
             return {
                 "status": "ok",
-                "channel_name": channel["snippet"]["title"],
-                "channel_id": channel["id"],
+                "channel_name": channel.get("snippet", {}).get("title", "Unknown"),
+                "channel_id": channel.get("id", ""),
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}

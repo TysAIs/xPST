@@ -161,8 +161,13 @@ class TestTestConnectionsYouTubeRefresh:
         config.instagram.enabled = False
         config.x.enabled = False
 
+        # Client secrets must exist for the canonical SessionManager path
+        # (connect.test_connections delegates YouTube auth to it now).
+        secrets_path = Path(config.youtube.client_secrets)
+        secrets_path.parent.mkdir(parents=True, exist_ok=True)
+        secrets_path.write_text("{}")
+
         token_path = Path(config.youtube.token_file)
-        token_path.parent.mkdir(parents=True, exist_ok=True)
         # Pre-existing (deliberately loose) token file that will be refreshed.
         token_path.write_text('{"token": "old"}')
         if not sys.platform.startswith("win"):
@@ -182,7 +187,7 @@ class TestTestConnectionsYouTubeRefresh:
 
         fake_service = MagicMock()
         fake_service.channels().list().execute.return_value = {
-            "items": [{"snippet": {"title": "Test Channel"}}]
+            "items": [{"snippet": {"title": "Test Channel"}, "id": "UCtest"}]
         }
         fake_discovery = MagicMock()
         fake_discovery.build.return_value = fake_service
@@ -195,7 +200,7 @@ class TestTestConnectionsYouTubeRefresh:
                 "googleapiclient.discovery": fake_discovery,
             },
         ):
-            results = asyncio.run(connect.test_connections(config))
+            results = connect.test_connections(config)
 
         assert results["youtube"] is True
         fake_creds.refresh.assert_called_once()
@@ -224,7 +229,7 @@ class TestConnectInstagram:
         answers = iter(["n", "y", "tester"])
         def mock_input(*a, **k):
             return next(answers)
-        def mock_confirm(msg, default=True):
+        def mock_confirm(msg, default=True, interactive=True):
             # First confirm = "Use Graph API?" → "n" (no)
             # Second confirm = "Continue with instagrapi?" → "y" (yes)
             return next(answers).lower() in ("y", "yes")
