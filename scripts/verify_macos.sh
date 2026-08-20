@@ -26,7 +26,15 @@ fi
 "$VENV_DIR/bin/python" -m build
 
 "$VENV_DIR/bin/xpst" version --json
+# On a release runner no platform is authenticated, so `xpst health` exits 3
+# (EXIT_AUTH_FAILURE) while still emitting machine-readable JSON. Assert the
+# intended contract: exit 3 + valid JSON; any other exit means health broke.
+set +e
 "$VENV_DIR/bin/xpst" health --json
+HEALTH_RC=$?
+set -e
+[ "$HEALTH_RC" -eq 3 ] || { echo "xpst health exited $HEALTH_RC (expected 3 on unauthenticated runner)"; exit 1; }
+echo "CLI health smoke OK (exit 3, unauthenticated)"
 
 QT_QPA_PLATFORM=offscreen "$VENV_DIR/bin/python" scripts/verify_qml_pages.py
 
