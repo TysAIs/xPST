@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://www.python.org"><img alt="Python" src="https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green"></a>
-  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-1419%20passing-brightgreen"></a>
+  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-1455%20passing-brightgreen"></a>
   <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-7-blue"></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/os-Linux%20|%20macOS%20|%20Windows-lightgrey"></a>
   <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-23%20tools-orange"></a>
@@ -787,7 +787,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and [docs/a
 # Install with dev tooling
 uv pip install -e ".[full,dev]"
 
-# Run the test suite (1431 collected; 1419 passing / 12 skipped on Python 3.11)
+# Run the test suite (1455 passed / 12 skipped on Python 3.11)
 pytest
 
 # Lint and format
