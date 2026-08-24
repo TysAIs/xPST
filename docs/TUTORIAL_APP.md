@@ -30,7 +30,7 @@
 ### Install with Desktop Support
 
 ```bash
-pip install 'xpst[pyside6]'
+pip install 'xpst[desktop]'
 ```
 
 ### Launch the App

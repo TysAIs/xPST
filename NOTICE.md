@@ -38,7 +38,7 @@ xPST's dual MIT/Apache-2.0 license:
 
 These are installed only when explicitly requested (`pip install xpst[extra]`):
 
-### `pyside6` extra — Desktop GUI
+### `desktop` extra — Desktop GUI
 
 | Package | License | Notes |
 |---------|---------|-------|

@@ -1370,35 +1370,19 @@ def dashboard(ctx: click.Context, port: int, host: str, api_only: bool):
 @click.pass_context
 def app(ctx: click.Context, port: int | None, no_splash: bool):
     """Launch xPST as a native desktop app (PySide6)"""
-    config_path = ctx.obj.get("config_path")
-    config_dir = str(get_config_dir())
-    if config_path:
-        config_dir = str(Path(config_path).parent)
-    else:
-        try:
-            cfg = load_config(config_path)
-            config_dir = cfg.config_dir
-        except Exception as e:
-            logger.debug("Could not load config for desktop app: %s", e)
+    # PySide6 is an optional extra ('desktop' extra, ~983MB). Check for it
+    # before importing the launcher so a missing install prints a clear
+    # message instead of crashing with an ImportError/SystemExit traceback.
+    import importlib.util
 
-    # Try PySide6 native desktop app first, fall back to pywebview, then browser
-    try:
-        from xpst.desktop_app.main import main as pyside_main
-        console.print("[bold blue]Launching xPST desktop app…[/bold blue]")
-        sys.exit(pyside_main(no_splash=no_splash))
-    except ImportError:
-        console.print("[yellow]PySide6 not installed — trying pywebview fallback.[/yellow]")
-        console.print("[dim]Install with: pip install PySide6[/dim]\n")
-        try:
-            from xpst.desktop import launch_desktop_app
-            launch_desktop_app(config_dir=config_dir, port=port)
-        except ImportError:
-            console.print("[yellow]pywebview not installed — falling back to browser.[/yellow]")
-            from xpst.desktop import launch_browser_fallback
-            launch_browser_fallback(config_dir=config_dir, port=port or 8080)
-        except RuntimeError as e:
-            console.print(f"[red]{e}[/red]")
-            sys.exit(EXIT_PLATFORM_UNAVAILABLE)
+    if importlib.util.find_spec("PySide6") is None:
+        console.print("[yellow]Desktop app not installed. Run: pip install xpst\\[desktop][/yellow]")
+        sys.exit(EXIT_GENERAL)
+
+    from xpst.desktop_app.main import main as pyside_main
+
+    console.print("[bold blue]Launching xPST desktop app…[/bold blue]")
+    sys.exit(pyside_main(no_splash=no_splash))
 
 
 # ──────────────────────────────────────────────

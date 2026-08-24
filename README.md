@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://www.python.org"><img alt="Python" src="https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green"></a>
-  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-1455%20passing-brightgreen"></a>
+  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-1498%20passing-brightgreen"></a>
   <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-7-blue"></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/os-Linux%20|%20macOS%20|%20Windows-lightgrey"></a>
   <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-23%20tools-orange"></a>
@@ -178,12 +178,11 @@ pip install -e .
 |-------|-------------|
 | `mcp` | MCP server (`xpst mcp`, `xpst-mcp`) |
 | `knowledge` | KB transcription/embeddings/LanceDB |
-| `pyside6` | Native desktop GUI (PySide6/QML) |
 | `dashboard` | Web dashboard (FastAPI + WebSocket) |
-| `desktop` | pywebview fallback for desktop |
+| `desktop` | Native desktop GUI (PySide6/QML) + pywebview fallback |
 | `windows` | Windows-specific pywin32/winshell |
 | `dev` | pytest, ruff, mypy, import-linter |
-| `full` | Everything (`mcp,desktop,pyside6,dashboard,windows,knowledge`) |
+| `full` | Everything (`mcp,desktop,dashboard,windows,knowledge`) |
 
 ### PyPI (v1.0.0 and later)
 
@@ -414,7 +413,7 @@ xpst config set monitoring.dashboard_password mypassword
 ```
 
 For the full graphical experience use the native desktop app (`xpst app`,
-requires the `pyside6` extra) or the NiceGUI dashboard (requires the
+requires the `desktop` extra) or the NiceGUI dashboard (requires the
 `dashboard` extra). Endpoints, auth, and response shapes are documented in
 [docs/DASHBOARD.md](docs/DASHBOARD.md).
 
@@ -550,6 +549,8 @@ Instagram defaults to the official **Meta Graph API** (`auth_mode: graph_api`) â
 4. Get your IG user ID and generate a **long-lived access token** (60 days, refreshable)
 5. Run `xpst connect instagram` and provide the token and IG user ID
 
+`xpst connect instagram` now supports the official OAuth flow (ban-safe).
+
 ```yaml
 accounts:
   instagram:
@@ -578,6 +579,8 @@ mv cookies.json ~/.xpst/credentials/x_cookies.json
 
 Then run `xpst auth x`. An official **API v2** mode (`auth_mode: api_v2`) is also available if you have developer credentials. See [docs/setup-x-twitter.md](docs/setup-x-twitter.md).
 
+`xpst connect x` now supports the official OAuth flow (ban-safe).
+
 ### TikTok (source + destination)
 
 TikTok works both ways in xPST.
@@ -601,6 +604,8 @@ accounts:
 ```
 
 See [docs/setup-tiktok.md](docs/setup-tiktok.md) and TikTok's [Direct Post docs](https://developers.tiktok.com/doc/content-posting-api-direct-post) for app registration and obtaining a user access token.
+
+`xpst connect tiktok` now supports the official OAuth flow (ban-safe).
 
 ### Threads (Meta Threads API â€” official)
 
@@ -636,6 +641,8 @@ accounts:
     access_token: "YOUR_LINKEDIN_ACCESS_TOKEN"
     linkedin_user_id: "YOUR_LINKEDIN_USER_ID"
 ```
+
+`xpst connect linkedin` now supports the official OAuth flow (ban-safe).
 
 Limits: ~150 posts/day, recommended MP4 (H.264) up to ~200 MB. See [docs/setup-linkedin.md](docs/setup-linkedin.md).
 
@@ -787,7 +794,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and [docs/a
 # Install with dev tooling
 uv pip install -e ".[full,dev]"
 
-# Run the test suite (1455 passed / 12 skipped on Python 3.11)
+# Run the test suite (1498 passed / 12 skipped on Python 3.11)
 pytest
 
 # Lint and format

@@ -1074,7 +1074,12 @@ xpst app
 xpst app --no-splash     # skip the splash screen
 ```
 
-If PySide6 is not installed, falls back to pywebview, then to a browser.
+If PySide6 is not installed, `xpst app` prints an install hint and exits
+gracefully:
+
+```bash
+Desktop app not installed. Run: pip install xpst[desktop]
+```
 
 See [TUTORIAL_APP.md](TUTORIAL_APP.md) for the full desktop app walkthrough.
 
