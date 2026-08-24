@@ -451,6 +451,14 @@ def connect_x(config: XPSTConfig) -> bool:
         console.print("[red]❌ Password required.[/red]")
         return False
 
+    # Optional 2FA support. twikit.Client.login() accepts totp_secret;
+    # xPST should forward it so accounts with 2FA don't get dead-ended.
+    totp_secret = None
+    if _confirm("Does your X account use 2FA? (authenticator app code/secret)", default=False):
+        totp_secret = _input_secret("X 2FA secret (or code, no spaces): ")
+    elif input("2FA secret empty — skip? [y/N] ").strip().lower().startswith("y"):
+        totp_secret = ""
+
     console.print("\n[bold]Connecting to X/Twitter...[/bold]")
 
     try:
@@ -465,6 +473,7 @@ def connect_x(config: XPSTConfig) -> bool:
                 auth_info_1=username,
                 auth_info_2=email,
                 password=password,
+                totp_secret=totp_secret or None,
                 cookies_file=cookies_path_str,
             )
 
