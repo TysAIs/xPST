@@ -4,7 +4,7 @@ Streamlined account connection wizard for xPST.
 Aims to connect all 4 platforms in under 5 minutes by:
 - YouTube: Auto-opening browser for OAuth via InstalledAppFlow.run_local_server()
 - Instagram: Username/password login via instagrapi (with 2FA support)
-- X/Twitter: Username/email/password login via twikit (no cookie export needed)
+- X/Twitter: Official X API v2 (ban-safe, free 17 posts/day) or twikit cookies
 - TikTok: Auto-extract browser cookies via yt-dlp --cookies-from-browser
 
 Usage:
@@ -22,7 +22,9 @@ import json
 import stat
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlencode
 
+import httpx
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -228,53 +230,198 @@ def connect_instagram(config: XPSTConfig) -> bool:
         return _connect_instagram_session(config)
 
 
+GRAPH_API_BASE = "https://graph.facebook.com/v21.0"
+GRAPH_EXPLORER_URL = "https://developers.facebook.com/tools/explorer/"
+
+
+def _graph_api_verify_url(ig_user_id: str, access_token: str) -> str:
+    """Build the Graph API URL used to verify a token against an IG account.
+
+    Args:
+        ig_user_id: Numeric Instagram business/creator account ID.
+        access_token: Meta Graph API access token.
+
+    Returns:
+        Full ``https://graph.facebook.com/v21.0/<ig_user_id>?...`` verify URL.
+    """
+    params = urlencode(
+        {
+            "fields": "username,followers_count,media_count",
+            "access_token": access_token,
+        }
+    )
+    return f"{GRAPH_API_BASE}/{ig_user_id}?{params}"
+
+
+def _verify_instagram_graph_token(ig_user_id: str, access_token: str, timeout: float = 15.0) -> dict | None:
+    """Verify a Graph API token against an IG account.
+
+    Args:
+        ig_user_id: Numeric Instagram business/creator account ID.
+        access_token: Meta Graph API access token.
+        timeout: HTTP timeout in seconds.
+
+    Returns:
+        Parsed JSON payload on HTTP 200, or None on any failure.
+    """
+    try:
+        r = httpx.get(_graph_api_verify_url(ig_user_id, access_token), timeout=timeout)
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+        return None
+
+
+def _fetch_ig_business_accounts(access_token: str, timeout: float = 15.0) -> list[dict]:
+    """Enumerate the IG business accounts linked to a token's Facebook Pages.
+
+    Uses ``/me/accounts`` and collects each Page's ``instagram_business_account``.
+
+    Returns:
+        List of dicts with keys ``id``, ``username``, ``followers_count``,
+        ``media_count``, ``page_name``, ``page_id``.
+    """
+    try:
+        r = httpx.get(
+            f"{GRAPH_API_BASE}/me/accounts",
+            params={
+                "fields": "id,name,instagram_business_account{id,username,followers_count,media_count}",
+                "access_token": access_token,
+            },
+            timeout=timeout,
+        )
+        if r.status_code != 200:
+            return []
+        accounts = []
+        for page in r.json().get("data", []):
+            ig = page.get("instagram_business_account") or {}
+            if ig.get("id"):
+                accounts.append(
+                    {
+                        "id": str(ig["id"]),
+                        "username": ig.get("username", ""),
+                        "followers_count": int(ig.get("followers_count") or 0),
+                        "media_count": int(ig.get("media_count") or 0),
+                        "page_name": page.get("name", ""),
+                        "page_id": page.get("id", ""),
+                    }
+                )
+        return accounts
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+        return []
+
+
+def _detect_ig_user_id(access_token: str, timeout: float = 15.0) -> tuple[str, str, int, int]:
+    """Auto-detect the IG business account bound to a token.
+
+    First tries ``/me`` — a token generated in the Graph API Explorer with the
+    IG business account selected returns the account's ``id``/``username``
+    directly. Otherwise enumerates ``/me/accounts`` for a Page-linked IG
+    business account (prompts if several are found).
+
+    Returns:
+        ``(ig_user_id, username, followers_count, media_count)`` — empty string
+        and zeros when nothing could be detected.
+    """
+    try:
+        r = httpx.get(
+            f"{GRAPH_API_BASE}/me",
+            params={"fields": "id,username,followers_count,media_count", "access_token": access_token},
+            timeout=timeout,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            if data.get("id") and data.get("username"):
+                return (
+                    str(data["id"]),
+                    data.get("username", ""),
+                    int(data.get("followers_count") or 0),
+                    int(data.get("media_count") or 0),
+                )
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+
+    accounts = _fetch_ig_business_accounts(access_token, timeout=timeout)
+    if len(accounts) == 1:
+        acc = accounts[0]
+        return (acc["id"], acc["username"], acc["followers_count"], acc["media_count"])
+    if len(accounts) > 1:
+        console.print("[bold]Multiple IG business accounts found:[/bold]")
+        for i, acc in enumerate(accounts, 1):
+            console.print(
+                f"  [cyan]{i}.[/cyan] @{acc['username'] or '?'} "
+                f"({acc['followers_count'] or '?'} followers) — Page: {acc['page_name'] or '?'}"
+            )
+        choice = console.input("[cyan]Which account? (number): [/cyan]").strip()
+        if choice.isdigit() and 1 <= int(choice) <= len(accounts):
+            acc = accounts[int(choice) - 1]
+            return (acc["id"], acc["username"], acc["followers_count"], acc["media_count"])
+
+    return ("", "", 0, 0)
+
+
 def _connect_instagram_graph_api(config: XPSTConfig) -> bool:
-    """Connect via official Meta Graph API."""
+    """Connect via official Meta Graph API (OEM, self-verifying).
+
+    Flow:
+    1. Offer the Graph API Explorer in the browser to generate a token.
+    2. Ask for the long-lived access token.
+    3. Auto-detect the IG user ID via /me and /me/accounts (prompt fallback).
+    4. Verify the token against the detected account.
+    5. Save token + user ID to config and the CredentialStore.
+    """
     console.print("\n[bold]Meta Graph API Setup[/bold]")
-    console.print("[dim]You need a long-lived access token and your IG user ID.[/dim]\n")
+    console.print("[dim]You need a long-lived access token; xPST auto-detects your IG user ID.[/dim]\n")
 
     console.print("[bold]Quick setup:[/bold]")
-    console.print("  1. Go to: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
+    console.print("  1. Open: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
     console.print("  2. Create or select a Meta app")
-    console.print("  3. Add 'Instagram Graph API' product")
-    console.print("  4. Get your IG user ID from the Graph API Explorer")
-    console.print("  5. Generate a long-lived access token\n")
+    console.print("  3. Add the 'Instagram Graph API' product")
+    console.print("  4. In the Graph API Explorer, pick your IG business account and generate a token")
+    console.print("  5. Paste the token below — xPST verifies it and finds your IG user ID automatically\n")
 
     if _confirm("Open Meta Developer console in browser?", default=True):
         import webbrowser
         webbrowser.open("https://developers.facebook.com/apps")
 
-    ig_user_id = console.input("[cyan]Instagram user ID (numbers): [/cyan]").strip()
-    if not ig_user_id:
-        console.print("[red]❌ IG user ID required.[/red]")
-        return False
+    if _confirm("Generate token in browser (Graph API Explorer)?", default=True):
+        import webbrowser
+        webbrowser.open(GRAPH_EXPLORER_URL)
 
     access_token = _input_secret("Long-lived access token: ")
     if not access_token:
         console.print("[red]❌ Access token required.[/red]")
         return False
 
-    # Verify the token works
-    console.print("\n[bold]Verifying token...[/bold]")
-    try:
-        import httpx
-        r = httpx.get(
-            f"https://graph.facebook.com/v21.0/{ig_user_id}",
-            params={"fields": "username,followers_count,media_count", "access_token": access_token},
-            timeout=15,
+    # Auto-detect the IG user ID (prompt fallback stays)
+    console.print("\n[bold]Auto-detecting your IG business account...[/bold]")
+    ig_user_id, username, followers, media_count = _detect_ig_user_id(access_token)
+    if not ig_user_id:
+        console.print("[yellow]⚠️  Could not auto-detect the IG business account from this token.[/yellow]")
+        console.print(
+            "[dim]Make sure the token has instagram_basic scope and the account is a "
+            "Business/Creator account linked to a Facebook Page.[/dim]"
         )
-        if r.status_code == 200:
-            data = r.json()
-            console.print(f"[green]✅ Connected as @{data.get('username', '?')} "
-                         f"({data.get('followers_count', '?')} followers, "
-                         f"{data.get('media_count', '?')} posts)[/green]")
-        else:
-            console.print(f"[red]❌ Token verification failed: {r.status_code} {r.text[:200]}[/red]")
-            console.print("[dim]Make sure your token has instagram_basic + instagram_content_publish scopes.[/dim]")
+        ig_user_id = console.input("[cyan]Enter your IG user ID manually (numbers): [/cyan]").strip()
+        if not ig_user_id:
+            console.print("[red]❌ IG user ID required.[/red]")
             return False
-    except Exception as e:
-        console.print(f"[red]❌ Verification error: {e}[/red]")
+
+    # Verify the token works against the detected/entered account
+    console.print("\n[bold]Verifying token...[/bold]")
+    data = _verify_instagram_graph_token(ig_user_id, access_token)
+    if data is None:
+        console.print("[red]❌ Token verification failed.[/red]")
+        console.print("[dim]Make sure your token has instagram_basic + instagram_content_publish scopes.[/dim]")
         return False
+    console.print(
+        f"[green]✅ Connected as @{data.get('username') or username or '?'} "
+        f"({data.get('followers_count', followers or '?')} followers, "
+        f"{data.get('media_count', media_count or '?')} posts)[/green]"
+    )
 
     # Save to config
     config.instagram.auth_mode = "graph_api"
@@ -415,12 +562,35 @@ def _connect_instagram_session(config: XPSTConfig) -> bool:
 
 
 # ──────────────────────────────────────────────
-# X/Twitter (username/email/password via twikit)
+# X/Twitter (official X API v2 or twikit cookies)
 # ──────────────────────────────────────────────
 
 def connect_x(config: XPSTConfig) -> bool:
     """
-    Connect X/Twitter using username/email/password via twikit.
+    Connect X/Twitter via the official X API v2 (recommended) or twikit cookies.
+
+    Flow:
+    1. Ask which auth method: official X API v2 (ban-safe) or cookies (twikit)
+    2. Option 1 (default): walk user through creating an X Developer app,
+       prompt for API Key/Secret + Access Token/Secret or Bearer Token, verify
+       via https://api.x.com/2/users/me, save config + CredentialStore
+    3. Option 2: username/email/password login via twikit.Client.login()
+    """
+    console.print(Panel("[bold]X/Twitter Connection[/bold]", style="blue"))
+
+    choice = console.input(
+        "[cyan]Which auth method? [1] Official X API v2 (ban-safe, free 17 posts/day) "
+        "[2] Cookies (twikit, unofficial) [/cyan]"
+    ).strip()
+
+    if choice == "2":
+        return _connect_x_cookies(config)
+    return _connect_x_api_v2(config)
+
+
+def _connect_x_cookies(config: XPSTConfig) -> bool:
+    """
+    Connect X/Twitter using username/email/password via twikit (unofficial).
 
     Flow:
     1. Prompt for username, email, and password
@@ -428,7 +598,6 @@ def connect_x(config: XPSTConfig) -> bool:
     3. Cookies are auto-saved
     4. Test connection
     """
-    console.print(Panel("[bold]X/Twitter Connection[/bold]", style="blue"))
     creds_dir = _get_creds_dir(config)
     cookies_path = creds_dir / "x_cookies.json"
 
@@ -529,9 +698,401 @@ def connect_x(config: XPSTConfig) -> bool:
         return False
 
 
+# X API v2 (official) endpoints — ban-safe free tier (17 posts/day)
+X_API_V2_ME_URL = "https://api.x.com/2/users/me"
+X_DEV_PORTAL_URL = "https://developer.x.com/en/portal"
+
+
+def _x_api_v2_verify_headers(bearer_token: str) -> dict[str, str]:
+    """Build the Authorization header for the /2/users/me verification call.
+
+    Args:
+        bearer_token: X API v2 Bearer Token (or OAuth 1.0a user-context
+            access token used as a bearer).
+
+    Returns:
+        ``{"Authorization": "Bearer <token>"}`` header dict.
+    """
+    return {"Authorization": f"Bearer {bearer_token}"}
+
+
+def _verify_x_api_v2_creds(
+    api_key: str,
+    api_secret: str,
+    access_token: str,
+    access_token_secret: str,
+    bearer_token: str,
+    timeout: float = 15.0,
+) -> tuple[bool, str]:
+    """Verify X API v2 credentials against ``GET https://api.x.com/2/users/me``.
+
+    Prefers the Bearer Token (app-only). When only the OAuth 1.0a user-context
+    set (API Key/Secret + Access Token/Secret) is available, signs the request
+    with authlib's ``OAuth1Client`` instead.
+
+    Args:
+        api_key: X API Key (Consumer Key).
+        api_secret: X API Key Secret (Consumer Secret).
+        access_token: X Access Token (OAuth 1.0a user context).
+        access_token_secret: X Access Token Secret.
+        bearer_token: X Bearer Token (app-only).
+        timeout: HTTP timeout in seconds.
+
+    Returns:
+        ``(ok, message)`` — on success ``message`` is ``@username (id: ...)``,
+        on failure a short error description.
+    """
+    try:
+        if bearer_token:
+            r = httpx.get(
+                X_API_V2_ME_URL,
+                headers=_x_api_v2_verify_headers(bearer_token),
+                timeout=timeout,
+            )
+        else:
+            from authlib.integrations.httpx_client import OAuth1Client
+
+            client = OAuth1Client(
+                client_id=api_key,
+                client_secret=api_secret,
+                token=access_token,
+                token_secret=access_token_secret,
+            )
+            r = client.get(X_API_V2_ME_URL, timeout=timeout)
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+        return False, str(e)
+
+    if r.status_code == 200:
+        data = r.json().get("data", {})
+        return True, f"@{data.get('username', '?')} (id: {data.get('id', '?')})"
+    return False, f"{r.status_code} {getattr(r, 'text', '')[:200]}"
+
+
+def _connect_x_api_v2(config: XPSTConfig) -> bool:
+    """Connect X via the official X API v2 (ban-safe, free 17 posts/day).
+
+    Flow:
+    1. Guide the user through creating an X Developer app.
+    2. Prompt for API Key/Secret + Access Token/Secret or Bearer Token.
+    3. Verify against https://api.x.com/2/users/me.
+    4. Save ``auth_mode='api_v2'`` + credentials to config and the
+       CredentialStore (key ``x_api_v2_creds``).
+    """
+    console.print("\n[bold]X API v2 Setup[/bold]")
+    console.print(
+        "[dim]Official X API v2 uses OAuth 1.0a user context (API Key/Secret + "
+        "Access Token/Secret) or a Bearer Token. No cookies, no unofficial "
+        "clients — ban-safe posting on the free tier (17 posts/day).[/dim]\n"
+    )
+
+    console.print("[bold]Quick setup:[/bold]")
+    console.print(f"  1. Open: [link={X_DEV_PORTAL_URL}]{X_DEV_PORTAL_URL}[/link]")
+    console.print("  2. Create an app (or reuse an existing one)")
+    console.print("  3. Grant the app Read + Write permissions")
+    console.print("  4. Under 'Keys and tokens', copy the API Key, API Key Secret, Access Token, and Access Token Secret")
+    console.print("  5. (Optional) Copy the Bearer Token for app-only verification\n")
+
+    if _confirm("Open X Developer Portal in browser now?", default=True):
+        import webbrowser
+        webbrowser.open(X_DEV_PORTAL_URL)
+
+    api_key = _input_secret("API Key (Consumer Key): ")
+    if not api_key:
+        console.print("[red]❌ API Key required.[/red]")
+        return False
+
+    api_secret = _input_secret("API Key Secret (Consumer Secret): ")
+    if not api_secret:
+        console.print("[red]❌ API Key Secret required.[/red]")
+        return False
+
+    access_token = _input_secret("Access Token (leave empty if using Bearer Token only): ")
+    access_token_secret = _input_secret("Access Token Secret (leave empty if using Bearer Token only): ")
+    bearer_token = _input_secret("Bearer Token (optional): ")
+
+    if not access_token and not bearer_token:
+        console.print("[red]❌ Need either the Access Token + Secret (for posting) or a Bearer Token (for verification).[/red]")
+        return False
+
+    # Verify the credentials against /2/users/me
+    console.print("\n[bold]Verifying credentials...[/bold]")
+    ok, message = _verify_x_api_v2_creds(
+        api_key,
+        api_secret,
+        access_token,
+        access_token_secret,
+        bearer_token,
+    )
+    if not ok:
+        console.print(f"[red]❌ Verification failed: {message}[/red]")
+        console.print("[dim]Double-check your keys/tokens in the X Developer Portal.[/dim]")
+        return False
+    console.print(f"[green]✅ Verified as {message}[/green]")
+
+    # Save to config
+    config.x.auth_mode = "api_v2"
+    config.x.api_key = api_key
+    config.x.api_secret = api_secret
+    config.x.access_token = access_token
+    config.x.access_token_secret = access_token_secret
+    config.x.bearer_token = bearer_token
+    config.save()
+
+    # Store in encrypted credential store
+    cred_store = CredentialStore(config.config_dir)
+    try:
+        cred_store.store_json(
+            "x_api_v2_creds",
+            {
+                "api_key": api_key,
+                "api_secret": api_secret,
+                "access_token": access_token,
+                "access_token_secret": access_token_secret,
+                "bearer_token": bearer_token,
+                "connected_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            },
+        )
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+
+    console.print("[green]✅ X API v2 configured (ban-safe, official) — 17 free posts/day![/green]")
+    if not access_token:
+        console.print("[yellow]⚠️  No Access Token set — verification works, but posting needs the Access Token + Secret.[/yellow]")
+    return True
+
+
 # ──────────────────────────────────────────────
-# TikTok (browser cookies via yt-dlp)
+# TikTok (browser cookies via yt-dlp) — SOURCE
 # ──────────────────────────────────────────────
+
+# TikTok Content Posting API (Direct Post) — official OAuth endpoints
+TIKTOK_AUTHORIZE_URL = "https://www.tiktok.com/v2/auth/authorize"
+TIKTOK_TOKEN_URL = "https://open.tiktokapis.com/v2/oauth/token/"
+TIKTOK_USER_INFO_URL = "https://open.tiktokapis.com/v2/user/info/"
+TIKTOK_OAUTH_SCOPES = "user.info.basic,video.publish,video.upload"
+TIKTOK_DEFAULT_REDIRECT_URI = "http://localhost:8085/callback"
+
+
+def build_tiktok_authorize_url(client_key: str, redirect_uri: str) -> str:
+    """Build the TikTok OAuth authorization URL for a Content Posting API app.
+
+    Args:
+        client_key: TikTok app client key (developers.tiktok.com).
+        redirect_uri: The redirect URI registered on the app.
+
+    Returns:
+        Full authorization URL with ``response_type=code`` and the
+        ``user.info.basic,video.publish,video.upload`` scopes.
+    """
+    params = {
+        "client_key": client_key,
+        "response_type": "code",
+        "scope": TIKTOK_OAUTH_SCOPES,
+        "redirect_uri": redirect_uri,
+    }
+    return f"{TIKTOK_AUTHORIZE_URL}?{urlencode(params, safe=',')}"
+
+
+def _extract_tiktok_code(pasted: str) -> str:
+    """Extract the OAuth ``code`` from a pasted redirect URL or raw code.
+
+    The user may paste the full redirect URL (``.../callback?code=xxx&...``)
+    or just the ``code`` value. Handles both.
+
+    Args:
+        pasted: The raw string pasted by the user.
+
+    Returns:
+        The extracted authorization code (possibly empty).
+    """
+    pasted = (pasted or "").strip()
+    if "code=" in pasted:
+        query = pasted.split("?", 1)[1] if "?" in pasted else pasted
+        return parse_qs(query).get("code", [""])[0]
+    return pasted
+
+
+def exchange_tiktok_code(
+    client_key: str,
+    client_secret: str,
+    code: str,
+    redirect_uri: str,
+) -> dict:
+    """Exchange a TikTok authorization code for access + refresh tokens.
+
+    Args:
+        client_key: TikTok app client key.
+        client_secret: TikTok app client secret.
+        code: Authorization code from the OAuth redirect.
+        redirect_uri: Must match the one used in the authorize URL.
+
+    Returns:
+        The parsed token response dict (``access_token``, ``refresh_token``...).
+
+    Raises:
+        ValueError: On HTTP error or missing ``access_token`` in the response.
+    """
+    import httpx
+
+    resp = httpx.post(
+        TIKTOK_TOKEN_URL,
+        data={
+            "client_key": client_key,
+            "client_secret": client_secret,
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+        },
+        timeout=30,
+    )
+    if resp.status_code != 200:
+        raise ValueError(
+            f"TIKTOK_TOKEN_EXCHANGE_FAILED: HTTP {resp.status_code}: {resp.text[:200]}"
+        )
+    data = resp.json()
+    if not data.get("access_token"):
+        raise ValueError(
+            f"TIKTOK_TOKEN_EXCHANGE_FAILED: no access_token in response: {resp.text[:200]}"
+        )
+    return data
+
+
+def _verify_tiktok_token(access_token: str) -> str | None:
+    """Verify a TikTok access token via the user/info endpoint.
+
+    Args:
+        access_token: The OAuth access token to verify.
+
+    Returns:
+        Display name (fallback: username) of the connected account, or None
+        if verification failed.
+    """
+    import httpx
+
+    try:
+        resp = httpx.get(
+            TIKTOK_USER_INFO_URL,
+            params={"fields": "open_id,union_id,avatar_url,display_name,username"},
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            logger.warning(
+                "TikTok user/info verification failed: HTTP %s: %s",
+                resp.status_code,
+                resp.text[:200],
+            )
+            return None
+        user = resp.json().get("data", {}).get("user", {})
+        return user.get("display_name") or user.get("username") or None
+    except Exception as e:
+        logger.debug("TikTok user/info verification error: %s", e)
+        return None
+
+
+def _connect_tiktok_upload_destination(config: XPSTConfig) -> bool:
+    """Configure the official TikTok Content Posting API upload destination.
+
+    Runs the OAuth 2.0 authorization-code flow against developers.tiktok.com:
+
+    1. Prompt for the app's client_key / client_secret
+    2. Build + open the authorize URL (scope: user.info.basic,video.publish,video.upload)
+    3. Prompt the user to paste the ``code`` from the redirect
+    4. Exchange the code for access_token + refresh_token
+    5. Persist credentials (config + CredentialStore) and verify via user/info
+
+    Args:
+        config: xPST configuration to update in place.
+
+    Returns:
+        True on success, False otherwise.
+    """
+    console.print("\n[bold]TikTok Upload Destination (Content Posting API)[/bold]")
+    console.print(
+        "[dim]This enables official, ban-safe uploads. You need a TikTok app "
+        "with the Content Posting API enabled (scopes: user.info.basic, "
+        "video.publish, video.upload).[/dim]\n"
+    )
+
+    client_key = console.input("[cyan]TikTok app client key: [/cyan]").strip()
+    if not client_key:
+        console.print("[red]❌ Client key required.[/red]")
+        return False
+
+    client_secret = _input_secret("TikTok app client secret: ")
+    if not client_secret:
+        console.print("[red]❌ Client secret required.[/red]")
+        return False
+
+    redirect_uri = TIKTOK_DEFAULT_REDIRECT_URI
+    if not _confirm(
+        f"Use default redirect URI {TIKTOK_DEFAULT_REDIRECT_URI}? "
+        "(say N if your app has a public/custom redirect)",
+        default=True,
+    ):
+        redirect_uri = console.input("[cyan]Your app's redirect URI: [/cyan]").strip()
+        if not redirect_uri:
+            console.print("[red]❌ Redirect URI required.[/red]")
+            return False
+
+    authorize_url = build_tiktok_authorize_url(client_key, redirect_uri)
+    console.print("\n[bold]Authorize in your browser:[/bold]")
+    console.print(f"[link={authorize_url}]{authorize_url}[/link]\n")
+
+    if _confirm("Open the authorization page in your browser now?", default=True):
+        import webbrowser
+
+        webbrowser.open(authorize_url)
+
+    console.print(
+        "[dim]After authorizing, you'll be redirected. Paste the full redirect "
+        "URL or just the ?code= value below.[/dim]"
+    )
+    pasted = console.input("[cyan]Redirect URL or code: [/cyan]").strip()
+    code = _extract_tiktok_code(pasted)
+    if not code:
+        console.print("[red]❌ Authorization code required.[/red]")
+        return False
+
+    console.print("\n[bold]Exchanging code for access tokens...[/bold]")
+    try:
+        token_data = exchange_tiktok_code(client_key, client_secret, code, redirect_uri)
+    except Exception as e:
+        console.print(f"[red]❌ Token exchange failed: {e}[/red]")
+        return False
+
+    access_token = token_data["access_token"]
+    refresh_token = token_data.get("refresh_token", "")
+
+    # Persist in config.yaml + encrypted CredentialStore
+    config.tiktok.enabled = True
+    config.tiktok.client_key = client_key
+    config.tiktok.client_secret = client_secret
+    config.tiktok.access_token = access_token
+    config.tiktok.refresh_token = refresh_token
+    config.save()
+
+    cred_store = CredentialStore(config.config_dir)
+    try:
+        cred_store.store("tiktok_client_secret", client_secret)
+        cred_store.store("tiktok_access_token", access_token)
+        if refresh_token:
+            cred_store.store("tiktok_refresh_token", refresh_token)
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+
+    # Verify the token works
+    display_name = _verify_tiktok_token(access_token)
+    if display_name:
+        console.print(f"[green]✅ TikTok upload destination connected as {display_name}![/green]")
+    else:
+        console.print("[green]✅ TikTok upload destination configured (tokens saved)![/green]")
+        console.print(
+            "[dim]   Could not verify user info — tokens will be used on first upload.[/dim]"
+        )
+    return True
+
 
 def connect_tiktok(config: XPSTConfig) -> bool:
     """
@@ -581,6 +1142,13 @@ def connect_tiktok(config: XPSTConfig) -> bool:
     console.print(f"[green]✅ TikTok source configured for @{current_username}[/green]")
     if config.tiktok.cookies_from_browser:
         console.print("[dim]   Browser cookies will be used automatically for downloads.[/dim]")
+
+    # Optional: official upload destination via the TikTok Content Posting API.
+    # The source/cookies path above is untouched; this only adds the OAuth
+    # destination flow when the user opts in.
+    if _confirm("Configure upload destination (Content Posting API)?", default=False):
+        return _connect_tiktok_upload_destination(config)
+
     return True
 
 
@@ -638,21 +1206,262 @@ def connect_threads(config: XPSTConfig) -> bool:
 
 
 # ──────────────────────────────────────────────
-# LinkedIn (OAuth 2.0 access token)
+# LinkedIn (OAuth 2.0 access token + auto-URN)
 # ──────────────────────────────────────────────
+
+LINKEDIN_AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization"
+LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
+LINKEDIN_USERINFO_URL = "https://api.linkedin.com/v2/userinfo"
+LINKEDIN_REDIRECT_URI = "http://localhost:8085/callback"
+LINKEDIN_SCOPE = "w_member_social"
+
+
+def build_linkedin_authorize_url(
+    client_id: str,
+    redirect_uri: str = LINKEDIN_REDIRECT_URI,
+    scope: str = LINKEDIN_SCOPE,
+) -> str:
+    """Build the LinkedIn OAuth 2.0 authorization URL.
+
+    Args:
+        client_id: OAuth client ID from linkedin.com/developers/apps.
+        redirect_uri: OAuth redirect URI registered on the app.
+        scope: OAuth scope to request (default ``w_member_social``).
+
+    Returns:
+        The fully-qualified authorize URL a browser should be pointed at.
+    """
+    from urllib.parse import urlencode
+
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": scope,
+    }
+    return f"{LINKEDIN_AUTH_URL}?{urlencode(params)}"
+
+
+def exchange_linkedin_auth_code(
+    client_id: str,
+    client_secret: str,
+    code: str,
+    redirect_uri: str = LINKEDIN_REDIRECT_URI,
+    client: "httpx.Client | None" = None,
+) -> dict:
+    """Exchange an authorization ``code`` for an OAuth access token.
+
+    Args:
+        client_id: OAuth client ID.
+        client_secret: OAuth client secret.
+        code: The ``?code=`` value pasted from the authorization redirect.
+        redirect_uri: Must match the one used in the authorize URL.
+        client: Optional ``httpx.Client`` (injected by tests). When omitted a
+            new client is created and closed within the call.
+
+    Returns:
+        The parsed token-exchange JSON (contains ``access_token``).
+
+    Raises:
+        httpx.HTTPStatusError: if LinkedIn rejects the exchange.
+    """
+    import httpx
+
+    close_after = client is None
+    if client is None:
+        client = httpx.Client(timeout=30)
+    try:
+        r = client.post(
+            LINKEDIN_TOKEN_URL,
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        r.raise_for_status()
+        return r.json()
+    finally:
+        if close_after:
+            client.close()
+
+
+def fetch_linkedin_userinfo(
+    access_token: str,
+    client: "httpx.Client | None" = None,
+) -> dict:
+    """Fetch the LinkedIn member profile via ``/v2/userinfo``.
+
+    LinkedIn returns the member's person URN id in the ``sub`` field, which
+    is exactly what ``config.linkedin.linkedin_user_id`` needs for posting.
+
+    Args:
+        access_token: OAuth access token (``w_member_social`` scope).
+        client: Optional ``httpx.Client`` (injected by tests).
+
+    Returns:
+        The parsed userinfo JSON (contains ``sub``).
+
+    Raises:
+        httpx.HTTPStatusError: if the token is invalid/expired.
+    """
+    import httpx
+
+    close_after = client is None
+    if client is None:
+        client = httpx.Client(timeout=30)
+    try:
+        r = client.get(
+            LINKEDIN_USERINFO_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        r.raise_for_status()
+        return r.json()
+    finally:
+        if close_after:
+            client.close()
+
 
 def connect_linkedin(config: XPSTConfig) -> bool:
     """
-    Connect LinkedIn via an OAuth 2.0 access token.
+    Connect LinkedIn via a full OAuth 2.0 browser flow with auto-URN.
 
-    Flow:
-    1. Prompt for the LinkedIn user URN/ID and an access token
-    2. Store credentials in config + encrypted credential store
+    Preferred flow:
+    1. Prompt for client_id + client_secret from linkedin.com/developers/apps
+    2. Build the authorize URL and open it in the browser
+    3. Prompt the user to paste the ``?code=`` value from the redirect
+    4. Exchange the code for an access token via httpx
+    5. Auto-fetch the member URN id from ``/v2/userinfo`` (``sub`` field),
+       prompting for a manual fallback if that fails
+    6. Verify the token and save config + encrypted credential store
+
+    Backward compatibility: if the user picks 'paste token directly', the
+    legacy paste-token + paste-URN wizard is kept unchanged.
     """
     console.print(Panel("[bold]LinkedIn Connection[/bold]", style="blue"))
+
+    use_oauth = _confirm(
+        "Use the full OAuth flow (recommended — auto-fetches your user URN)?",
+        default=True,
+    )
+    if not use_oauth:
+        return _connect_linkedin_paste(config)
+
     console.print(
-        "[dim]LinkedIn uses OAuth 2.0. You need an access token with the "
-        "w_member_social scope and your member URN.[/dim]\n"
+        "\n[bold]OAuth Setup — linkedin.com/developers/apps[/bold]\n"
+        "[dim]You need a LinkedIn app with the 'Share on LinkedIn' product "
+        "(w_member_social scope) and an OAuth 2.0 redirect set to:[/dim] "
+        f"[cyan]{LINKEDIN_REDIRECT_URI}[/cyan]\n"
+    )
+    console.print("[bold]Quick setup:[/bold]")
+    console.print("  1. Go to: [link=https://www.linkedin.com/developers/apps]https://www.linkedin.com/developers/apps[/link]")
+    console.print("  2. Create or select an app and add the 'Share on LinkedIn' product")
+    console.print("  3. Copy the OAuth Client ID and Client Secret")
+    console.print(f"  4. Add redirect URL: [cyan]{LINKEDIN_REDIRECT_URI}[/cyan]\n")
+
+    if _confirm("Open LinkedIn Developer console in browser?", default=True):
+        import webbrowser
+        webbrowser.open("https://www.linkedin.com/developers/apps")
+
+    client_id = console.input("[cyan]Client ID: [/cyan]").strip()
+    if not client_id:
+        console.print("[red]❌ Client ID required.[/red]")
+        return False
+
+    client_secret = _input_secret("Client Secret: ")
+    if not client_secret:
+        console.print("[red]❌ Client Secret required.[/red]")
+        return False
+
+    # Build and open the authorization URL
+    auth_url = build_linkedin_authorize_url(client_id)
+    console.print("\n[bold]Opening browser for LinkedIn authorization...[/bold]")
+    console.print(f"[dim]Authorize URL: {auth_url}[/dim]\n")
+    import webbrowser
+    webbrowser.open(auth_url)
+
+    # Ask for the ?code= value from the redirect (tolerate a full URL paste)
+    code = console.input(
+        "[cyan]Paste the ?code= value from the redirect URL (or the full URL): [/cyan]"
+    ).strip()
+    if code and "code=" in code:
+        from urllib.parse import parse_qs, urlparse
+
+        parsed = parse_qs(urlparse(code).query) or parse_qs(code)
+        if "code" in parsed:
+            code = parsed["code"][0]
+    if not code:
+        console.print("[red]❌ Authorization code required. Run the flow again.[/red]")
+        return False
+
+    # Exchange the code for an access token
+    console.print("\n[bold]Exchanging code for access token...[/bold]")
+    try:
+        token_data = exchange_linkedin_auth_code(client_id, client_secret, code)
+    except Exception as e:
+        console.print(f"[red]❌ Token exchange failed: {e}[/red]")
+        return False
+    access_token = token_data.get("access_token")
+    if not access_token:
+        console.print(f"[red]❌ No access_token in response: {token_data}[/red]")
+        return False
+
+    # Auto-fetch the member URN id from /v2/userinfo ('sub'), fallback to manual
+    console.print("\n[bold]Fetching your LinkedIn user URN...[/bold]")
+    linkedin_user_id = None
+    try:
+        userinfo = fetch_linkedin_userinfo(access_token)
+        linkedin_user_id = userinfo.get("sub")
+        if linkedin_user_id:
+            console.print(f"[green]✅ Auto-detected member URN id: {linkedin_user_id}[/green]")
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+        console.print(f"[yellow]⚠️  Could not auto-fetch user URN: {e}[/yellow]")
+
+    if not linkedin_user_id:
+        linkedin_user_id = console.input(
+            "[cyan]LinkedIn user URN or ID (manual fallback): [/cyan]"
+        ).strip()
+    if not linkedin_user_id:
+        console.print("[red]❌ LinkedIn user ID required.[/red]")
+        return False
+
+    # Save to config
+    config.linkedin.enabled = True
+    config.linkedin.access_token = access_token
+    config.linkedin.linkedin_user_id = linkedin_user_id
+    config.save()
+
+    cred_store = CredentialStore(config.config_dir)
+    try:
+        cred_store.store("linkedin_access_token", access_token)
+        cred_store.store("linkedin_user_id", linkedin_user_id)
+    except Exception as e:
+        logger.debug("Unexpected error: %s", e)
+
+    # Verify the token with /v2/userinfo
+    console.print("\n[bold]Verifying token...[/bold]")
+    try:
+        userinfo = fetch_linkedin_userinfo(access_token)
+        sub = userinfo.get("sub", linkedin_user_id)
+        console.print(f"[green]✅ LinkedIn connected! Member URN id: {sub}[/green]")
+        return True
+    except Exception as e:
+        console.print(f"[red]❌ Token verification failed: {e}[/red]")
+        return False
+
+
+def _connect_linkedin_paste(config: XPSTConfig) -> bool:
+    """Legacy LinkedIn flow: paste an access token + user URN directly.
+
+    Kept for backward compatibility with the pre-OAuth wizard.
+    """
+    console.print(
+        "[dim]Legacy flow: paste an access token with the w_member_social "
+        "scope and your member URN.[/dim]\n"
     )
     console.print("[bold]Quick setup:[/bold]")
     console.print("  1. Go to: [link=https://www.linkedin.com/developers/apps]https://www.linkedin.com/developers/apps[/link]")
