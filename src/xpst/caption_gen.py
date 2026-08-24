@@ -211,3 +211,154 @@ def generate_caption(
     except RuntimeError:
         # Already in an event loop
         return generate_caption_deterministic(transcript_text, platform)
+
+
+# ── Post idea generation ────────────────────────────────────────────────
+
+# Engagement-tested idea templates (rotated per slot so consecutive ideas
+# never share a hook shape). "{topic}" is substituted at call time.
+IDEA_TEMPLATES: tuple[str, ...] = (
+    "5 things nobody tells you about {topic}",
+    "The {topic} mistake that costs you the most",
+    "How I turned {topic} into a daily habit",
+    "Behind the scenes: {topic} in 60 seconds",
+    "What {topic} actually looks like in 2026",
+    "The one {topic} tip that changed everything",
+    "{topic} for beginners: start here",
+    "Why most {topic} advice is wrong",
+    "POV: you just discovered {topic}",
+    "3 tools I use for {topic} every day",
+    "The dark side of {topic}",
+    "Can you master {topic} in 7 days?",
+)
+
+IDEA_HOOKS: tuple[str, ...] = (
+    "listicle",
+    "mistake",
+    "story",
+    "behind-the-scenes",
+    "trend",
+    "tip",
+    "tutorial",
+    "hot-take",
+    "pov",
+    "tools",
+    "controversy",
+    "challenge",
+)
+
+
+def generate_ideas_deterministic(topic: str, count: int = 5) -> list[dict[str, str]]:
+    """Generate post ideas without an LLM (deterministic template fallback).
+
+    Args:
+        topic: Content topic to build ideas around.
+        count: Number of ideas to generate (clamped to 1-10).
+
+    Returns:
+        List of ``count`` dicts, each with "idea", "hook", and "source" keys.
+    """
+    topic = (topic or "").strip() or "content creation"
+    count = max(1, min(int(count), 10))
+    return [
+        {
+            "idea": IDEA_TEMPLATES[i % len(IDEA_TEMPLATES)].format(topic=topic),
+            "hook": IDEA_HOOKS[i % len(IDEA_HOOKS)],
+            "source": "deterministic",
+        }
+        for i in range(count)
+    ]
+
+
+async def generate_ideas_llm(
+    topic: str,
+    count: int = 5,
+    llm_config: Any = None,
+) -> list[dict[str, str]]:
+    """Generate post ideas using an LLM.
+
+    Requires a configured LLM endpoint. Falls back to deterministic
+    generation when the LLM is not available.
+
+    Returns:
+        List of dicts with "idea", "hook", and "source" keys.
+    """
+    try:
+        from xpst.knowledge.llm.client import LLMClient
+
+        if llm_config is None:
+            from xpst.knowledge.config import KnowledgeConfig
+            llm_config = KnowledgeConfig.from_env()
+
+        if not llm_config.llm_enabled or not llm_config.llm_base_url:
+            logger.debug("LLM not configured, falling back to deterministic ideas")
+            return generate_ideas_deterministic(topic, count)
+
+        client = LLMClient(
+            base_url=llm_config.llm_base_url,
+            model=llm_config.llm_model or "gpt-4o-mini",
+        )
+
+        prompt = (
+            f"Generate {count} creative social media post ideas about '{topic}'. "
+            f"Each idea needs a short hook. "
+            f"Return {count} ideas as JSON: "
+            f'[{{"idea": "...", "hook": "..."}}]'
+        )
+
+        import asyncio
+
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: client.chat_json([{"role": "user", "content": prompt}]),
+        )
+        if isinstance(result, list):
+            ideas = result
+        elif isinstance(result, dict) and "ideas" in result:
+            ideas = result["ideas"]
+        else:
+            ideas = [result]
+
+        # Normalise + tag the source; trim to the requested count.
+        normalized: list[dict[str, str]] = []
+        for item in ideas[:count]:
+            if isinstance(item, dict):
+                normalized.append({
+                    "idea": str(item.get("idea", "")).strip(),
+                    "hook": str(item.get("hook", "")).strip(),
+                    "source": "llm",
+                })
+        if not normalized or not normalized[0]["idea"]:
+            raise ValueError("LLM returned no usable ideas")
+        return normalized
+
+    except Exception as e:
+        logger.debug(f"LLM idea generation failed, using deterministic: {e}")
+        return generate_ideas_deterministic(topic, count)
+
+
+def generate_ideas(
+    topic: str,
+    count: int = 5,
+    llm_config: Any = None,
+) -> list[dict[str, str]]:
+    """Generate post ideas (synchronous wrapper).
+
+    Uses the LLM when configured (XPST_KB_LLM_ENABLED), otherwise falls back
+    to deterministic template generation.
+
+    Args:
+        topic: Content topic to build ideas around.
+        count: Number of ideas to generate (clamped to 1-10).
+        llm_config: Optional KnowledgeConfig for LLM settings.
+
+    Returns:
+        List of dicts with "idea", "hook", and "source" keys.
+    """
+    import asyncio
+
+    try:
+        return asyncio.run(generate_ideas_llm(topic, count, llm_config))
+    except RuntimeError:
+        # Already in an event loop
+        return generate_ideas_deterministic(topic, count)

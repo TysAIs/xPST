@@ -70,6 +70,8 @@ DEFAULT_CONFIG = {
             "webhook_path": "/webhook/messenger",
             "auto_reply": False,
             "reply_rules": {},
+            "comment_reply_enabled": False,
+            "comment_platforms": ["instagram", "facebook"],
         },
         "linkedin": {
             "enabled": False,
@@ -155,6 +157,10 @@ DEFAULT_CONFIG = {
         "tiktok": 5,
         "threads": 5,
         "linkedin": 5,
+    },
+    "bio": {
+        "handle": "",
+        "links": [],
     },
     "schedule": {
         "check_interval": 900,  # 15 minutes
@@ -264,6 +270,10 @@ class MessengerAccountConfig(AccountConfig):
         webhook_path: Dashboard webhook URL path (default /webhook/messenger).
         auto_reply: ManyChat-lite master switch.
         reply_rules: Keyword → reply text map; "*" is catch-all.
+        comment_reply_enabled: Content360-lite master switch for IG/FB comment
+            auto-reply on posts.
+        comment_platforms: Platforms allowed to run comment auto-reply
+            ("instagram", "facebook"); empty means none.
     """
 
     enabled: bool = False
@@ -275,6 +285,8 @@ class MessengerAccountConfig(AccountConfig):
     webhook_path: str = "/webhook/messenger"
     auto_reply: bool = False
     reply_rules: dict = field(default_factory=dict)
+    comment_reply_enabled: bool = False
+    comment_platforms: list = field(default_factory=lambda: ["instagram", "facebook"])
 
 
 @dataclass
@@ -396,6 +408,19 @@ class RateLimitConfig:
 
 
 @dataclass
+class BioConfig:
+    """Link-in-bio page configuration (served at /bio by the dashboard).
+
+    Fields:
+        handle: Display name shown on the bio page (avatar initial + heading).
+        links: Custom links rendered below the social accounts. Each entry is
+            a dict with ``label`` and ``url`` keys (http/https only).
+    """
+    handle: str = ""
+    links: list[dict] = field(default_factory=list)
+
+
+@dataclass
 class XPSTConfig:
     """Main configuration for xPST"""
     # Accounts
@@ -422,6 +447,9 @@ class XPSTConfig:
 
     # Rate limits
     rate_limits: RateLimitConfig = field(default_factory=RateLimitConfig)
+
+    # Link-in-bio page
+    bio: BioConfig = field(default_factory=BioConfig)
 
     # Notifications
     notifications: NotificationConfig = field(default_factory=NotificationConfig)
@@ -619,6 +647,13 @@ class XPSTConfig:
                 config.messenger.auto_reply = ms.get("auto_reply", config.messenger.auto_reply)
                 if isinstance(ms.get("reply_rules"), dict):
                     config.messenger.reply_rules = ms.get("reply_rules", config.messenger.reply_rules)
+                config.messenger.comment_reply_enabled = ms.get(
+                    "comment_reply_enabled", config.messenger.comment_reply_enabled
+                )
+                if isinstance(ms.get("comment_platforms"), list):
+                    config.messenger.comment_platforms = ms.get(
+                        "comment_platforms", config.messenger.comment_platforms
+                    )
                 config.messenger.proxy = ms.get("proxy", config.messenger.proxy)
 
         # LinkedIn
@@ -693,6 +728,22 @@ class XPSTConfig:
                 config.rate_limits.tiktok = rl.get("tiktok", config.rate_limits.tiktok)
                 config.rate_limits.threads = rl.get("threads", config.rate_limits.threads)
                 config.rate_limits.linkedin = rl.get("linkedin", config.rate_limits.linkedin)
+
+        # Bio (link-in-bio page)
+        if "bio" in file_config:
+            bio = file_config["bio"]
+            if bio and isinstance(bio, dict):
+                config.bio.handle = str(bio.get("handle", config.bio.handle) or "")
+                if isinstance(bio.get("links"), list):
+                    links = []
+                    for item in bio["links"]:
+                        if not isinstance(item, dict):
+                            continue
+                        label = str(item.get("label", "") or "").strip()
+                        url = str(item.get("url", "") or "").strip()
+                        if label and url:
+                            links.append({"label": label, "url": url})
+                    config.bio.links = links
 
         # Shortcuts (stored in config_dir as raw dict)
         if "shortcuts" in file_config and isinstance(file_config["shortcuts"], dict):
@@ -846,6 +897,10 @@ class XPSTConfig:
                 parsed = {}
             if isinstance(parsed, dict):
                 config.messenger.reply_rules = parsed
+        if v := os.getenv("XPST_MESSENGER_COMMENT_REPLY_ENABLED"):
+            config.messenger.comment_reply_enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_MESSENGER_COMMENT_PLATFORMS"):
+            config.messenger.comment_platforms = [p.strip() for p in v.split(",") if p.strip()]
         if v := os.getenv("XPST_MESSENGER_PROXY"):
             config.messenger.proxy = v
 
@@ -1146,6 +1201,10 @@ class XPSTConfig:
                 "tiktok": self.rate_limits.tiktok,
                 "threads": self.rate_limits.threads,
                 "linkedin": self.rate_limits.linkedin,
+            },
+            "bio": {
+                "handle": self.bio.handle,
+                "links": self.bio.links,
             },
             "shortcuts": self._shortcuts,
             "first_run_complete": self.first_run_complete,

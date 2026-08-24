@@ -1360,6 +1360,24 @@ def dashboard(ctx: click.Context, port: int, host: str, api_only: bool):
     start_dashboard(port=port, host=host, config_dir=config_dir)
 
 
+@main.command()
+@click.option("--port", "-p", default=8080, type=int, help="Dashboard HTTP port")
+@click.option("--host", default="127.0.0.1",
+              help="Dashboard bind host (default: 127.0.0.1)")
+@json_option
+@click.pass_context
+def bio(ctx: click.Context, port: int, host: str, as_json: bool):
+    """Print your Link-in-Bio page URL (start the dashboard with `xpst dashboard` first)"""
+    from xpst.dashboard.server import bio_url
+
+    url = bio_url(host=host, port=port)
+    if as_json:
+        json_output({"url": url}, True)
+        return
+    console.print(f"[bold blue]Link-in-Bio:[/bold blue] {url}")
+    console.print("[dim]Start the dashboard with `xpst dashboard`, then share this URL.[/dim]")
+
+
 # ──────────────────────────────────────────────
 # Desktop App Command
 # ──────────────────────────────────────────────
@@ -1430,6 +1448,77 @@ def mcp_list(json_output: bool):
             desc = (tool.description or "").split("\n")[0]
             table.add_row(str(i), tool.name, desc[:80])
         console.print(table)
+
+
+# ──────────────────────────────────────────────
+# Messenger / IG+FB comment automation
+# ──────────────────────────────────────────────
+
+@main.group()
+@click.pass_context
+def messenger(ctx: click.Context):
+    """Messenger — IG + Facebook comment auto-reply (Content360-lite)."""
+    pass
+
+
+@messenger.command("check-comments")
+@click.argument("media_id")
+@click.option(
+    "--platform",
+    "-p",
+    type=click.Choice(["instagram", "facebook"]),
+    default="instagram",
+    show_default=True,
+    help="Platform owning media_id (instagram or facebook)",
+)
+@click.option(
+    "--since",
+    "since_ts",
+    type=int,
+    default=None,
+    help="Only reply to comments created after this epoch timestamp (Facebook only)",
+)
+@json_option
+@click.pass_context
+def messenger_check_comments(
+    ctx: click.Context,
+    media_id: str,
+    platform: str,
+    since_ts: int | None,
+    as_json: bool,
+) -> None:
+    """Fetch recent comments on a post and auto-reply per reply_rules.
+
+    Gated by accounts.messenger.comment_reply_enabled and
+    accounts.messenger.comment_platforms. Replies use the same keyword →
+    reply map as DM auto-reply (reply_rules).
+    """
+    import asyncio as _asyncio
+
+    from xpst.platforms.messenger import MessengerAdapter
+
+    config = load_config(ctx.obj.get("config_path"))
+    adapter = MessengerAdapter(config)
+    results = _asyncio.run(adapter.auto_reply_to_comments(platform, media_id, since_ts))
+
+    if as_json:
+        json_output({"media_id": media_id, "platform": platform, "results": results}, True)
+        return
+
+    if not results:
+        console.print("[dim]No comments to process (disabled, platform not enabled, or none found).[/dim]")
+        return
+    replied = sum(1 for r in results if r.get("sent"))
+    console.print(
+        f"[bold]Comment scan on {platform} media {media_id}:[/bold] {replied}/{len(results)} replied"
+    )
+    for r in results:
+        if r.get("error"):
+            console.print(f"[red]❌ {r.get('comment_id')} ({r.get('from', '')}): {r.get('error')}[/red]")
+        elif r.get("sent"):
+            console.print(f"[green]✅ Replied to {r.get('comment_id')} ({r.get('from', '')}): {r.get('reply')}[/green]")
+        else:
+            console.print(f"[yellow]⏭  Skipped {r.get('comment_id')} ({r.get('from', '')}): no matching rule[/yellow]")
 
 
 # ──────────────────────────────────────────────
@@ -3606,6 +3695,77 @@ def _get_platform_char_limit(platform: str) -> int:
     """Return the character limit for a platform."""
     from xpst.caption_gen import PLATFORM_CHAR_LIMITS
     return PLATFORM_CHAR_LIMITS.get(platform, 2200)
+
+
+# ── Phase F: AI Content Generation (captions + ideas) ──────────────────
+
+
+@main.group(name="generate")
+def generate_group() -> None:
+    """AI content creation: captions and post ideas (works without an LLM)."""
+
+
+@generate_group.command(name="caption")
+@click.option("--text", "-t", required=True, help="Source text (transcript, description, or seed)")
+@click.option("--platform", "-p", default="instagram", help="Target platform for char limits")
+@json_option
+@click.pass_context
+def generate_caption_cmd(ctx: click.Context, text: str, platform: str, as_json: bool) -> None:
+    """Generate 3 caption variants from text.
+
+    Uses the KB LLM when XPST_KB_LLM_ENABLED is set, otherwise falls back to
+    deterministic extraction. Platform char limits are enforced:
+    X /280, Threads /500, Instagram /2200, LinkedIn /3000, YouTube /5000.
+    """
+    from xpst.caption_gen import generate_caption
+
+    captions = generate_caption(text, platform=platform)
+
+    if as_json:
+        click.echo(_json.dumps({
+            "text": text,
+            "platform": platform,
+            "char_limit": _get_platform_char_limit(platform),
+            "suggestions": captions,
+        }, indent=2, default=str))
+        return
+    console.print(f"\n[bold]Caption suggestions for {platform}:[/bold]\n")
+    for i, c in enumerate(captions, 1):
+        console.print(f"  [cyan]Option {i}[/cyan] ({c.get('style', 'default')}):")
+        console.print(f"  {c['caption']}")
+        console.print(f"  [dim]Hashtags: {c.get('hashtags', '')}[/dim]\n")
+
+
+@generate_group.command(name="ideas")
+@click.option("--topic", "-t", required=True, help="Content topic to generate ideas for")
+@click.option("--count", "-n", default=5, show_default=True, type=click.IntRange(1, 10), help="Number of ideas (1-10)")
+@json_option
+@click.pass_context
+def generate_ideas_cmd(ctx: click.Context, topic: str, count: int, as_json: bool) -> None:
+    """Generate N post ideas for a topic.
+
+    Uses the KB LLM when XPST_KB_LLM_ENABLED is set, otherwise falls back to
+    deterministic template generation — no LLM required.
+    """
+    from xpst.caption_gen import generate_ideas
+
+    ideas = generate_ideas(topic, count=count)
+
+    if as_json:
+        click.echo(_json.dumps({
+            "topic": topic,
+            "count": len(ideas),
+            "ideas": ideas,
+        }, indent=2, default=str))
+        return
+    console.print(f"\n[bold]Post ideas for '{topic}':[/bold]\n")
+    for i, idea in enumerate(ideas, 1):
+        console.print(f"  [cyan]{i}.[/cyan] {idea['idea']}")
+        hook = idea.get("hook")
+        if hook:
+            console.print(
+                f"      [dim]hook: {hook} · source: {idea.get('source', 'deterministic')}[/dim]"
+            )
 
 
 # ── Phase E/F: Security Audit ───────────────────────────────────────────

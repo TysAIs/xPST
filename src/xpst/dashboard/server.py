@@ -11,6 +11,8 @@ Endpoints:
     GET /health   — aggregated platform health check
     GET /metrics  — Prometheus text-format metrics
     GET /state    — current xPST state summary
+    GET /bio      — public, mobile-first link-in-bio page
+    GET/POST /bio/edit — auth-protected link-in-bio editor
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 logger = logging.getLogger(__name__)
 
@@ -122,8 +124,9 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
 
         class BasicAuthMiddleware(BaseHTTPMiddleware):
             async def dispatch(self, request: Request, call_next):
-                # Skip auth for health and metrics endpoints
-                if request.url.path in ("/health", "/metrics"):
+                # Skip auth for health, metrics, and the public bio page.
+                # /bio/edit stays protected (admin only).
+                if request.url.path in ("/health", "/metrics", "/bio"):
                     return await call_next(request)
 
                 auth_header = request.headers.get("Authorization", "")
@@ -173,8 +176,83 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
         logger.info("Dashboard auth enabled for user: %s", username)
 
     _setup_messenger_webhook(app, config_dir)
+    _setup_bio_routes(app, config_dir)
 
     return app
+
+
+def bio_url(host: str = "127.0.0.1", port: int = 8080) -> str:
+    """Return the public URL of the link-in-bio page."""
+    return f"http://{host}:{port}/bio"
+
+
+def _setup_bio_routes(app: FastAPI, config_dir: str) -> None:
+    """Register the link-in-bio page and its auth-protected editor.
+
+    - GET  /bio       → public HTML page (no auth; meant to be shared)
+    - GET  /bio/edit  → admin form (protected by the dashboard Basic auth)
+    - POST /bio/edit  → persist handle + custom links to config.yaml
+    """
+    def _load_config():
+        from xpst.config import XPSTConfig
+        return XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+
+    @app.get("/bio", name="bio_page", include_in_schema=False, response_model=None)
+    def bio_page() -> HTMLResponse:
+        """Serve the public link-in-bio page."""
+        try:
+            from xpst.dashboard.bio import render_bio_page
+            config = _load_config()
+            return HTMLResponse(render_bio_page(config))
+        except Exception as exc:
+            logger.warning("Bio page render failed: %s", exc)
+            return HTMLResponse(
+                f"<p>Error rendering bio page: {exc}</p>",
+                status_code=500,
+            )
+
+    @app.get("/bio/edit", name="bio_edit_form", include_in_schema=False, response_model=None)
+    def bio_edit_form() -> HTMLResponse:
+        """Serve the auth-protected link-in-bio editor form."""
+        try:
+            from xpst.dashboard.bio import render_bio_edit_page
+            config = _load_config()
+            return HTMLResponse(render_bio_edit_page(config))
+        except Exception as exc:
+            logger.warning("Bio edit form render failed: %s", exc)
+            return HTMLResponse(
+                f"<p>Error rendering bio editor: {exc}</p>",
+                status_code=500,
+            )
+
+    @app.post("/bio/edit", name="bio_edit_save", include_in_schema=False, response_model=None)
+    async def bio_edit_save(request: Request) -> RedirectResponse:
+        """Persist handle + custom links from the editor form."""
+        form = await request.form()
+
+        links: list[dict] = []
+        i = 0
+        while f"label_{i}" in form:
+            if str(form.get(f"remove_{i}", "")) not in ("1", "on", "true"):
+                label = str(form.get(f"label_{i}", "") or "").strip()
+                url = str(form.get(f"url_{i}", "") or "").strip()
+                if label and url:
+                    links.append({"label": label, "url": url})
+            i += 1
+        new_label = str(form.get("new_label", "") or "").strip()
+        new_url = str(form.get("new_url", "") or "").strip()
+        if new_label and new_url:
+            links.append({"label": new_label, "url": new_url})
+
+        try:
+            config = _load_config()
+            config.bio.handle = str(form.get("handle", "") or "").strip()
+            config.bio.links = links
+            config.save()
+        except Exception as exc:
+            logger.warning("Bio save failed: %s", exc)
+            return RedirectResponse("/bio/edit", status_code=303)
+        return RedirectResponse("/bio/edit?saved=1", status_code=303)
 
 
 def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
