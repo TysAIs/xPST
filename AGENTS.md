@@ -11,7 +11,7 @@ python -m xpst --help          # CLI with 34 commands
 python -m xpst run             # Run the cross-posting engine
 python -m xpst dashboard       # Start FastAPI dashboard (port 8080)
 python -m xpst desktop         # Launch PySide6/QML desktop app
-python -m pytest tests/        # full suite (1467 collected)
+python -m pytest tests/        # full suite (1534 collected)
 ```
 
 ## Architecture
@@ -32,7 +32,7 @@ python -m pytest tests/        # full suite (1467 collected)
 ## Key Principles
 
 - **FREE + OPEN SOURCE** — Zero personal data in distributable tools
-- **Enterprise-grade quality** — 1467 tests collected, thread-safe, encrypted credentials, bcrypt passwords
+- **Enterprise-grade quality** — 1534 tests collected, thread-safe, encrypted credentials, bcrypt passwords
 - **Agent-friendly CLI** — Auto-JSON on non-TTY, `--quiet`, `--dry-run`, exit codes 0/1/2/3/4/10
 - **No hardcoded secrets** — All via `~/.xpst/` or env vars
 - **Apple-like UI standard** — Light/dark mode, Inter font, accessibility (Accessible.role/name)
