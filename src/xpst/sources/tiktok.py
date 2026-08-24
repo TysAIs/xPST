@@ -279,9 +279,13 @@ class TikTokSource(VideoSource):
 
         rc, stdout, stderr = await self._run_yt_dlp(cmd, timeout=120)
 
-        if rc != 0:
+        # yt-dlp may exit 1 with valid JSON (e.g. extractor warnings) — treat
+        # non-zero as failure only when stdout is empty/missing.
+        if rc != 0 and not stdout.strip():
             logger.error(f"yt-dlp failed: {stderr[:300]}")
             raise RuntimeError(f"Failed to fetch videos: {stderr[:200]}")
+        if rc != 0:
+            logger.warning(f"yt-dlp rc={rc} but stdout present — continuing ({stderr[:200]})")
 
         videos = []
         for line in stdout.strip().split("\n"):
