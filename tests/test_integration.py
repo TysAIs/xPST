@@ -40,7 +40,6 @@ def _make_config(tmp_path: Path):
     # Disable new platforms (not part of integration test yet)
     config.tiktok.enabled = False
     config.threads.enabled = False
-    config.linkedin.enabled = False
     return config
 
 

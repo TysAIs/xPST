@@ -3,7 +3,7 @@
 > **Role in xPST:** Both a **source** and a **posting destination**. xPST can download videos *from* TikTok to cross-post elsewhere, and (with the official Content Posting API configured) post *to* TikTok as well.
 > **Auth:** None required for downloads. Optional **browser cookies** enable HD quality without watermarks. Posting to TikTok requires a TikTok developer app and OAuth 2.0 (see [TikTok as a destination](#tiktok-as-a-destination-content-posting-api)).
 
-TikTok works as **both a source and a destination** in xPST. As a **source**, you tell xPST a TikTok username to watch, and it downloads that creator's new videos using `yt-dlp` so they can be re-encoded and posted to YouTube, Instagram, X/Twitter, Threads, and LinkedIn. Downloads work without any login, but enabling browser cookies unlocks higher-quality, watermark-free downloads. As a **destination**, xPST can upload videos directly to TikTok via the official Content Posting API (Direct Post) once a developer app and OAuth credentials are configured.
+TikTok works as **both a source and a destination** in xPST. As a **source**, you tell xPST a TikTok username to watch, and it downloads that creator's new videos using `yt-dlp` so they can be re-encoded and posted to YouTube, Instagram, X/Twitter, and Threads. Downloads work without any login, but enabling browser cookies unlocks higher-quality, watermark-free downloads. As a **destination**, xPST can upload videos directly to TikTok via the official Content Posting API (Direct Post) once a developer app and OAuth credentials are configured.
 
 ---
 

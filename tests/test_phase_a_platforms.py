@@ -1,6 +1,6 @@
-"""Phase A platform tests: TikTok, Threads, LinkedIn uploaders.
+"""Phase A platform tests: TikTok, Threads uploaders.
 
-Mock-based tests for the three new destination platform uploaders added in
+Mock-based tests for the new destination platform uploaders added in
 Phase A of the xPST Master Plan. No real API calls are made — all HTTP
 responses are mocked via ``unittest.mock`` patches on ``httpx.AsyncClient``.
 
@@ -23,7 +23,6 @@ import yaml
 
 from xpst.config import (
     DEFAULT_CONFIG,
-    LinkedInAccountConfig,
     ThreadsAccountConfig,
     XPSTConfig,
 )
@@ -52,9 +51,6 @@ def _make_config(**overrides: Any) -> XPSTConfig:
     config.threads.graph_access_token = "th_token"
     config.threads.threads_user_id = "123456"
 
-    config.linkedin.enabled = True
-    config.linkedin.access_token = "li_token"
-    config.linkedin.linkedin_user_id = "urn:li:person:abc"
     return config
 
 
@@ -428,162 +424,6 @@ class TestThreadsUploader:
 
 
 # ---------------------------------------------------------------------------
-# LinkedIn uploader tests
-# ---------------------------------------------------------------------------
-
-
-class TestLinkedInUploader:
-    """Tests for LinkedInUploader (LinkedIn API)."""
-
-    def test_manifest(self) -> None:
-        from xpst.platforms.linkedin import LinkedInUploader
-
-        m = LinkedInUploader(_make_config()).manifest
-        assert m.name == "linkedin"
-        assert m.display_name == "LinkedIn"
-        assert m.auth_mode == AuthMode.OAUTH
-        assert m.is_official_api is True
-        assert ProviderCapability.UPLOAD in m.capabilities
-        assert ProviderRole.DESTINATION in m.roles
-
-    def test_registered(self) -> None:
-        assert "linkedin" in PlatformRegistry.list_platforms()
-
-    @pytest.mark.asyncio
-    async def test_upload_success(self, tmp_path: Path) -> None:
-        from xpst.platforms.linkedin import LinkedInUploader
-
-        video = tmp_path / "v.mp4"
-        video.write_bytes(b"0" * 1024)
-        responses = [
-            # registerUpload
-            _FakeResponse(200, {"value": {"asset": "urn:li:digitalmediaAsset:1", "uploadMechanism": {"com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest": {"uploadUrl": "https://s3/x"}}}}),
-            # upload to S3 (PUT)
-            _FakeResponse(201, {}),
-            # create post
-            _FakeResponse(201, {}, headers={"x-linkedin-id": "post1"}),
-        ]
-        with _patch_httpx(responses):
-            uploader = LinkedInUploader(_make_config())
-            result = await uploader.upload(video, "caption")
-
-        assert result.success is True
-        assert result.post_id == "post1"
-        assert result.metadata.get("asset_urn") == "urn:li:digitalmediaAsset:1"
-
-    @pytest.mark.asyncio
-    async def test_upload_no_token(self, tmp_path: Path) -> None:
-        from xpst.platforms.linkedin import LinkedInUploader
-
-        config = _make_config()
-        config.linkedin.access_token = ""
-        video = tmp_path / "v.mp4"
-        video.write_bytes(b"0" * 1024)
-        uploader = LinkedInUploader(config)
-        result = await uploader.upload(video, "caption")
-        assert result.success is False
-        assert "LINKEDIN_NOT_CONFIGURED" in (result.error or "")
-
-    @pytest.mark.asyncio
-    async def test_upload_auth_expired(self, tmp_path: Path) -> None:
-        from xpst.platforms.linkedin import LinkedInUploader
-
-        video = tmp_path / "v.mp4"
-        video.write_bytes(b"0" * 1024)
-        responses = [_FakeResponse(401, text="expired")]
-        with _patch_httpx(responses):
-            uploader = LinkedInUploader(_make_config())
-            result = await uploader.upload(video, "caption")
-        assert result.success is False
-        assert "LINKEDIN_AUTH_EXPIRED" in (result.error or "")
-
-    @pytest.mark.asyncio
-    async def test_upload_rate_limited(self, tmp_path: Path) -> None:
-        from xpst.platforms.linkedin import LinkedInUploader
-
-        video = tmp_path / "v.mp4"
-        video.write_bytes(b"0" * 1024)
-        responses = [_FakeResponse(429, text="rate limited")]
-        with _patch_httpx(responses):
-            uploader = LinkedInUploader(_make_config())
-            result = await uploader.upload(video, "caption")
-        assert result.success is False
-        assert "LINKEDIN_RATE_LIMITED" in (result.error or "")
-
-    @pytest.mark.asyncio
-    async def test_upload_network_error(self, tmp_path: Path) -> None:
-        import httpx
-
-        from xpst.platforms.linkedin import LinkedInUploader
-
-        video = tmp_path / "v.mp4"
-        video.write_bytes(b"0" * 1024)
-        client = MagicMock()
-        client.post = AsyncMock(side_effect=httpx.ConnectError("boom"))
-        cm = MagicMock()
-        cm.__aenter__ = AsyncMock(return_value=client)
-        cm.__aexit__ = AsyncMock(return_value=False)
-        with patch("httpx.AsyncClient", return_value=cm):
-            uploader = LinkedInUploader(_make_config())
-            result = await uploader.upload(video, "caption")
-        assert result.success is False
-        assert "LINKEDIN_NETWORK_ERROR" in (result.error or "")
-
-    @pytest.mark.asyncio
-    async def test_check_health_success(self) -> None:
-        from xpst.platforms.linkedin import LinkedInUploader
-
-        responses = [_FakeResponse(200, {"sub": "abc", "name": "Test User", "email": "t@e.com"})]
-        with _patch_httpx(responses):
-            uploader = LinkedInUploader(_make_config())
-            health = await uploader.check_health()
-        assert health.authenticated is True
-        assert health.session_valid is True
-        assert health.details.get("name") == "Test User"
-
-    @pytest.mark.asyncio
-    async def test_check_health_auth_expired(self) -> None:
-        from xpst.platforms.linkedin import LinkedInUploader
-
-        responses = [_FakeResponse(401, text="expired")]
-        with _patch_httpx(responses):
-            uploader = LinkedInUploader(_make_config())
-            health = await uploader.check_health()
-        assert health.authenticated is False
-        assert "LINKEDIN_AUTH_EXPIRED" in (health.error or "")
-
-    @pytest.mark.asyncio
-    async def test_get_followers(self) -> None:
-        from xpst.platforms.linkedin import LinkedInUploader
-
-        responses = [_FakeResponse(200, {"numConnections": 250})]
-        with _patch_httpx(responses):
-            uploader = LinkedInUploader(_make_config())
-            count = await uploader.get_followers()
-        assert count == 250
-
-    @pytest.mark.asyncio
-    async def test_delete_success(self) -> None:
-        from xpst.platforms.linkedin import LinkedInUploader
-
-        responses = [_FakeResponse(204, {})]
-        with _patch_httpx(responses):
-            uploader = LinkedInUploader(_make_config())
-            assert await uploader.delete("post1") is True
-
-    def test_urn_author_builds_urn(self) -> None:
-        from xpst.platforms.linkedin import LinkedInUploader
-
-        config = _make_config()
-        config.linkedin.linkedin_user_id = "plainid"
-        uploader = LinkedInUploader(config)
-        assert uploader._urn_author() == "urn:li:person:plainid"
-
-        config.linkedin.linkedin_user_id = "urn:li:person:xyz"
-        assert uploader._urn_author() == "urn:li:person:xyz"
-
-
-# ---------------------------------------------------------------------------
 # Config tests
 # ---------------------------------------------------------------------------
 
@@ -597,10 +437,6 @@ class TestNewPlatformConfig:
         assert th.threads_user_id == "1"
         assert th.enabled is True  # AccountConfig default
 
-        li = LinkedInAccountConfig(access_token="a", linkedin_user_id="urn:li:person:x")
-        assert li.access_token == "a"
-        assert li.linkedin_user_id == "urn:li:person:x"
-
     def test_tiktok_oauth_fields(self) -> None:
         config = XPSTConfig()
         assert hasattr(config.tiktok, "client_key")
@@ -613,40 +449,31 @@ class TestNewPlatformConfig:
     def test_xpstconfig_has_new_fields(self) -> None:
         config = XPSTConfig()
         assert isinstance(config.threads, ThreadsAccountConfig)
-        assert isinstance(config.linkedin, LinkedInAccountConfig)
 
     def test_default_config_has_new_platforms(self) -> None:
         assert "threads" in DEFAULT_CONFIG["accounts"]
-        assert "linkedin" in DEFAULT_CONFIG["accounts"]
         assert DEFAULT_CONFIG["accounts"]["threads"]["enabled"] is False
-        assert DEFAULT_CONFIG["accounts"]["linkedin"]["enabled"] is False
         assert "client_key" in DEFAULT_CONFIG["accounts"]["tiktok"]
         assert "sandbox" in DEFAULT_CONFIG["accounts"]["tiktok"]
         assert "threads" in DEFAULT_CONFIG["rate_limits"]
-        assert "linkedin" in DEFAULT_CONFIG["rate_limits"]
 
     def test_merge_config_loads_new_platforms(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "config.yaml"
         cfg_file.write_text(yaml.dump({
             "accounts": {
                 "threads": {"enabled": True, "graph_access_token": "abc", "threads_user_id": "777"},
-                "linkedin": {"enabled": True, "access_token": "def", "linkedin_user_id": "urn:li:person:u"},
                 "tiktok": {"client_key": "ck", "access_token": "at", "sandbox": True},
             },
-            "rate_limits": {"threads": 10, "linkedin": 20},
+            "rate_limits": {"threads": 10},
         }))
         config = XPSTConfig.load(str(cfg_file))
         assert config.threads.enabled is True
         assert config.threads.graph_access_token == "abc"
         assert config.threads.threads_user_id == "777"
-        assert config.linkedin.enabled is True
-        assert config.linkedin.access_token == "def"
-        assert config.linkedin.linkedin_user_id == "urn:li:person:u"
         assert config.tiktok.client_key == "ck"
         assert config.tiktok.access_token == "at"
         assert config.tiktok.sandbox is True
         assert config.rate_limits.threads == 10
-        assert config.rate_limits.linkedin == 20
 
     def test_env_vars_override(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg_file = tmp_path / "config.yaml"
@@ -654,9 +481,6 @@ class TestNewPlatformConfig:
         monkeypatch.setenv("XPST_THREADS_ENABLED", "true")
         monkeypatch.setenv("XPST_THREADS_GRAPH_ACCESS_TOKEN", "envtok")
         monkeypatch.setenv("XPST_THREADS_USER_ID", "envuid")
-        monkeypatch.setenv("XPST_LINKEDIN_ENABLED", "1")
-        monkeypatch.setenv("XPST_LINKEDIN_ACCESS_TOKEN", "envlitok")
-        monkeypatch.setenv("XPST_LINKEDIN_USER_ID", "envliid")
         monkeypatch.setenv("XPST_TIKTOK_CLIENT_KEY", "envck")
         monkeypatch.setenv("XPST_TIKTOK_ACCESS_TOKEN", "envat")
         monkeypatch.setenv("XPST_TIKTOK_SANDBOX", "yes")
@@ -664,9 +488,6 @@ class TestNewPlatformConfig:
         assert config.threads.enabled is True
         assert config.threads.graph_access_token == "envtok"
         assert config.threads.threads_user_id == "envuid"
-        assert config.linkedin.enabled is True
-        assert config.linkedin.access_token == "envlitok"
-        assert config.linkedin.linkedin_user_id == "envliid"
         assert config.tiktok.client_key == "envck"
         assert config.tiktok.access_token == "envat"
         assert config.tiktok.sandbox is True
@@ -678,12 +499,9 @@ class TestNewPlatformConfig:
         loaded = yaml.safe_load(out.read_text())
         assert "threads" in loaded["accounts"]
         assert loaded["accounts"]["threads"]["graph_access_token"] == "th_token"
-        assert "linkedin" in loaded["accounts"]
-        assert loaded["accounts"]["linkedin"]["access_token"] == "li_token"
         assert loaded["accounts"]["tiktok"]["client_key"] == "tk_ck"
         assert loaded["accounts"]["tiktok"]["sandbox"] is False
         assert "threads" in loaded["rate_limits"]
-        assert "linkedin" in loaded["rate_limits"]
 
 
 # ---------------------------------------------------------------------------
@@ -704,7 +522,6 @@ class TestEngineInit:
                 "instagram": {"enabled": False},
                 "tiktok": {"enabled": False},
                 "threads": {"enabled": True, "graph_access_token": "t", "threads_user_id": "1"},
-                "linkedin": {"enabled": True, "access_token": "t", "linkedin_user_id": "urn:li:person:1"},
             },
         }))
         config = XPSTConfig.load(str(cfg_file))
@@ -715,10 +532,8 @@ class TestEngineInit:
 
         engine = CrossPostEngine(config)
         assert "threads" in engine._platforms
-        assert "linkedin" in engine._platforms
         assert isinstance(engine._platforms["threads"].__class__.__name__, str)
         assert engine._platforms["threads"].platform_name == "threads"
-        assert engine._platforms["linkedin"].platform_name == "linkedin"
 
     def test_engine_excludes_threads_when_disabled(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "config.yaml"
@@ -729,7 +544,6 @@ class TestEngineInit:
                 "instagram": {"enabled": False},
                 "tiktok": {"enabled": False},
                 "threads": {"enabled": False},
-                "linkedin": {"enabled": False},
             },
         }))
         config = XPSTConfig.load(str(cfg_file))
@@ -737,7 +551,6 @@ class TestEngineInit:
 
         engine = CrossPostEngine(config)
         assert "threads" not in engine._platforms
-        assert "linkedin" not in engine._platforms
 
     def test_engine_includes_tiktok_destination_when_enabled(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "config.yaml"
@@ -748,7 +561,6 @@ class TestEngineInit:
                 "instagram": {"enabled": False},
                 "tiktok": {"enabled": True, "client_key": "k", "access_token": "t"},
                 "threads": {"enabled": False},
-                "linkedin": {"enabled": False},
             },
         }))
         config = XPSTConfig.load(str(cfg_file))
@@ -771,11 +583,10 @@ class TestProviderManifests:
         names = PlatformRegistry.list_platforms()
         assert "tiktok" in names
         assert "threads" in names
-        assert "linkedin" in names
 
     def test_all_manifests_oauth_official(self) -> None:
         config = _make_config()
-        for name in ("tiktok", "threads", "linkedin"):
+        for name in ("tiktok", "threads"):
             m = PlatformRegistry.get(name, config).manifest
             assert m.auth_mode == AuthMode.OAUTH, f"{name} should be OAUTH"
             assert m.is_official_api is True, f"{name} should be official API"
@@ -787,7 +598,7 @@ class TestProviderManifests:
         import json
 
         config = _make_config()
-        for name in ("tiktok", "threads", "linkedin"):
+        for name in ("tiktok", "threads"):
             m = PlatformRegistry.get(name, config).manifest
             d = m.to_dict()
             # Must be JSON-serializable

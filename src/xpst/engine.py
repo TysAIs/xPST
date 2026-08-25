@@ -50,7 +50,7 @@ from xpst.utils.video import VideoProcessor
 logger = get_logger(__name__)
 
 # Platform-encoded temp-file suffixes (single source, ISC-92)
-_ENCODED_SUFFIXES = ("_youtube", "_instagram", "_x", "_tiktok", "_threads", "_linkedin")
+_ENCODED_SUFFIXES = ("_youtube", "_instagram", "_x", "_tiktok", "_threads")
 
 
 @dataclass
@@ -187,7 +187,6 @@ class CrossPostEngine:
             "x": config.rate_limits.x,
             "tiktok": config.rate_limits.tiktok,
             "threads": config.rate_limits.threads,
-            "linkedin": config.rate_limits.linkedin,
         })
         self.upload_service = UploadService(
             video_processor=self.video_processor,
@@ -334,15 +333,6 @@ class CrossPostEngine:
                 logger.info("Threads uploader initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize Threads uploader: {e}")
-
-        # LinkedIn
-        if self.config.linkedin.enabled:
-            try:
-                from xpst.platforms.linkedin import LinkedInUploader
-                self._platforms["linkedin"] = LinkedInUploader(self.config)
-                logger.info("LinkedIn uploader initialized")
-            except Exception as e:
-                logger.error(f"Failed to initialize LinkedIn uploader: {e}")
 
         # NOTE: Messenger is intentionally NOT registered here. It is a
         # webhook-driven auto-reply adapter (ManyChat-lite), not a video-posting
@@ -1090,7 +1080,7 @@ class CrossPostEngine:
                 }
 
         # Check platforms (connectivity test, no uploads)
-        all_known_platforms = {"youtube", "instagram", "x", "tiktok", "threads", "linkedin"}
+        all_known_platforms = {"youtube", "instagram", "x", "tiktok", "threads"}
         for name, uploader in self._platforms.items():
             try:
                 platform_health = await uploader.check_health()

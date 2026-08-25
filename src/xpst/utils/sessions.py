@@ -171,7 +171,8 @@ class SessionManager:
             "Android (33/13; 420dpi; 1080x2400; samsung; SM-G998B; o1s; exynos2100; en_US; 458229237)"
         )
 
-        # Extract sessionid from stored session (supports both minimal and full formats)
+        # Extract sessionid from stored session (supports minimal, full, and
+        # flat cookie-dump formats — must mirror instagram.py _get_client_direct)
         sessionid = None
         if isinstance(stored_session, dict):
             auth_data = stored_session.get("authorization_data", {})
@@ -180,14 +181,21 @@ class SessionManager:
                 # Try full instagrapi settings format
                 settings = stored_session.get("settings", {})
                 sessionid = settings.get("authorization_data", {}).get("sessionid", "")
+            if not sessionid:
+                # Flat cookie-dump formats: cookies dict or top-level key
+                cookies = stored_session.get("cookies", {})
+                sessionid = cookies.get("sessionid") or stored_session.get("sessionid")
 
         # Try sessionid-based auth first (no username/password needed)
         if sessionid:
             try:
                 client.login_by_sessionid(sessionid)
-                # Verify session is valid
+                # Verify session is valid. Use account_info() (the same probe
+                # instagram.py check_health uses) — get_timeline_feed() raises
+                # spurious LoginRequired on sessions that are actually valid
+                # (verified 2026-08-24 against a live tys.ais session).
                 try:
-                    client.get_timeline_feed()
+                    client.account_info()
                     logger.info("Instagram session valid (sessionid auth)")
 
                     # Save refreshed session (owner-only perms — see SECURITY.md)
@@ -209,9 +217,9 @@ class SessionManager:
                 client.set_settings(stored_session if isinstance(stored_session, dict) else {})
                 client.login(username, password)
 
-                # Verify session is valid
+                # Verify session is valid (account_info probe — see above)
                 try:
-                    client.get_timeline_feed()
+                    client.account_info()
                     logger.info("Instagram session valid (login auth)")
 
                     # Save refreshed session (owner-only perms — see SECURITY.md)

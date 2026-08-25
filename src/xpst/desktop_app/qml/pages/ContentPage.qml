@@ -328,8 +328,7 @@ Page {
             "instagram": "Instagram",
             "x": "X",
             "tiktok": "TikTok",
-            "threads": "Threads",
-            "linkedin": "LinkedIn"
+            "threads": "Threads"
         }
         return names[(name || "").toLowerCase()] || name || ""
     }
@@ -893,8 +892,7 @@ Page {
                         { name: "Instagram", key: "instagram", color: theme.instagram, icon: theme.iconInstagram + " " },
                         { name: "X", key: "x", color: theme.xtwitter, icon: theme.iconX + " " },
                         { name: "TikTok", key: "tiktok", color: theme.tiktok, icon: theme.iconTikTok + " " },
-                        { name: "Threads", key: "threads", color: "#000000", icon: "T " },
-                        { name: "LinkedIn", key: "linkedin", color: "#0A66C2", icon: "in " }
+                        { name: "Threads", key: "threads", color: "#000000", icon: "T " }
                     ]
 
                     ColumnLayout {
@@ -1412,7 +1410,7 @@ Page {
                 spacing: theme.spacingLg
 
                 Repeater {
-                    model: ["youtube", "instagram", "x", "tiktok", "threads", "linkedin"]
+                    model: ["youtube", "instagram", "x", "tiktok", "threads"]
 
                     ColumnLayout {
                         spacing: theme.spacingXs
@@ -1433,7 +1431,6 @@ Page {
                                     if (modelData === "x") return theme.xtwitter
                                     if (modelData === "tiktok") return theme.tiktok
                                     if (modelData === "threads") return "#000000"
-                                    if (modelData === "linkedin") return "#0A66C2"
                                     return theme.accent
                                 }
                             }
@@ -1632,7 +1629,7 @@ Page {
                 spacing: theme.spacingSm
 
                 Repeater {
-                    model: ["All", "YouTube", "Instagram", "X", "TikTok", "Threads", "LinkedIn"]
+                    model: ["All", "YouTube", "Instagram", "X", "TikTok", "Threads"]
 
                     Rectangle {
                         width: filterLabel.implicitWidth + theme.spacingXl
@@ -1995,7 +1992,6 @@ Page {
                                             if (p === "x") return Qt.rgba(0.11, 0.61, 0.94, 0.15)
                                             if (p === "tiktok") return Qt.rgba(0, 0.95, 0.92, 0.15)
                                             if (p === "threads") return Qt.rgba(0, 0, 0, 0.15)
-                                            if (p === "linkedin") return Qt.rgba(0.04, 0.4, 0.76, 0.15)
                                             return theme.accentMuted
                                         }
                                         Text {
@@ -2011,7 +2007,6 @@ Page {
                                                 if (p === "x") return theme.xtwitter
                                                 if (p === "tiktok") return theme.tiktok
                                                 if (p === "threads") return "#000000"
-                                                if (p === "linkedin") return "#0A66C2"
                                                 return theme.accent
                                             }
                                         }

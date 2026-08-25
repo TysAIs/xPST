@@ -53,7 +53,6 @@ Page {
         if (p === "x") return theme.xtwitter
         if (p === "tiktok") return theme.tiktok
         if (p === "threads") return "#000000"
-        if (p === "linkedin") return "#0A66C2"
         return theme.accent
     }
 
@@ -203,8 +202,7 @@ Page {
                         { name: "Instagram", key: "Instagram", icon: theme.iconInstagram + " " },
                         { name: "X", key: "X", icon: theme.iconX + " " },
                         { name: "TikTok", key: "TikTok", icon: theme.iconTikTok + " " },
-                        { name: "Threads", key: "Threads", icon: "T " },
-                        { name: "LinkedIn", key: "LinkedIn", icon: "in " }
+                        { name: "Threads", key: "Threads", icon: "T " }
                     ]
 
                     Rectangle {
@@ -707,7 +705,6 @@ Page {
                                     if (p === "x") return Qt.rgba(0.11, 0.61, 0.94, 0.15)
                                     if (p === "tiktok") return Qt.rgba(0, 0.95, 0.92, 0.15)
                                     if (p === "threads") return Qt.rgba(0, 0, 0, 0.15)
-                                    if (p === "linkedin") return Qt.rgba(0.04, 0.4, 0.76, 0.15)
                                     return theme.accentMuted
                                 }
                                 Text {
@@ -719,7 +716,6 @@ Page {
                                         if (p === "x") return "X"
                                         if (p === "tiktok") return "TT"
                                         if (p === "threads") return "T"
-                                        if (p === "linkedin") return "in"
                                         return "P"
                                     }
                                     font.pixelSize: 12

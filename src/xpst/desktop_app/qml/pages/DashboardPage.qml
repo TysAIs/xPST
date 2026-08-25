@@ -94,7 +94,6 @@ Page {
         if (n === "x") return theme.xtwitter
         if (n === "tiktok") return theme.tiktok
         if (n === "threads") return "#000000"
-        if (n === "linkedin") return "#0A66C2"
         return theme.accent
     }
 
@@ -353,7 +352,7 @@ Page {
                     Repeater {
                         model: {
                             var result = []
-                            var keys = ["youtube", "instagram", "x", "tiktok", "threads", "linkedin"]
+                            var keys = ["youtube", "instagram", "x", "tiktok", "threads"]
                             for (var i = 0; i < keys.length; i++) {
                                 var k = keys[i]
                                 var info = dashboardPage.platformHealthData[k]
