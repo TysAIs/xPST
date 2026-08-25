@@ -291,10 +291,10 @@ choco install ffmpeg
 
 ### "YouTube credentials expired"
 
-If your OAuth app is in **Testing** mode with a Gmail/Brand Account:
-1. Go to Google Cloud Console → OAuth consent screen
-2. Switch to **Production**
-3. Run: `xpst auth youtube`
+If your OAuth app is in **Testing** mode with a Gmail/Brand Account, Google expires the refresh token ~7 days after consent — xPST's silent auto-refresh cannot recover from that. One-time fix:
+1. Go to Google Cloud Console → **OAuth consent screen** → click **Publish App** (see [setup-youtube.md, Step 7](setup-youtube.md#step-7--publish-the-app-to-production-one-time-fix-for-constant-re-auth)).
+2. Re-run: `xpst connect youtube` (authorize once under production mode).
+3. Verify: `xpst auth status --json` → `youtube.authenticated: true`. After this, refresh tokens are long-lived and xPST refreshes silently forever.
 
 ### "X session expired"
 
