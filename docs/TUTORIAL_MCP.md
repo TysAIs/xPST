@@ -101,7 +101,7 @@ If running from a source checkout:
 
 ## Tool Reference
 
-xPST exposes 23 MCP tools organized into 5 categories: Core Operations (6), Analytics & Insights (5), Content & Knowledge (4), Configuration & Scheduling (4), and Knowledge Base (4). All posting destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn — are valid `platforms` values.
+xPST exposes 23 MCP tools organized into 5 categories: Core Operations (6), Analytics & Insights (5), Content & Knowledge (4), Configuration & Scheduling (4), and Knowledge Base (4). All posting destinations — YouTube, Instagram, X/Twitter, TikTok, and Threads — are valid `platforms` values.
 
 ### Core Operations (6 tools)
 
@@ -127,7 +127,7 @@ Manually post a video file to selected platforms.
 {
   "video_path": "/path/to/video.mp4",
   "caption": "Check out this video!",
-  "platforms": ["youtube", "x", "threads", "linkedin"]  // optional; any of youtube, instagram, x, tiktok, threads, linkedin; defaults to all enabled
+  "platforms": ["youtube", "x", "threads"]  // optional; any of youtube, instagram, x, tiktok, threads; defaults to all enabled
 }
 ```
 
@@ -140,7 +140,7 @@ Remove a post record from local state (does not call a platform delete API).
 ```json
 {
   "video_id": "video-abc123",
-  "platform": "youtube"  // youtube | instagram | x | tiktok | threads | linkedin | all
+  "platform": "youtube"  // youtube | instagram | x | tiktok | threads | all
 }
 ```
 
@@ -154,7 +154,7 @@ Retry failed or incomplete posts.
 {
   "max_count": 10,
   "source": "tiktok",
-  "platforms": ["youtube", "instagram", "x", "tiktok", "threads", "linkedin"]
+  "platforms": ["youtube", "instagram", "x", "tiktok", "threads"]
 }
 ```
 
@@ -190,7 +190,7 @@ Retrieve per-post and per-platform engagement metrics with snapshot history.
 
 ```json
 {
-  "platform": "youtube",  // optional; youtube | instagram | x | tiktok | threads | linkedin; defaults to all
+  "platform": "youtube",  // optional; youtube | instagram | x | tiktok | threads; defaults to all
   "live": false           // optional; fetch fresh metrics instead of stored snapshots
 }
 ```
@@ -333,7 +333,7 @@ Schedule a new post for future publishing.
 {
   "video_path": "/path/to/video.mp4",
   "caption": "Scheduled post",
-  "platforms": ["youtube", "instagram", "threads", "linkedin"],
+  "platforms": ["youtube", "instagram", "threads"],
   "scheduled_time": "2026-06-20T14:00:00Z",
   "repeat_rule": "weekly"  // optional; daily | weekly | monthly
 }

@@ -17,7 +17,7 @@ from typing import Any
 
 from xpst.utils.platform import get_config_dir
 
-# PySide6 is an optional ('desktop'/'pyside6') extra. Import it gracefully so
+# PySide6 is an optional ('desktop') extra. Import it gracefully so
 # that importing this module does not hard-fail when the extra is absent. The
 # clear install message is surfaced only when the GUI is actually launched
 # (see require_pyside6 / run_desktop_app in main.py).
@@ -105,7 +105,7 @@ def require_pyside6() -> None:
     if not HAS_PYSIDE6:
         raise ModuleNotFoundError(
             "The desktop app requires the optional PySide6 extra. "
-            "Install it with: pip install 'xpst[pyside6]'"
+            "Install it with: pip install 'xpst[desktop]'"
         ) from _PYSIDE6_IMPORT_ERROR
 
 
@@ -165,7 +165,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-PLATFORMS = ("youtube", "instagram", "x", "tiktok", "threads", "linkedin")
+PLATFORMS = ("youtube", "instagram", "x", "tiktok", "threads")
 ACCOUNT_SECTIONS = (*PLATFORMS, "local")
 
 

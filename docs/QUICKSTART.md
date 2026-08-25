@@ -57,7 +57,7 @@ xpst setup
 
 This will:
 1. Ask for your TikTok username
-2. Ask which platforms to enable (YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn, and Messenger)
+2. Ask which platforms to enable (YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger)
 3. Create configuration file at `~/.xpst/config.yaml`
 4. Create credentials directory at `~/.xpst/credentials/`
 
@@ -136,15 +136,6 @@ Threads is a **destination** using the official **Meta Threads API** (OAuth, con
 2. Run `xpst auth threads` if guided setup is available
 
 > **Note:** Max caption 500 chars, video up to 300s, 250 posts/day.
-
-#### LinkedIn
-
-LinkedIn is a **destination** using the official LinkedIn `/v2/posts` endpoint (OAuth).
-
-1. Configure the LinkedIn OAuth credentials in `~/.xpst/config.yaml`
-2. Run `xpst auth linkedin` if guided setup is available
-
-> **Note:** Max caption 3000 chars, 150 posts/day.
 
 #### Messenger
 
@@ -246,9 +237,6 @@ accounts:
     client_secret: "YOUR_TIKTOK_CLIENT_SECRET"
 
   threads:
-    enabled: true
-
-  linkedin:
     enabled: true
 
   messenger:

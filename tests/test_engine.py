@@ -38,7 +38,6 @@ def _make_config(tmp_path: Path):
     config.instagram.enabled = False
     config.tiktok.enabled = False
     config.threads.enabled = False
-    config.linkedin.enabled = False
     return config
 
 

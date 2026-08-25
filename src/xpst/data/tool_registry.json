@@ -10,6 +10,7 @@
     {"name": "xpst_best_time", "handler": "handle_best_time", "mutating": false, "rate_limit": "60/min", "description": "Get best posting times"},
     {"name": "xpst_security_audit", "handler": "handle_security_audit", "mutating": false, "rate_limit": "10/min", "description": "Run security audit"},
     {"name": "xpst_suggest_caption", "handler": "handle_suggest_caption", "mutating": false, "rate_limit": "30/min", "description": "Generate caption suggestions"},
+    {"name": "xpst_generate_ideas", "handler": "handle_generate_ideas", "mutating": false, "rate_limit": "30/min", "description": "Generate post ideas for a topic (AI content studio)"},
     {"name": "xpst_transcript", "handler": "handle_transcript", "mutating": false, "rate_limit": "30/min", "description": "Get video transcript"},
     {"name": "xpst_search", "handler": "handle_search", "mutating": false, "rate_limit": "60/min", "description": "Search transcripts and content"},
     {"name": "xpst_schedule_list", "handler": "handle_schedule_list", "mutating": false, "rate_limit": "60/min", "description": "List scheduled posts"},
@@ -19,12 +20,16 @@
     {"name": "xpst_backfill", "handler": "handle_backfill", "mutating": true, "rate_limit": "10/min", "description": "Retry failed posts"},
     {"name": "xpst_config_show", "handler": "handle_config_show", "mutating": false, "rate_limit": "60/min", "description": "Show configuration"},
     {"name": "xpst_auth_status", "handler": "handle_auth_status", "mutating": false, "rate_limit": "60/min", "description": "Show auth status"},
+    {"name": "xpst_bio_get", "handler": "handle_bio_get", "mutating": false, "rate_limit": "60/min", "description": "Link-in-bio URL and rendered links"},
     {"name": "xpst_providers", "handler": "handle_providers", "mutating": false, "rate_limit": "60/min", "description": "Show provider modes"},
     {"name": "xpst_delete", "handler": "handle_delete", "mutating": true, "rate_limit": "20/min", "description": "Delete a post from a platform"},
+    {"name": "messenger_send", "handler": "handle_messenger_send", "mutating": true, "rate_limit": "30/min", "description": "Send a Messenger message to a PSID"},
+    {"name": "messenger_set_rules", "handler": "handle_messenger_set_rules", "mutating": true, "rate_limit": "30/min", "description": "Configure Messenger auto-reply rules"},
+    {"name": "xpst_messenger_check_comments", "handler": "handle_messenger_check_comments", "mutating": true, "rate_limit": "20/min", "description": "Scan IG/FB comments and auto-reply per rules"},
     {"name": "kb_add", "handler": "handle_kb_add", "mutating": true, "rate_limit": "30/min", "description": "Add to knowledge base (deprecated)"},
     {"name": "kb_query", "handler": "handle_kb_query", "mutating": false, "rate_limit": "60/min", "description": "Query knowledge base (deprecated)"},
     {"name": "kb_organize", "handler": "handle_kb_organize", "mutating": true, "rate_limit": "10/min", "description": "Organize knowledge base (deprecated)"},
     {"name": "kb_areas", "handler": "handle_kb_areas", "mutating": false, "rate_limit": "60/min", "description": "List knowledge base areas (deprecated)"}
   ],
-  "total_tools": 23
+  "total_tools": 28
 }
