@@ -16,9 +16,10 @@ YouTube uses Google's official OAuth 2.0 flow. You create a small "OAuth client"
 5. [Step 4 — Create OAuth Desktop credentials](#step-4--create-oauth-desktop-credentials)
 6. [Step 5 — Download client_secrets.json](#step-5--download-client_secretsjson)
 7. [Step 6 — Run `xpst connect youtube`](#step-6--run-xpst-connect-youtube)
-8. [Verify](#verify)
-9. [Token storage & refresh](#token-storage--refresh)
-10. [Troubleshooting](#troubleshooting)
+8. [Step 7 — Publish the app to production (one-time fix for constant re-auth)](#step-7--publish-the-app-to-production-one-time-fix-for-constant-re-auth)
+9. [Verify](#verify)
+10. [Token storage & refresh](#token-storage--refresh)
+11. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -63,7 +64,7 @@ No billing is required — the YouTube Data API v3 has a generous free daily quo
 5. On the **Test users** page, click **Add users** and add the Google account you'll upload with (e.g. `your-email@gmail.com`). This is required while the app is in **Testing** mode.
 6. Click **Save and Continue**.
 
-> While the consent screen is in **Testing** mode, only the accounts you add as test users can authorize. For personal use that's exactly what you want — you don't need to publish the app or go through verification.
+> While the consent screen is in **Testing** mode, only the accounts you add as test users can authorize. **But Testing mode has a hidden cost: Google expires the refresh token ~7 days after consent** (access tokens last ~1 hour and xPST refreshes them silently — the 7-day refresh-token expiry is what makes xPST ask you to log in again every week). **Fix: Step 7 publishes the app to production, which makes the refresh token long-lived. Do Step 7.**
 
 ---
 
@@ -127,6 +128,45 @@ xPST requests these scopes (read+upload):
 
 ---
 
+## Step 7 — Publish the app to production (one-time fix for constant re-auth)
+
+**Do this. It is the single most important step for "set it and forget it" auth.**
+
+While the consent screen sits in **Testing** mode, Google **expires the refresh
+token ~7 days after you consent** (the access token's ~1 hour lifetime is
+handled automatically by xPST — it's the refresh-token expiry that forces a
+new browser login every week). Publishing the app converts the grant to a
+**long-lived refresh token**: you authorize once, and xPST refreshes silently
+forever after. This is a Google app-setting change — **no xPST code change is
+required** (the auto-refresh at `src/xpst/utils/sessions.py` is already there).
+
+1. Go to **<https://console.cloud.google.com/apis/credentials/oauthclient>** (or **APIs & Services** → **OAuth consent screen** in the left sidebar), with your xPST project selected in the top bar.
+2. On the consent screen page, click **Publish App** (top of the page). It will change from "In testing" to "In production".
+3. Google may ask you to add the three xPST scopes to the consent screen (**Scopes** tab → **Add or remove scopes**):
+   - `https://www.googleapis.com/auth/youtube.upload`
+   - `https://www.googleapis.com/auth/youtube.readonly`
+   - `https://www.googleapis.com/auth/youtube.force-ssl`
+
+   YouTube scopes are classified as **sensitive**, so the published app will show an **"unverified app" warning screen** (and a 100-user cap) until you complete Google's app verification. **That warning does not stop a refresh token from being issued** — just click **Advanced** → **Continue** on the warning when you next authorize. The 100-user cap is irrelevant for personal use (you are 1 user).
+   - *Optional, later:* if you want the warning gone, click **Prepare for Verification** on the consent screen page and answer the short questionnaire (scope justification + demo link). For a personal tool this is never required for auth to work.
+4. **Re-authorize once** so the new grant is issued under production mode:
+   ```bash
+   xpst connect youtube
+   ```
+   Sign in with the channel's Google account, click **Allow**. (If you see the "unverified app" warning: **Advanced** → **Continue** → **Allow**.)
+5. Verify:
+   ```bash
+   xpst auth status --json    # youtube.authenticated should be true
+   ```
+
+> **How to tell it worked:** in `~/.xpst/credentials/youtube_token.json` the
+> `expiry` field keeps advancing (access tokens are refreshed hourly), and you
+> no longer get a "YouTube credentials expired. Run: xpst auth youtube" error
+> ~7 days later. If you still do, the app is still in Testing mode — repeat
+> step 2.
+
+---
+
 ## Verify
 
 ```bash
@@ -153,13 +193,16 @@ xpst post -v ~/Videos/short.mp4 -c "First xPST Short 🎬" -p youtube
 
 ## Token storage & refresh
 
-The saved token includes a **refresh token**, so once you've authorized once you should never need to do the browser dance again. xPST:
+The saved token includes a **refresh token**. xPST:
 
-- Detects when the access token is expired.
+- Detects when the access token is expired (access tokens last ~1 hour).
 - Uses the refresh token to get a new access token automatically.
 - Re-saves the refreshed token to `youtube_token.json` (`0600`).
 
+**The refresh token itself only lives forever if your app is in production mode (Step 7).** In Testing mode, Google expires the refresh token ~7 days after consent, and xPST *cannot* silently recover from that — it will tell you to run `xpst connect youtube` again. So: publish the app once, and "authorize once, refresh forever" is real.
+
 You only need to re-run `xpst connect youtube` if:
+- Your app was still in Testing mode and the refresh token expired (~7 days), **or**
 - You revoke xPST's access in your Google account settings, or
 - You delete `youtube_token.json` and `youtube_token.enc`, or
 - You change the Google account / channel.
@@ -170,6 +213,7 @@ You only need to re-run `xpst connect youtube` if:
 
 | Symptom | Fix |
 |---------|-----|
+| **"YouTube credentials expired" every ~7 days** | Your OAuth app is still in **Testing** mode — Google expires refresh tokens there. **Step 7: Publish App to production**, then re-run `xpst connect youtube` once. After that the refresh token is long-lived. |
 | `access_denied` during OAuth | Your Google account isn't on the consent screen's **Test users** list (Step 3, item 5). Add it and retry. |
 | `redirect_uri_mismatch` | You created a **Web application** credential instead of **Desktop app**. Recreate it as Desktop app (Step 4). |
 | `File not found` for client_secrets | The file isn't at `~/.xpst/credentials/youtube_client_secrets.json`. Check the exact name. |
