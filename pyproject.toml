@@ -75,7 +75,7 @@ anti-ban = [
     "curl_cffi>=0.7.0,<1.0.0",
 ]
 mcp = [
-    "mcp[cli]>=1.0.0,<2.0.0",
+    "mcp[cli]>=1.0.0,<3.0.0",
 ]
 desktop = [
     # Full desktop app: native PySide6/QML UI plus the pywebview fallback.
