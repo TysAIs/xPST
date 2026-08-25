@@ -23,8 +23,8 @@ from xpst.platforms.messenger import (
     MESSENGER_API_BASE,
     MESSENGER_API_VERSION,
     MESSENGER_MAX_TEXT_LENGTH,
-    MessengerAdapter,
     MessengerError,
+    MessengerUploader,
     appsecret_proof,
 )
 from xpst.providers import AuthMode, ProviderCapability, ProviderRole
@@ -98,7 +98,7 @@ def _patch_client(monkeypatch: pytest.MonkeyPatch) -> FakeAsyncClient:
     return fake
 
 
-def _set_session_token(adapter: MessengerAdapter, token: str = PAGE_TOKEN, secret: str = APP_SECRET) -> None:
+def _set_session_token(adapter: MessengerUploader, token: str = PAGE_TOKEN, secret: str = APP_SECRET) -> None:
     class FakeSM:
         async def get_messenger_token(self) -> str:
             return token
@@ -134,7 +134,7 @@ def test_messenger_registered_in_registry() -> None:
 
 
 def test_messenger_manifest() -> None:
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     manifest = adapter.manifest
     assert manifest.name == "messenger"
     assert manifest.display_name == "Messenger"
@@ -217,7 +217,7 @@ def test_appsecret_proof_none_without_secret() -> None:
 
 def test_send_text_builds_graph_request(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _patch_client(monkeypatch)
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     _set_session_token(adapter)
 
     _run(adapter.send_text(PSID, "hello"))
@@ -234,7 +234,7 @@ def test_send_text_builds_graph_request(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_send_alias_and_truncation(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _patch_client(monkeypatch)
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     _set_session_token(adapter)
 
     long_text = "x" * (MESSENGER_MAX_TEXT_LENGTH + 100)
@@ -248,13 +248,13 @@ def test_send_alias_and_truncation(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_send_text_without_token_raises() -> None:
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     with pytest.raises(ValueError, match="MESSENGER_NOT_CONFIGURED"):
         _run(adapter.send_text(PSID, "hello"))
 
 
 def test_send_text_missing_recipient_raises() -> None:
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     _set_session_token(adapter)
     with pytest.raises(ValueError, match="recipient"):
         _run(adapter.send_text("", "hello"))
@@ -263,7 +263,7 @@ def test_send_text_missing_recipient_raises() -> None:
 def test_api_error_raises_messenger_error(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeAsyncClient(responder=lambda method, url, params, json: ({}, 429))
     monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     _set_session_token(adapter)
     with pytest.raises(MessengerError, match="MESSENGER_RATE_LIMITED"):
         _run(adapter.send_text(PSID, "hello"))
@@ -272,7 +272,7 @@ def test_api_error_raises_messenger_error(monkeypatch: pytest.MonkeyPatch) -> No
 def test_auth_error_raises_messenger_error(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeAsyncClient(responder=lambda method, url, params, json: ({}, 401))
     monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     _set_session_token(adapter)
     with pytest.raises(MessengerError, match="MESSENGER_AUTH_EXPIRED"):
         _run(adapter.send_text(PSID, "hello"))
@@ -283,7 +283,7 @@ def test_auth_error_raises_messenger_error(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_send_action_builds_sender_action_request(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _patch_client(monkeypatch)
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     _set_session_token(adapter)
 
     _run(adapter.send_action(PSID, "typing_on"))
@@ -296,7 +296,7 @@ def test_send_action_builds_sender_action_request(monkeypatch: pytest.MonkeyPatc
 
 def test_send_quick_replies_include_buttons(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _patch_client(monkeypatch)
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     _set_session_token(adapter)
 
     qr = [{"content_type": "text", "title": "Yes", "payload": "YES"}]
@@ -309,7 +309,7 @@ def test_send_quick_replies_include_buttons(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_upload_wrapper_returns_upload_result(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _patch_client(monkeypatch)
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     _set_session_token(adapter)
     adapter.config.messenger.page_id = "page_123"
 
@@ -322,7 +322,7 @@ def test_upload_wrapper_returns_upload_result(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_upload_wrapper_no_token_returns_failure() -> None:
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     result = _run(adapter.upload(Path("unused.mp4"), "hello"))
     assert result.success is False
     assert "MESSENGER_NOT_CONFIGURED" in (result.error or "")
@@ -332,7 +332,7 @@ def test_upload_wrapper_no_token_returns_failure() -> None:
 
 
 def test_check_health_not_configured() -> None:
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     health = _run(adapter.check_health())
     assert health.authenticated is False
     assert health.session_valid is False
@@ -342,7 +342,7 @@ def test_check_health_not_configured() -> None:
 def test_check_health_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeAsyncClient(responder=lambda method, url, params, json: ({"id": "page_1", "name": "Test Page"}, 200))
     monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     _set_session_token(adapter)
     health = _run(adapter.check_health())
     assert health.authenticated is True
@@ -356,7 +356,7 @@ def test_check_health_ok(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_check_health_unauthorized(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeAsyncClient(responder=lambda method, url, params, json: ({}, 401))
     monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     _set_session_token(adapter)
     health = _run(adapter.check_health())
     assert health.authenticated is False
@@ -367,7 +367,7 @@ def test_check_health_unauthorized(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_reply_rules_longest_match_wins() -> None:
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     rules = {"pricing": "See pricing!", "pricing pro": "Pro pricing", "*": "default"}
     assert adapter._match_rule("tell me about pricing", rules) == "See pricing!"
     assert adapter._match_rule("pricing pro please", rules) == "Pro pricing"
@@ -379,7 +379,7 @@ def test_reply_rules_longest_match_wins() -> None:
 
 def test_handle_webhook_payload_auto_reply(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _patch_client(monkeypatch)
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     _set_session_token(adapter)
     adapter.config.messenger.auto_reply = True
     adapter.config.messenger.reply_rules = {"hello": "Hi there!", "*": "Thanks for writing"}
@@ -410,7 +410,7 @@ def test_handle_webhook_payload_auto_reply(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_handle_webhook_payload_disabled_auto_reply() -> None:
-    adapter = MessengerAdapter(_make_config())
+    adapter = MessengerUploader(_make_config())
     payload = {"entry": [{"id": "page_1", "messaging": [_messaging_entry("hi", "mid.1")]}]}
     results = _run(adapter.handle_webhook_payload(payload))
     assert results == [{"event": "message", "sent": False, "response": None}]
