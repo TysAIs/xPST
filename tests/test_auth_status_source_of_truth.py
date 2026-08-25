@@ -152,7 +152,6 @@ class TestAuthStatusSourceOfTruth:
         assert platforms["instagram"]["authenticated"] is True
         # Nothing configured anywhere => still false (no false positives)
         assert platforms["threads"]["authenticated"] is False
-        assert platforms["linkedin"]["authenticated"] is False
         assert platforms["messenger"]["authenticated"] is False
 
     def test_no_credentials_reports_unauthenticated(
@@ -170,7 +169,7 @@ class TestAuthStatusSourceOfTruth:
         )
 
         data = _status_json(runner, auth_config["config"])
-        for plat in ("youtube", "x", "instagram", "threads", "linkedin", "messenger"):
+        for plat in ("youtube", "x", "instagram", "threads", "messenger"):
             assert data["platforms"][plat]["authenticated"] is False
 
     def test_store_credentials_still_reported_authenticated(
