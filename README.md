@@ -46,7 +46,7 @@ xPST works across **seven platforms** — YouTube, Instagram, X/Twitter, TikTok,
 
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
-- **CLI** — 34 top-level commands covering the entire workflow
+- **CLI** — 37 top-level commands covering the entire workflow
 - **MCP server** — 23 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
@@ -90,7 +90,7 @@ network traffic is the platform API calls you configure. See
 
 ### Three Drivable Surfaces
 - **Desktop GUI** — PySide6/QML app with Dashboard, Compose, Content, Analytics, Connect, Schedule, Settings, and About pages + DetailPanel
-- **CLI** — 34 Click-based commands with `--json` output, `--dry-run` mode, and meaningful exit codes
+- **CLI** — 37 Click-based commands with `--json` output, `--dry-run` mode, and meaningful exit codes
 - **MCP server** — 23 tools (19 `xpst_*` + 4 `kb_*`) for AI agent integration
 
 ### Enterprise Hardening
@@ -216,7 +216,7 @@ See `Dockerfile` and `docker-compose.yml` for details.
 
 ## CLI Reference
 
-xPST provides 34 top-level commands. Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 37 top-level commands. Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 
 ### Setup & Accounts
 
