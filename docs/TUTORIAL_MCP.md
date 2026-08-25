@@ -1,6 +1,6 @@
 # xPST MCP (Model Context Protocol) Tutorial
 
-> **Complete guide** to using xPST's 23 MCP tools with AI agents. Drive the entire cross-posting workflow from Claude Desktop, Cursor, or any MCP-compatible client.
+> **Complete guide** to using xPST's 28 MCP tools with AI agents. Drive the entire cross-posting workflow from Claude Desktop, Cursor, or any MCP-compatible client.
 
 ---
 
@@ -19,7 +19,7 @@
 
 ## What is MCP?
 
-The **Model Context Protocol** (MCP) is an open standard that lets AI assistants interact with external tools and data sources. xPST exposes 23 MCP tools that let any MCP-compatible AI agent:
+The **Model Context Protocol** (MCP) is an open standard that lets AI assistants interact with external tools and data sources. xPST exposes 28 MCP tools that let any MCP-compatible AI agent:
 
 - Fetch and post videos across platforms
 - Check platform health and auth status
@@ -101,7 +101,7 @@ If running from a source checkout:
 
 ## Tool Reference
 
-xPST exposes 23 MCP tools organized into 5 categories: Core Operations (6), Analytics & Insights (5), Content & Knowledge (4), Configuration & Scheduling (4), and Knowledge Base (4). All posting destinations — YouTube, Instagram, X/Twitter, TikTok, and Threads — are valid `platforms` values.
+xPST exposes 28 MCP tools organized into 6 categories: Core Operations (6), Analytics & Insights (5), Content & Knowledge (6), Configuration & Scheduling (4), Messenger (3), and Knowledge Base (4). All posting destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger — are valid `platforms` values.
 
 ### Core Operations (6 tools)
 
@@ -241,7 +241,7 @@ List all scheduled posts (pending, completed, failed).
 
 ---
 
-### Content & Knowledge (4 tools)
+### Content & Knowledge (6 tools)
 
 #### `xpst_suggest_caption`
 
@@ -255,6 +255,19 @@ Generate AI caption suggestions for a video file.
 ```
 
 **Returns:** One or more suggested captions.
+
+#### `xpst_generate_ideas`
+
+Generate post ideas for a topic (AI content studio).
+
+```json
+{
+  "topic": "home lab setups",
+  "count": 5
+}
+```
+
+**Returns:** A list of post ideas with hooks and angles.
 
 #### `xpst_transcript`
 
@@ -290,6 +303,55 @@ Run an automated security check on the xPST installation.
 ```
 
 **Returns:** Audit findings with severity and remediation hints.
+
+#### `xpst_bio_get`
+
+Get the Link-in-Bio page URL, handle, and rendered links (the dashboard serves the page).
+
+```json
+{}
+```
+
+**Returns:** Bio page URL and configured links.
+
+---
+
+### Messenger (3 tools)
+
+#### `messenger_send`
+
+Send a text message to a Messenger PSID. **Sends real messages** — confirm with the user first.
+
+```json
+{
+  "psid": "1234567890",
+  "text": "Thanks for reaching out!"
+}
+```
+
+**Returns:** Delivery status.
+
+#### `messenger_set_rules`
+
+Configure Messenger auto-reply keyword rules. Rewrites config.
+
+```json
+{
+  "rules": [{ "keywords": ["price"], "reply": "DM me for pricing!" }]
+}
+```
+
+**Returns:** The updated rule set.
+
+#### `xpst_messenger_check_comments`
+
+Scan IG/FB comments and apply auto-reply rules via the Graph API. **Posts public replies.**
+
+```json
+{ "dry_run": true }
+```
+
+**Returns:** Comments matched and replies queued/sent.
 
 ---
 
