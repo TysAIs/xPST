@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://www.python.org"><img alt="Python" src="https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green"></a>
-  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-1534%20passing-brightgreen"></a>
+  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-1524%20passing-brightgreen"></a>
   <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-7-blue"></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/os-Linux%20|%20macOS%20|%20Windows-lightgrey"></a>
   <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-28%20tools-orange"></a>
@@ -442,7 +442,7 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 }
 ```
 
-### 23 Tools
+### 28 Tools (22 `xpst_*` + 2 `messenger_*` + 4 `kb_*`)
 
 **Posting & operations (10 tools):**
 
@@ -468,13 +468,15 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 | `xpst_followers` | Follower counts per platform with growth history |
 | `xpst_best_time` | Recommended posting times derived from engagement history |
 
-**Content & creative (3 tools):**
+**Content & creative (5 tools):**
 
 | Tool | Description |
 |------|-------------|
 | `xpst_suggest_caption` | Generate AI caption suggestions from a video file |
+| `xpst_generate_ideas` | Generate post ideas for a topic (AI content studio) |
 | `xpst_transcript` | Get the transcript for a video by ID or content hash |
 | `xpst_search` | Search transcripts and content across the knowledge base |
+| `xpst_bio_get` | Link-in-bio URL, handle, and rendered links |
 
 **Scheduling (2 tools):**
 
@@ -492,9 +494,17 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 | `kb_organize` | Discover areas, tag difficulty, and assign nuggets |
 | `kb_areas` | List discovered knowledge areas in course order (beginner → advanced) |
 
+**Messenger (3 tools):**
+
+| Tool | Description |
+|------|-------------|
+| `messenger_send` | Send a text message to a Messenger PSID |
+| `messenger_set_rules` | Configure Messenger auto-reply rules |
+| `xpst_messenger_check_comments` | Scan IG/FB comments and auto-reply per rules |
+
 ### Security Guardrails
 
-Mutating tools (`xpst_run`, `xpst_post`, `xpst_backfill`, `xpst_delete`, `xpst_schedule_add`, `kb_add`, `kb_organize`) post to or mutate **real accounts**. Two environment-variable tiers control them:
+Mutating tools (`xpst_run`, `xpst_post`, `xpst_backfill`, `xpst_delete`, `xpst_schedule_add`, `messenger_send`, `messenger_set_rules`, `xpst_messenger_check_comments`, `kb_add`, `kb_organize`) post to or mutate **real accounts**. Two environment-variable tiers control them:
 
 - **`XPST_MCP_READONLY=1`** — Blocks all mutating tools entirely (read-only mode)
 - **`XPST_MCP_REQUIRE_CONFIRM=1`** — Requires `confirm: true` in the arguments (consent tier)
@@ -768,7 +778,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and [docs/a
 # Install with dev tooling
 uv pip install -e ".[full,dev]"
 
-# Run the test suite (1534 passed / 12 skipped on Python 3.11)
+# Run the test suite (1524 passed / 12 skipped on Python 3.11)
 pytest
 
 # Lint and format
