@@ -1,7 +1,7 @@
 # Getting Started with xPST
 
 > **Free · Local-first · Open-source · Cross-platform**
-> Distribute short-form video to YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn — from one tool, on your machine. (Plus an opt-in Messenger auto-reply option.)
+> Distribute short-form video to YouTube, Instagram, X/Twitter, TikTok, and Threads — from one tool, on your machine. (Plus an opt-in Messenger auto-reply option.)
 
 xPST (Cross-Posting Suite) watches your video sources (TikTok, YouTube, Instagram, X, or local files), downloads new videos, re-encodes them per-platform with FFmpeg, and cross-posts to every connected destination. Nothing about your accounts or media ever leaves your computer except the uploads themselves — xPST is a local tool that talks directly to each platform's official API.
 
@@ -131,7 +131,6 @@ Each platform has its own setup guide with screenshots-level detail:
 | **X / Twitter** | Login via twikit (cookies saved) | [setup-x-twitter.md](setup-x-twitter.md) |
 | **TikTok** | yt-dlp cookies (source) · Content Posting API OAuth (destination) | [setup-tiktok.md](setup-tiktok.md) |
 | **Threads** | Meta Threads API (long-lived token) | [setup-threads.md](setup-threads.md) |
-| **LinkedIn** | LinkedIn OAuth 2.0 | See platform setup docs for current auth instructions |
 | **Messenger** | Static Page Access Token (auto-reply) | [setup-messenger.md](setup-messenger.md) |
 
 > **Why so many auth methods?** Each platform exposes a different API. xPST always prefers the **official, ban-safe API** when one exists. Instagram in particular defaults to the official Meta Graph API rather than unofficial private-API clients, which historically get accounts banned.
@@ -248,7 +247,6 @@ xpst diagnostics          # Export a REDACTED support bundle (secrets stripped)
 - 🐦 [X/Twitter setup](setup-x-twitter.md) — login-based, no cookie export
 - 🎵 [TikTok setup](setup-tiktok.md) — source (browser cookies) and destination (Content Posting API)
 - 🧵 [Threads setup](setup-threads.md) — Meta Threads API
-- 💼 [LinkedIn setup](setup-linkedin.md) — LinkedIn OAuth 2.0
 - 💬 [Messenger setup](setup-messenger.md) — Messenger Platform auto-reply (opt-in)
 - 🛠️ [Troubleshooting](troubleshooting.md) — common errors and fixes
 - 🚀 [Quickstart](QUICKSTART.md) — install and first run

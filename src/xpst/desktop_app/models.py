@@ -8,12 +8,23 @@ import json
 from datetime import datetime
 from typing import Any
 
-from PySide6.QtCore import (
-    QAbstractListModel,
-    QByteArray,
-    QModelIndex,
-    Qt,
-)
+# PySide6 is an optional extra ('desktop' extra). This module defines Qt list
+# models, so it genuinely requires PySide6 — but give a clear, actionable
+# error (and the install command) instead of a bare ModuleNotFoundError when
+# the extra is missing. Nothing on the xpst cold path imports this module;
+# only the desktop launcher does, after its own PySide6 guard has passed.
+try:
+    from PySide6.QtCore import (
+        QAbstractListModel,
+        QByteArray,
+        QModelIndex,
+        Qt,
+    )
+except ImportError as exc:  # pragma: no cover - exercised only without the desktop extra
+    raise ModuleNotFoundError(
+        "The xPST desktop app requires the optional PySide6 extra. "
+        "Install it with: pip install 'xpst[desktop]'"
+    ) from exc
 
 # Optional: state manager for real data
 try:

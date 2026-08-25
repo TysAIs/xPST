@@ -155,24 +155,43 @@ class TikTokSource(VideoSource):
 
         cmd = [self._yt_dlp_path]
 
-        # Try browser cookies if configured
-        if getattr(self.config.tiktok, 'cookies_from_browser', False):
-            from xpst.utils.platform import get_browser_list
-            for browser in get_browser_list():
-                try:
-                    rc, _, _ = await self._run_yt_dlp(
-                        [self._yt_dlp_path, "--cookies-from-browser", browser, "--version"],
-                        timeout=5,
-                    )
-                    if rc == 0:
-                        cmd.extend(["--cookies-from-browser", browser])
-                        break
-                except (asyncio.TimeoutError, FileNotFoundError, OSError):
-                    continue
+        # TikTok cookie strategy (most-to-least reliable):
+        #   1. Explicit cookies_file (Netscape jar) wins if present.
+        #   2. If cookies_from_browser is set, try a CDP-extracted Netscape jar
+        #      first (works without TCC filesystem access to the browser profile
+        #      DB on macOS), then fall back to yt-dlp's --cookies-from-browser.
+        jar_used = False
+        if getattr(self.config.tiktok, 'cookies_file', None):
+            jar_path = Path(self.config.tiktok.cookies_file).expanduser()
+            if jar_path.exists():
+                cmd.extend(["--cookies", str(jar_path)])
+                jar_used = True
 
-        # Add explicit cookies file if provided
-        if self.config.tiktok.cookies_file:
-            cmd.extend(["--cookies", self.config.tiktok.cookies_file])
+        if not jar_used and getattr(self.config.tiktok, 'cookies_from_browser', False):
+            # Prefer a CDP-extracted Netscape jar (ships at this path by default).
+            default_jar = Path(self.config.config_dir).expanduser() / "credentials" / "tiktok_cookies.txt"
+            if default_jar.exists():
+                cmd.extend(["--cookies", str(default_jar)])
+                jar_used = True
+            else:
+                from xpst.utils.platform import get_browser_list
+                for browser in get_browser_list():
+                    try:
+                        rc, _, _ = await self._run_yt_dlp(
+                            [self._yt_dlp_path, "--cookies-from-browser", browser, "--version"],
+                            timeout=5,
+                        )
+                        if rc == 0:
+                            cmd.extend(["--cookies-from-browser", browser])
+                            break
+                    except (asyncio.TimeoutError, FileNotFoundError, OSError):
+                        continue
+
+        # Add explicit cookies file if provided (and not already applied above)
+        if self.config.tiktok.cookies_file and not jar_used:
+            cookie_path = Path(self.config.tiktok.cookies_file).expanduser()
+            if cookie_path.exists():
+                cmd.extend(["--cookies", str(cookie_path)])
 
         # Common options
         cmd.extend([
@@ -260,9 +279,13 @@ class TikTokSource(VideoSource):
 
         rc, stdout, stderr = await self._run_yt_dlp(cmd, timeout=120)
 
-        if rc != 0:
+        # yt-dlp may exit 1 with valid JSON (e.g. extractor warnings) — treat
+        # non-zero as failure only when stdout is empty/missing.
+        if rc != 0 and not stdout.strip():
             logger.error(f"yt-dlp failed: {stderr[:300]}")
             raise RuntimeError(f"Failed to fetch videos: {stderr[:200]}")
+        if rc != 0:
+            logger.warning(f"yt-dlp rc={rc} but stdout present — continuing ({stderr[:200]})")
 
         videos = []
         for line in stdout.strip().split("\n"):

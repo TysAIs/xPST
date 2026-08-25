@@ -296,6 +296,69 @@ class TestSessionManagerTokenWrite:
             assert _mode(token_path) == 0o600
 
 
+class TestSessionManagerInstagramSession:
+    """Instagram session-loading edge cases in SessionManager.get_instagram_client."""
+
+    @pytest.mark.asyncio
+    async def test_flat_sessionid_format_accepted(self, tmp_path):
+        """A flat cookie-dump session file (top-level ``sessionid``) must be used.
+
+        Regression (2026-08-24): get_instagram_client only extracted sessionid
+        from ``authorization_data.sessionid`` / ``settings.authorization_data.sessionid``,
+        so the flat format actually written to disk (and supported by
+        instagram.py _get_client_direct) was invisible and the session was
+        declared "expired or invalid" without ever attempting auth — even
+        though the sessionid was live and valid (verified against tys.ais).
+        """
+
+        from xpst.utils.sessions import SessionManager
+
+        mgr = SessionManager(config_dir=str(tmp_path))
+        session_path = tmp_path / "instagram_session.json"
+        sessionid = "80131363736%3AqF8PDQ0NsgsFQD%3A9%3AAYiPaIdDGjGbskg2FREQ2dxIsedbmrAUd_jJX36NXA"
+        session_path.write_text(
+            json.dumps(
+                {
+                    "sessionid": sessionid,
+                    "ds_user_id": "80131363736",
+                    "csrftoken": "fake",
+                }
+            )
+        )
+
+        with patch("instagrapi.Client") as fake_client_cls:
+            fake_client = fake_client_cls.return_value
+            fake_client.get_settings.return_value = {"authorization_data": {"sessionid": sessionid}}
+
+            client = await mgr.get_instagram_client(str(session_path))
+
+        # The flat-format sessionid must actually be attempted (old code skipped
+        # sessionid auth entirely and raised ValueError instead).
+        fake_client.login_by_sessionid.assert_called_once_with(sessionid)
+        # Validity probe is account_info(), not the spurious-403 timeline feed.
+        assert not fake_client.get_timeline_feed.called
+        assert client is fake_client
+
+    @pytest.mark.asyncio
+    async def test_cookies_dict_sessionid_format_accepted(self, tmp_path):
+        """Cookie-dict format (``cookies.sessionid``) must be accepted too."""
+
+        from xpst.utils.sessions import SessionManager
+
+        mgr = SessionManager(config_dir=str(tmp_path))
+        session_path = tmp_path / "instagram_session.json"
+        sessionid = "abc123%3Adef"
+        session_path.write_text(json.dumps({"cookies": {"sessionid": sessionid}}))
+
+        with patch("instagrapi.Client") as fake_client_cls:
+            fake_client = fake_client_cls.return_value
+            fake_client.get_settings.return_value = {"authorization_data": {"sessionid": sessionid}}
+
+            await mgr.get_instagram_client(str(session_path))
+
+        fake_client.login_by_sessionid.assert_called_once_with(sessionid)
+
+
 class TestCliAuthYouTube:
     def test_auth_youtube_stores_existing_token(self, tmp_path):
         """The CLI ``auth youtube`` path mirrors an existing token file into the

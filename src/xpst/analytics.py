@@ -186,8 +186,6 @@ class AnalyticsCollector:
                 metrics_list = await self._collect_tiktok(post_ids)
             elif platform == "threads":
                 metrics_list = await self._collect_threads(post_ids)
-            elif platform == "linkedin":
-                metrics_list = await self._collect_linkedin(post_ids)
         except Exception as e:
             logger.warning(f"Platform {platform} analytics collection failed: {e}")
 
@@ -450,45 +448,6 @@ class AnalyticsCollector:
 
         return results
 
-    async def _collect_linkedin(self, post_ids: list[str]) -> list[dict]:
-        """Fetch LinkedIn metrics via yt-dlp metadata extraction (best effort).
-
-        LinkedIn has no stable public metrics API for personal shares, so we
-        attempt yt-dlp extraction like TikTok and skip gracefully when it is
-        unavailable.
-        """
-        results = []
-        try:
-            import yt_dlp
-
-            for post_id in post_ids:
-                try:
-                    url = f"https://www.linkedin.com/feed/update/{post_id}"
-                    ydl_opts = {
-                        "quiet": True,
-                        "skip_download": True,
-                        "extract_flat": False,
-                        "no_warnings": True,
-                    }
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(url, download=False)
-
-                    results.append({
-                        "platform": "linkedin",
-                        "post_id": post_id,
-                        "views": info.get("view_count", 0) or 0,
-                        "likes": info.get("like_count", 0) or 0,
-                        "comments": info.get("comment_count", 0) or 0,
-                        "shares": info.get("repost_count", 0) or 0,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
-                except Exception as e:
-                    logger.debug(f"LinkedIn metrics failed for {post_id}: {e}")
-        except ImportError:
-            logger.debug("yt-dlp not available for LinkedIn metrics")
-
-        return results
-
     def _discover_post_ids(self) -> dict[str, list[str]]:
         """Discover post IDs from state.json for each platform.
 
@@ -511,7 +470,6 @@ class AnalyticsCollector:
             "x": [],
             "tiktok": [],
             "threads": [],
-            "linkedin": [],
         }
 
         for _video_id, data in state.get("posted_videos", {}).items():
