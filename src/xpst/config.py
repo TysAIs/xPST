@@ -70,11 +70,8 @@ DEFAULT_CONFIG = {
             "webhook_path": "/webhook/messenger",
             "auto_reply": False,
             "reply_rules": {},
-        },
-        "linkedin": {
-            "enabled": False,
-            "access_token": "",
-            "linkedin_user_id": "",
+            "comment_reply_enabled": False,
+            "comment_platforms": ["instagram", "facebook"],
         },
         "local": {
             "path": "",
@@ -154,7 +151,10 @@ DEFAULT_CONFIG = {
         "x": 5,
         "tiktok": 5,
         "threads": 5,
-        "linkedin": 5,
+    },
+    "bio": {
+        "handle": "",
+        "links": [],
     },
     "schedule": {
         "check_interval": 900,  # 15 minutes
@@ -264,6 +264,10 @@ class MessengerAccountConfig(AccountConfig):
         webhook_path: Dashboard webhook URL path (default /webhook/messenger).
         auto_reply: ManyChat-lite master switch.
         reply_rules: Keyword → reply text map; "*" is catch-all.
+        comment_reply_enabled: Content360-lite master switch for IG/FB comment
+            auto-reply on posts.
+        comment_platforms: Platforms allowed to run comment auto-reply
+            ("instagram", "facebook"); empty means none.
     """
 
     enabled: bool = False
@@ -275,15 +279,8 @@ class MessengerAccountConfig(AccountConfig):
     webhook_path: str = "/webhook/messenger"
     auto_reply: bool = False
     reply_rules: dict = field(default_factory=dict)
-
-
-@dataclass
-class LinkedInAccountConfig(AccountConfig):
-    """LinkedIn account configuration — destination only."""
-    # OAuth 2.0 access token
-    access_token: str = ""
-    # LinkedIn user URN (urn:li:person:{id}) or plain ID
-    linkedin_user_id: str = ""
+    comment_reply_enabled: bool = False
+    comment_platforms: list = field(default_factory=lambda: ["instagram", "facebook"])
 
 
 @dataclass
@@ -392,7 +389,19 @@ class RateLimitConfig:
     x: int = 5
     tiktok: int = 5
     threads: int = 5
-    linkedin: int = 5
+
+
+@dataclass
+class BioConfig:
+    """Link-in-bio page configuration (served at /bio by the dashboard).
+
+    Fields:
+        handle: Display name shown on the bio page (avatar initial + heading).
+        links: Custom links rendered below the social accounts. Each entry is
+            a dict with ``label`` and ``url`` keys (http/https only).
+    """
+    handle: str = ""
+    links: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -405,7 +414,6 @@ class XPSTConfig:
     instagram: InstagramAccountConfig = field(default_factory=InstagramAccountConfig)
     threads: ThreadsAccountConfig = field(default_factory=ThreadsAccountConfig)
     messenger: MessengerAccountConfig = field(default_factory=MessengerAccountConfig)
-    linkedin: LinkedInAccountConfig = field(default_factory=LinkedInAccountConfig)
     local: LocalAccountConfig = field(default_factory=LocalAccountConfig)
 
     # Video processing
@@ -422,6 +430,9 @@ class XPSTConfig:
 
     # Rate limits
     rate_limits: RateLimitConfig = field(default_factory=RateLimitConfig)
+
+    # Link-in-bio page
+    bio: BioConfig = field(default_factory=BioConfig)
 
     # Notifications
     notifications: NotificationConfig = field(default_factory=NotificationConfig)
@@ -619,16 +630,14 @@ class XPSTConfig:
                 config.messenger.auto_reply = ms.get("auto_reply", config.messenger.auto_reply)
                 if isinstance(ms.get("reply_rules"), dict):
                     config.messenger.reply_rules = ms.get("reply_rules", config.messenger.reply_rules)
+                config.messenger.comment_reply_enabled = ms.get(
+                    "comment_reply_enabled", config.messenger.comment_reply_enabled
+                )
+                if isinstance(ms.get("comment_platforms"), list):
+                    config.messenger.comment_platforms = ms.get(
+                        "comment_platforms", config.messenger.comment_platforms
+                    )
                 config.messenger.proxy = ms.get("proxy", config.messenger.proxy)
-
-        # LinkedIn
-        if "accounts" in file_config and "linkedin" in file_config["accounts"]:
-            li = file_config["accounts"]["linkedin"]
-            if li and isinstance(li, dict):
-                config.linkedin.enabled = li.get("enabled", config.linkedin.enabled)
-                config.linkedin.access_token = li.get("access_token", config.linkedin.access_token)
-                config.linkedin.linkedin_user_id = li.get("linkedin_user_id", config.linkedin.linkedin_user_id)
-                config.linkedin.proxy = li.get("proxy", config.linkedin.proxy)
 
         # Local
         if "accounts" in file_config and "local" in file_config["accounts"]:
@@ -692,7 +701,22 @@ class XPSTConfig:
                 config.rate_limits.x = rl.get("x", config.rate_limits.x)
                 config.rate_limits.tiktok = rl.get("tiktok", config.rate_limits.tiktok)
                 config.rate_limits.threads = rl.get("threads", config.rate_limits.threads)
-                config.rate_limits.linkedin = rl.get("linkedin", config.rate_limits.linkedin)
+
+        # Bio (link-in-bio page)
+        if "bio" in file_config:
+            bio = file_config["bio"]
+            if bio and isinstance(bio, dict):
+                config.bio.handle = str(bio.get("handle", config.bio.handle) or "")
+                if isinstance(bio.get("links"), list):
+                    links = []
+                    for item in bio["links"]:
+                        if not isinstance(item, dict):
+                            continue
+                        label = str(item.get("label", "") or "").strip()
+                        url = str(item.get("url", "") or "").strip()
+                        if label and url:
+                            links.append({"label": label, "url": url})
+                    config.bio.links = links
 
         # Shortcuts (stored in config_dir as raw dict)
         if "shortcuts" in file_config and isinstance(file_config["shortcuts"], dict):
@@ -846,18 +870,12 @@ class XPSTConfig:
                 parsed = {}
             if isinstance(parsed, dict):
                 config.messenger.reply_rules = parsed
+        if v := os.getenv("XPST_MESSENGER_COMMENT_REPLY_ENABLED"):
+            config.messenger.comment_reply_enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_MESSENGER_COMMENT_PLATFORMS"):
+            config.messenger.comment_platforms = [p.strip() for p in v.split(",") if p.strip()]
         if v := os.getenv("XPST_MESSENGER_PROXY"):
             config.messenger.proxy = v
-
-        # LinkedIn
-        if v := os.getenv("XPST_LINKEDIN_ENABLED"):
-            config.linkedin.enabled = v.lower() in ("true", "1", "yes")
-        if v := os.getenv("XPST_LINKEDIN_ACCESS_TOKEN"):
-            config.linkedin.access_token = v
-        if v := os.getenv("XPST_LINKEDIN_USER_ID"):
-            config.linkedin.linkedin_user_id = v
-        if v := os.getenv("XPST_LINKEDIN_PROXY"):
-            config.linkedin.proxy = v
 
         # X username
         if v := os.getenv("XPST_X_USERNAME"):
@@ -965,13 +983,13 @@ class XPSTConfig:
         Platforms are considered "community" when their current auth_mode
         routes through an unofficial integration (instagrapi, twikit, etc.).
         Official API platforms (YouTube, TikTok Content Posting API, Threads,
-        LinkedIn, IG Graph API, X API v2) return False.
+        IG Graph API, X API v2) return False.
         """
         if platform_name == "instagram":
             return self.instagram.auth_mode == "session"
         if platform_name == "x":
             return self.x.auth_mode == "cookies"
-        # YouTube, TikTok (Content Posting API), Threads, LinkedIn are always official
+        # YouTube, TikTok (Content Posting API), Threads are always official
         return False
 
     def should_show_platform(self, platform_name: str) -> bool:
@@ -1056,12 +1074,6 @@ class XPSTConfig:
                     "reply_rules": self.messenger.reply_rules,
                     "proxy": self.messenger.proxy,
                 },
-                "linkedin": {
-                    "enabled": self.linkedin.enabled,
-                    "access_token": self.linkedin.access_token,
-                    "linkedin_user_id": self.linkedin.linkedin_user_id,
-                    "proxy": self.linkedin.proxy,
-                },
                 "local": {
                     "path": self.local.path,
                 },
@@ -1145,7 +1157,10 @@ class XPSTConfig:
                 "x": self.rate_limits.x,
                 "tiktok": self.rate_limits.tiktok,
                 "threads": self.rate_limits.threads,
-                "linkedin": self.rate_limits.linkedin,
+            },
+            "bio": {
+                "handle": self.bio.handle,
+                "links": self.bio.links,
             },
             "shortcuts": self._shortcuts,
             "first_run_complete": self.first_run_complete,

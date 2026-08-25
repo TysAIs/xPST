@@ -33,7 +33,6 @@ class TestCrashRecovery:
                         "instagram": {"id": "ig1"},
                         "tiktok": {"id": "tt1"},
                         "threads": {"id": "th1"},
-                        "linkedin": {"id": "li1"},
                     },
                 },
             },

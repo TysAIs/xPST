@@ -619,7 +619,7 @@ class UploadService:
             config = self.config.video.encoding_instagram
         elif platform == "x":
             config = self.config.video.encoding_x
-        elif platform in ("tiktok", "threads", "linkedin"):
+        elif platform in ("tiktok", "threads"):
             # Use Instagram profile for these platforms (high-quality, compatible)
             config = self.config.video.encoding_instagram
         else:

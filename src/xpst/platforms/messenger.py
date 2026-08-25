@@ -41,6 +41,9 @@ logger = get_logger(__name__)
 # Meta Graph API base + version pin (matches the design doc / IG Graph pin policy).
 MESSENGER_API_BASE = "https://graph.facebook.com"
 MESSENGER_API_VERSION = "v22.0"
+# Version pin for IG/FB *comment* automation (per the Content360-lite plan; the
+# comments/replies endpoints are stable on v21.0 and the Page token scopes it).
+COMMENT_API_VERSION = "v21.0"
 # Hard text limit per Messenger message.
 MESSENGER_MAX_TEXT_LENGTH = 640
 
@@ -157,8 +160,15 @@ class MessengerAdapter(PlatformUploader):
         *,
         params: dict[str, Any],
         data: dict[str, Any] | None = None,
+        version: str = MESSENGER_API_VERSION,
     ) -> dict[str, Any]:
         """POST to the Graph API with token + appsecret_proof attached.
+
+        Args:
+            path: Graph API object path (e.g. ``me/messages``).
+            params: Query params (token + proof are appended).
+            data: Optional JSON body.
+            version: API version to target (defaults to the Messenger pin).
 
         Raises:
             ValueError: If no page token is configured.
@@ -171,10 +181,56 @@ class MessengerAdapter(PlatformUploader):
         if proof:
             payload["appsecret_proof"] = proof
 
-        url = f"{MESSENGER_API_BASE}/{MESSENGER_API_VERSION}/{path}"
+        url = f"{MESSENGER_API_BASE}/{version}/{path}"
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(url, params=payload, json=data)
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code if e.response else 0
+            body = e.response.text[:300] if e.response else str(e)
+            if status_code == 401:
+                raise MessengerError(
+                    f"MESSENGER_AUTH_EXPIRED: Page Access Token invalid or expired. {body}"
+                ) from e
+            if status_code == 429:
+                raise MessengerError(
+                    "MESSENGER_RATE_LIMITED: Messenger API rate limit exceeded."
+                ) from e
+            raise MessengerError(f"MESSENGER_HTTP_ERROR: {body}") from e
+        except httpx.HTTPError as e:
+            raise MessengerError(f"MESSENGER_NETWORK_ERROR: {str(e)[:200]}") from e
+
+    async def _get_from_graph(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any],
+        version: str = MESSENGER_API_VERSION,
+    ) -> dict[str, Any]:
+        """GET the Graph API with token + appsecret_proof attached.
+
+        Args:
+            path: Graph API object path (e.g. ``{media_id}/comments``).
+            params: Query params (token + proof are appended).
+            version: API version to target (defaults to the Messenger pin).
+
+        Raises:
+            ValueError: If no page token is configured.
+            MessengerError: On HTTP/network/API errors.
+        """
+        token = await self._get_page_token()
+        proof = appsecret_proof(token, await self._get_app_secret())
+        payload = dict(params)
+        payload["access_token"] = token
+        if proof:
+            payload["appsecret_proof"] = proof
+
+        url = f"{MESSENGER_API_BASE}/{version}/{path}"
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.get(url, params=payload)
                 resp.raise_for_status()
                 return resp.json()
         except httpx.HTTPStatusError as e:
@@ -421,6 +477,107 @@ class MessengerAdapter(PlatformUploader):
                     results.append(
                         {"event": "message", "sent": False, "response": response, "sender": sender, "error": str(e)[:200]}
                     )
+        return results
+
+    # ── Comment automation (Content360-lite) ──────────────────────────
+    async def auto_reply_to_comments(
+        self,
+        platform: str,
+        media_id: str,
+        since_ts: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Auto-reply to recent comments on a post via the Meta Graph API.
+
+        Content360-style IG/FB comment automation on top of the official Graph
+        API: fetches comments on ``media_id`` (GET ``{media_id}/comments``)
+        and, when a ``reply_rules`` keyword matches the comment text, posts a
+        public reply on the comment thread (POST ``{comment_id}/replies``).
+
+        Gated by ``config.messenger.comment_reply_enabled`` and
+        ``config.messenger.comment_platforms``. Runs as a standalone command
+        (``xpst messenger check-comments``) — the Messenger webhook only
+        delivers DM ``message`` events, not comment events, so this is polled
+        rather than event-driven.
+
+        Args:
+            platform: ``"instagram"`` or ``"facebook"``. Must be listed in
+                ``comment_platforms`` (default both), else nothing is done.
+            media_id: Post/media ID to scan for comments.
+            since_ts: Optional epoch timestamp; only comments created after it
+                are considered. Honoured on Facebook Page posts; pass ``None``
+                on Instagram where the comments endpoint has no ``since``
+                parameter.
+
+        Returns:
+            List of per-comment result dicts: ``comment_id``, ``from``,
+            ``text``, ``reply``, ``sent``, ``error``.
+        """
+        results: list[dict[str, Any]] = []
+        try:
+            rules = self._reply_rules()
+            comment_reply_enabled = bool(self.config.messenger.comment_reply_enabled)
+        except Exception as e:
+            logger.error("Messenger comment-rule config load failed: %s", e)
+            return results
+
+        platforms = list(self.config.messenger.comment_platforms or [])
+        if not comment_reply_enabled:
+            logger.info("Messenger comment auto-reply disabled (comment_reply_enabled=false).")
+            return results
+        if platform not in platforms:
+            logger.info(
+                "Messenger comment auto-reply not enabled for platform %r (comment_platforms=%s)",
+                platform,
+                platforms,
+            )
+            return results
+
+        # 1) Fetch recent comments on the post.
+        get_params: dict[str, Any] = {"fields": "id,message,from,created_time"}
+        if since_ts:
+            get_params["since"] = since_ts
+        try:
+            data = await self._get_from_graph(
+                f"{media_id}/comments", params=get_params, version=COMMENT_API_VERSION
+            )
+        except (MessengerError, ValueError) as e:
+            logger.error("Failed to fetch comments for %s: %s", media_id, e)
+            return [{"media_id": media_id, "error": str(e)[:300]}]
+
+        for comment in data.get("data") or []:
+            comment_id = str(comment.get("id", ""))
+            text = str(comment.get("message", "")).strip()
+            author = (comment.get("from") or {}).get("name", "")
+            if not comment_id or not text:
+                continue
+            response = self._match_rule(text, rules)
+            if not response:
+                results.append(
+                    {"comment_id": comment_id, "from": author, "text": text, "reply": None, "sent": False}
+                )
+                continue
+            try:
+                await self._post_to_graph(
+                    f"{comment_id}/replies",
+                    params={},
+                    data={"message": response},
+                    version=COMMENT_API_VERSION,
+                )
+                results.append(
+                    {"comment_id": comment_id, "from": author, "text": text, "reply": response, "sent": True}
+                )
+            except (MessengerError, ValueError) as e:
+                logger.error("Failed to reply to comment %s: %s", comment_id, e)
+                results.append(
+                    {
+                        "comment_id": comment_id,
+                        "from": author,
+                        "text": text,
+                        "reply": response,
+                        "sent": False,
+                        "error": str(e)[:200],
+                    }
+                )
         return results
 
     def _reply_rules(self) -> dict[str, str]:

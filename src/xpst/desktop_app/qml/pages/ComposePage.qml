@@ -569,7 +569,7 @@ Page {
                             Text {
                                 text: {
                                     var len = captionInput.length
-                                    var limits = { "x": 280, "threads": 500, "instagram": 2200, "youtube": 5000, "linkedin": 3000, "tiktok": 2200 }
+                                    var limits = { "x": 280, "threads": 500, "instagram": 2200, "youtube": 5000, "tiktok": 2200 }
                                     var parts = []
                                     var sp = composePage.selectedPlatforms || ({})
                                     var activeCount = 0
@@ -589,7 +589,7 @@ Page {
                                 }
                                 font.pixelSize: 11
                                 color: {
-                                    var limits = { "x": 280, "threads": 500, "instagram": 2200, "youtube": 5000, "linkedin": 3000, "tiktok": 2200 }
+                                    var limits = { "x": 280, "threads": 500, "instagram": 2200, "youtube": 5000, "tiktok": 2200 }
                                     var sp = composePage.selectedPlatforms || ({})
                                     for (var p in sp) {
                                         if (!sp[p]) continue

@@ -53,7 +53,7 @@ class CrashRecoveryManager:
             List of incomplete upload records with video_id, completed platforms, missing platforms
         """
         incomplete = []
-        all_platforms = {"youtube", "x", "instagram", "tiktok", "threads", "linkedin"}
+        all_platforms = {"youtube", "x", "instagram", "tiktok", "threads"}
 
         for video_id, video_data in state.get("posted_videos", {}).items():
             posted_to = video_data.get("posted_to", {})

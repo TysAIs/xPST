@@ -286,7 +286,9 @@ def launch_desktop_app(
     """
     try:
         from xpst.desktop_app.main import main as desktop_main
-    except ImportError as exc:
+    except (ImportError, SystemExit) as exc:
+        # main.py raises SystemExit(1) (not ImportError) from its module-level
+        # guard when the optional PySide6 extra is missing.
         logger.warning("PySide6 desktop app unavailable, falling back to webview: %s", exc)
 
         return _launch_webview_desktop(config_dir=config_dir, port=port)

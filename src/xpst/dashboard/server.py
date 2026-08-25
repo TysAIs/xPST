@@ -11,6 +11,8 @@ Endpoints:
     GET /health   — aggregated platform health check
     GET /metrics  — Prometheus text-format metrics
     GET /state    — current xPST state summary
+    GET /bio      — public, mobile-first link-in-bio page
+    GET/POST /bio/edit — auth-protected link-in-bio editor
 """
 
 from __future__ import annotations
@@ -25,9 +27,84 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 
 logger = logging.getLogger(__name__)
+
+_DASHBOARD_INDEX_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xPST Dashboard</title>
+<style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
+                     Roboto, Helvetica, Arial, sans-serif;
+        background: linear-gradient(180deg, #f5f5f7 0%, #ececf0 100%);
+        color: #1d1d1f;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px 16px;
+        -webkit-font-smoothing: antialiased;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: linear-gradient(180deg, #161617 0%, #1d1d1f 100%);
+               color: #f5f5f7; }
+        .card { background: #242426; box-shadow: 0 8px 32px rgba(0,0,0,.5); }
+        .btn { background: #343437; color: #f5f5f7; }
+        .btn:hover { background: #3d3d41; }
+        .subtitle { color: #a1a1a6; }
+        footer { color: #86868b; }
+    }
+    .card {
+        background: #ffffff;
+        border-radius: 24px;
+        box-shadow: 0 8px 32px rgba(0,0,0,.08);
+        padding: 40px 24px 28px;
+        width: 100%;
+        max-width: 420px;
+        text-align: center;
+    }
+    h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+    .subtitle { font-size: 14px; color: #6e6e73; margin: 6px 0 24px; }
+    .links { display: flex; flex-direction: column; gap: 12px; }
+    .btn {
+        display: block;
+        padding: 14px 20px;
+        border-radius: 14px;
+        background: #f2f2f4;
+        color: #1d1d1f;
+        text-decoration: none;
+        font-size: 15px;
+        font-weight: 600;
+        transition: background .15s ease, transform .1s ease;
+    }
+    .btn:hover { background: #e8e8ec; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    footer { margin-top: 28px; font-size: 12px; color: #86868b; }
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>xPST Dashboard</h1>
+  <p class="subtitle">Cross-posting control plane</p>
+  <div class="links">
+    <a class="btn" href="/health">Health</a>
+    <a class="btn" href="/state">State</a>
+    <a class="btn" href="/metrics">Metrics</a>
+    <a class="btn" href="/bio">Link in Bio</a>
+    <a class="btn" href="/bio/edit">Edit Link in Bio</a>
+  </div>
+  <footer>Powered by xPST</footer>
+</main>
+</body>
+</html>
+"""
 
 
 def _load_dashboard_auth(config_dir: str) -> tuple[str, str]:
@@ -115,6 +192,16 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
                 status_code=500,
             )
 
+    # ── Dashboard index ─────────────────────────────────────────────────
+    @app.get("/", name="dashboard_index", include_in_schema=False, response_model=None)
+    def dashboard_index() -> HTMLResponse:
+        """Serve the auth-protected dashboard landing page.
+
+        Lists the dashboard endpoints and links to the public link-in-bio
+        page. Protected by the same Basic auth as /state and /bio/edit.
+        """
+        return HTMLResponse(_DASHBOARD_INDEX_HTML)
+
     # ── Auth middleware ─────────────────────────────────────────────────
     username, password_hash = _load_dashboard_auth(config_dir)
     if username and password_hash:
@@ -122,8 +209,9 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
 
         class BasicAuthMiddleware(BaseHTTPMiddleware):
             async def dispatch(self, request: Request, call_next):
-                # Skip auth for health and metrics endpoints
-                if request.url.path in ("/health", "/metrics"):
+                # Skip auth for health, metrics, and the public bio page.
+                # /bio/edit stays protected (admin only).
+                if request.url.path in ("/health", "/metrics", "/bio"):
                     return await call_next(request)
 
                 auth_header = request.headers.get("Authorization", "")
@@ -173,8 +261,83 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
         logger.info("Dashboard auth enabled for user: %s", username)
 
     _setup_messenger_webhook(app, config_dir)
+    _setup_bio_routes(app, config_dir)
 
     return app
+
+
+def bio_url(host: str = "127.0.0.1", port: int = 8080) -> str:
+    """Return the public URL of the link-in-bio page."""
+    return f"http://{host}:{port}/bio"
+
+
+def _setup_bio_routes(app: FastAPI, config_dir: str) -> None:
+    """Register the link-in-bio page and its auth-protected editor.
+
+    - GET  /bio       → public HTML page (no auth; meant to be shared)
+    - GET  /bio/edit  → admin form (protected by the dashboard Basic auth)
+    - POST /bio/edit  → persist handle + custom links to config.yaml
+    """
+    def _load_config():
+        from xpst.config import XPSTConfig
+        return XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+
+    @app.get("/bio", name="bio_page", include_in_schema=False, response_model=None)
+    def bio_page() -> HTMLResponse:
+        """Serve the public link-in-bio page."""
+        try:
+            from xpst.dashboard.bio import render_bio_page
+            config = _load_config()
+            return HTMLResponse(render_bio_page(config))
+        except Exception as exc:
+            logger.warning("Bio page render failed: %s", exc)
+            return HTMLResponse(
+                f"<p>Error rendering bio page: {exc}</p>",
+                status_code=500,
+            )
+
+    @app.get("/bio/edit", name="bio_edit_form", include_in_schema=False, response_model=None)
+    def bio_edit_form() -> HTMLResponse:
+        """Serve the auth-protected link-in-bio editor form."""
+        try:
+            from xpst.dashboard.bio import render_bio_edit_page
+            config = _load_config()
+            return HTMLResponse(render_bio_edit_page(config))
+        except Exception as exc:
+            logger.warning("Bio edit form render failed: %s", exc)
+            return HTMLResponse(
+                f"<p>Error rendering bio editor: {exc}</p>",
+                status_code=500,
+            )
+
+    @app.post("/bio/edit", name="bio_edit_save", include_in_schema=False, response_model=None)
+    async def bio_edit_save(request: Request) -> RedirectResponse:
+        """Persist handle + custom links from the editor form."""
+        form = await request.form()
+
+        links: list[dict] = []
+        i = 0
+        while f"label_{i}" in form:
+            if str(form.get(f"remove_{i}", "")) not in ("1", "on", "true"):
+                label = str(form.get(f"label_{i}", "") or "").strip()
+                url = str(form.get(f"url_{i}", "") or "").strip()
+                if label and url:
+                    links.append({"label": label, "url": url})
+            i += 1
+        new_label = str(form.get("new_label", "") or "").strip()
+        new_url = str(form.get("new_url", "") or "").strip()
+        if new_label and new_url:
+            links.append({"label": new_label, "url": new_url})
+
+        try:
+            config = _load_config()
+            config.bio.handle = str(form.get("handle", "") or "").strip()
+            config.bio.links = links
+            config.save()
+        except Exception as exc:
+            logger.warning("Bio save failed: %s", exc)
+            return RedirectResponse("/bio/edit", status_code=303)
+        return RedirectResponse("/bio/edit?saved=1", status_code=303)
 
 
 def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
