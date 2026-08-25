@@ -2,7 +2,7 @@
 
 > **In-depth tutorial for every xPST CLI command with examples.**
 >
- xPST provides 34 top-level commands covering the entire cross-posting workflow.
+ xPST provides 37 top-level commands covering the entire cross-posting workflow.
 > This guide explains each one with real examples, flags, and expected output.
 
 ---

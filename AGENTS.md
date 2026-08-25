@@ -7,7 +7,7 @@
 ```bash
 cd ~/XPST
 source .venv/bin/activate
-python -m xpst --help          # CLI with 34 commands
+python -m xpst --help          # CLI with 37 commands
 python -m xpst run             # Run the cross-posting engine
 python -m xpst dashboard       # Start FastAPI dashboard (port 8080)
 python -m xpst desktop         # Launch PySide6/QML desktop app
@@ -18,7 +18,7 @@ python -m pytest tests/        # full suite (1534 collected)
 
 | Layer | Location | Responsibility |
 |-------|----------|----------------|
-| **CLI** | `src/xpst/cli.py` | 34 commands, `--json`, `--dry-run`, structured exit codes |
+| **CLI** | `src/xpst/cli.py` | 37 commands, `--json`, `--dry-run`, structured exit codes |
 | **Engine v2** | `src/xpst/engine_v2.py` | Orchestrates use-cases via DI |
 | **Use-Cases** | `src/xpst/usecases/` | `FetchNewVideos`, `CrossPostVideo`, `ManualPost`, `Backfill`, `HealthCheck`, `DeletePost` |
 | **Platforms** | `src/xpst/platforms/` | YouTube, X, Instagram uploaders (auth via SessionManager) |
