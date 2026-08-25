@@ -310,8 +310,8 @@ class TestSessionManagerInstagramSession:
         declared "expired or invalid" without ever attempting auth — even
         though the sessionid was live and valid (verified against tys.ais).
         """
+
         from xpst.utils.sessions import SessionManager
-        from instagrapi import Client
 
         mgr = SessionManager(config_dir=str(tmp_path))
         session_path = tmp_path / "instagram_session.json"
@@ -342,8 +342,8 @@ class TestSessionManagerInstagramSession:
     @pytest.mark.asyncio
     async def test_cookies_dict_sessionid_format_accepted(self, tmp_path):
         """Cookie-dict format (``cookies.sessionid``) must be accepted too."""
+
         from xpst.utils.sessions import SessionManager
-        from instagrapi import Client
 
         mgr = SessionManager(config_dir=str(tmp_path))
         session_path = tmp_path / "instagram_session.json"
