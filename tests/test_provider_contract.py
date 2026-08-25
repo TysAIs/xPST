@@ -103,9 +103,16 @@ def test_concrete_platform_manifests_expose_real_capabilities():
         PlatformRegistry._registry.clear()
         PlatformRegistry.auto_discover()
 
+        manifests_raw = PlatformRegistry.list_manifests(XPSTConfig())
+        # Regression: a spurious registry key (e.g. class-name-derived
+        # "messengeradapter" alongside the canonical "messenger") surfaces as a
+        # duplicate destination in `xpst providers` / MCP provider listings.
+        names = [manifest.name for manifest in manifests_raw]
+        assert len(names) == len(set(names)), f"duplicate platform names: {names}"
+
         manifests = {
             manifest.name: manifest
-            for manifest in PlatformRegistry.list_manifests(XPSTConfig())
+            for manifest in manifests_raw
         }
 
         assert set(manifests) >= {"youtube", "instagram", "x"}

@@ -442,13 +442,13 @@ async def _dispatch_messenger_payload(payload: dict, config_dir: str) -> None:
 
         from xpst.config import XPSTConfig
         from xpst.platforms.base import PlatformRegistry
-        from xpst.platforms.messenger import MessengerAdapter  # noqa: TC001
+        from xpst.platforms.messenger import MessengerUploader  # noqa: TC001
         from xpst.utils.sessions import SessionManager
 
         cfg = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
         if not cfg.messenger.enabled:
             return
-        adapter = cast("MessengerAdapter", PlatformRegistry.get("messenger", cfg))
+        adapter = cast("MessengerUploader", PlatformRegistry.get("messenger", cfg))
     except Exception as e:
         logger.error("Messenger webhook dispatch aborted before handling: %s", e)
         return
