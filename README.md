@@ -12,7 +12,7 @@
   <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-1534%20passing-brightgreen"></a>
   <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-7-blue"></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/os-Linux%20|%20macOS%20|%20Windows-lightgrey"></a>
-  <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-23%20tools-orange"></a>
+  <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-28%20tools-orange"></a>
   <a href="#"><img alt="Desktop" src="https://img.shields.io/badge/desktop-PySide6%2FQML-blueviolet"></a>
 </p>
 
@@ -47,7 +47,7 @@ xPST works across **six platforms** — YouTube, Instagram, X/Twitter, TikTok, T
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
 - **CLI** — 34 top-level commands covering the entire workflow
-- **MCP server** — 23 tools so AI agents can drive the entire product
+- **MCP server** — 28 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
 
@@ -91,7 +91,7 @@ network traffic is the platform API calls you configure. See
 ### Three Drivable Surfaces
 - **Desktop GUI** — PySide6/QML app with Dashboard, Compose, Content, Analytics, Connect, Schedule, Settings, and About pages + DetailPanel
 - **CLI** — 34 Click-based commands with `--json` output, `--dry-run` mode, and meaningful exit codes
-- **MCP server** — 23 tools (19 `xpst_*` + 4 `kb_*`) for AI agent integration
+- **MCP server** — 28 tools (22 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 ### Enterprise Hardening
 - **Encrypted credentials** — OS keychain storage (macOS Keychain, Linux Secret Service, Windows Credential Manager) with encrypted `.enc` file fallback (Fernet + scrypt)

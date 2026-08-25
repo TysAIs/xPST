@@ -353,6 +353,34 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="xpst_generate_ideas",
+        description=(
+            "Generate post ideas for a content topic (AI content studio). "
+            "Uses the KB LLM when configured (XPST_KB_LLM_ENABLED), otherwise "
+            "falls back to deterministic template generation — no LLM required. "
+            "Returns up to `count` ideas, each with an 'idea' headline and "
+            "optional 'hook'."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "Content topic to generate ideas around",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Number of ideas to generate (clamped to 1-10)",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 10,
+                },
+            },
+            "required": ["topic"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_transcript",
         description=(
             "Get the transcript for a video by its content_hash or video_id. "
@@ -493,6 +521,20 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="xpst_bio_get",
+        description=(
+            "Get the link-in-bio page URL and its current configuration. "
+            "Returns the public /bio URL, the page handle, and the ordered "
+            "list of links (enabled social accounts + custom links) exactly "
+            "as rendered by the dashboard bio page."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_providers",
         description="List supported content sources and posting destinations with capabilities",
         inputSchema={
@@ -556,6 +598,36 @@ TOOLS: list[Tool] = [
                 "auto_reply": {"type": "boolean", "description": "Enable/disable auto-reply", "default": True},
             },
             "required": ["rules"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_messenger_check_comments",
+        description=(
+            "Fetch recent comments on an Instagram or Facebook post and "
+            "auto-reply per the configured reply_rules (Content360-style "
+            "comment auto-reply, mirroring `xpst messenger check-comments`). "
+            "Gated by accounts.messenger.comment_reply_enabled and "
+            "comment_platforms. Posts public replies on the comment threads "
+            "when a keyword matches."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
+                "media_id": {"type": "string", "description": "Post/media ID to scan for comments"},
+                "platform": {
+                    "type": "string",
+                    "enum": ["instagram", "facebook"],
+                    "description": "Platform owning media_id",
+                    "default": "instagram",
+                },
+                "since_ts": {
+                    "type": "integer",
+                    "description": "Only reply to comments created after this epoch timestamp (Facebook only)",
+                },
+            },
+            "required": ["media_id"],
             "additionalProperties": False,
         },
     ),
@@ -649,7 +721,7 @@ TOOLS: list[Tool] = [
 _MUTATING_TOOLS = {
     "xpst_run", "xpst_post", "xpst_backfill", "xpst_delete",
     "xpst_schedule_add",
-    "messenger_send", "messenger_set_rules",
+    "messenger_send", "messenger_set_rules", "xpst_messenger_check_comments",
     "kb_add", "kb_organize",
 }
 
@@ -766,6 +838,12 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             result = await _handle_messenger_send(server.config, arguments)
         elif name == "messenger_set_rules":
             result = await _handle_messenger_set_rules(server.config, arguments)
+        elif name == "xpst_messenger_check_comments":
+            result = await _handle_messenger_check_comments(server.config, arguments)
+        elif name == "xpst_generate_ideas":
+            result = await _handle_generate_ideas(arguments)
+        elif name == "xpst_bio_get":
+            result = await _handle_bio_get(server.config)
         elif name in {"kb_add", "kb_query", "kb_organize", "kb_areas"}:
             result = await _handle_kb_tool(name, arguments)
         else:
@@ -1193,6 +1271,28 @@ async def _handle_suggest_caption(arguments: dict[str, Any]) -> CallToolResult:
     )
 
 
+async def _handle_generate_ideas(arguments: dict[str, Any]) -> CallToolResult:
+    """Handle xpst_generate_ideas (AI content studio).
+
+    Mirrors `xpst generate ideas`. Uses the KB LLM when configured
+    (XPST_KB_LLM_ENABLED), otherwise falls back to deterministic template
+    generation — no LLM required.
+    """
+    from xpst.caption_gen import generate_ideas
+
+    topic = arguments.get("topic", "")
+    count = arguments.get("count", 5)
+    ideas = generate_ideas(topic, count=count) if topic else []
+    payload = {
+        "topic": topic,
+        "count": len(ideas),
+        "ideas": ideas,
+    }
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
+    )
+
+
 async def _handle_transcript(arguments: dict[str, Any]) -> CallToolResult:
     """Handle xpst_transcript (F2.4 / D2)."""
     video_id = arguments.get("video_id", "")
@@ -1317,6 +1417,25 @@ async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
     )
 
 
+async def _handle_bio_get(config: XPSTConfig) -> CallToolResult:
+    """Handle xpst_bio_get — link-in-bio URL + current page config.
+
+    Mirrors `xpst bio`. Returns the public /bio URL (dashboard default
+    127.0.0.1:8080), the page handle, and the ordered links exactly as the
+    dashboard renders them (enabled social accounts + custom links).
+    """
+    from xpst.dashboard.bio import collect_links
+
+    payload = {
+        "url": "http://127.0.0.1:8080/bio",
+        "handle": config.bio.handle or "",
+        "links": collect_links(config),
+    }
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
+    )
+
+
 async def _handle_providers(config: XPSTConfig) -> CallToolResult:
     """Handle xpst_providers tool."""
     data = build_provider_catalog(config)
@@ -1382,6 +1501,36 @@ async def _handle_messenger_set_rules(config: XPSTConfig, args: dict[str, Any]) 
                 "auto_reply": config.messenger.auto_reply,
                 "reply_rules": config.messenger.reply_rules,
             }, indent=2),
+        )],
+    )
+
+
+async def _handle_messenger_check_comments(config: XPSTConfig, args: dict[str, Any]) -> CallToolResult:
+    """Handle xpst_messenger_check_comments.
+
+    Mirrors `xpst messenger check-comments`: scans recent comments on an
+    Instagram/Facebook post and posts public replies per the configured
+    reply_rules. Gated internally by comment_reply_enabled and
+    comment_platforms.
+    """
+    from xpst.platforms.messenger import MessengerAdapter
+    from xpst.utils.sessions import SessionManager
+
+    media_id = args["media_id"]
+    platform = args.get("platform", "instagram")
+    since_ts = args.get("since_ts")
+
+    adapter = MessengerAdapter(config)
+    adapter._session_manager = SessionManager(config.config_dir)
+    results = await adapter.auto_reply_to_comments(platform, media_id, since_ts)
+    return CallToolResult(
+        content=[TextContent(
+            type="text",
+            text=json.dumps({
+                "media_id": media_id,
+                "platform": platform,
+                "results": results,
+            }, indent=2, default=str),
         )],
     )
 

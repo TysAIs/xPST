@@ -2,7 +2,7 @@
 
 The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, run posting workflows, and query the personal content knowledge base without scraping CLI text.
 
-This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **25 tools total: 21 `xpst_*` + 4 `kb_*`.**
+This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **28 tools total: 22 `xpst_*` + 2 `messenger_*` + 4 `kb_*`.**
 
 xPST posts to six destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger (messaging/auto-reply) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
 
@@ -49,6 +49,8 @@ Metadata-only tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) n
 | `xpst_best_time` | Best time to post per platform | Yes | None (read-only) |
 | `xpst_security_audit` | Automated security check on the install | No | None |
 | `xpst_suggest_caption` | Generate AI caption suggestions for a video | No | None |
+| `xpst_generate_ideas` | Generate post ideas for a topic (AI content studio) | No | None |
+| `xpst_bio_get` | Link-in-bio URL, handle, and rendered links | No | None |
 | `xpst_transcript` | Get transcript for a video by hash or ID | Yes | None (read-only) |
 | `xpst_search` | Search the knowledge base | Yes | None (read-only) |
 | `xpst_schedule_list` | List scheduled posts | Yes | None (read-only) |
@@ -59,6 +61,7 @@ Metadata-only tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) n
 | `xpst_delete` | Remove a post record from local state | Yes | Destructive to local state |
 | `messenger_send` | Send a text message to a Messenger PSID | No | **SENDS REAL MESSAGES** |
 | `messenger_set_rules` | Configure Messenger auto-reply rules | No | Rewrites config |
+| `xpst_messenger_check_comments` | Scan IG/FB comments and auto-reply per rules | No | **POSTS PUBLIC REPLIES** |
 | `kb_add` | Ingest a file/URL into the knowledge base | No | Downloads + transcribes locally |
 | `kb_query` | Search stored knowledge nuggets | No | None (read-only) |
 | `kb_organize` | Cluster nuggets into areas, tag difficulty | No | Rewrites KB area assignments |

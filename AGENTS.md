@@ -27,7 +27,7 @@ python -m pytest tests/        # full suite (1534 collected)
 | **Config** | `src/xpst/config.py` | Pydantic settings, bcrypt dashboard auth, auto-migration v1→v4 |
 | **Desktop** | `src/xpst/desktop_app/` | PySide6/QML (8 core pages + onboarding/detail panel), splash, i18n, plugins |
 | **Dashboard** | `src/xpst/dashboard/server.py` | FastAPI + WebSocket, bcrypt auth |
-| **MCP** | `src/xpst/mcp/server.py` | 23 tools (post, health, config, state, platforms, scheduling, analytics, KB, captions, transcripts, search) |
+| **MCP** | `src/xpst/mcp/server.py` | 28 tools (post, health, config, state, platforms, scheduling, analytics, KB, captions, ideas, bio, transcripts, search, Messenger DM + comment auto-reply) |
 
 ## Key Principles
 
