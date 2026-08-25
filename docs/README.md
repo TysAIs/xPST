@@ -405,7 +405,7 @@ xpst mcp
 
 ### Available Tools
 
-xPST exposes 23 MCP tools (19 `xpst_*` + 4 `kb_*`). See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
+xPST exposes 28 MCP tools (22 `xpst_*` + 2 `messenger_*` + 4 `kb_*`). See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 
 | Tool | Description |
 |------|-------------|
@@ -428,6 +428,11 @@ xPST exposes 23 MCP tools (19 `xpst_*` + 4 `kb_*`). See [MCP_TOOLS.md](MCP_TOOLS
 | `xpst_search` | Search transcripts and content |
 | `xpst_schedule_list` | List scheduled posts |
 | `xpst_schedule_add` | Add a scheduled post |
+| `xpst_generate_ideas` | Generate post ideas (AI content studio) |
+| `xpst_bio_get` | Link-in-bio URL and rendered links |
+| `messenger_send` | Send a Messenger DM |
+| `messenger_set_rules` | Configure Messenger auto-reply rules |
+| `xpst_messenger_check_comments` | Scan comments and auto-reply |
 | `kb_add` | Add to knowledge base |
 | `kb_query` | Query knowledge base |
 | `kb_organize` | Organize knowledge base |
