@@ -2,7 +2,7 @@
 
 The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, run posting workflows, and query the personal content knowledge base without scraping CLI text.
 
-This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **28 tools total: 22 `xpst_*` + 2 `messenger_*` + 4 `kb_*`.**
+This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **25 tools total: 19 `xpst_*` + 2 `messenger_*` + 4 `kb_*`.**
 
 xPST posts to six destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger (messaging/auto-reply) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
 
