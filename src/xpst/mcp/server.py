@@ -1470,10 +1470,10 @@ async def _handle_messenger_send(config: XPSTConfig, args: dict[str, Any]) -> Ca
     """Handle messenger_send tool — send a text message to a PSID."""
     import httpx
 
-    from xpst.platforms.messenger import MessengerAdapter, MessengerError
+    from xpst.platforms.messenger import MessengerError, MessengerUploader
     from xpst.utils.sessions import SessionManager
 
-    adapter = MessengerAdapter(config)
+    adapter = MessengerUploader(config)
     adapter._session_manager = SessionManager(config.config_dir)
     try:
         data = await adapter.send_text(args["recipient"], args["text"])

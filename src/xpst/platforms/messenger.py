@@ -63,7 +63,7 @@ def appsecret_proof(page_token: str, app_secret: str | None) -> str | None:
     return hmac.new(app_secret.encode("utf-8"), page_token.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-class MessengerAdapter(PlatformUploader):
+class MessengerUploader(PlatformUploader):
     """Official Messenger Platform adapter — text send + ManyChat-lite auto-reply.
 
     Registered in ``PlatformRegistry`` under the name ``messenger`` and
@@ -614,4 +614,4 @@ class MessengerAdapter(PlatformUploader):
         return text[: MESSENGER_MAX_TEXT_LENGTH - 3] + "..."
 
 
-PlatformRegistry.register("messenger", MessengerAdapter)
+PlatformRegistry.register("messenger", MessengerUploader)
