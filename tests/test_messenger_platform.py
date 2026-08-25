@@ -673,7 +673,7 @@ def _comment_responder(method: str, url: str, params: dict[str, Any] | None, jso
 def test_auto_reply_to_comments_replies_on_keyword(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeAsyncClient(responder=_comment_responder)
     monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
-    adapter = MessengerAdapter(_comment_config())
+    adapter = MessengerUploader(_comment_config())
     _set_session_token(adapter)
 
     results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
@@ -702,7 +702,7 @@ def test_auto_reply_to_comments_replies_on_keyword(monkeypatch: pytest.MonkeyPat
 def test_auto_reply_to_comments_passes_since(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeAsyncClient(responder=_comment_responder)
     monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
-    adapter = MessengerAdapter(_comment_config())
+    adapter = MessengerUploader(_comment_config())
     _set_session_token(adapter)
 
     _run(adapter.auto_reply_to_comments("facebook", "178956239487", since_ts=1700000000))
@@ -716,7 +716,7 @@ def test_auto_reply_to_comments_no_rule_match_skips(monkeypatch: pytest.MonkeyPa
     fake = FakeAsyncClient(responder=_comment_responder)
     monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
     cfg = _comment_config(rules={"hello": "Hi there!"})  # no catch-all
-    adapter = MessengerAdapter(cfg)
+    adapter = MessengerUploader(cfg)
     _set_session_token(adapter)
 
     results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
@@ -729,7 +729,7 @@ def test_auto_reply_to_comments_no_rule_match_skips(monkeypatch: pytest.MonkeyPa
 
 def test_auto_reply_to_comments_disabled_no_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _patch_client(monkeypatch)
-    adapter = MessengerAdapter(_comment_config(enabled=False))
+    adapter = MessengerUploader(_comment_config(enabled=False))
     _set_session_token(adapter)
 
     results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
@@ -740,7 +740,7 @@ def test_auto_reply_to_comments_disabled_no_calls(monkeypatch: pytest.MonkeyPatc
 
 def test_auto_reply_to_comments_platform_not_enabled_no_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _patch_client(monkeypatch)
-    adapter = MessengerAdapter(_comment_config(platforms=["facebook"]))
+    adapter = MessengerUploader(_comment_config(platforms=["facebook"]))
     _set_session_token(adapter)
 
     results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
@@ -752,7 +752,7 @@ def test_auto_reply_to_comments_platform_not_enabled_no_calls(monkeypatch: pytes
 def test_auto_reply_to_comments_get_error_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = FakeAsyncClient(responder=lambda method, url, params, json: ({}, 429))
     monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
-    adapter = MessengerAdapter(_comment_config())
+    adapter = MessengerUploader(_comment_config())
     _set_session_token(adapter)
 
     results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
@@ -770,7 +770,7 @@ def test_auto_reply_to_comments_reply_error_records_not_raises(monkeypatch: pyte
 
     fake = FakeAsyncClient(responder=responder)
     monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
-    adapter = MessengerAdapter(_comment_config())
+    adapter = MessengerUploader(_comment_config())
     _set_session_token(adapter)
 
     results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
@@ -782,7 +782,7 @@ def test_auto_reply_to_comments_reply_error_records_not_raises(monkeypatch: pyte
 
 def test_auto_reply_to_comments_no_token_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_client(monkeypatch)
-    adapter = MessengerAdapter(_comment_config())
+    adapter = MessengerUploader(_comment_config())
     # no session manager / no config token → _get_page_token raises ValueError,
     # which is captured and surfaced as an error result (not raised).
     results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
@@ -816,7 +816,7 @@ def test_cli_messenger_check_comments_json(monkeypatch: pytest.MonkeyPatch, tmp_
         async def auto_reply_to_comments(self, platform: str, media_id: str, since_ts: int | None) -> list[dict[str, Any]]:
             return [{"comment_id": "c1", "from": "A", "text": "hello", "reply": "Hi!", "sent": True}]
 
-    monkeypatch.setattr("xpst.platforms.messenger.MessengerAdapter", FakeAdapter)
+    monkeypatch.setattr("xpst.platforms.messenger.MessengerUploader", FakeAdapter)
 
     cfg_file = tmp_path / "config.yaml"
     cfg_file.write_text(yaml.dump({

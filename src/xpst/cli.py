@@ -1478,10 +1478,10 @@ def messenger_check_comments(
     """
     import asyncio as _asyncio
 
-    from xpst.platforms.messenger import MessengerAdapter
+    from xpst.platforms.messenger import MessengerUploader
 
     config = load_config(ctx.obj.get("config_path"))
-    adapter = MessengerAdapter(config)
+    adapter = MessengerUploader(config)
     results = _asyncio.run(adapter.auto_reply_to_comments(platform, media_id, since_ts))
 
     if as_json:
