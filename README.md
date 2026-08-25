@@ -46,8 +46,8 @@ xPST works across **six platforms** — YouTube, Instagram, X/Twitter, TikTok, T
 
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
-- **CLI** — 37 top-level commands covering the entire workflow
-- **MCP server** — 28 tools so AI agents can drive the entire product
+- **CLI** — 34 top-level commands covering the entire workflow
+- **MCP server** — 25 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
 
@@ -90,8 +90,8 @@ network traffic is the platform API calls you configure. See
 
 ### Three Drivable Surfaces
 - **Desktop GUI** — PySide6/QML app with Dashboard, Compose, Content, Analytics, Connect, Schedule, Settings, and About pages + DetailPanel
-- **CLI** — 37 Click-based commands with `--json` output, `--dry-run` mode, and meaningful exit codes
-- **MCP server** — 28 tools (22 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
+- **CLI** — 34 Click-based commands with `--json` output, `--dry-run` mode, and meaningful exit codes
+- **MCP server** — 25 tools (19 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 ### Enterprise Hardening
 - **Encrypted credentials** — OS keychain storage (macOS Keychain, Linux Secret Service, Windows Credential Manager) with encrypted `.enc` file fallback (Fernet + scrypt)
@@ -215,7 +215,7 @@ See `Dockerfile` and `docker-compose.yml` for details.
 
 ## CLI Reference
 
-xPST provides 37 top-level commands. Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 34 top-level commands. Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 
 ### Setup & Accounts
 
@@ -442,7 +442,7 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 }
 ```
 
-### 23 Tools
+### 25 Tools
 
 **Posting & operations (10 tools):**
 
@@ -482,6 +482,13 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 |------|-------------|
 | `xpst_schedule_list` | List scheduled posts (pending, completed, failed) with times and targets |
 | `xpst_schedule_add` | Schedule a post: local video + caption + ISO-8601 time + optional platform list and repeat rule |
+
+**Messenger auto-reply (2 tools):**
+
+| Tool | Description |
+|------|-------------|
+| `messenger_send` | Send a text message to a Messenger recipient (page-scoped PSID) via the Meta Graph API |
+| `messenger_set_rules` | Configure the Messenger ManyChat-lite auto-reply rules (keyword → reply mappings) |
 
 **Knowledge base (4 tools, deprecated in favor of the `xpst_*` content tools):**
 

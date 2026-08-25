@@ -405,7 +405,7 @@ xpst mcp
 
 ### Available Tools
 
-xPST exposes 23 MCP tools (19 `xpst_*` + 4 `kb_*`). See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
+xPST exposes 25 MCP tools (19 `xpst_*` + 2 `messenger_*` + 4 `kb_*`). See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 
 | Tool | Description |
 |------|-------------|
@@ -532,7 +532,7 @@ xpst/
 │   ├── sessions.py     # SessionManager (auth consolidation)
 │   ├── video.py        # FFmpeg encoding per platform
 │   └── platform.py     # Cross-platform paths
-├── mcp/                # MCP server (28 tools)
+├── mcp/                # MCP server (25 tools)
 │   └── server.py       # stdio MCP server with audit logging
 ├── dashboard/          # Web API dashboard
 │   ├── server.py       # FastAPI server
