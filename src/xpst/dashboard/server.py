@@ -31,6 +31,81 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 
 logger = logging.getLogger(__name__)
 
+_DASHBOARD_INDEX_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xPST Dashboard</title>
+<style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
+                     Roboto, Helvetica, Arial, sans-serif;
+        background: linear-gradient(180deg, #f5f5f7 0%, #ececf0 100%);
+        color: #1d1d1f;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px 16px;
+        -webkit-font-smoothing: antialiased;
+    }
+    @media (prefers-color-scheme: dark) {
+        body { background: linear-gradient(180deg, #161617 0%, #1d1d1f 100%);
+               color: #f5f5f7; }
+        .card { background: #242426; box-shadow: 0 8px 32px rgba(0,0,0,.5); }
+        .btn { background: #343437; color: #f5f5f7; }
+        .btn:hover { background: #3d3d41; }
+        .subtitle { color: #a1a1a6; }
+        footer { color: #86868b; }
+    }
+    .card {
+        background: #ffffff;
+        border-radius: 24px;
+        box-shadow: 0 8px 32px rgba(0,0,0,.08);
+        padding: 40px 24px 28px;
+        width: 100%;
+        max-width: 420px;
+        text-align: center;
+    }
+    h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+    .subtitle { font-size: 14px; color: #6e6e73; margin: 6px 0 24px; }
+    .links { display: flex; flex-direction: column; gap: 12px; }
+    .btn {
+        display: block;
+        padding: 14px 20px;
+        border-radius: 14px;
+        background: #f2f2f4;
+        color: #1d1d1f;
+        text-decoration: none;
+        font-size: 15px;
+        font-weight: 600;
+        transition: background .15s ease, transform .1s ease;
+    }
+    .btn:hover { background: #e8e8ec; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    footer { margin-top: 28px; font-size: 12px; color: #86868b; }
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>xPST Dashboard</h1>
+  <p class="subtitle">Cross-posting control plane</p>
+  <div class="links">
+    <a class="btn" href="/health">Health</a>
+    <a class="btn" href="/state">State</a>
+    <a class="btn" href="/metrics">Metrics</a>
+    <a class="btn" href="/bio">Link in Bio</a>
+    <a class="btn" href="/bio/edit">Edit Link in Bio</a>
+  </div>
+  <footer>Powered by xPST</footer>
+</main>
+</body>
+</html>
+"""
+
 
 def _load_dashboard_auth(config_dir: str) -> tuple[str, str]:
     """Load dashboard credentials from config.
@@ -116,6 +191,16 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
                 {"error": str(exc)},
                 status_code=500,
             )
+
+    # ── Dashboard index ─────────────────────────────────────────────────
+    @app.get("/", name="dashboard_index", include_in_schema=False, response_model=None)
+    def dashboard_index() -> HTMLResponse:
+        """Serve the auth-protected dashboard landing page.
+
+        Lists the dashboard endpoints and links to the public link-in-bio
+        page. Protected by the same Basic auth as /state and /bio/edit.
+        """
+        return HTMLResponse(_DASHBOARD_INDEX_HTML)
 
     # ── Auth middleware ─────────────────────────────────────────────────
     username, password_hash = _load_dashboard_auth(config_dir)
