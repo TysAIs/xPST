@@ -8,7 +8,6 @@ Platform-specific formatting:
 - X: 280 chars max
 - Threads: 500 chars max
 - Instagram: 2200 chars max
-- LinkedIn: 3000 chars max
 - YouTube: 5000 chars max (title + description)
 - TikTok: 2200 chars max
 """
@@ -27,7 +26,6 @@ PLATFORM_CHAR_LIMITS: dict[str, int] = {
     "x": 280,
     "threads": 500,
     "instagram": 2200,
-    "linkedin": 3000,
     "youtube": 5000,
     "tiktok": 2200,
 }

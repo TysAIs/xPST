@@ -154,7 +154,6 @@ def test_bio_page_renders_social_and_custom_links(tmp_path):
             "x": {"enabled": True, "username": "tys_ais"},
             "instagram": {"enabled": False, "username": "hidden_ig"},
             "tiktok": {"enabled": True, "username": "tys.ais"},
-            "linkedin": {"enabled": True, "linkedin_user_id": "tysais"},
             "threads": {"enabled": False, "threads_user_id": "12345"},
         },
         bio={
@@ -170,7 +169,6 @@ def test_bio_page_renders_social_and_custom_links(tmp_path):
     assert "https://youtube.com/@tysais" in html
     assert "https://x.com/tys_ais" in html
     assert "https://tiktok.com/@tys.ais" in html
-    assert "https://linkedin.com/in/tysais" in html
     assert "https://instagram.com/hidden_ig" not in html   # disabled
     assert "https://threads.net/" not in html              # disabled
     assert '>Website<' in html
@@ -184,13 +182,11 @@ def test_bio_page_skips_disabled_and_handleless_accounts(tmp_path):
         accounts={
             "youtube": {"enabled": True, "username": ""},        # no handle
             "x": {"enabled": False, "username": "ghost"},         # disabled
-            "linkedin": {"enabled": True, "linkedin_user_id": "urn:li:person:abc123"},  # URN, not a vanity
         },
     )
     html = client.get("/bio").text
     assert "youtube.com" not in html
     assert "x.com/ghost" not in html
-    assert "linkedin.com" not in html
 
 
 def test_bio_page_escapes_html_in_config(tmp_path):

@@ -3,7 +3,7 @@
 A self-hosted, mobile-first "Link in Bio" page (Content360-style) served by
 the FastAPI dashboard at ``/bio``. Social links are derived automatically
 from the enabled accounts in config that carry a handle (youtube, x,
-instagram, tiktok, linkedin, threads); custom links come from the ``bio``
+instagram, tiktok, threads); custom links come from the ``bio``
 config section.
 
 Pure functions here — no FastAPI dependency — so the renderer is trivially
@@ -21,7 +21,6 @@ _PLATFORMS: list[tuple[str, str, str]] = [
     ("x", "X", "username"),
     ("instagram", "Instagram", "username"),
     ("tiktok", "TikTok", "username"),
-    ("linkedin", "LinkedIn", "linkedin_user_id"),
     ("threads", "Threads", "threads_user_id"),
 ]
 
@@ -133,10 +132,6 @@ def _url_for(platform: str, handle: str) -> str:
         return f"https://instagram.com/{safe}"
     if platform == "tiktok":
         return f"https://tiktok.com/@{safe}"
-    if platform == "linkedin":
-        if h.startswith("urn:li:"):  # numeric URN, not a vanity name
-            return ""
-        return f"https://linkedin.com/in/{safe}"
     if platform == "threads":
         return f"https://threads.net/@{safe}"
     return ""
@@ -236,7 +231,7 @@ def render_bio_edit_page(config, saved: bool = False) -> str:
     <label class="field" for="handle">Display name</label>
     <input type="text" id="handle" name="handle" value="{html.escape(handle)}" placeholder="Your name or brand">
     <label class="field">Social links (auto — edit in config accounts)</label>
-    <p class="hint">YouTube, X, Instagram, TikTok, LinkedIn and Threads links
+    <p class="hint">YouTube, X, Instagram, TikTok and Threads links
     are generated automatically from enabled accounts with a handle.</p>
     <label class="field">Custom links</label>
 {rows_html}

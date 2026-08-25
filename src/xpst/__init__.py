@@ -1,13 +1,13 @@
 """xPST v1.0.0 — Free, open-source, local-first cross-posting suite.
 
-Distribute short-form video to YouTube, Instagram, X, TikTok, Threads,
-and LinkedIn — all for free via official APIs. Includes cross-post
+Distribute short-form video to YouTube, Instagram, X, TikTok, and Threads —
+all for free via official APIs. Includes cross-post
 correlation, follower tracking, best-time-to-post analytics, a knowledge
 base that works with zero config, and an AI agent integration layer
 (CLI + MCP).
 
 Key Features:
-    - Cross-posting to 7 platforms (YouTube, IG, X, TikTok, Threads, LinkedIn)
+    - Cross-posting to 5 video platforms (YouTube, IG, X, TikTok, Threads)
     - Official APIs by default, community mode for unofficial (opt-in)
     - Cross-post correlation — one video = one entry with total metrics
     - Follower tracking, best-time-to-post, engagement rate analytics

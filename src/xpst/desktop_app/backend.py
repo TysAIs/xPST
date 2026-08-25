@@ -165,7 +165,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-PLATFORMS = ("youtube", "instagram", "x", "tiktok", "threads", "linkedin")
+PLATFORMS = ("youtube", "instagram", "x", "tiktok", "threads")
 ACCOUNT_SECTIONS = (*PLATFORMS, "local")
 
 

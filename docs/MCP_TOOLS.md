@@ -4,7 +4,7 @@ The xPST MCP server exposes local xPST workflows over stdio so AI assistants and
 
 This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **25 tools total: 21 `xpst_*` + 4 `kb_*`.**
 
-xPST posts to seven destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn, and Messenger (messaging/auto-reply) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
+xPST posts to six destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger (messaging/auto-reply) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
 
 ## Setup
 
@@ -68,7 +68,7 @@ Metadata-only tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) n
 
 ## xpst_providers
 
-Lists all discovered content sources and posting destinations with auth modes and capabilities. Call this first so the agent adapts to the installed provider set instead of assuming a fixed platform list. Destinations are YouTube Shorts, Instagram Reels, X, TikTok, Threads, LinkedIn, and Messenger (messaging/auto-reply); sources are TikTok, YouTube, Instagram, X, and local files. TikTok now appears under both `sources` and `destinations` (posting via the official Content Posting API).
+Lists all discovered content sources and posting destinations with auth modes and capabilities. Call this first so the agent adapts to the installed provider set instead of assuming a fixed platform list. Destinations are YouTube Shorts, Instagram Reels, X, TikTok, Threads, and Messenger (messaging/auto-reply); sources are TikTok, YouTube, Instagram, X, and local files. TikTok now appears under both `sources` and `destinations` (posting via the official Content Posting API).
 
 Arguments: none.
 
@@ -199,7 +199,7 @@ Dry-run response shape:
   "dry_run": true,
   "fetch_count": 2,
   "videos": [
-    { "video_id": "7301...", "caption": "First 100 chars...", "source": "tiktok", "targets": ["youtube", "instagram", "x", "tiktok", "threads", "linkedin"] }
+    { "video_id": "7301...", "caption": "First 100 chars...", "source": "tiktok", "targets": ["youtube", "instagram", "x", "tiktok", "threads"] }
   ]
 }
 ```
@@ -214,7 +214,7 @@ Manually posts a local video file, or a carousel when `carousel_paths` is given.
 |----------|------|----------|---------|-------------|
 | `video_path` | string | yes | — | Path to the video (or first carousel item). |
 | `caption` | string | yes | — | Caption/title for the post. |
-| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`, `linkedin`. |
+| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`. |
 | `carousel_paths` | string[] | no | `[]` | Additional image/video paths for a carousel. |
 | `dry_run` | boolean | no | `false` | Preview without uploading. Always use first. |
 
@@ -255,7 +255,7 @@ Retries failed or incomplete posts from history. **Live mode posts to real accou
 |----------|------|----------|---------|-------------|
 | `max_count` | integer | no | `10` | Maximum videos to backfill. |
 | `source` | string | no | `"tiktok"` | Source provider name. |
-| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`, `linkedin`. |
+| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`. |
 | `dry_run` | boolean | no | `false` | Preview what would be backfilled. |
 
 Example call:
@@ -281,7 +281,7 @@ Removes a post **record** from local state. This is state-only: it does NOT call
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
 | `video_id` | string | yes | — | Video ID to remove from state. |
-| `platform` | string | no | `"all"` | `youtube`, `instagram`, `x`, `tiktok`, `threads`, `linkedin`, or `all`. |
+| `platform` | string | no | `"all"` | `youtube`, `instagram`, `x`, `tiktok`, `threads`, or `all`. |
 
 Example call:
 
@@ -335,7 +335,7 @@ Returns per-post and per-platform engagement metrics with snapshot history. Read
 
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| `platform` | string | no | all | `youtube`, `instagram`, `x`, `tiktok`, `threads`, or `linkedin`. |
+| `platform` | string | no | all | `youtube`, `instagram`, `x`, `tiktok`, or `threads`. |
 | `live` | boolean | no | `false` | Fetch fresh metrics from platforms instead of stored snapshots. |
 
 Example call:
@@ -477,7 +477,7 @@ Schedules a post for a future time: video + caption + ISO-8601 time, with an opt
 | `video_path` | string | yes | — | Path to the video to schedule. |
 | `caption` | string | yes | — | Caption/title for the post. |
 | `scheduled_time` | string | yes | — | ISO-8601 timestamp for publishing. |
-| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`, `linkedin`. |
+| `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`. |
 | `repeat_rule` | string | no | none | `daily`, `weekly`, or `monthly`. |
 
 Example call:

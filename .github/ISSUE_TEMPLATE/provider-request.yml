@@ -7,7 +7,7 @@ body:
     id: provider
     attributes:
       label: Provider name
-      placeholder: "Bluesky, LinkedIn, Facebook Reels, Pinterest, etc."
+      placeholder: "Bluesky, Facebook Reels, Pinterest, etc."
     validations:
       required: true
   - type: dropdown

@@ -135,15 +135,6 @@ Threads is a **destination** using the official Meta Threads API (container-publ
 
 > **Note:** Max caption 500 chars, video up to 300s, 250 posts/day.
 
-### LinkedIn (OAuth)
-
-LinkedIn is a **destination** using the official LinkedIn `/v2/posts` endpoint.
-
-1. Configure OAuth credentials for the LinkedIn API
-2. Run `xpst auth linkedin` or set credentials in `~/.xpst/config.yaml`
-
-> **Note:** Max caption 3000 chars, 150 posts/day.
-
 ---
 
 ## Composing & Posting
@@ -155,7 +146,7 @@ The **Compose** page is where you create new posts from local video files.
 1. **Select a video folder** — Click "Browse" to pick a folder containing your videos
 2. **Choose a video** — The grid shows thumbnails of all video files in the folder
 3. **Write a caption** — Enter your post caption in the text area (character count shown)
-4. **Select platforms** — Check the boxes for which platforms to post to (YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn)
+4. **Select platforms** — Check the boxes for which platforms to post to (YouTube, Instagram, X/Twitter, TikTok, Threads)
 5. **Click "Post Now"** — The upload begins
 
 ### Upload Progress
@@ -324,7 +315,6 @@ export XPST_FFMPEG_PATH=/path/to/ffmpeg
 - **X**: Verify cookies are valid and not expired. Re-export if needed
 - **TikTok**: For source downloads, cookies expire — re-export periodically. For posting, ensure the Content Posting API OAuth tokens are valid
 - **Threads**: Verify the Meta Threads API OAuth credentials are valid
-- **LinkedIn**: Verify the LinkedIn API OAuth credentials are valid
 
 ### Thumbnails not showing
 

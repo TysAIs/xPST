@@ -34,7 +34,6 @@ PLATFORM_COLORS = {
     "x": "#1d9bf0",
     "tiktok": "#00f2ea",
     "threads": "#000000",
-    "linkedin": "#0A66C2",
 }
 
 PLATFORM_ICONS = {
@@ -43,7 +42,6 @@ PLATFORM_ICONS = {
     "x": "𝕏",
     "tiktok": "♪",
     "threads": "T",
-    "linkedin": "in",
 }
 
 PLATFORM_LABELS = {
@@ -52,7 +50,6 @@ PLATFORM_LABELS = {
     "instagram": "Instagram",
     "tiktok": "TikTok",
     "threads": "Threads",
-    "linkedin": "LinkedIn",
 }
 
 PLATFORM_BADGE_LABELS = {
@@ -61,7 +58,6 @@ PLATFORM_BADGE_LABELS = {
     "x": "X",
     "tiktok": "TK",
     "threads": "TH",
-    "linkedin": "IN",
 }
 
 
@@ -547,7 +543,7 @@ class AnalyticsCollector:
         posted = state.get("posted_videos", {})
         engagement: dict[str, dict] = {
             name: {"posts": 0, "views": 0, "likes": 0, "comments": 0, "shares": 0}
-            for name in ["youtube", "instagram", "x", "tiktok", "threads", "linkedin"]
+            for name in ["youtube", "instagram", "x", "tiktok", "threads"]
         }
         for video_data in posted.values():
             for platform in video_data.get("posted_to", {}):
@@ -707,7 +703,7 @@ class AnalyticsCollector:
         health = state.get("health", {})
 
         platform_counts: dict[str, int] = {
-            "youtube": 0, "instagram": 0, "x": 0, "tiktok": 0, "threads": 0, "linkedin": 0,
+            "youtube": 0, "instagram": 0, "x": 0, "tiktok": 0, "threads": 0,
         }
         total_platform_posts = 0
         for video_data in posted.values():
@@ -793,7 +789,7 @@ class AnalyticsCollector:
         health = state.get("health", {}).get("platforms", {})
 
         platforms = []
-        for name in ["youtube", "instagram", "x", "tiktok", "threads", "linkedin"]:
+        for name in ["youtube", "instagram", "x", "tiktok", "threads"]:
             p_health = health.get(name, {})
             configured = False
             if name == "youtube":
@@ -808,10 +804,6 @@ class AnalyticsCollector:
             elif name == "threads":
                 configured = bool(
                     self.config.get("accounts", {}).get("threads", {}).get("graph_access_token")
-                )
-            elif name == "linkedin":
-                configured = bool(
-                    self.config.get("accounts", {}).get("linkedin", {}).get("access_token")
                 )
 
             platforms.append(
@@ -847,7 +839,7 @@ class AnalyticsCollector:
         posted = state.get("posted_videos", {})
 
         engagement: dict[str, dict] = {}
-        for name in ["youtube", "instagram", "x", "tiktok", "threads", "linkedin"]:
+        for name in ["youtube", "instagram", "x", "tiktok", "threads"]:
             engagement[name] = {
                 "posts": 0,
                 "views": 0,
@@ -863,7 +855,6 @@ class AnalyticsCollector:
             "x": [],
             "tiktok": [],
             "threads": [],
-            "linkedin": [],
         }
 
         for video_data in posted.values():

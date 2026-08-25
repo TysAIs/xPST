@@ -344,7 +344,7 @@ TOOLS: list[Tool] = [
                 },
                 "platform": {
                     "type": "string",
-                    "description": "Target platform (x, threads, instagram, linkedin, youtube, tiktok)",
+                    "description": "Target platform (x, threads, instagram, youtube, tiktok)",
                     "default": "instagram",
                 },
             },
@@ -1259,7 +1259,7 @@ async def _handle_config_show(config: XPSTConfig) -> CallToolResult:
     masked = _mask_sensitive_values({
         "accounts": {
             platform: _section(getattr(config, platform))
-            for platform in ("tiktok", "youtube", "x", "instagram", "threads", "linkedin", "messenger", "local")
+            for platform in ("tiktok", "youtube", "x", "instagram", "threads", "messenger", "local")
             if hasattr(config, platform)
         },
         "video": _section(config.video),

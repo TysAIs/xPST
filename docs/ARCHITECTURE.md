@@ -4,18 +4,18 @@ This document describes the high-level architecture of xPST, designed for enterp
 
 ## Overview
 
-xPST is a modular, plugin-based system for cross-posting video content across social media platforms. It supports multiple sources (TikTok, Instagram Reels, YouTube, local files) and distributes to multiple destinations (YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn, and Messenger for messaging/auto-reply).
+xPST is a modular, plugin-based system for cross-posting video content across social media platforms. It supports multiple sources (TikTok, Instagram Reels, YouTube, local files) and distributes to multiple destinations (YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger for messaging/auto-reply).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        xPST Engine v2                     │
 ├─────────────────────────────────────────────────────────────┤
 │  Sources                Destinations                       │
-│  ┌──────────────┐       ┌──────────────┐ ┌──────────────┐  │
-│  │ TikTok       │       │ YouTube      │ │ Instagram    │  │
-│  │ IG Reels     │──────▶│ X/Twitter    │ │ TikTok       │  │
-│  │ YouTube      │       │ Threads      │ │ LinkedIn     │  │
-│  │ X/Twitter    │       └──────────────┘ └──────────────┘  │
+│  ┌──────────────┐       ┌──────────────┐                    │
+│  │ TikTok       │       │ YouTube      │                    │
+│  │ IG Reels     │──────▶│ X/Twitter    │                    │
+│  │ YouTube      │       │ Threads      │                    │
+│  │ X/Twitter    │       └──────────────┘                    │
 │  │ Local Files  │                                            │
 │  └──────────────┘                                            │
 │         │                                                     │
@@ -43,7 +43,7 @@ xPST is a modular, plugin-based system for cross-posting video content across so
 ### 1. Separation of Concerns
 Each component has a single responsibility:
 - **Sources**: Fetch/download videos (TikTok, Instagram Reels, YouTube, local files)
-- **Platforms**: Upload videos (YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn)
+- **Platforms**: Upload videos (YouTube, Instagram, X/Twitter, TikTok, Threads)
 - **Engine**: Orchestrate workflow via dependency-injected use-cases
 - **State**: Persist data atomically (write-then-rename, thread-safe)
 - **Config**: Pydantic settings with auto-migration (v1→v4)
@@ -102,7 +102,7 @@ class VideoSource(ABC):
 
 Responsible for uploading videos to target platforms.
 
-**Current**: YouTube, X/Twitter, Instagram, TikTok, Threads, LinkedIn, Messenger (messaging/auto-reply)
+**Current**: YouTube, X/Twitter, Instagram, TikTok, Threads, Messenger (messaging/auto-reply)
 
 **Interface**:
 ```python
@@ -255,7 +255,6 @@ ffmpeg -i input.mp4 \
 - Graph API for Instagram (recommended), session-based via instagrapi (fallback)
 - Content Posting API v2 for TikTok
 - Meta Threads API for Threads
-- OAuth 2.0 for LinkedIn
 - Static Page Access Token for Messenger (with `appsecret_proof` on outbound calls and `X-Hub-Signature-256` verification on inbound webhooks)
 
 ### Data Privacy
@@ -365,7 +364,6 @@ WantedBy=multi-user.target
 
 ### Shipped
 - [x] Threads support (official Meta Threads API)
-- [x] LinkedIn video support (official LinkedIn /v2/posts)
 - [x] Messenger support (official Messenger Platform, opt-in auto-reply)
 - [x] TikTok posting (official Content Posting API)
 - [x] Web dashboard (FastAPI)

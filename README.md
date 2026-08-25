@@ -42,7 +42,7 @@
 
 **xPST** (Cross-Posting Suite) is a local-first, open-source automation tool that takes a creator's short-form video from one source platform and republishes it — at full native fidelity — to every other platform they own. It tracks per-post performance across all of them in one place, and feeds the creator's published content into a personal knowledge base that any connected AI agent can semantically query.
 
-xPST works across **seven platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn, and (opt-in) Facebook Messenger — and every one of them is supported end-to-end: in the posting engine, the desktop UI, the analytics layer, and the connection wizard.
+xPST works across **six platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, and (opt-in) Facebook Messenger — and every one of them is supported end-to-end: in the posting engine, the desktop UI, the analytics layer, and the connection wizard.
 
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
@@ -63,7 +63,7 @@ network traffic is the platform API calls you configure. See
 ## Features
 
 ### Core Cross-Posting
-- **Six video platforms + Messenger** — YouTube, Instagram, X/Twitter, TikTok, Threads, and LinkedIn as posting destinations, plus opt-in Facebook Messenger auto-reply
+- **Five video platforms + Messenger** — YouTube, Instagram, X/Twitter, TikTok, Threads as posting destinations, plus opt-in Facebook Messenger auto-reply
 - **Full-fidelity fan-out** — One source video downloads once and uploads to every connected destination, with orientation-aware encoding that never degrades quality
 - **Bidirectional cross-posting** — Monitor ALL connected sources for new content and distribute to every connected destination (not just one direction)
 - **Smart passthrough** — A probe checks whether the source already satisfies the platform profile and skips the re-encode entirely, saving a generation loss
@@ -71,7 +71,7 @@ network traffic is the platform API calls you configure. See
 - **Crash recovery** — Partially-completed uploads are detected and queued for retry on next launch
 
 ### Unified Analytics
-- **6-platform coverage** — Engagement metrics normalized into one schema across YouTube, Instagram, X, TikTok, Threads, and LinkedIn
+- **5-platform coverage** — Engagement metrics normalized into one schema across YouTube, Instagram, X, TikTok, and Threads
 - **Per-post engagement metrics** — Views, likes, comments, shares, and platform-specific signals in one normalized schema
 - **Follower tracking** — Per-platform follower counts with growth history (`xpst followers`)
 - **Best-time recommendations** — Suggested posting windows derived from your own engagement history (`xpst best-time`)
@@ -223,7 +223,7 @@ xPST provides 34 top-level commands. Run `xpst --help` for the full list. Most c
 |---------|-------------|
 | `xpst setup` | Interactive first-time setup wizard (connects platforms, writes config) |
 | `xpst connect [PLATFORM]` | Streamlined account connection wizard; use `--test` to test existing |
-| `xpst auth [PLATFORM]` | Authenticate with a specific platform (youtube/x/instagram/tiktok/threads/linkedin) |
+| `xpst auth [PLATFORM]` | Authenticate with a specific platform (youtube/x/instagram/tiktok/threads) |
 | `xpst auth status` | Show authentication and quota status for all platforms |
 | `xpst config show` | Display current configuration as YAML (sensitive values masked) |
 | `xpst config set KEY VALUE` | Set a config value using dotted keys (e.g. `rate_limits.youtube 10`) |
@@ -370,7 +370,7 @@ xpst app --no-splash  # skip the splash screen
 | **Compose** | Compose a new post: select a video file, write a caption, choose target platforms, and submit |
 | **Content** | Browse your content library of posted videos with thumbnails, captions, and per-platform status |
 | **Analytics** | View cross-platform engagement metrics (views, likes, comments, shares) with trend history |
-| **Connect** | Connect and manage your social accounts across all six platforms (YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn) |
+| **Connect** | Connect and manage your social accounts across all five platforms (YouTube, Instagram, X/Twitter, TikTok, Threads) |
 | **Schedule** | Manage scheduled posts: create, view, and remove upcoming and recurring posts |
 | **Settings** | Customize xPST settings: encoding profiles, rate limits, notifications, and preferences |
 | **About** | Version info, dependency versions, links to docs and source, acknowledgments |
@@ -513,7 +513,7 @@ See [docs/TUTORIAL_MCP.md](docs/TUTORIAL_MCP.md) for a full MCP walkthrough with
 
 ## Platform Setup Guides
 
-xPST supports seven platforms. Each setup guide lives in `docs/`:
+xPST supports six platforms. Each setup guide lives in `docs/`:
 
 | Platform | Role | Auth method | Guide |
 |----------|------|-------------|-------|
@@ -522,7 +522,6 @@ xPST supports seven platforms. Each setup guide lives in `docs/`:
 | X / Twitter | Source + Destination | Cookies (twikit), optional API v2 | [docs/setup-x-twitter.md](docs/setup-x-twitter.md) |
 | TikTok | Source + Destination | yt-dlp (source) / Content Posting API (destination) | [docs/setup-tiktok.md](docs/setup-tiktok.md) |
 | Threads | Destination | Meta Threads API (official) | [docs/setup-threads.md](docs/setup-threads.md) |
-| LinkedIn | Destination | LinkedIn API (OAuth 2.0) | [docs/setup-linkedin.md](docs/setup-linkedin.md) |
 | Messenger | Destination (opt-in) | Facebook Page Access Token + appsecret | [docs/setup-messenger.md](docs/setup-messenger.md) |
 
 ### YouTube (OAuth 2.0 — official API)
@@ -626,26 +625,6 @@ accounts:
 
 Limits: 250 posts/24h, ≤300s video, ≤1 GB, ≤500-char captions. xPST refreshes the token automatically while it is still valid. See [docs/setup-threads.md](docs/setup-threads.md).
 
-### LinkedIn (LinkedIn API — OAuth 2.0)
-
-LinkedIn uses the official **LinkedIn API** (OAuth 2.0) to publish video posts via the registered-media upload flow (`registerUpload` → upload → create post):
-
-1. Create a LinkedIn developer app at [linkedin.com/developers](https://www.linkedin.com/developers)
-2. Request the posting/share permissions and complete the OAuth 2.0 flow to obtain an access token (60 days, refreshable)
-3. Configure xPST with your token and LinkedIn user ID
-
-```yaml
-accounts:
-  linkedin:
-    enabled: true
-    access_token: "YOUR_LINKEDIN_ACCESS_TOKEN"
-    linkedin_user_id: "YOUR_LINKEDIN_USER_ID"
-```
-
-`xpst connect linkedin` now supports the official OAuth flow (ban-safe).
-
-Limits: ~150 posts/day, recommended MP4 (H.264) up to ~200 MB. See [docs/setup-linkedin.md](docs/setup-linkedin.md).
-
 ### Messenger (opt-in — ManyChat-lite auto-reply)
 
 Messenger is **disabled by default**. It turns a Facebook Page into a keyword
@@ -684,7 +663,7 @@ MCP tools: `messenger_send`, `messenger_set_rules`. See
 Use local folders as a source for manual posting and carousels:
 
 ```bash
-xpst post -v ./my-video.mp4 -c "My caption" -p youtube,instagram,x,threads,linkedin
+xpst post -v ./my-video.mp4 -c "My caption" -p youtube,instagram,x,threads
 xpst run --source local
 ```
 
@@ -719,10 +698,6 @@ accounts:
     enabled: false
     graph_access_token: ""
     threads_user_id: ""
-  linkedin:
-    enabled: false
-    access_token: ""
-    linkedin_user_id: ""
   messenger:                     # opt-in ManyChat-lite auto-reply (off by default)
     enabled: false
     page_id: ""
@@ -739,7 +714,6 @@ rate_limits:                      # max uploads per day, per platform
   x: 5
   tiktok: 5
   threads: 5
-  linkedin: 5
 
 video:
   download_dir: "~/.xpst/downloads"
@@ -815,7 +789,7 @@ Contributions are welcome. The codebase enforces import boundaries (surfaces mus
 ## Security Practices
 
 - **Credentials never leave your machine.** Tokens and cookies are stored in the OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager) with an encrypted file fallback (Fernet + scrypt).
-- **Official APIs by default.** Instagram (Graph API), Threads, LinkedIn, YouTube, and TikTok destination posting all use sanctioned APIs. Unofficial modes exist only as explicit, documented fallbacks.
+- **Official APIs by default.** Instagram (Graph API), Threads, YouTube, and TikTok destination posting all use sanctioned APIs. Unofficial modes exist only as explicit, documented fallbacks.
 - **Secrets are masked** in `xpst config show`, redacted in `xpst diagnostics` bundles, and never written to logs.
 - **MCP guardrails** (`XPST_MCP_READONLY`, `XPST_MCP_REQUIRE_CONFIRM`) gate every mutating tool so agents cannot post without explicit authorization.
 - **Self-audit** your installation with `xpst security-audit`, which checks credential file permissions and configuration hygiene.

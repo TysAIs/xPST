@@ -879,7 +879,7 @@ def health(ctx: click.Context, as_json: bool):
 # ──────────────────────────────────────────────
 
 @main.command()
-@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "linkedin", "messenger"]))
+@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
 @click.option("--test", "test_only", is_flag=True, help="Test existing connections only")
 @click.pass_context
 def connect(ctx: click.Context, platform: str | None, test_only: bool):
@@ -914,7 +914,7 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         _show_auth_status(ctx, as_json)
         return
 
-    valid_platforms = {"tiktok", "youtube", "x", "instagram", "threads", "linkedin", "messenger"}
+    valid_platforms = {"tiktok", "youtube", "x", "instagram", "threads", "messenger"}
     if platform not in valid_platforms:
         click.echo(f"Unknown platform: {platform}")
         click.echo(f"Valid platforms: {', '.join(sorted(valid_platforms))}")
@@ -935,8 +935,6 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         _auth_tiktok(config)
     elif platform == "threads":
         _auth_threads(config)
-    elif platform == "linkedin":
-        _auth_linkedin(config)
     elif platform == "messenger":
         _auth_messenger(config)
 
@@ -962,14 +960,12 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
         x_creds = cred_store.retrieve_json("x_cookies")
         ig_creds = cred_store.retrieve_json("instagram_session")
         threads_creds = cred_store.retrieve("threads_access_token")
-        linkedin_creds = cred_store.retrieve("linkedin_access_token")
         messenger_creds = cred_store.retrieve("messenger_page_token")
         for plat, creds in [
             ("youtube", yt_creds),
             ("x", x_creds),
             ("instagram", ig_creds),
             ("threads", threads_creds),
-            ("linkedin", linkedin_creds),
             ("messenger", messenger_creds),
         ]:
             remaining = quota_mgr.get_remaining(plat)
@@ -1048,19 +1044,6 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
         str(quota_mgr.quotas.get("threads", {}).daily_limit if hasattr(quota_mgr.quotas.get("threads", {}), "daily_limit") else "N/A"),
         str(threads_quota.get("daily", "N/A")),
         "Keyring" if threads_creds else ("Config" if config.threads.graph_access_token else "Not configured"),
-    )
-
-    # LinkedIn
-    linkedin_creds = cred_store.retrieve("linkedin_access_token")
-    linkedin_token = bool(linkedin_creds or config.linkedin.access_token)
-    linkedin_auth = "✅" if linkedin_token else "❌"
-    linkedin_quota = quota_mgr.get_remaining("linkedin")
-    table.add_row(
-        "LinkedIn",
-        linkedin_auth,
-        str(quota_mgr.quotas.get("linkedin", {}).daily_limit if hasattr(quota_mgr.quotas.get("linkedin", {}), "daily_limit") else "N/A"),
-        str(linkedin_quota.get("daily", "N/A")),
-        "Keyring" if linkedin_creds else ("Config" if config.linkedin.access_token else "Not configured"),
     )
 
     # Messenger
@@ -1748,17 +1731,6 @@ def _auth_threads(config: XPSTConfig) -> None:
     from xpst.connect import connect_threads
 
     connect_threads(config)
-
-
-def _auth_linkedin(config: XPSTConfig) -> None:
-    """Guide LinkedIn (OAuth 2.0) authentication.
-
-    Args:
-        config: Loaded xPST configuration.
-    """
-    from xpst.connect import connect_linkedin
-
-    connect_linkedin(config)
 
 
 def _auth_messenger(config: XPSTConfig) -> None:
@@ -3653,7 +3625,7 @@ def suggest_caption(ctx: click.Context, video_path: str, platform: str, as_json:
     is configured.
 
     Platform-specific character limits are enforced:
-    X /280, Threads /500, Instagram /2200, LinkedIn /3000, YouTube /5000
+    X /280, Threads /500, Instagram /2200, YouTube /5000
     """
     import json as _json
     from pathlib import Path
@@ -3715,7 +3687,7 @@ def generate_caption_cmd(ctx: click.Context, text: str, platform: str, as_json: 
 
     Uses the KB LLM when XPST_KB_LLM_ENABLED is set, otherwise falls back to
     deterministic extraction. Platform char limits are enforced:
-    X /280, Threads /500, Instagram /2200, LinkedIn /3000, YouTube /5000.
+    X /280, Threads /500, Instagram /2200, YouTube /5000.
     """
     from xpst.caption_gen import generate_caption
 

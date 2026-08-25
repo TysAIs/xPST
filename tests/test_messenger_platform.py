@@ -607,7 +607,6 @@ def test_messenger_not_in_cross_posting_engine(tmp_path: Path) -> None:
             "instagram": {"enabled": False},
             "tiktok": {"enabled": False},
             "threads": {"enabled": False},
-            "linkedin": {"enabled": False},
             "messenger": {"enabled": True, "page_access_token": "t", "page_id": "1"},
         },
     }))
