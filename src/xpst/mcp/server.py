@@ -1513,14 +1513,14 @@ async def _handle_messenger_check_comments(config: XPSTConfig, args: dict[str, A
     reply_rules. Gated internally by comment_reply_enabled and
     comment_platforms.
     """
-    from xpst.platforms.messenger import MessengerAdapter
+    from xpst.platforms.messenger import MessengerUploader
     from xpst.utils.sessions import SessionManager
 
     media_id = args["media_id"]
     platform = args.get("platform", "instagram")
     since_ts = args.get("since_ts")
 
-    adapter = MessengerAdapter(config)
+    adapter = MessengerUploader(config)
     adapter._session_manager = SessionManager(config.config_dir)
     results = await adapter.auto_reply_to_comments(platform, media_id, since_ts)
     return CallToolResult(
