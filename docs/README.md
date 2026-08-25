@@ -2,7 +2,7 @@
 
 **Free, local-first, provider-agnostic cross-posting for short-form video**
 
-Automatically distribute short-form video from configured sources to connected destinations. xPST supports 7 platforms — YouTube, Instagram, X/Twitter, TikTok, Threads, LinkedIn, and Messenger (messaging/auto-reply) — as sources and destinations, with local file support for manual posting and carousels.
+Automatically distribute short-form video from configured sources to connected destinations. xPST supports 6 platforms — YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger (messaging/auto-reply) — as sources and destinations, with local file support for manual posting and carousels.
 
 ---
 
@@ -236,15 +236,6 @@ Meta Threads API:
 ```bash
 xpst auth threads
 # Enter Threads API token + user ID
-```
-
-### LinkedIn
-
-LinkedIn API (OAuth 2.0):
-
-```bash
-xpst auth linkedin
-# Enter LinkedIn access token + user ID
 ```
 
 ### Messenger
@@ -512,14 +503,13 @@ xpst/
 ├── analytics_store.py # Persistent analytics (SQLite)
 ├── anti_bot.py         # Anti-bot pacing and human-like behavior
 ├── connect.py          # Platform connection wizards
-├── platforms/          # Platform uploaders (6 platforms)
+├── platforms/          # Platform uploaders (5 platforms)
 │   ├── base.py         # Abstract base + registry
 │   ├── youtube.py      # YouTube (OAuth2, Data API v3)
 │   ├── instagram.py    # Instagram (Graph API / instagrapi)
 │   ├── x.py            # X/Twitter (twikit cookies / API v2)
 │   ├── tiktok.py       # TikTok (Content Posting API v2)
 │   ├── threads.py      # Threads (Meta API)
-│   ├── linkedin.py     # LinkedIn (OAuth 2.0)
 │   └── messenger.py    # Messenger (static page token, auto-reply)
 ├── sources/            # Video sources (yt-dlp based)
 │   ├── base.py         # Abstract base + registry
@@ -542,7 +532,7 @@ xpst/
 │   ├── sessions.py     # SessionManager (auth consolidation)
 │   ├── video.py        # FFmpeg encoding per platform
 │   └── platform.py     # Cross-platform paths
-├── mcp/                # MCP server (23 tools)
+├── mcp/                # MCP server (28 tools)
 │   └── server.py       # stdio MCP server with audit logging
 ├── dashboard/          # Web API dashboard
 │   ├── server.py       # FastAPI server

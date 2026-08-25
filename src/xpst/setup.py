@@ -9,6 +9,7 @@ Guides users through:
 5. Connectivity testing
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -60,17 +61,32 @@ def check_yt_dlp() -> str | None:
 
     Returns:
         Version string if installed, None otherwise.
-    """
 
-    try:
-        result = subprocess.run(
-            ["yt-dlp", "--version"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    Falls back to the venv bin dir and platform-specific locations so
+    yt-dlp is detected even when xPST is launched without the venv's
+    ``bin/`` on PATH (e.g. from the Finder/desktop app).
+    """
+    from .utils.platform import get_ytdlp_fallback_path
+
+    candidates = ["yt-dlp"]  # ambient PATH lookup
+    venv_bin = os.environ.get("VIRTUAL_ENV")
+    if venv_bin:
+        candidates.append(str(Path(venv_bin) / "bin" / "yt-dlp"))
+        if sys.platform == "win32":
+            candidates.append(str(Path(venv_bin) / "Scripts" / "yt-dlp.exe"))
+    fallback = get_ytdlp_fallback_path()
+    candidates.append(str(fallback))
+
+    for binary in dict.fromkeys(candidates):  # dedupe, keep order
+        try:
+            result = subprocess.run(
+                [binary, "--version"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
     return None
 
 

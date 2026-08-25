@@ -200,7 +200,7 @@ class VideoProcessor:
         nothing, so the pipeline can skip the re-encode entirely. Fidelity
         invariant: never spend a quality generation on compliant media.
         """
-        # TikTok/Threads/LinkedIn use the Instagram profile for compliance checks
+        # TikTok/Threads use the Instagram profile for compliance checks
         check_platform = platform if platform in ("youtube", "instagram", "x") else "instagram"
         info = self.get_video_info(video_path)
         streams = info.get("streams", [])
@@ -268,8 +268,8 @@ class VideoProcessor:
             cmd = self._build_instagram_cmd(input_path, output_path, config)
         elif platform == "x":
             cmd = self._build_x_cmd(input_path, output_path, config)
-        elif platform in ("tiktok", "threads", "linkedin"):
-            # TikTok/Threads/LinkedIn: use high-quality generic profile (same as Instagram)
+        elif platform in ("tiktok", "threads"):
+            # TikTok/Threads: use high-quality generic profile (same as Instagram)
             cmd = self._build_instagram_cmd(input_path, output_path, config)
         else:
             raise ValueError(f"Unknown platform: {platform}")

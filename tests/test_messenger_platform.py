@@ -19,6 +19,7 @@ import yaml
 from xpst.config import MessengerAccountConfig, XPSTConfig
 from xpst.platforms.base import PlatformRegistry
 from xpst.platforms.messenger import (
+    COMMENT_API_VERSION,
     MESSENGER_API_BASE,
     MESSENGER_API_VERSION,
     MESSENGER_MAX_TEXT_LENGTH,
@@ -606,10 +607,231 @@ def test_messenger_not_in_cross_posting_engine(tmp_path: Path) -> None:
             "instagram": {"enabled": False},
             "tiktok": {"enabled": False},
             "threads": {"enabled": False},
-            "linkedin": {"enabled": False},
             "messenger": {"enabled": True, "page_access_token": "t", "page_id": "1"},
         },
     }))
     config = XPSTConfig.load(str(cfg_file))
     engine = CrossPostEngine(config)
     assert "messenger" not in engine._platforms
+
+
+# ── Config: comment automation fields ──────────────────────────────────
+
+
+def test_messenger_comment_config_defaults() -> None:
+    cfg = _make_config()
+    assert cfg.messenger.comment_reply_enabled is False
+    assert cfg.messenger.comment_platforms == ["instagram", "facebook"]
+
+
+def test_messenger_comment_config_merge(tmp_path: Path) -> None:
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.dump({
+        "accounts": {
+            "messenger": {
+                "comment_reply_enabled": True,
+                "comment_platforms": ["instagram"],
+            },
+        },
+    }))
+    config = XPSTConfig.load(str(cfg_file))
+    assert config.messenger.comment_reply_enabled is True
+    assert config.messenger.comment_platforms == ["instagram"]
+
+
+# ── Comment automation (auto_reply_to_comments) ────────────────────────
+
+
+def _comment_config(
+    *,
+    enabled: bool = True,
+    platforms: list[str] | None = None,
+    rules: dict[str, str] | None = None,
+) -> XPSTConfig:
+    cfg = _make_config()
+    cfg.messenger.comment_reply_enabled = enabled
+    cfg.messenger.comment_platforms = platforms or ["instagram", "facebook"]
+    cfg.messenger.reply_rules = rules or {"hello": "Hi there!", "price": "Check our site!", "*": "Thanks!"}
+    return cfg
+
+
+def _comment_responder(method: str, url: str, params: dict[str, Any] | None, json: dict[str, Any] | None) -> tuple[dict, int]:
+    if method == "get":
+        return (
+            {
+                "data": [
+                    {"id": "1789_com_1", "message": "hello world", "from": {"name": "Alice", "id": "1"}},
+                    {"id": "1789_com_2", "message": "what's the price?", "from": {"name": "Bob", "id": "2"}},
+                    {"id": "1789_com_3", "message": "no match here", "from": {"name": "Carol", "id": "3"}},
+                ]
+            },
+            200,
+        )
+    return ({"id": "reply_ok"}, 200)
+
+
+def test_auto_reply_to_comments_replies_on_keyword(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeAsyncClient(responder=_comment_responder)
+    monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
+    adapter = MessengerAdapter(_comment_config())
+    _set_session_token(adapter)
+
+    results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
+
+    # GET comments then 2 matching replies (comments 1 and 2; comment 3 no rule... has * catch-all, so 3)
+    gets = [c for c in fake.calls if c["method"] == "get"]
+    posts = [c for c in fake.calls if c["method"] == "post"]
+    assert len(gets) == 1
+    assert gets[0]["url"] == f"{MESSENGER_API_BASE}/{COMMENT_API_VERSION}/178956239487/comments"
+    assert gets[0]["params"]["access_token"] == PAGE_TOKEN
+    assert gets[0]["params"]["appsecret_proof"] == appsecret_proof(PAGE_TOKEN, APP_SECRET)
+    assert gets[0]["params"]["fields"] == "id,message,from,created_time"
+    # 3 replies: hello → Hi there!, price → Check our site!, no-match → catch-all Thanks!
+    assert len(posts) == 3
+    assert posts[0]["url"] == f"{MESSENGER_API_BASE}/{COMMENT_API_VERSION}/1789_com_1/replies"
+    assert posts[0]["json"] == {"message": "Hi there!"}
+    assert posts[1]["json"] == {"message": "Check our site!"}
+    assert posts[2]["json"] == {"message": "Thanks!"}
+
+    sent = [r for r in results if r.get("sent")]
+    assert len(sent) == 3
+    assert sent[0]["reply"] == "Hi there!"
+    assert sent[0]["from"] == "Alice"
+
+
+def test_auto_reply_to_comments_passes_since(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeAsyncClient(responder=_comment_responder)
+    monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
+    adapter = MessengerAdapter(_comment_config())
+    _set_session_token(adapter)
+
+    _run(adapter.auto_reply_to_comments("facebook", "178956239487", since_ts=1700000000))
+
+    get = fake.calls[0]
+    assert get["method"] == "get"
+    assert get["params"]["since"] == 1700000000
+
+
+def test_auto_reply_to_comments_no_rule_match_skips(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeAsyncClient(responder=_comment_responder)
+    monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
+    cfg = _comment_config(rules={"hello": "Hi there!"})  # no catch-all
+    adapter = MessengerAdapter(cfg)
+    _set_session_token(adapter)
+
+    results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
+
+    posts = [c for c in fake.calls if c["method"] == "post"]
+    assert len(posts) == 1  # only the "hello" comment
+    assert results[1]["sent"] is False  # "what's the price?" has no matching rule
+    assert results[2]["sent"] is False  # "no match here" has no matching rule
+
+
+def test_auto_reply_to_comments_disabled_no_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _patch_client(monkeypatch)
+    adapter = MessengerAdapter(_comment_config(enabled=False))
+    _set_session_token(adapter)
+
+    results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
+
+    assert results == []
+    assert fake.calls == []
+
+
+def test_auto_reply_to_comments_platform_not_enabled_no_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _patch_client(monkeypatch)
+    adapter = MessengerAdapter(_comment_config(platforms=["facebook"]))
+    _set_session_token(adapter)
+
+    results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
+
+    assert results == []
+    assert fake.calls == []
+
+
+def test_auto_reply_to_comments_get_error_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeAsyncClient(responder=lambda method, url, params, json: ({}, 429))
+    monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
+    adapter = MessengerAdapter(_comment_config())
+    _set_session_token(adapter)
+
+    results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
+
+    assert len(results) == 1
+    assert "MESSENGER_RATE_LIMITED" in (results[0].get("error") or "")
+    assert results[0]["media_id"] == "178956239487"
+
+
+def test_auto_reply_to_comments_reply_error_records_not_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    def responder(method: str, url: str, params: dict[str, Any] | None, json: dict[str, Any] | None) -> tuple[dict, int]:
+        if method == "get":
+            return ({"data": [{"id": "c1", "message": "hello", "from": {"name": "A"}}]}, 200)
+        return ({}, 500)  # reply POST fails
+
+    fake = FakeAsyncClient(responder=responder)
+    monkeypatch.setattr("xpst.platforms.messenger.httpx.AsyncClient", lambda *a, **k: fake)
+    adapter = MessengerAdapter(_comment_config())
+    _set_session_token(adapter)
+
+    results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
+
+    assert len(results) == 1
+    assert results[0]["sent"] is False
+    assert "MESSENGER_HTTP_ERROR" in (results[0].get("error") or "")
+
+
+def test_auto_reply_to_comments_no_token_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_client(monkeypatch)
+    adapter = MessengerAdapter(_comment_config())
+    # no session manager / no config token → _get_page_token raises ValueError,
+    # which is captured and surfaced as an error result (not raised).
+    results = _run(adapter.auto_reply_to_comments("instagram", "178956239487"))
+    assert len(results) == 1
+    assert "MESSENGER_NOT_CONFIGURED" in (results[0].get("error") or "")
+
+
+# ── CLI: messenger check-comments ──────────────────────────────────────
+
+
+def test_cli_messenger_check_comments_in_help() -> None:
+    from click.testing import CliRunner
+
+    from xpst.cli import main
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["messenger", "--help"])
+    assert result.exit_code == 0
+    assert "check-comments" in result.output
+
+
+def test_cli_messenger_check_comments_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from click.testing import CliRunner
+
+    from xpst.cli import main
+
+    class FakeAdapter:
+        def __init__(self, config: Any) -> None:
+            self.config = config
+
+        async def auto_reply_to_comments(self, platform: str, media_id: str, since_ts: int | None) -> list[dict[str, Any]]:
+            return [{"comment_id": "c1", "from": "A", "text": "hello", "reply": "Hi!", "sent": True}]
+
+    monkeypatch.setattr("xpst.platforms.messenger.MessengerAdapter", FakeAdapter)
+
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.dump({
+        "accounts": {
+            "messenger": {
+                "enabled": True,
+                "comment_reply_enabled": True,
+                "page_access_token": PAGE_TOKEN,
+            },
+        },
+    }))
+    runner = CliRunner()
+    result = runner.invoke(main, ["--config", str(cfg_file), "messenger", "check-comments", "178956239487", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["media_id"] == "178956239487"
+    assert payload["platform"] == "instagram"
+    assert payload["results"][0]["sent"] is True

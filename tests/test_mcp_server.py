@@ -22,6 +22,17 @@ def test_mcp_tools_include_provider_catalog():
     assert "xpst_providers" in tool_names
 
 
+def test_mcp_tools_cover_new_features():
+    """New feature coverage: generate ideas, link-in-bio, comment auto-reply."""
+    tool_names = {tool.name for tool in mcp_server.TOOLS}
+
+    assert "xpst_generate_ideas" in tool_names
+    assert "xpst_bio_get" in tool_names
+    assert "xpst_messenger_check_comments" in tool_names
+    # comment auto-reply posts public replies -> must be guardrail-protected
+    assert "xpst_messenger_check_comments" in mcp_server._MUTATING_TOOLS
+
+
 def test_mcp_provider_catalog_uses_shared_provider_manifests(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)

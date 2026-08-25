@@ -54,7 +54,7 @@ Page {
             }
         }
         if (platforms.length === 0) {
-            platforms = ["youtube", "instagram", "x", "tiktok", "threads", "linkedin"]
+            platforms = ["youtube", "instagram", "x", "tiktok", "threads"]
         }
         return platforms
     }
@@ -65,7 +65,6 @@ Page {
         if (name === "x") return theme.iconX || Icons.share
         if (name === "tiktok") return Icons.play
         if (name === "threads") return "T"
-        if (name === "linkedin") return "in"
         return Icons.content
     }
 
@@ -75,8 +74,7 @@ Page {
             "instagram": "Instagram",
             "x": "X",
             "tiktok": "TikTok",
-            "threads": "Threads",
-            "linkedin": "LinkedIn"
+            "threads": "Threads"
         }
         return names[name] || name
     }
