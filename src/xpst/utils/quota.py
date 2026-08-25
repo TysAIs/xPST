@@ -31,6 +31,31 @@ from xpst.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+class QuotaExhaustedError(Exception):
+    """Raised by :meth:`QuotaManager.preflight` when an upload is blocked.
+
+    Carries structured detail so callers (CLI, MCP, desktop) can surface a
+    machine-readable error instead of failing silently mid-upload.
+    """
+
+    def __init__(self, platform: str, remaining: dict) -> None:
+        self.platform = platform
+        self.remaining = remaining
+        daily = remaining.get("daily")
+        super().__init__(
+            f"QUOTA_EXHAUSTED: {platform} daily quota exhausted "
+            f"({daily if daily is not None else 'unlimited tracking'} uploads remaining today)"
+        )
+
+    def to_dict(self) -> dict:
+        """Structured representation for JSON error output."""
+        return {
+            "error": "QUOTA_EXHAUSTED",
+            "platform": self.platform,
+            "remaining": self.remaining,
+        }
+
+
 @dataclass
 class PlatformQuota:
     """Quota tracking for a platform"""
@@ -203,6 +228,19 @@ class QuotaManager:
             return True  # No quota tracking = allow
 
         return quota.can_upload()
+
+    def preflight(self, platform: str) -> None:
+        """Pre-flight quota check — raise before any upload work happens.
+
+        Args:
+            platform: Platform name.
+
+        Raises:
+            QuotaExhaustedError: If the platform cannot accept an upload now.
+                Carries structured remaining-quota detail via ``to_dict()``.
+        """
+        if not self.can_upload(platform):
+            raise QuotaExhaustedError(platform, self.get_remaining(platform))
 
     def record_upload(self, platform: str) -> None:
         """
