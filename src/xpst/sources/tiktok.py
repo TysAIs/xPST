@@ -137,7 +137,9 @@ class TikTokSource(VideoSource):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            return proc.returncode or 1, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+            # NOTE: `proc.returncode or 1` here used to coerce success (0) into
+            # failure (1), making EVERY successful fetch raise. Return rc as-is.
+            return proc.returncode if proc.returncode is not None else 1, stdout.decode(errors="replace"), stderr.decode(errors="replace")
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
