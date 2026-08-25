@@ -1,6 +1,7 @@
 ﻿# -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for building xPST macOS .app bundle."""
 
+import os
 import sys
 from pathlib import Path
 
@@ -60,7 +61,10 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "scipy", "numpy", "pandas"],
+    excludes=["tkinter", "matplotlib", "scipy", "numpy", "pandas", "av", "faster_whisper"],
+    # av/faster_whisper: PyAV's __dot__dylibs layout breaks the BUNDLE stage;
+    # both are lazy-imported (transcription), so excluded from the frozen app.
+    # XPST_TARGET_ARCH env hook for future universal2 experiments.,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -82,7 +86,7 @@ exe = EXE(
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=True,
-    target_arch=None,
+    target_arch=os.environ.get("XPST_TARGET_ARCH") or None,
     codesign_identity=None,
     entitlements_file=None,
     icon=str(mac_icon) if mac_icon.exists() else None,
