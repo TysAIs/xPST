@@ -1115,6 +1115,15 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
     if platform_list:
         post_ids = {k: v for k, v in post_ids.items() if k in platform_list}
 
+    # Also cover the channel's recent uploads (videos posted outside xPST) so
+    # analytics works for previous videos too. Failure-safe: no-op without a
+    # YouTube token or when the API is unreachable.
+    if platform_list is None or "youtube" in platform_list:
+        channel_ids = collector._discover_channel_videos()
+        if channel_ids:
+            existing = post_ids.get("youtube", [])
+            post_ids["youtube"] = list(dict.fromkeys(existing + channel_ids))
+
     total_ids = sum(len(v) for v in post_ids.values())
     if total_ids == 0:
         if as_json:
