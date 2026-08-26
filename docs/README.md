@@ -503,7 +503,7 @@ xpst/
 ├── analytics_store.py # Persistent analytics (SQLite)
 ├── anti_bot.py         # Anti-bot pacing and human-like behavior
 ├── connect.py          # Platform connection wizards
-├── platforms/          # Platform uploaders (5 platforms)
+├── platforms/          # Platform uploaders (6 platforms)
 │   ├── base.py         # Abstract base + registry
 │   ├── youtube.py      # YouTube (OAuth2, Data API v3)
 │   ├── instagram.py    # Instagram (Graph API / instagrapi)
