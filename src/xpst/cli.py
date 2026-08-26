@@ -459,10 +459,38 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
     else:
         result = asyncio.run(engine.post_manual(media_paths[0], caption, platform_list))
 
+    quota_blocked = [
+        p for p, ur in result.results.items()
+        if not ur.success and "QUOTA_EXHAUSTED" in (ur.error or "")
+    ]
+
     if as_json:
-        json_output(_result_to_dict(result), True)
+        out = _result_to_dict(result)
+        if quota_blocked:
+            out["error"] = {
+                "code": "QUOTA_EXHAUSTED",
+                "message": "Daily upload quota exhausted; no upload was attempted",
+                "platforms": quota_blocked,
+            }
+            out["exit_code"] = EXIT_RATE_LIMIT
+        json_output(out, True)
     else:
         _display_result(result)
+        if quota_blocked and not quiet:
+            console.print(
+                f"[red]Error: QUOTA_EXHAUSTED — daily upload quota exhausted for: "
+                f"{', '.join(quota_blocked)}. No upload was attempted. "
+                f"Quota resets at midnight.[/red]"
+            )
+
+    # Exit non-zero when every target platform was quota-blocked so scripts,
+    # schedulers, and MCP callers can detect the failure instead of missing it.
+    attempted = [p for p, ur in result.results.items() if "already_posted" not in (ur.metadata or {})]
+    if attempted and all(
+        not result.results[p].success and "QUOTA_EXHAUSTED" in (result.results[p].error or "")
+        for p in attempted
+    ):
+        sys.exit(EXIT_RATE_LIMIT)
 
 
 @main.command()

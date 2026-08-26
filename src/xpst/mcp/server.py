@@ -927,6 +927,11 @@ def _serialize_result(result: CrossPostResult) -> dict[str, Any]:
         "results": {p: asdict(r) for p, r in result.results.items()},
         "all_success": result.all_success,
         "partial_success": result.partial_success,
+        "quota_blocked": {
+            p: r.metadata.get("quota")
+            for p, r in result.results.items()
+            if not r.success and "QUOTA_EXHAUSTED" in (r.error or "")
+        },
     }
 
 
