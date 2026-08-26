@@ -13,6 +13,7 @@ Upload specs:
 - Category: 28 (Science & Technology) - configurable
 """
 
+import asyncio
 from pathlib import Path
 
 from xpst.config import XPSTConfig
@@ -264,11 +265,11 @@ class YouTubeUploader(PlatformUploader):
                 platform="youtube",
             )
 
-    def _execute_upload(self, request):
-        """Blocking upload execution for thread pool."""
+    async def _execute_upload(self, request):
+        """Blocking upload execution, run in a thread to avoid blocking the event loop."""
         response = None
         while response is None:
-            status, response = request.next_chunk()
+            status, response = await asyncio.to_thread(request.next_chunk)
             if status:
                 progress = int(status.progress() * 100)
                 logger.info(f"YouTube upload: {progress}%")
