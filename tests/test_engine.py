@@ -554,3 +554,61 @@ class TestToSWarnings:
 
         tos_warnings = [r for r in caplog.records if "unofficial API" in r.message]
         assert len(tos_warnings) == 0
+
+
+# ---------------------------------------------------------------------------
+# Delete post (regression: state schema stores the post id under "id")
+# ---------------------------------------------------------------------------
+
+class TestDeletePost:
+    """Delete must resolve the platform post id from state, which stores it
+    under ``id`` (see state.py mark_video_posted / state_manager.py). The
+    delete path used to read ``post_id`` and always failed."""
+
+    @pytest.mark.asyncio
+    async def test_delete_post_resolves_id_key(self, tmp_path):
+        """delete_post finds the post recorded under the canonical ``id`` key."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        mock_uploader = _make_mock_uploader("x", success=True)
+        mock_uploader.delete = AsyncMock(return_value=True)
+        engine._platforms["x"] = mock_uploader
+
+        engine.state.mark_video_posted(
+            "test-video-abc", "x",
+            post_id="status-999",
+            post_url="https://x.com/i/status/status-999",
+        )
+
+        ok = await engine.delete_post("test-video-abc", "x")
+
+        assert ok is True
+        mock_uploader.delete.assert_awaited_once_with("status-999")
+        # successful delete removes the state entry
+        assert engine.state.get_post_data("test-video-abc", "x") is None
+
+    @pytest.mark.asyncio
+    async def test_delete_post_missing_id_returns_false(self, tmp_path):
+        """delete_post fails cleanly when no post was recorded for the video."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        engine._platforms["x"] = _make_mock_uploader("x", success=True)
+
+        ok = await engine.delete_post("nonexistent", "x")
+        assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_delete_post_missing_platform_returns_false(self, tmp_path):
+        """delete_post fails cleanly when the platform uploader is absent."""
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        engine.state.mark_video_posted("v1", "tiktok", post_id="tk-1")
+
+        ok = await engine.delete_post("v1", "tiktok")
+        assert ok is False
