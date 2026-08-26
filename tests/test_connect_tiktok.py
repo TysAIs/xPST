@@ -150,7 +150,11 @@ class TestConnectTikTokDestinationFlow:
         monkeypatch.setattr(connect, "_confirm", lambda *a, **k: next(confirms))
 
         opened: list[str] = []
-        monkeypatch.setattr("webbrowser.open", lambda url: opened.append(url) or True)
+        def _fake_open(url: str) -> bool:
+            opened.append(url)
+            return True
+
+        monkeypatch.setattr("webbrowser.open", _fake_open)
 
         token_payload = {"access_token": "act.abc", "refresh_token": "rft.xyz", "expires_in": 86400}
         user_payload = {
