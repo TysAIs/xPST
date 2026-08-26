@@ -240,7 +240,7 @@ def save_wizard_state(config: XPSTConfig, state: dict) -> None:
     path = _state_path(config)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2))
+    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
     tmp.replace(path)
 
 
@@ -283,7 +283,7 @@ def export_markdown(path: str | Path) -> Path:
         parts.append("")
     out = Path(path).expanduser()
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("\n".join(parts))
+    out.write_text("\n".join(parts), encoding="utf-8")
     return out
 
 
