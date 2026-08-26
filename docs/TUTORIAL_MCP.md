@@ -530,7 +530,7 @@ asyncio.run(main())
 
 ## See Also
 
-- 📖 [CLI Tutorial](TUTORIAL_CLI.md) — All 28 CLI commands
+- 📖 [CLI Tutorial](TUTORIAL_CLI.md) — All 37 CLI commands
 - 🖥️ [Desktop App Tutorial](TUTORIAL_APP.md) — Full GUI walkthrough
 - 🏠 [README](../README.md) — Project overview and installation
 - 🐛 [Report Issues](https://github.com/TysAIs/xPST/issues)
