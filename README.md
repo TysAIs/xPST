@@ -768,7 +768,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and [docs/a
 # Install with dev tooling
 uv pip install -e ".[full,dev]"
 
-# Run the test suite (1534 passed / 12 skipped on Python 3.11)
+# Run the test suite (1524 passed / 12 skipped on Python 3.11)
 pytest
 
 # Lint and format
