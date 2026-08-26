@@ -30,7 +30,7 @@ from xpst.utils.disk import DiskSpaceError, check_disk_space
 from xpst.utils.logger import get_logger
 from xpst.utils.notifications import WebhookNotifier
 from xpst.utils.progress import create_upload_tracker
-from xpst.utils.quota import QuotaManager
+from xpst.utils.quota import QuotaExhaustedError, QuotaManager
 from xpst.utils.retry import STANDARD_RETRY, retry_operation
 from xpst.utils.shutdown import ShutdownHandler
 from xpst.utils.video import VideoProcessor
@@ -181,18 +181,16 @@ class UploadService:
                 platform=platform_name,
             )
 
-        # Check quota
-        if not self.quota_manager.can_upload(platform_name):
-            remaining = self.quota_manager.get_remaining(platform_name)
-            logger.warning(
-                "Quota exhausted for %s (remaining today: %s), skipping",
-                platform_name,
-                remaining.get("daily", "?"),
-            )
+        # Pre-flight quota check (fail fast, before encode/upload)
+        try:
+            self.quota_manager.preflight(platform_name)
+        except QuotaExhaustedError as exc:
+            logger.warning("Pre-flight quota check failed for %s: %s", platform_name, exc)
             return UploadResult(
                 success=False,
-                error=f"Quota exhausted: {remaining.get('daily', 0)} uploads remaining today",
+                error=str(exc),
                 platform=platform_name,
+                metadata={"quota": exc.to_dict()},
             )
 
         # ── Disk space check before encoding ──
@@ -513,18 +511,16 @@ class UploadService:
                 platform=platform_name,
             )
 
-        # Check quota
-        if not self.quota_manager.can_upload(platform_name):
-            remaining = self.quota_manager.get_remaining(platform_name)
-            logger.warning(
-                "Quota exhausted for %s (remaining today: %s)",
-                platform_name,
-                remaining.get("daily", "?"),
-            )
+        # Pre-flight quota check (fail fast, before encode/upload)
+        try:
+            self.quota_manager.preflight(platform_name)
+        except QuotaExhaustedError as exc:
+            logger.warning("Pre-flight quota check failed for %s: %s", platform_name, exc)
             return UploadResult(
                 success=False,
-                error=f"Quota exhausted: {remaining.get('daily', 0)} uploads remaining today",
+                error=str(exc),
                 platform=platform_name,
+                metadata={"quota": exc.to_dict()},
             )
 
         # Carousel identity for the idempotency guard: fingerprint of the

@@ -386,7 +386,9 @@ class TestQuotaExhaustion:
 
         result = await engine.post_manual(video_path, "Test", ["youtube"])
         assert result.results["youtube"].success is False
-        assert "Quota" in result.results["youtube"].error
+        # Pre-flight guardrail: structured QUOTA_EXHAUSTED error before upload
+        assert "QUOTA_EXHAUSTED" in result.results["youtube"].error
+        assert "quota exhausted" in result.results["youtube"].error
 
 
 # ---------------------------------------------------------------------------
