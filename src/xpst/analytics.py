@@ -482,6 +482,49 @@ class AnalyticsCollector:
 
         return post_ids
 
+    def _discover_channel_videos(self, max_results: int = 25) -> list[str]:
+        """List the authenticated YouTube channel's recent uploads via the Data
+        API, so analytics covers videos xPST did not post itself.
+
+        Failure-safe: returns [] when no token, no channel, or the API errors,
+        so callers can treat it as an optional enhancement over state discovery.
+
+        Returns:
+            List of YouTube video IDs, newest first.
+        """
+        try:
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
+
+            token_path = Path(self.config_dir) / "credentials" / "youtube_token.json"
+            if not token_path.exists():
+                token_path = Path(
+                    self._config.get("accounts", {}).get("youtube", {}).get(
+                        "token_file", "~/.xpst/credentials/youtube_token.json"
+                    )
+                ).expanduser()
+            if not token_path.exists():
+                return []
+
+            creds = Credentials.from_authorized_user_file(str(token_path))
+            service = build("youtube", "v3", credentials=creds)
+
+            channels = service.channels().list(part="contentDetails", mine=True).execute()
+            if not channels.get("items"):
+                return []
+            uploads = channels["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+            playlist = (
+                service.playlistItems()
+                .list(part="contentDetails", playlistId=uploads, maxResults=max_results)
+                .execute()
+            )
+            return [
+                item["contentDetails"]["videoId"] for item in playlist.get("items", [])
+            ]
+        except Exception as e:  # pragma: no cover - defensive, network/creds dependent
+            logger.warning(f"YouTube channel discovery failed: {e}")
+            return []
+
     def get_total_metrics(self, data: dict[str, dict]) -> dict[str, int]:
         """Aggregate total metrics across all platforms.
 
