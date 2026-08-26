@@ -793,11 +793,17 @@ class CrossPostEngine:
         """
 
         post_data = self.state.get_post_data(video_id, platform)
-        if not post_data or not post_data.get('post_id'):
+        if not post_data:
             logger.error(f"No post data found for {video_id} on {platform}")
             return False
 
-        post_id = post_data['post_id']
+        # State schema stores the platform post id under "id" (see state.py
+        # mark_video_posted / state_manager.py record_posted). Accept "post_id"
+        # too for robustness against older or external state shapes.
+        post_id = post_data.get("post_id") or post_data.get("id")
+        if not post_id:
+            logger.error(f"No post id found for {video_id} on {platform}")
+            return False
         uploader = self._platforms.get(platform)
         if not uploader:
             logger.error(f"Platform {platform} not available")
