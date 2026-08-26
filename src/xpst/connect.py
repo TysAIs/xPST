@@ -450,7 +450,12 @@ def _detect_ig_user_id(access_token: str, timeout: float = 15.0) -> tuple[str, s
     return ("", "", 0, 0)
 
 
-def _connect_instagram_graph_api(config: XPSTConfig) -> bool:
+def _connect_instagram_graph_api(
+    config: XPSTConfig,
+    ig_user_id: str = "",
+    access_token: str = "",
+    interactive: bool = True,
+) -> bool:
     """Connect via official Meta Graph API (OEM, self-verifying).
 
     Flow:
@@ -689,7 +694,13 @@ def connect_x(
     return _connect_x_api_v2(config)
 
 
-def _connect_x_cookies(config: XPSTConfig) -> bool:
+def _connect_x_cookies(
+    config: XPSTConfig,
+    username: str = "",
+    email: str = "",
+    password: str = "",
+    interactive: bool = True,
+) -> bool:
     """
     Connect X/Twitter using username/email/password via twikit (unofficial).
 
@@ -1199,7 +1210,11 @@ def _connect_tiktok_upload_destination(config: XPSTConfig) -> bool:
     return True
 
 
-def connect_tiktok(config: XPSTConfig) -> bool:
+def connect_tiktok(
+    config: XPSTConfig,
+    username: str = "",
+    interactive: bool = True,
+) -> bool:
     """
     Configure TikTok source with browser cookie extraction.
 
@@ -1650,24 +1665,14 @@ def run_connect(
             getattr(config, p).enabled = True
 
     results = {}
-    platform_connectors = {
-        "tiktok": connect_tiktok,
-        "youtube": connect_youtube,
-        "instagram": connect_instagram,
-        "x": connect_x,
-        "threads": connect_threads,
-        "messenger": connect_messenger,
-    }
-
     for platform in target_platforms:
         try:
             if platform == "youtube":
                 results[platform] = connect_youtube(config, interactive=interactive)
             else:
                 connector = _CONNECTORS[platform]
-                args = dict(connector_args[platform])
-                args["interactive"] = interactive
-                results[platform] = connector(config, **args)
+                args: dict[str, object] = {"interactive": interactive}
+                results[platform] = connector(config, **args)  # type: ignore[arg-type]
         except NonInteractiveError as e:
             console.print(f"[red]❌ {e}[/red]")
             results[platform] = False
