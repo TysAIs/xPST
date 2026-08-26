@@ -21,7 +21,7 @@ the README and docs can speak to a "beat the incumbents" story with facts, not h
 3. **Official OAuth by default** (X API v2, IG Graph API, TikTok Content Posting, YouTube, Threads). Ban-safe. Content360/Postiz rely on the same official APIs but as a black box; ours is auditable + self-hosted so tokens never leave your machine (encrypted CredentialStore).
 4. **Encrypted-at-rest credentials + OS keychain.** Paid SaaS hold your tokens server-side; xPST keeps them in a Fernet/scrypt `.enc` (or macOS Keychain) on your own box.
 5. **Cross-platform packaging** (macOS/Windows/Linux, Docker, PyInstaller) — runs anywhere, including on a local LLM box with no monthly fee.
-6. **1498 tests, enterprise-hardened** — thread-safe state, circuit breakers, anti-bot jitter, rate-limit calendars, MCP security hardening.
+6. **1524 tests, enterprise-hardened** — thread-safe state, circuit breakers, anti-bot jitter, rate-limit calendars, MCP security hardening.
 
 ## Features where we're now parity-or-better (built 2026-08-24)
 
