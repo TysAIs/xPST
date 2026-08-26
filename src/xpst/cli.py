@@ -892,6 +892,28 @@ def connect(ctx: click.Context, platform: str | None, test_only: bool):
         sys.exit(EXIT_AUTH_FAILURE)
 
 
+@main.command()
+@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
+@click.option("--export-md", "export_md", type=click.Path(), default=None, help="Export the step-by-step guide as markdown and exit")
+@json_option
+def wizard(platform: str | None, export_md: str | None, as_json: bool):
+    """Polished first-run connection wizard (resumes progress)"""
+    from xpst.wizard import export_markdown, run_wizard
+
+    if export_md:
+        path = export_markdown(export_md)
+        if as_json:
+            json_output({"exported": str(path)}, True)
+        else:
+            console.print(f"[green]✅ Guide written to {path}[/green]")
+        return
+
+    platforms = [platform] if platform else None
+    success = run_wizard(platforms=platforms, json_mode=as_json)
+    if not success:
+        sys.exit(EXIT_AUTH_FAILURE)
+
+
 # ──────────────────────────────────────────────
 # Auth Commands
 # ──────────────────────────────────────────────
