@@ -181,6 +181,58 @@ class AnalyticsStore:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM metric_snapshots").fetchone()[0])
 
+    def delete_youtube_snapshots_not_in(self, owned_ids: set[str]) -> int:
+        """Purge stale ``metric_snapshots`` rows whose id is not owned.
+
+        Self-healing half of the ownership invariant (root-cause hardening
+        for the skewed views/likes/comments dashboard aggregates): the
+        persistence gate in the collector stops NEW foreign ids from being
+        written, and this removes foreign rows that are ALREADY present —
+        test posts, videos later deleted from the channel, or rows persisted
+        before the ownership gate existed. Only ``platform='youtube'`` rows
+        are touched; X/Instagram identity is governed by state.json and
+        never purged here.
+
+        Args:
+            owned_ids: Verified ids on the authenticated channel's uploads
+                playlist. Callers must pass a VERIFIED set — never a
+                failure sentinel — or a transient ownership check failure
+                would wipe the whole table.
+
+        Returns:
+            Number of rows deleted.
+        """
+        deleted = 0
+        # A temp table avoids the sqlite parameter limit entirely and makes
+        # the "channel owns nothing" case (empty set → delete all youtube
+        # rows) a plain inner join, not a special branch.
+        with self._connect() as conn:
+            conn.execute("CREATE TEMP TABLE _owned_snap (id TEXT PRIMARY KEY)")
+            try:
+                conn.executemany(
+                    "INSERT OR IGNORE INTO _owned_snap (id) VALUES (?)",
+                    ((str(i),) for i in owned_ids),
+                )
+                deleted = int(
+                    conn.execute(
+                        """
+                        DELETE FROM metric_snapshots
+                        WHERE platform = 'youtube'
+                          AND NOT EXISTS (
+                              SELECT 1 FROM _owned_snap o
+                              WHERE o.id = metric_snapshots.post_id
+                          )
+                        """
+                    ).rowcount
+                )
+            finally:
+                conn.execute("DROP TABLE _owned_snap")
+        if deleted:
+            logger.info(
+                "Purged %d stale youtube snapshot(s) not owned by the channel", deleted
+            )
+        return deleted
+
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
         data = dict(row)
