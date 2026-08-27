@@ -51,7 +51,7 @@ analytics, scheduling, a desktop app, and AI-agent integration.
   mode, falling back to session-based access when Graph API is unavailable.
 - **Encoding** for TikTok and Threads uses a Reels-grade profile
   (1080×1920, CRF 20, 10 Mbps).
-- **Desktop app** has consistent hover states across all six pages and refreshed
+- **Desktop app** has consistent hover states across all ten pages and refreshed
   navigation (Library, Accounts, Automations).
 - **Web dashboard** binds to `127.0.0.1` by default; remote access is opt-in via
   an explicit `--host` flag with a warning.
