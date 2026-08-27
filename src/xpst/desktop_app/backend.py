@@ -60,6 +60,10 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
         def start(self, *args: Any, **kwargs: Any) -> None:
             pass
 
+        @staticmethod
+        def singleShot(*args: Any, **kwargs: Any) -> None:
+            pass
+
     def Slot(*args: Any, **kwargs: Any):  # type: ignore[no-redef]
         """Stand-in for the @Slot(...) decorator: returns the function as-is."""
 
@@ -208,11 +212,14 @@ class AppController(QObject):
         self._refresh_timer.timeout.connect(self.refreshData)
         self._refresh_timer.start(30_000)
 
-        # Platform health auto-check timer (5 minutes)
+        # Platform health auto-check timer (5 minutes). Fires once immediately
+        # so the Dashboard shows real session states on first paint instead of
+        # up-to-5-minutes of stale state.json "Connected" defaults.
         self._health_check_interval = self._get_health_check_interval()
         self._health_timer = QTimer(self)
         self._health_timer.timeout.connect(self._run_health_check)
         self._health_timer.start(self._health_check_interval)
+        QTimer.singleShot(0, self._run_health_check)
 
         # Thumbnail cache dir (routed through get_config_dir so Windows uses
         # %APPDATA% rather than ~/.xpst — W3-4).
