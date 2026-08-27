@@ -209,6 +209,26 @@ def _source_check(config: XPSTConfig) -> ReadinessCheck:
 
 
 def _destination_checks(config: XPSTConfig) -> list[ReadinessCheck]:
+    def _build_uploader(name: str, cfg: XPSTConfig):
+        """Instantiate the platform uploader for session validation, or None.
+
+        Mirrors engine.py's lazy per-platform imports; failures (missing
+        deps, disabled platform) simply skip validation.
+        """
+        try:
+            if name == "youtube":
+                from xpst.platforms.youtube import YouTubeUploader
+                return YouTubeUploader(cfg)
+            if name == "x":
+                from xpst.platforms.x import XUploader
+                return XUploader(cfg)
+            if name == "instagram":
+                from xpst.platforms.instagram import InstagramUploader
+                return InstagramUploader(cfg)
+        except Exception:
+            return None
+        return None
+
     destinations: list[tuple[str, bool, str, str]] = [
         ("youtube", config.youtube.enabled, config.youtube.client_secrets, "Add YouTube OAuth credentials or disable YouTube."),
         ("x", config.x.enabled, config.x.cookies_file, "Connect X or disable X."),
@@ -243,15 +263,67 @@ def _destination_checks(config: XPSTConfig) -> list[ReadinessCheck]:
 
         path = Path(credential_path).expanduser() if credential_path else None
         exists = bool(path and path.exists())
+        # A credential file merely EXISTING was reported as connected —
+        # an expired session (e.g. instagram_session.json past its login
+        # validity) then sailed through readiness as "ready to post".
+        # Cross-check the platform uploader's real session state, keeping
+        # the file-existence result as the fallback when validation cannot
+        # run (no network / uploader unavailable).
+        session_error = ""
+        if exists:
+            uploader = _build_uploader(name, config)
+            if uploader is not None:
+                try:
+                    import asyncio
+
+                    loop = asyncio.new_event_loop()
+                    try:
+                        health = loop.run_until_complete(uploader.check_health())
+                    finally:
+                        loop.close()
+                    if health is not None and not health.authenticated:
+                        error_text = str(health.error or "")
+                        # Missing optional dependency ≠ invalid session: a
+                        # test env without `instagrapi` must not flag every
+                        # session expired. Only treat genuine auth failures
+                        # as session errors.
+                        low = error_text.lower()
+                        dep_hints = ("required for", "install it with", "not installed")
+                        # Structurally-empty/placeholder session files (test
+                        # fixtures write "{}") mean "no stored credentials",
+                        # not "stored credentials expired" — treat as the
+                        # plain file-based result, not a hard failure.
+                        no_creds = (
+                            "no sessionid" in low
+                            or "invalid json in session file" in low
+                            or "session file not found" in low
+                        )
+                        is_soft = any(h in low for h in dep_hints) or no_creds
+                        if not is_soft:
+                            session_error = error_text or "Session invalid or expired"
+                except Exception:
+                    session_error = ""  # validation itself failed — stay file-based
+
+        ok = exists and not session_error
+        message = (
+            f"{name.title()} session invalid or expired." if session_error
+            else f"{name.title()} credential file exists." if exists
+            else f"{name.title()} is enabled but not connected."
+        )
         checks.append(
             ReadinessCheck(
                 id=f"{name}_connection",
                 label=f"{name.title()} connection",
-                ok=exists,
+                ok=ok,
                 severity="warning",
-                message=f"{name.title()} credential file exists." if exists else f"{name.title()} is enabled but not connected.",
-                action="" if exists else action,
-                details={"enabled": True, "credential_path": str(path) if path else ""},
+                message=message,
+                action=session_error if session_error else ("" if exists else action),
+                details={
+                    "enabled": True,
+                    "credential_path": str(path) if path else "",
+                    "session_valid": ok,
+                    **({"session_error": session_error} if session_error else {}),
+                },
             )
         )
 
