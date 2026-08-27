@@ -93,6 +93,29 @@ def json_output(data: object, as_json: bool) -> None:
         click.echo(_json.dumps(data, default=str, ensure_ascii=False))
 
 
+def _maybe_show_onboarding_hint(config, as_json: bool, quiet: bool) -> None:
+    """Defensive first-run nudge for `run`/`status`.
+
+    Gates exclusively on the persisted ``first_run_complete`` flag (via
+    :func:`xpst.wizard.onboarding_required`) — never on the presence of
+    ``wizard_state.json``. A stale or missing progress file therefore cannot
+    re-trigger onboarding for an install that has genuinely completed, and an
+    install that *hasn't* completed gets a one-line pointer to
+    ``xpst wizard`` instead of silently skipping first-run setup.
+
+    Never emits on ``--json`` (keeps machine output parseable) or ``--quiet``.
+    """
+    if as_json or quiet:
+        return
+    from xpst.wizard import onboarding_required
+
+    if onboarding_required(config):
+        console.print(
+            "[yellow]First-run setup is not complete — run "
+            "[cyan]xpst wizard[/cyan] to connect your accounts.[/yellow]"
+        )
+
+
 # Shared Click decorator that adds ``--json`` to every command.
 # Respects group-level ``--json`` and auto-JSON-on-pipe (non-TTY).
 json_option = click.option(
@@ -270,6 +293,8 @@ def run(ctx: click.Context, source: str, bidirectional: bool, dry_run: bool, as_
         log_level=config.monitoring.log_level,
         log_file=config.monitoring.log_file,
     )
+
+    _maybe_show_onboarding_hint(config, as_json, quiet)
 
     engine = CrossPostEngine(config)
 
@@ -548,6 +573,10 @@ def backfill(ctx: click.Context, platforms: str | None, limit: int, dry_run: boo
 def status(ctx: click.Context, as_json: bool):
     """Show health status"""
     config = load_config(ctx.obj.get("config_path"))
+
+    _maybe_show_onboarding_hint(
+        config, as_json, bool(ctx.obj.get("quiet", False))
+    )
 
     # Load state
     state = StateManager(config.config_dir)
