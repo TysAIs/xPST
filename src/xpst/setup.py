@@ -12,6 +12,7 @@ Guides users through:
 import os
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 
 from rich.console import Console
@@ -88,6 +89,57 @@ def check_yt_dlp() -> str | None:
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             continue
     return None
+
+
+def install_yt_dlp() -> tuple[bool, str]:
+    """Auto-install yt-dlp into the running Python environment.
+
+    Used by the setup wizard and readiness flow so source downloads work
+    immediately after setup instead of failing on first run ("why isn't
+    yt-dlp downloaded automatically?"). Prefers the local interpreter's
+    ``pip`` (venv-safe); falls back to the standalone binary installer for
+    PyInstaller-frozen launches that have no writable site-packages.
+
+    Returns:
+        (installed_ok, message)
+    """
+    if check_yt_dlp() is not None:
+        return True, "yt-dlp already installed"
+
+    console.print("[blue]Installing yt-dlp...[/blue]")
+    # 1) pip module of the current interpreter (works in venvs and wheels).
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode == 0:
+            version = check_yt_dlp()
+            if version:
+                console.print(f"  ✅ yt-dlp {version} installed")
+                return True, f"yt-dlp {version} installed"
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logger.debug("pip install path failed: %s", exc)
+
+    # 2) Standalone binary fallback (frozen app: no pip). Installs to
+    # ~/.local/bin (POSIX) — get_ytdlp_fallback_path() already probes there.
+    try:
+        system = sys.platform
+        if system in ("linux", "darwin"):
+            target = Path.home() / ".local" / "bin"
+            target.mkdir(parents=True, exist_ok=True)
+            url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+            urllib.request.urlretrieve(url, target / "yt-dlp")  # noqa: S310 - fixed https URL
+            os.chmod(target / "yt-dlp", 0o755)
+            version = check_yt_dlp()
+            if version:
+                console.print(f"  ✅ yt-dlp {version} installed to {target}")
+                return True, f"yt-dlp {version} installed to {target}"
+            return False, f"Downloaded to {target}/yt-dlp but it is not on PATH — add it to PATH or set XPST_YTDLP_PATH."
+    except OSError as exc:
+        logger.warning("Standalone yt-dlp install failed: %s", exc)
+
+    return False, "Could not install yt-dlp automatically. Run: pip install yt-dlp"
 
 
 def create_directory_structure() -> Path:
@@ -365,6 +417,12 @@ def run_setup() -> XPSTConfig:
         if not _confirm("Continue anyway?", default=True):
             console.print("[red]Setup aborted. Please install missing requirements and try again.[/red]")
             sys.exit(4)  # config error
+
+    # Step 1b: Auto-install yt-dlp when missing (source downloads depend on it)
+    if check_yt_dlp() is None:
+        ok, message = install_yt_dlp()
+        if not ok:
+            console.print(f"[yellow]⚠️  {message}[/yellow]\n")
 
     # Step 2: Create directories
     config_dir = create_directory_structure()
