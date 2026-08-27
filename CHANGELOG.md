@@ -16,9 +16,9 @@ short-form video to every major platform from one place, with built-in
 analytics, scheduling, a desktop app, and AI-agent integration.
 
 ### Added
-- **Seven-platform posting**: YouTube Shorts, X, Instagram Reels, TikTok,
-  Threads, and LinkedIn — supported across the engine, scheduler, web
-  dashboard, desktop app, analytics, and connection flow.
+- **Six-platform posting**: YouTube Shorts, X, Instagram Reels, TikTok,
+  and Threads — supported across the engine, scheduler, web dashboard,
+  desktop app, analytics, and connection flow.
 - **Facebook Messenger platform** (opt-in, disabled by default) — a
   ManyChat-lite auto-reply/chatbot option. Static Page Access Token auth (no
   refresh), direct `httpx` against the Graph API (`v22.0/me/messages`),
@@ -33,7 +33,7 @@ analytics, scheduling, a desktop app, and AI-agent integration.
 - **Cross-post analytics**: one video posted to several platforms is correlated
   into a single entry with combined metrics.
 - **Follower tracking** and **best-time-to-post** analysis across all platforms.
-- **23 MCP tools** for AI-agent control, including cross-post analytics,
+- **28 MCP tools** for AI-agent control, including cross-post analytics,
   follower stats, best-time suggestions, security audit, caption suggestions,
   transcript retrieval, and content search.
 - **Caption suggestions** with platform-specific character limits, via CLI and
@@ -49,7 +49,7 @@ analytics, scheduling, a desktop app, and AI-agent integration.
 ### Changed
 - **Instagram** now uses the official Graph API as its primary authentication
   mode, falling back to session-based access when Graph API is unavailable.
-- **Encoding** for TikTok, Threads, and LinkedIn uses a Reels-grade profile
+- **Encoding** for TikTok and Threads uses a Reels-grade profile
   (1080×1920, CRF 20, 10 Mbps).
 - **Desktop app** has consistent hover states across all six pages and refreshed
   navigation (Library, Accounts, Automations).
@@ -75,4 +75,4 @@ analytics, scheduling, a desktop app, and AI-agent integration.
 ### Security
 - Independent security review: 0 critical, 0 high findings, no known CVEs in
   dependencies, and no personal or customer data in the repository.
-- 1427 tests passing (3 skipped).
+- 1555 tests passing (2 skipped).

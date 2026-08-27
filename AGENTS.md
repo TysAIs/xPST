@@ -7,18 +7,18 @@
 ```bash
 cd ~/XPST
 source .venv/bin/activate
-python -m xpst --help          # CLI with 37 commands
+python -m xpst --help          # CLI with 38 commands
 python -m xpst run             # Run the cross-posting engine
 python -m xpst dashboard       # Start FastAPI dashboard (port 8080)
 python -m xpst desktop         # Launch PySide6/QML desktop app
-python -m pytest tests/        # full suite (1534 collected)
+python -m pytest tests/        # full suite (1555 passed, 2 skipped)
 ```
 
 ## Architecture
 
 | Layer | Location | Responsibility |
 |-------|----------|----------------|
-| **CLI** | `src/xpst/cli.py` | 37 commands, `--json`, `--dry-run`, structured exit codes |
+| **CLI** | `src/xpst/cli.py` | 38 commands, `--json`, `--dry-run`, structured exit codes |
 | **Engine v2** | `src/xpst/engine_v2.py` | Orchestrates use-cases via DI |
 | **Use-Cases** | `src/xpst/usecases/` | `FetchNewVideos`, `CrossPostVideo`, `ManualPost`, `Backfill`, `HealthCheck`, `DeletePost` |
 | **Platforms** | `src/xpst/platforms/` | YouTube, X, Instagram uploaders (auth via SessionManager) |
@@ -32,7 +32,7 @@ python -m pytest tests/        # full suite (1534 collected)
 ## Key Principles
 
 - **FREE + OPEN SOURCE** — Zero personal data in distributable tools
-- **Enterprise-grade quality** — 1534 tests collected, thread-safe, encrypted credentials, bcrypt passwords
+- **Enterprise-grade quality** — 1555 passed, 2 skipped, thread-safe, encrypted credentials, bcrypt passwords
 - **Agent-friendly CLI** — Auto-JSON on non-TTY, `--quiet`, `--dry-run`, exit codes 0/1/2/3/4/10
 - **No hardcoded secrets** — All via `~/.xpst/` or env vars
 - **Apple-like UI standard** — Light/dark mode, Inter font, accessibility (Accessible.role/name)
