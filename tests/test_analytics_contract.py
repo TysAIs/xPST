@@ -68,6 +68,27 @@ class TestCapabilityContract:
 
 # ── X collector: twikit primary, optional API v2 behind a flag ───────────
 
+def _extract_cli_json(output: str) -> dict:
+    """Extract the JSON object from CLI output that may carry log/prefix text
+    (click CliRunner mixes stderr log lines into ``output``; prefixes may
+    even contain braces/brackets). Try candidate ``{`` starts from the RIGHT
+    (the report root is the JSON object ending at the last ``}``) and parse
+    each span; surface the raw output in the assertion message when nothing
+    parses so CI failures are self-diagnosing."""
+    stripped = output.strip()
+    starts = [i for i, ch in enumerate(stripped) if ch == "{"]
+    end = stripped.rfind("}")
+    if end == -1:
+        raise AssertionError(f"no JSON object in CLI output: {output[:300]!r}")
+    for start in reversed(starts):
+        if start >= end:
+            continue
+        try:
+            return json.loads(stripped[start : end + 1])
+        except json.JSONDecodeError:
+            continue
+    raise AssertionError(f"CLI output contained no parseable JSON object: {output[:500]!r}")
+
 def _x_config(tmp_path, **x_overrides) -> str:
     x_cfg = {
         "auth_mode": "cookies",
@@ -381,7 +402,6 @@ class TestCliAnalyticsJson:
         live network (collectors mocked)."""
         from click.testing import CliRunner
 
-        from scripts.clean_install_smoke import json_from_output
         from xpst.analytics import AnalyticsCollector
         from xpst.cli import main as cli
 
@@ -422,10 +442,10 @@ class TestCliAnalyticsJson:
             result = CliRunner().invoke(cli, ["analytics", "--json"])
 
         assert result.exit_code == 0, result.output
-        # The CLI may prefix JSON with log lines (repo convention — see
-        # scripts.clean_install_smoke.json_from_output), so parse tolerantly.
-        payload = json_from_output(result.output)
-        assert isinstance(payload, dict)
+        # The CLI may prefix JSON with log lines (click mixes stderr into
+        # output; repo convention — see scripts.clean_install_smoke), so
+        # extract the JSON object tolerantly.
+        payload = _extract_cli_json(result.output)
         assert "generated_at" in payload
         assert set(payload["platforms"]) == {"youtube", "x"}
 
@@ -444,7 +464,6 @@ class TestCliAnalyticsJson:
         """No posts in state → still valid JSON with a platforms key."""
         from click.testing import CliRunner
 
-        from scripts.clean_install_smoke import json_from_output
         from xpst.cli import main as cli
 
         monkeypatch.setenv("HOME", str(tmp_path))
@@ -454,7 +473,6 @@ class TestCliAnalyticsJson:
 
         result = CliRunner().invoke(cli, ["analytics", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json_from_output(result.output)
-        assert isinstance(payload, dict)
+        payload = _extract_cli_json(result.output)
         assert "platforms" in payload
         assert "generated_at" in payload
