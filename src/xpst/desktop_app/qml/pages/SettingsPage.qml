@@ -68,7 +68,7 @@ Page {
     // ── Load from controller on creation ────────────────────────
     Component.onCompleted: {
         loadFromConfig()
-        loadShortcuts()
+        loadShortcuts.call(shortcutsSection)  // shortcutDefs lives on the section item
         if (typeof controller !== "undefined" && controller.isMcpRunning) {
             mcpRunning = controller.isMcpRunning()
         }
@@ -218,8 +218,9 @@ Page {
         if (typeof controller === "undefined" || !controller.saveShortcuts) return
         try {
             var obj = {}
-            for (var i = 0; i < shortcutDefs.length; i++) {
-                obj[shortcutActionKey(shortcutDefs[i].label)] = shortcutDefs[i].key
+            var defs = shortcutsSection.shortcutDefs
+            for (var i = 0; i < defs.length; i++) {
+                obj[shortcutActionKey(defs[i].label)] = defs[i].key
             }
             controller.saveShortcuts(JSON.stringify(obj))
         } catch(e) {
@@ -785,6 +786,7 @@ Page {
 
             // Keyboard Shortcuts Section (#23)
             ColumnLayout {
+                id: shortcutsSection
                 spacing: theme.spacingXl
 
                 Text {
