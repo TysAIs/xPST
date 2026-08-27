@@ -8,7 +8,7 @@ xPST is a modular, plugin-based system for cross-posting video content across so
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        xPST Engine v2                     │
+│                        xPST Engine                     │
 ├─────────────────────────────────────────────────────────────┤
 │  Sources                Destinations                       │
 │  ┌──────────────┐       ┌──────────────┐                    │
@@ -44,7 +44,7 @@ xPST is a modular, plugin-based system for cross-posting video content across so
 Each component has a single responsibility:
 - **Sources**: Fetch/download videos (TikTok, Instagram Reels, YouTube, local files)
 - **Platforms**: Upload videos (YouTube, Instagram, X/Twitter, TikTok, Threads)
-- **Engine**: Orchestrate workflow via dependency-injected use-cases
+- **Engine**: Orchestrate workflow via single CrossPostEngine orchestrator
 - **State**: Persist data atomically (write-then-rename, thread-safe)
 - **Config**: Pydantic settings with auto-migration (v1→v4)
 - **Credentials**: Encrypted file fallback (Fernet + scrypt) or OS keychain (opt-in)

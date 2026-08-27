@@ -179,7 +179,7 @@ pip install -e .
 | `mcp` | MCP server (`xpst mcp`, `xpst-mcp`) |
 | `knowledge` | KB transcription/embeddings/LanceDB |
 | `dashboard` | Web dashboard (FastAPI + WebSocket) |
-| `desktop` | Native desktop GUI (PySide6/QML) + pywebview fallback |
+| `desktop` | Native desktop GUI (PySide6/QML) |
 | `windows` | Windows-specific pywin32/winshell |
 | `dev` | pytest, ruff, mypy, import-linter |
 | `full` | Everything (`mcp,desktop,dashboard,windows,knowledge`) |
