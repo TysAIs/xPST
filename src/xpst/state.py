@@ -139,6 +139,14 @@ class StateManager:
     def update_last_wake_check(self) -> None:
         return self._new_manager.update_last_wake_check()
 
+    def get_last_wake_check(self):
+        """Get the last wake check timestamp (scheduler catch-up heuristic).
+
+        Delegates to the new state manager.  Returns a naive datetime or
+        None when no wake check has been recorded.
+        """
+        return self._new_manager.get_last_wake_check()
+
     def record_circuit_breaker_failure(self, platform: str) -> None:
         return self._new_manager.record_circuit_breaker_failure(platform)
 

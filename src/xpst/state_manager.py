@@ -462,6 +462,22 @@ class StateManager:
 
         self._store.update(update_wake)
 
+    def get_last_wake_check(self) -> datetime | None:
+        """Return the last wake check timestamp as a datetime, or None.
+
+        Returns a naive datetime parsed from the persisted ISO string (the
+        scheduler uses this for its sleep/wake catch-up heuristic). Returns
+        None when no wake check has ever been recorded or the value is
+        unparseable.
+        """
+        stored = self._state.get("health", {}).get("last_wake_check")
+        if not stored:
+            return None
+        try:
+            return datetime.fromisoformat(stored)
+        except (TypeError, ValueError):
+            return None
+
     # ── Circuit Breaker State ──
 
     def record_circuit_breaker_failure(self, platform: str) -> None:
