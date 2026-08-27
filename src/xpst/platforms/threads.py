@@ -22,7 +22,14 @@ from pathlib import Path
 import httpx
 
 from xpst.config import XPSTConfig
-from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
+from xpst.platforms.base import (
+    DeleteOutcome,
+    DeleteResult,
+    PlatformHealth,
+    PlatformRegistry,
+    PlatformUploader,
+    UploadResult,
+)
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
 
@@ -393,15 +400,14 @@ class ThreadsUploader(PlatformUploader):
                 error=f"Health check failed: {str(e)[:200]}",
             )
 
-    async def delete(self, post_id: str) -> bool:
-        """Delete a Threads post by media ID.
-
-        Args:
-            post_id: The media ID of the post to delete.
-
-        Returns:
-            True if deletion succeeded, False otherwise.
-        """
+    async def delete(
+        self,
+        post_id: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """Delete a Threads post by media ID (Graph API DELETE)."""
         try:
             token = await self._get_access_token()
             async with httpx.AsyncClient(timeout=30) as client:
@@ -411,10 +417,19 @@ class ThreadsUploader(PlatformUploader):
                 )
                 resp.raise_for_status()
                 logger.info(f"Deleted Threads post: {post_id}")
-                return True
+                return DeleteResult(
+                    outcome=DeleteOutcome.DELETED,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                )
         except Exception as e:
             logger.error(f"Failed to delete Threads post {post_id}: {e}")
-            return False
+            return DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail=str(e)[:200],
+            )
 
 
 def _safe_handle(user_id: str) -> str:
