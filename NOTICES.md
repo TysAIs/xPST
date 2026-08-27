@@ -30,11 +30,8 @@ xPST is dual licensed as `MIT OR Apache-2.0`. This file lists direct runtime and
 | Package | Extra | Declared range | License | Role |
 |---|---|---:|---|---|
 | mcp | `mcp` | `>=1.0.0` | MIT | MCP server framework |
-| pywebview | `desktop` | `>=4.0` | BSD-3-Clause | Desktop webview fallback |
 | pywin32 | `windows` | `>=306` | PSF | Windows integration |
 | winshell | `windows` | `>=0.6` | MIT | Windows shortcut/shell helpers |
-| nicegui | `dashboard` | `>=1.4.0,<4.0.0` | MIT | Browser dashboard |
-| plotly | `dashboard` | `>=5.18.0,<7.0.0` | MIT | Dashboard charts |
 | PySide6 | `desktop` | `>=6.5.0` | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only | Native QML desktop app |
 | faster-whisper | `knowledge` | `>=1.0.0` | MIT | Knowledge base transcription |
 | fastembed | `knowledge` | `>=0.3` | Apache-2.0 | Knowledge base in-process embeddings |

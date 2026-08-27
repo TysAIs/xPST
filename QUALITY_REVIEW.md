@@ -1,7 +1,7 @@
 # xPST — Final QA Quality Review
 
 **Scope:** Read-only quality pass focused on edge cases, race conditions, resource
-leaks, and failure modes that the 1427-test suite does not exercise. No code was
+leaks, and failure modes that the 1555-test suite does not exercise. No code was
 modified.
 
 **Method:** Direct reading of the state/engine/scheduler/recovery core, plus

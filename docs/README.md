@@ -405,7 +405,7 @@ xpst mcp
 
 ### Available Tools
 
-xPST exposes 23 MCP tools (19 `xpst_*` + 4 `kb_*`). See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
+xPST exposes 28 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 
 | Tool | Description |
 |------|-------------|

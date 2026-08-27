@@ -74,14 +74,11 @@ These are installed only when explicitly requested (`pip install xpst[extra]`):
 
 | Package | License | Purpose |
 |---------|---------|---------|
-| pywebview | BSD-3-Clause | WebView wrapper |
 
 ### `dashboard` extra — Web dashboard
 
 | Package | License | Purpose |
 |---------|---------|---------|
-| nicegui | Apache-2.0 | Web UI framework |
-| plotly | MIT | Interactive charts |
 
 ### `windows` extra — Windows integration
 
