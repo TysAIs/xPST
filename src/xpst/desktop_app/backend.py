@@ -23,6 +23,7 @@ from xpst.utils.platform import get_config_dir
 # (see require_pyside6 / run_desktop_app in main.py).
 try:
     from PySide6.QtCore import Property, QObject, QTimer, Signal, Slot
+    from PySide6.QtGui import QFontDatabase
     _PYSIDE6_IMPORT_ERROR: ImportError | None = None
     HAS_PYSIDE6 = True
 except ImportError as exc:  # pragma: no cover - exercised only without the extra
@@ -2341,13 +2342,71 @@ def _default_ui_font() -> str:
     macOS and Linux Qt silently substituted a different family, drifting the
     text metrics the layout was tuned against. This returns the native UI font
     per platform so each OS uses its intended family.
+
+    macOS: SF Pro Text is system-shipped, but Finder-launched bundles that
+    miss it (or non-standard installs) previously triggered a startup warning
+    + alias-resolution cost every launch. We now bundle Inter (SIL OFL) and
+    register it at startup; if SF Pro Text is absent we fall back to the
+    registered Inter family seamlessly.
     """
     if sys.platform == "darwin":
+        if _font_family_available("SF Pro Text"):
+            return "SF Pro Text"
+        if _BUNDLED_UI_FONT_FAMILY:
+            return _BUNDLED_UI_FONT_FAMILY
         return "SF Pro Text"
     if sys.platform.startswith("win"):
         return "Segoe UI"
     # Linux / other: a widely-installed, metrically-sane sans family.
     return "Noto Sans"
+
+
+#: Populated by :func:`_register_bundled_fonts` at app start; empty until then
+#: and in non-GUI contexts.
+_BUNDLED_UI_FONT_FAMILY: str = ""
+
+
+def _font_family_available(family: str) -> bool:
+    """True when Qt's font database knows ``family``."""
+    if not HAS_PYSIDE6:
+        return False
+    try:
+        return family in QFontDatabase.families()
+    except Exception:
+        return False
+
+
+def _register_bundled_fonts() -> None:
+    """Register fonts bundled under ``assets/fonts/`` with Qt.
+
+    Currently: Inter (Regular/Medium/SemiBold/Bold, SIL OFL) as the UI-font
+    fallback on systems without the platform default. Idempotent; safe to
+    call before QApplication exists (QFontDatabase handles it).
+    """
+    global _BUNDLED_UI_FONT_FAMILY
+    if not HAS_PYSIDE6:
+        return
+    from xpst.desktop_app.resource_path import resource_path
+
+    loaded = 0
+    for weight_file in ("Inter-Regular.ttf", "Inter-Medium.ttf",
+                        "Inter-SemiBold.ttf", "Inter-Bold.ttf"):
+        font_path = resource_path("assets/fonts") / weight_file
+        if not font_path.exists():
+            logger.debug("Bundled font missing: %s", font_path)
+            continue
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        if font_id < 0:
+            logger.warning("Failed to register bundled font %s", font_path)
+            continue
+        families = QFontDatabase.applicationFontFamilies(font_id)
+        if families:
+            loaded += 1
+            if not _BUNDLED_UI_FONT_FAMILY:
+                _BUNDLED_UI_FONT_FAMILY = families[0]
+    if loaded:
+        logger.info("Registered %d bundled Inter font(s) as '%s'", loaded,
+                    _BUNDLED_UI_FONT_FAMILY)
 
 
 def _default_mono_font() -> str:
