@@ -1900,6 +1900,9 @@ class AppController(QObject):
             return dest.as_uri()
 
         try:
+            # Bandit B310: only permit http(s) schemes — never file:/ftp:/custom.
+            if urlparse(url).scheme not in {"http", "https"}:
+                return ""
             req = urllib.request.Request(url, headers={"User-Agent": "xPST/1.0 (+https://tysais.github.io/xPST/)"})
             with urllib.request.urlopen(req, timeout=15) as resp:
                 data = resp.read(max_bytes + 1)
