@@ -456,7 +456,7 @@ Rectangle {
                     indicator: Rectangle {
                         implicitWidth: 34; implicitHeight: 18
                         radius: 9
-                        color: themeSwitch.checked ? theme.accent : theme.border
+                        color: themeSwitch.checked ? theme.accent : theme.textMuted
                         Behavior on color { ColorAnimation { duration: 150 } }
                         Rectangle {
                             x: themeSwitch.checked ? parent.width - width - 2 : 2
