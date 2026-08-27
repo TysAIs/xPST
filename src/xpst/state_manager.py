@@ -92,9 +92,7 @@ class StateManager:
         if not video:
             return False
         posted_to = video.get("posted_to", {})
-        return all(
-            p in posted_to and not posted_to[p].get("deleted", False) for p in platforms
-        )
+        return all(p in posted_to and not posted_to[p].get("deleted", False) for p in platforms)
 
     def add_posted_video(
         self,
@@ -106,9 +104,11 @@ class StateManager:
         content_hash: str | None = None,
     ) -> None:
         """Record a successfully posted video."""
-        self._store.update(lambda state: self._add_posted_video_inner(
-            state, video_id, source_url, source_platform, posted_to, caption, content_hash
-        ))
+        self._store.update(
+            lambda state: self._add_posted_video_inner(
+                state, video_id, source_url, source_platform, posted_to, caption, content_hash
+            )
+        )
 
     def _add_posted_video_inner(
         self,
@@ -154,11 +154,13 @@ class StateManager:
 
         for platform, info in (posted_to or {}).items():
             if platform in state["health"]["platforms"]:
-                state["health"]["platforms"][platform].update({
-                    "status": "ok",
-                    "last_success": info.get("timestamp", now),
-                    "failures": 0,
-                })
+                state["health"]["platforms"][platform].update(
+                    {
+                        "status": "ok",
+                        "last_success": info.get("timestamp", now),
+                        "failures": 0,
+                    }
+                )
 
         return state
 
@@ -242,9 +244,7 @@ class StateManager:
 
     # ── Delete / unpublish state discipline (Phase-1.2 D5) ──
 
-    def _platform_entry(
-        self, state: dict[str, Any], video_id: str, platform: str
-    ) -> dict[str, Any] | None:
+    def _platform_entry(self, state: dict[str, Any], video_id: str, platform: str) -> dict[str, Any] | None:
         """Return the ``posted_to[platform]`` entry for a video, if any."""
         video = state["posted_videos"].get(video_id)
         if not video:
@@ -266,9 +266,7 @@ class StateManager:
         ``deleted_reason``. ``is_posted()`` excludes tombstones so the video
         can be re-posted, and a later successful post overwrites the entry.
         """
-        self._store.update(
-            lambda state: self._record_delete_tombstone_inner(state, video_id, platform, reason, detail)
-        )
+        self._store.update(lambda state: self._record_delete_tombstone_inner(state, video_id, platform, reason, detail))
 
     def _record_delete_tombstone_inner(
         self,
@@ -299,9 +297,7 @@ class StateManager:
         existing entry. The post stays posted — metrics and URL are kept — and
         ``is_posted()`` keeps returning True.
         """
-        self._store.update(
-            lambda state: self._set_visibility_inner(state, video_id, platform, visibility)
-        )
+        self._store.update(lambda state: self._set_visibility_inner(state, video_id, platform, visibility))
 
     def _set_visibility_inner(
         self, state: dict[str, Any], video_id: str, platform: str, visibility: str
@@ -328,9 +324,7 @@ class StateManager:
         ``delete_pending`` together with the share URL so the user can remove
         the post manually in one tap.
         """
-        self._store.update(
-            lambda state: self._mark_delete_pending_inner(state, video_id, platform, reason, detail)
-        )
+        self._store.update(lambda state: self._mark_delete_pending_inner(state, video_id, platform, reason, detail))
 
     def _mark_delete_pending_inner(
         self,
@@ -378,14 +372,16 @@ class StateManager:
             errors = video.get("errors", {})
             if errors:
                 for platform, err in errors.items():
-                    dlq.append({
-                        "video_id": video_id,
-                        "platform": platform,
-                        "error": err.get("error", "Unknown"),
-                        "timestamp": err.get("timestamp"),
-                        "count": err.get("count", 1),
-                        "source_url": video.get("source_url"),
-                    })
+                    dlq.append(
+                        {
+                            "video_id": video_id,
+                            "platform": platform,
+                            "error": err.get("error", "Unknown"),
+                            "timestamp": err.get("timestamp"),
+                            "count": err.get("count", 1),
+                            "source_url": video.get("source_url"),
+                        }
+                    )
         return dlq
 
     def clear_dead_letter_queue(self) -> int:
@@ -422,10 +418,14 @@ class StateManager:
 
         def update_health(state: dict[str, Any]) -> dict[str, Any]:
             if platform in state["health"]["platforms"]:
-                state["health"]["platforms"][platform].update({
-                    "status": status_str,
-                    "last_success": now if status_str == "ok" else state["health"]["platforms"][platform].get("last_success"),
-                })
+                state["health"]["platforms"][platform].update(
+                    {
+                        "status": status_str,
+                        "last_success": now
+                        if status_str == "ok"
+                        else state["health"]["platforms"][platform].get("last_success"),
+                    }
+                )
                 # Increment failures on non-ok status (for backward compatibility with tests)
                 if status_str != "ok":
                     state["health"]["platforms"][platform]["failures"] = (
@@ -462,10 +462,27 @@ class StateManager:
 
         self._store.update(update_wake)
 
+    def get_last_wake_check(self) -> datetime | None:
+        """Return the last wake check timestamp as a datetime, or None.
+
+        Returns a naive datetime parsed from the persisted ISO string (the
+        scheduler uses this for its sleep/wake catch-up heuristic). Returns
+        None when no wake check has ever been recorded or the value is
+        unparseable.
+        """
+        stored = self._state.get("health", {}).get("last_wake_check")
+        if not stored:
+            return None
+        try:
+            return datetime.fromisoformat(stored)
+        except (TypeError, ValueError):
+            return None
+
     # ── Circuit Breaker State ──
 
     def record_circuit_breaker_failure(self, platform: str) -> None:
         """Record a circuit breaker failure."""
+
         def update_cb(state: dict[str, Any]) -> dict[str, Any]:
             if platform not in state["health"]["platforms"]:
                 state["health"]["platforms"][platform] = {"status": "ok", "last_success": None, "failures": 0}
@@ -482,11 +499,13 @@ class StateManager:
 
         def update_cb(state: dict[str, Any]) -> dict[str, Any]:
             if platform in state["health"]["platforms"]:
-                state["health"]["platforms"][platform].update({
-                    "status": "ok",
-                    "last_success": now,
-                    "failures": 0,
-                })
+                state["health"]["platforms"][platform].update(
+                    {
+                        "status": "ok",
+                        "last_success": now,
+                        "failures": 0,
+                    }
+                )
             return state
 
         self._store.update(update_cb)

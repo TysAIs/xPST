@@ -26,7 +26,7 @@ class StateManager:
             config_or_dir = state_dir
         if config_or_dir is None:
             config_or_dir = Path.home() / ".xpst"
-        config_dir = config_or_dir.config_dir if hasattr(config_or_dir, 'config_dir') else config_or_dir
+        config_dir = config_or_dir.config_dir if hasattr(config_or_dir, "config_dir") else config_or_dir
 
         self.config_dir = config_dir
         self._new_manager = NewStateManager(config_dir)
@@ -45,6 +45,7 @@ class StateManager:
         self._state = self._new_manager._state
         # Use regular Lock for test compatibility (tests expect threading.Lock)
         import threading
+
         self._save_lock = threading.Lock()
         self._last_save_ts: float = 0.0
 
@@ -88,9 +89,7 @@ class StateManager:
         reason: str = "hard_delete",
         detail: str | None = None,
     ) -> None:
-        return self._new_manager.record_delete_tombstone(
-            video_id, platform, reason=reason, detail=detail
-        )
+        return self._new_manager.record_delete_tombstone(video_id, platform, reason=reason, detail=detail)
 
     def set_visibility(self, video_id: str, platform: str, visibility: str) -> None:
         return self._new_manager.set_visibility(video_id, platform, visibility)
@@ -103,9 +102,7 @@ class StateManager:
         reason: str = "pending",
         detail: str | None = None,
     ) -> None:
-        return self._new_manager.mark_delete_pending(
-            video_id, platform, reason=reason, detail=detail
-        )
+        return self._new_manager.mark_delete_pending(video_id, platform, reason=reason, detail=detail)
 
     def get_by_hash(self, content_hash: str) -> str | None:
         return self._new_manager.get_by_hash(content_hash)
@@ -138,6 +135,14 @@ class StateManager:
 
     def update_last_wake_check(self) -> None:
         return self._new_manager.update_last_wake_check()
+
+    def get_last_wake_check(self):
+        """Get the last wake check timestamp (scheduler catch-up heuristic).
+
+        Delegates to the new state manager.  Returns a naive datetime or
+        None when no wake check has been recorded.
+        """
+        return self._new_manager.get_last_wake_check()
 
     def record_circuit_breaker_failure(self, platform: str) -> None:
         return self._new_manager.record_circuit_breaker_failure(platform)
@@ -187,6 +192,7 @@ class StateManager:
     ) -> None:
         """Legacy method for marking a video as posted."""
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         posted_to = {}
         if platform:
@@ -207,8 +213,9 @@ class StateManager:
             )
             # Persist to disk — throttled to avoid I/O bottleneck in bulk operations
             import time as _time
+
             now_ts = _time.monotonic()
-            if not hasattr(self, '_last_save_ts') or (now_ts - self._last_save_ts) > 2.0:
+            if not hasattr(self, "_last_save_ts") or (now_ts - self._last_save_ts) > 2.0:
                 self._last_save_ts = now_ts
                 try:
                     self._new_manager._store.save()
@@ -257,6 +264,7 @@ class StateManager:
     ) -> None:
         """Legacy method - mark video as cross-posted to platform with optional content_hash."""
         from datetime import datetime, timezone
+
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         posted_to = {platform: {"id": post_id or "", "url": post_url or "", "timestamp": now}}
         self._new_manager.add_posted_video(
@@ -297,9 +305,7 @@ class StateManager:
             return None
         return video.get("posted_to", {}).get(platform)
 
-    def find_duplicate_by_hash(
-        self, content_hash: str, exclude_platform: str | None = None
-    ) -> dict[str, Any] | None:
+    def find_duplicate_by_hash(self, content_hash: str, exclude_platform: str | None = None) -> dict[str, Any] | None:
         """Legacy method - find video with matching content hash."""
         # Check if hash exists
         existing_video_id = self._new_manager.get_by_hash(content_hash)
@@ -377,5 +383,6 @@ class StateManager:
         """Close state manager and release file lock."""
         self._store._release_file_lock()
         self._lock_fd = None  # Sync with store
+
 
 __all__ = ["StateManager", "StateStore", "NewStateManager"]
