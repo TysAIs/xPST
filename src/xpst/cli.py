@@ -183,7 +183,12 @@ def main(ctx: click.Context, config: str | None, verbose: bool, quiet: bool, jso
 
 @main.command()
 def setup():
-    """Interactive first-time setup wizard"""
+    """Interactive first-time setup wizard
+
+    Full system configuration: requirements check (auto-installs
+    yt-dlp if missing), directories, content source, platform links.
+    Only linking accounts? `xpst wizard` is faster.
+    """
     from xpst.setup import run_setup
     run_setup()
 
@@ -983,7 +988,12 @@ def health(ctx: click.Context, as_json: bool):
 @click.option("--test", "test_only", is_flag=True, help="Test existing connections only")
 @click.pass_context
 def connect(ctx: click.Context, platform: str | None, test_only: bool):
-    """Connect social media accounts (streamlined wizard)"""
+    """Connect social media accounts (one platform at a time)
+
+    Use when you need to link or re-link a SPECIFIC account, e.g.
+    `xpst connect instagram` after a session expires. For first-time
+    setup of everything at once, use `xpst wizard` instead.
+    """
     from xpst.connect import run_connect
 
     platforms = [platform] if platform else None
@@ -997,7 +1007,13 @@ def connect(ctx: click.Context, platform: str | None, test_only: bool):
 @click.option("--export-md", "export_md", type=click.Path(), default=None, help="Export the step-by-step guide as markdown and exit")
 @json_option
 def wizard(platform: str | None, export_md: str | None, as_json: bool):
-    """Polished first-run connection wizard (resumes progress)"""
+    """Polished first-run connection wizard (resumes progress)
+
+    The recommended path for first-time setup of all accounts. To
+    re-link just one platform later, use `xpst connect <platform>`.
+    For full system configuration (folders, quotas, sources) use
+    `xpst setup` instead.
+    """
     from xpst.wizard import export_markdown, run_wizard
 
     if export_md:
@@ -3839,6 +3855,7 @@ def best_time(ctx: click.Context, platform: str | None, as_json: bool):
                 f"(avg {best['avg_engagement_rate']}% engagement, "
                 f"{best['post_count']} posts)\n"
             )
+            _warn_if_noise(best.get("avg_engagement_rate"), best.get("post_count"))
         else:
             console.print(f"\nNo data yet for {platform}.\n")
     else:
@@ -3854,9 +3871,27 @@ def best_time(ctx: click.Context, platform: str | None, as_json: bool):
                         f"  {p}: {top['day_name']} at {top['hour']}:00 "
                         f"(avg {top['avg_engagement_rate']}% engagement)"
                     )
+                    _warn_if_noise(top.get("avg_engagement_rate"), top.get("post_count"))
             console.print()
         else:
             console.print("\nNo posting history yet. Post a few videos to get recommendations.\n")
+
+
+def _warn_if_noise(avg_engagement_rate, post_count) -> None:
+    """Flag recommendations computed from zero engagement (audit #6).
+
+    With avg_engagement_rate == 0 every time slot scores identically, so the
+    'recommendation' is arbitrary noise presented with false confidence.
+    """
+    try:
+        if float(avg_engagement_rate or 0) <= 0.0:
+            console.print(
+                "  [yellow]⚠ No engagement data behind this yet — treat it as a "
+                "placeholder, not a real recommendation. Post videos with metrics "
+                "tracking enabled to train it.[/yellow]"
+            )
+    except (TypeError, ValueError):
+        pass
 
 
 # ── Phase F: Caption Generation ─────────────────────────────────────────
