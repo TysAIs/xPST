@@ -1904,7 +1904,8 @@ class AppController(QObject):
             if urlparse(url).scheme not in {"http", "https"}:
                 return ""
             req = urllib.request.Request(url, headers={"User-Agent": "xPST/1.0 (+https://tysais.github.io/xPST/)"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            # nosec B310: scheme validated above to http/https only.
+            with urllib.request.urlopen(req, timeout=15) as resp:  # nosec B310
                 data = resp.read(max_bytes + 1)
                 if len(data) > max_bytes:
                     return ""
