@@ -309,18 +309,24 @@ class QuotaManager:
         Get quota status for all platforms.
 
         Returns:
-            Dictionary with quota status
+            Dictionary with quota status. The reset is applied FIRST (before
+            any field is read) so ``used_today`` and ``remaining`` can never
+            disagree inside one snapshot: previously the read order produced
+            used_today=1 + remaining=5 when the stored counter predated the
+            last midnight reset, because ``remaining_today()`` resets as a
+            side effect while the earlier ``used_today`` read saw stale data.
         """
-        return {
-            name: {
+        status: dict[str, dict] = {}
+        for name, quota in self.quotas.items():
+            quota._check_reset()  # normalize counters before reading any
+            status[name] = {
                 "daily_limit": quota.daily_limit,
                 "used_today": quota.used_today,
                 "remaining": quota.remaining_today(),
                 "hourly_limit": quota.hourly_limit,
                 "used_this_hour": quota.used_this_hour,
             }
-            for name, quota in self.quotas.items()
-        }
+        return status
 
     def set_x_tier(self, tier: str) -> None:
         """
