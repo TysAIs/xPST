@@ -20,6 +20,7 @@ Page {
     property bool mcpRunning: false
     property bool notifCompletion: true
     property bool notifErrors: true
+    property bool notifEnabled: false
 
     // ── Validation state ────────────────────────────────────────
     property bool hasErrors: false
@@ -117,10 +118,11 @@ Page {
                 // log_level not directly mapped to UI yet
             }
 
-            // Load notification preferences
+            // Load notification preferences (real schema: enabled / on_success / on_failure)
             if (cfg.notifications) {
-                notifCompletion = cfg.notifications.completion !== false
-                notifErrors = cfg.notifications.errors !== false
+                notifCompletion = cfg.notifications.on_success !== false
+                notifErrors = cfg.notifications.on_failure !== false
+                notifEnabled = cfg.notifications.enabled === true
             }
         } catch(e) {
             console.error("Settings load error:", e)
@@ -172,8 +174,9 @@ Page {
         try {
             var payload = {
                 notifications: {
-                    completion: notifCompletion,
-                    errors: notifErrors
+                    enabled: notifEnabled,
+                    on_success: notifCompletion,
+                    on_failure: notifErrors
                 }
             }
             controller.saveSettings(JSON.stringify(payload))
@@ -544,6 +547,23 @@ Page {
                         anchors.margins: theme.pageMargin
                         spacing: theme.spacingMd
 
+                        RowLayout {
+                            Text {
+                                text: "Webhook notifications (Discord/Telegram)"
+                                font.pixelSize: 13
+                                color: theme.textPrimary
+                                Layout.fillWidth: true
+                            }
+                            Switch {
+                                checked: settingsPage.notifEnabled
+                                onCheckedChanged: {
+                                    settingsPage.notifEnabled = checked
+                                    settingsPage.saveNotifications()
+                                }
+                                Accessible.name: "Toggle webhook notifications"
+                                Accessible.role: Accessible.CheckBox
+                            }
+                        }
                         RowLayout {
                             Text {
                                 text: "Post completion alerts"
