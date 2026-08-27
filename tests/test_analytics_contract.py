@@ -367,6 +367,7 @@ class TestCliAnalyticsJson:
         live network (collectors mocked)."""
         from click.testing import CliRunner
 
+        from scripts.clean_install_smoke import json_from_output
         from xpst.analytics import AnalyticsCollector
         from xpst.cli import main as cli
 
@@ -407,7 +408,10 @@ class TestCliAnalyticsJson:
             result = CliRunner().invoke(cli, ["analytics", "--json"])
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        # The CLI may prefix JSON with log lines (repo convention — see
+        # scripts.clean_install_smoke.json_from_output), so parse tolerantly.
+        payload = json_from_output(result.output)
+        assert isinstance(payload, dict)
         assert "generated_at" in payload
         assert set(payload["platforms"]) == {"youtube", "x"}
 
@@ -426,6 +430,7 @@ class TestCliAnalyticsJson:
         """No posts in state → still valid JSON with a platforms key."""
         from click.testing import CliRunner
 
+        from scripts.clean_install_smoke import json_from_output
         from xpst.cli import main as cli
 
         monkeypatch.setenv("HOME", str(tmp_path))
@@ -435,6 +440,7 @@ class TestCliAnalyticsJson:
 
         result = CliRunner().invoke(cli, ["analytics", "--json"])
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_from_output(result.output)
+        assert isinstance(payload, dict)
         assert "platforms" in payload
         assert "generated_at" in payload
