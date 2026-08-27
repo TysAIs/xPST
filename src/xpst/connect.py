@@ -67,7 +67,12 @@ def _confirm(message: str, default: bool = True) -> bool:
     """
 
     suffix = " [Y/n]: " if default else " [y/N]: "
-    response = console.input(f"[cyan]{message}{suffix}[/cyan]").strip().lower()
+    try:
+        response = console.input(f"[cyan]{message}{suffix}[/cyan]").strip().lower()
+    except EOFError:
+        # Piped/closed stdin (agent automation) — fall back to the default
+        # instead of crashing onboarding with a traceback.
+        return default
     if not response:
         return default
     return response in ("y", "yes")

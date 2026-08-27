@@ -253,6 +253,48 @@ def _record_platform_result(state: dict, key: str, ok: bool, detail: str = "") -
     }
 
 
+def mark_onboarding_complete(config: XPSTConfig, state: dict | None = None) -> None:
+    """Persist server-side that first-run onboarding finished.
+
+    This is the single completion write path for every mode (interactive and
+    agent/``--json``). It flips the persisted ``first_run_complete`` config
+    flag (the authoritative gate read by the desktop app, ``run`` and
+    ``status``) AND records a ``completed: true`` marker in
+    ``wizard_state.json`` so the progress file can never be mistaken for an
+    unfinished flow.
+
+    Args:
+        config: The xPST config to persist the flag on.
+        state: Optional wizard progress dict to finalize. When omitted the
+            current persisted progress is loaded (an absent file is fine —
+            it degrades to ``{}``).
+    """
+    config.first_run_complete = True
+    config.save()
+    current = state if state is not None else load_wizard_state(config)
+    current.setdefault("platforms", {})
+    current["completed"] = True
+    save_wizard_state(config, current)
+
+
+def onboarding_required(config: XPSTConfig) -> bool:
+    """Whether first-run onboarding should still be offered.
+
+    The single source of truth is the persisted ``first_run_complete`` flag.
+    Crucially, it never consults ``wizard_state.json``: a stale or missing
+    progress file must never re-trigger onboarding for an install that has
+    genuinely completed (defensive check — see audit 02-integrations.md §4).
+
+    Args:
+        config: The xPST config to inspect.
+
+    Returns:
+        True when onboarding is still required, False once ``first_run_complete``
+        is True.
+    """
+    return not bool(getattr(config, "first_run_complete", False))
+
+
 # ──────────────────────────────────────────────
 # Rendering helpers
 # ──────────────────────────────────────────────
@@ -362,20 +404,47 @@ def _safe_confirm(message: str, default: bool = True) -> bool:
 # Main wizard entry points
 # ──────────────────────────────────────────────
 
-def run_wizard_json(platforms: list[str] | None = None) -> dict:
-    """Agent/non-TTY mode: emit the checklist as data. Never prompts."""
+def run_wizard_json(
+    platforms: list[str] | None = None,
+    *,
+    config: XPSTConfig | None = None,
+) -> dict:
+    """Agent/non-TTY mode: emit the checklist as data. Never prompts.
 
-    config = XPSTConfig.load()
-    checklist = build_checklist(config)
+    Completing the flow counts as finishing onboarding: when every requested
+    platform passes its health check (``all_pass``), the persisted
+    ``first_run_complete`` flag is set and ``wizard_state.json`` is finalized,
+    exactly like the interactive path. This lets bots/scripts drive the wizard
+    over a pipe and have the completion recorded server-side.
+
+    Args:
+        platforms: Optional subset of platforms to scope the run to.
+        config: Optional config to operate on (used by tests; defaults to the
+            user config when omitted).
+
+    Returns:
+        The machine-readable checklist result dict.
+    """
+
+    cfg = config if config is not None else XPSTConfig.load()
+    checklist = build_checklist(cfg)
     if platforms:
         wanted = set(platforms)
         checklist = [c for c in checklist if c["platform"] in wanted]
     passed = all(c["health"] == "pass" for c in checklist) if checklist else False
+    if passed and checklist:
+        state = load_wizard_state(cfg)
+        for entry in checklist:
+            _record_platform_result(
+                state, entry["platform"], True, detail="verified via agent mode"
+            )
+        mark_onboarding_complete(cfg, state)
     return {
         "mode": "agent",
         "interactive": False,
         "checklist": checklist,
         "all_pass": passed,
+        "completed": passed and bool(checklist),
         "next_action": (
             None if passed
             else next((c["action"] for c in checklist if c["action"]), None)
@@ -476,8 +545,6 @@ def run_wizard(
         results[key] = verdict
         console.print()
 
-    config.save()
-
     # End-to-end summary
     console.print(Panel("[bold]Summary[/bold]", style="blue"))
     failed = []
@@ -490,9 +557,21 @@ def run_wizard(
             failed.append(key)
 
     if not failed:
-        console.print("\n[bold green]🎉 All connected! Try:[/bold green] "
-                      "[cyan]xpst watch[/cyan]")
+        # Every requested platform is connected — finalize first-run
+        # onboarding server-side so later `run`/`status` invocations skip it.
+        state["completed"] = True
+        save_wizard_state(config, state)
+        config.first_run_complete = True
+    config.save()
+
+    if not failed:
+        console.print(
+            "\n[bold green]🎉 All connected! Try:[/bold green] "
+            "[cyan]xpst watch[/cyan]"
+        )
         return True
-    console.print(f"\n[yellow]{len(failed)} platform(s) still need attention.[/yellow] "
-                  "Re-run [cyan]xpst wizard[/cyan] — it resumes where you left off.")
+    console.print(
+        f"\n[yellow]{len(failed)} platform(s) still need attention.[/yellow] "
+        "Re-run [cyan]xpst wizard[/cyan] — it resumes where you left off."
+    )
     return False
