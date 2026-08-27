@@ -31,6 +31,18 @@ PACKAGE_IMPORTS = {
     "yt-dlp": "yt_dlp",
     "instagrapi": "instagrapi",
     "twikit": "twikit",
+    # Core runtime deps surfaced by `xpst version` so the report is honest
+    # about "all dependency versions" (audit 2026-08-27: previously only the
+    # three helpers above were listed).
+    "fastapi": "fastapi",
+    "pydantic": "pydantic",
+    "pydantic-settings": "pydantic_settings",
+    "PySide6": "PySide6",
+    "bcrypt": "bcrypt",
+    "cryptography": "cryptography",
+    "httpx": "httpx",
+    "authlib": "authlib",
+    "click": "click",
 }
 
 
