@@ -56,10 +56,17 @@ xpst setup
 ```
 
 This will:
-1. Ask for your TikTok username
-2. Ask which platforms to enable (YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger)
-3. Create configuration file at `~/.xpst/config.yaml`
-4. Create credentials directory at `~/.xpst/credentials/`
+1. Check system requirements (Python, FFmpeg, yt-dlp)
+2. **Automatically install yt-dlp if missing** — no manual `pip install` needed
+3. Ask for your TikTok username
+4. Ask which platforms to enable (YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger)
+5. Create configuration file at `~/.xpst/config.yaml`
+6. Create credentials directory at `~/.xpst/credentials/`
+
+> **FFmpeg note:** the setup check looks in `/opt/homebrew/bin`, `/usr/local/bin`,
+> and `~/.local/bin` too — so it usually finds an existing install even when a
+> GUI-launched app can't see your shell PATH. Only install if the readiness
+> check actually says it's missing (`xpst readiness`).
 
 ### Step 2: Authenticate Platforms
 
@@ -150,13 +157,20 @@ Messenger is an **opt-in auto-reply/chatbot** destination (ManyChat-lite) using 
 ### Step 3: Verify Setup
 
 ```bash
-xpst status
+# Readiness: what's still missing before you can post
+xpst readiness
+
+# Live connectivity: which platforms actually have valid sessions right now
+xpst health
+
+# Quota remaining for each platform today
+xpst quota
 ```
 
-This shows:
-- Platform authentication status
-- Health of each component
-- Any configuration issues
+> **Trust `xpst health` over the readiness file check:** a credential file can
+> exist but hold an expired session (Instagram is the usual suspect). Health
+> performs real session validation; if it says `session_valid: false`,
+> re-run that platform's connect/auth command before posting.
 
 ## Usage
 
@@ -164,7 +178,8 @@ This shows:
 
 ```bash
 # Check for new videos and post them
-xpst run
+xpst run --dry-run   # preview what would be posted without touching accounts
+xpst run             # actually check and post
 ```
 
 ### Watch Mode (Recommended)
