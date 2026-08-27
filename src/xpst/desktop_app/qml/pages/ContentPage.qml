@@ -2024,6 +2024,64 @@ Page {
                                     visible: text.length > 0
                                 }
 
+                                // Engagement metrics (views/likes/comments)
+                                RowLayout {
+                                    spacing: theme.spacingLg
+                                    visible: (modelData.views || 0) + (modelData.likes || 0) + (modelData.comments || 0) > 0
+
+                                    RowLayout {
+                                        spacing: 4
+                                        Text {
+                                            text: Icons.eye
+                                            font.family: theme.iconFontFamily
+                                            font.pixelSize: 11
+                                            color: theme.textMuted
+                                        }
+                                        Text {
+                                            text: contentPage.compactNumber(modelData.views)
+                                            font.pixelSize: 11
+                                            font.weight: Font.DemiBold
+                                            color: theme.textSecondary
+                                        }
+                                        Accessible.role: Accessible.StaticText
+                                        Accessible.name: (modelData.views || 0) + " views"
+                                    }
+                                    RowLayout {
+                                        spacing: 4
+                                        Text {
+                                            text: Icons.heart
+                                            font.family: theme.iconFontFamily
+                                            font.pixelSize: 11
+                                            color: theme.textMuted
+                                        }
+                                        Text {
+                                            text: contentPage.compactNumber(modelData.likes)
+                                            font.pixelSize: 11
+                                            font.weight: Font.DemiBold
+                                            color: theme.textSecondary
+                                        }
+                                        Accessible.role: Accessible.StaticText
+                                        Accessible.name: (modelData.likes || 0) + " likes"
+                                    }
+                                    RowLayout {
+                                        spacing: 4
+                                        Text {
+                                            text: Icons.message
+                                            font.family: theme.iconFontFamily
+                                            font.pixelSize: 11
+                                            color: theme.textMuted
+                                        }
+                                        Text {
+                                            text: contentPage.compactNumber(modelData.comments)
+                                            font.pixelSize: 11
+                                            font.weight: Font.DemiBold
+                                            color: theme.textSecondary
+                                        }
+                                        Accessible.role: Accessible.StaticText
+                                        Accessible.name: (modelData.comments || 0) + " comments"
+                                    }
+                                }
+
                                 RowLayout {
                                     spacing: theme.spacingSm
                                     Rectangle {
@@ -2116,6 +2174,32 @@ Page {
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: contentPage.openSmartDeleteDialog(modelData)
                                             Accessible.name: "Delete post"
+                                            Accessible.role: Accessible.Button
+                                        }
+                                    }
+
+                                    // Watch / play button (in-app playback)
+                                    Rectangle {
+                                        width: watchLabel.implicitWidth + theme.spacingMd
+                                        height: 24
+                                        radius: theme.radiusSm
+                                        color: watchMouseArea.containsMouse ? theme.accentHover : theme.accent
+                                        Behavior on color { ColorAnimation { duration: 120 } }
+                                        Text {
+                                            id: watchLabel
+                                            anchors.centerIn: parent
+                                            text: "▶ Watch"
+                                            font.pixelSize: 10
+                                            font.weight: Font.DemiBold
+                                            color: "#ffffff"
+                                        }
+                                        MouseArea {
+                                            id: watchMouseArea
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: contentPage.openPlayback(modelData)
+                                            Accessible.name: "Play video in xPST"
                                             Accessible.role: Accessible.Button
                                         }
                                     }
@@ -2260,5 +2344,11 @@ Page {
                 }
             }
         }
+    }
+
+    // ── In-app playback overlay (registered component; degrades to an
+    // open-in-browser fallback when QtWebEngine is unavailable) ──────
+    PlaybackOverlay {
+        id: playbackOverlay
     }
 }

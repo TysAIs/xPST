@@ -22,6 +22,11 @@ Page {
     property int formRecurrence: 0          // 0=One-time, 1=Daily, 2=Weekly
     property string formError: ""
 
+    // Visible upload queue: next-up scheduled posts + pending local videos
+    // (driven by controller.getQueueData, which reads ScheduleManager +
+    // state.json — see the backend "Video lineup & queue" section).
+    property var queueData: ({ scheduled: [], pending: [], scheduled_count: 0, pending_count: 0 })
+
     function reloadScheduledPosts() {
         if (typeof controller === "undefined" || !controller.listScheduledPosts) return
         try {
@@ -34,7 +39,29 @@ Page {
         }
     }
 
-    Component.onCompleted: reloadScheduledPosts()
+    function reloadQueue() {
+        if (typeof controller === "undefined" || !controller.getQueueData) return
+        try {
+            var raw = controller.getQueueData()
+            var parsed = JSON.parse(raw)
+            if (parsed.ok) {
+                queueData = {
+                    scheduled: parsed.scheduled || [],
+                    pending: parsed.pending || [],
+                    scheduled_count: parsed.scheduled_count || 0,
+                    pending_count: parsed.pending_count || 0
+                }
+            }
+        } catch(e) {
+            console.error("SchedulePage: failed to load queue", e)
+            queueData = ({ scheduled: [], pending: [], scheduled_count: 0, pending_count: 0 })
+        }
+    }
+
+    Component.onCompleted: {
+        reloadScheduledPosts()
+        reloadQueue()
+    }
 
     // Helper: format a schedule entry's scheduled_time for display
     function formatScheduleTime(ts) {
@@ -333,6 +360,163 @@ Page {
                     text: "View your posting schedule"
                     font.pixelSize: 13
                     color: theme.textSecondary
+                }
+            }
+
+            // ── Upcoming queue (next-up posts) ──────────────────────
+            Rectangle {
+                id: queueCard
+                Layout.fillWidth: true
+                Layout.preferredHeight: queueCol.implicitHeight + theme.spacingXxl
+                radius: theme.radiusLg
+                color: theme.surfaceCard
+
+                ColumnLayout {
+                    id: queueCol
+                    anchors.fill: parent
+                    anchors.margins: theme.pageMargin
+                    spacing: theme.spacingMd
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: theme.spacingMd
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Text {
+                                text: "Upcoming Queue"
+                                font.pixelSize: 16
+                                font.weight: Font.DemiBold
+                                color: theme.textPrimary
+                                Accessible.name: "Upcoming queue heading"
+                                Accessible.role: Accessible.Heading
+                            }
+                            Text {
+                                text: "What xPST will post next"
+                                font.pixelSize: 12
+                                color: theme.textSecondary
+                            }
+                        }
+
+                        Rectangle {
+                            width: refreshQueueLabel.implicitWidth + 24
+                            height: 30
+                            radius: theme.radiusSm
+                            color: refreshQueueMouse.containsMouse ? theme.surfaceAlt : "transparent"
+                            Text {
+                                id: refreshQueueLabel
+                                anchors.centerIn: parent
+                                text: "↻ Refresh"
+                                font.pixelSize: 11
+                                color: theme.textSecondary
+                            }
+                            MouseArea {
+                                id: refreshQueueMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: schedulePage.reloadQueue()
+                                Accessible.name: "Refresh upload queue"
+                                Accessible.role: Accessible.Button
+                            }
+                        }
+                    }
+
+                    // Next-up scheduled entries (nearest time first)
+                    Repeater {
+                        model: schedulePage.queueData.scheduled
+                        delegate: Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 52
+                            radius: theme.radiusSm
+                            color: theme.surfaceAlt
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: theme.spacingSm
+                                spacing: theme.spacingMd
+
+                                Rectangle {
+                                    width: 8; height: 8; radius: 4
+                                    color: modelData.due ? theme.warning : theme.accent
+                                }
+
+                                ColumnLayout {
+                                    spacing: 2
+                                    Layout.fillWidth: true
+                                    Text {
+                                        text: {
+                                            var vp = modelData.video_path || ""
+                                            return vp ? vp.split("/").pop() : (modelData.caption || "Untitled")
+                                        }
+                                        font.pixelSize: 12
+                                        font.weight: Font.DemiBold
+                                        color: theme.textPrimary
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                    Text {
+                                        text: ((modelData.platforms || []).join(", ") || "all platforms") +
+                                              " / " + schedulePage.formatScheduleTime(modelData.scheduled_time || "")
+                                        font.pixelSize: 10
+                                        color: theme.textMuted
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                }
+
+                                Text {
+                                    text: modelData.due ? "DUE" : "queued"
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    color: modelData.due ? theme.warning : theme.accent
+                                }
+                            }
+                        }
+                    }
+
+                    // Pending source videos (downloaded, not yet posted)
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: theme.spacingSm
+                        visible: schedulePage.queueData.pending_count > 0
+
+                        Rectangle {
+                            width: 8; height: 8; radius: 4
+                            color: theme.textMuted
+                        }
+                        Text {
+                            text: schedulePage.queueData.pending_count + " video(s) downloaded and not posted yet"
+                            font.pixelSize: 11
+                            color: theme.textSecondary
+                            Layout.fillWidth: true
+                        }
+                        Text {
+                            text: "Run →"
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                            color: theme.accent
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (typeof controller !== "undefined" && controller.runPost)
+                                        controller.runPost()
+                                    schedulePage.reloadQueue()
+                                }
+                            }
+                        }
+                    }
+
+                    // Empty queue state
+                    Text {
+                        text: "Queue is empty — schedule a post or run the engine to fill it."
+                        font.pixelSize: 12
+                        color: theme.textMuted
+                        visible: schedulePage.queueData.scheduled_count === 0 && schedulePage.queueData.pending_count === 0
+                        Layout.alignment: Qt.AlignHCenter
+                    }
                 }
             }
 

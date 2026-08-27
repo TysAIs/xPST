@@ -25,6 +25,10 @@ Page {
     }
     property var readinessData: ({ ready: true, summary: "", blocking: [], warnings: [] })
 
+    // Upload queue summary (next scheduled post + pending count) shown in
+    // the "Next up" card. Populated from controller.getQueueData.
+    property var queueData: ({ scheduled: [], pending: [], scheduled_count: 0, pending_count: 0 })
+
     // True until the first batch of controller data has arrived. Drives the
     // loading spinner overlay so the page never looks empty while refreshing.
     property bool dataLoaded: false
@@ -33,7 +37,18 @@ Page {
         if (typeof controller !== "undefined") {
             controller.refreshData()
             dashboardPage.loadReadiness()
+            dashboardPage.loadQueue()
         }
+    }
+
+    function loadQueue() {
+        if (typeof controller === "undefined" || !controller.getQueueData) return
+        try {
+            var raw = controller.getQueueData()
+            var parsed = JSON.parse(raw)
+            if (parsed.ok)
+                dashboardPage.queueData = parsed
+        } catch(e) { console.error('DashboardPage: failed to load queue', e) }
     }
 
     Connections {
@@ -45,6 +60,7 @@ Page {
                 dashboardPage.loadReadiness()
             } catch(e) { console.error('DashboardPage: onDataChanged failed to update data', e) }
             dashboardPage.dataLoaded = true
+            dashboardPage.loadQueue()
         }
     }
 
@@ -329,6 +345,95 @@ Page {
                                 color: theme.textPrimary
                             }
                         }
+                    }
+                }
+            }
+
+            // Next up (upload queue summary)
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: nextUpCol.implicitHeight + theme.spacingXxl
+                radius: theme.radiusLg
+                color: theme.surfaceCard
+                border.color: theme.accentMuted
+                border.width: 1
+                visible: dashboardPage.queueData.scheduled_count > 0 || dashboardPage.queueData.pending_count > 0
+
+                ColumnLayout {
+                    id: nextUpCol
+                    anchors.fill: parent
+                    anchors.margins: theme.pageMargin
+                    spacing: theme.spacingMd
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: theme.spacingMd
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+
+                            Text {
+                                text: "Next Up"
+                                font.pixelSize: 15
+                                font.weight: Font.DemiBold
+                                color: theme.textPrimary
+                                Accessible.name: "Next up in the upload queue"
+                                Accessible.role: Accessible.Heading
+                            }
+
+                            // Nearest next scheduled post
+                            Text {
+                                text: {
+                                    var sch = dashboardPage.queueData.scheduled || []
+                                    if (sch.length > 0) {
+                                        var s = sch[0]
+                                        var name = (s.video_path || "").split("/").pop() || s.caption || "Scheduled post"
+                                        return name + " — " + (s.due ? "due now" : "queued")
+                                    }
+                                    if (dashboardPage.queueData.pending_count > 0)
+                                        return dashboardPage.queueData.pending_count + " video(s) downloaded, not posted"
+                                    return "Queue is empty"
+                                }
+                                font.pixelSize: 12
+                                color: theme.textSecondary
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+                        }
+
+                        Rectangle {
+                            width: nextUpLabel.implicitWidth + 28
+                            height: 34
+                            radius: theme.radiusMd
+                            color: theme.accent
+                            Text {
+                                id: nextUpLabel
+                                anchors.centerIn: parent
+                                text: "View queue"
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#ffffff"
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (typeof root !== "undefined" && root.navigateTo)
+                                        root.navigateTo("schedule")
+                                }
+                                Accessible.name: "Open the schedule and queue"
+                                Accessible.role: Accessible.Button
+                            }
+                        }
+                    }
+
+                    // Full queue summary line
+                    Text {
+                        text: dashboardPage.queueData.scheduled_count + " scheduled · " +
+                              dashboardPage.queueData.pending_count + " pending"
+                        font.pixelSize: 11
+                        color: theme.textMuted
                     }
                 }
             }
