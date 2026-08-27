@@ -323,3 +323,87 @@ class AnalyticsStore:
         else:
             data["platforms"] = []
         return data
+
+    # ── Video lineup (desktop Library / dashboard listing) ─────────────
+
+    @staticmethod
+    def post_links(platform: str, post_id: str) -> dict[str, str]:
+        """Public/embed/thumbnail links for a tracked platform post.
+
+        Returns only fields that are meaningfully derivable from the
+        platform post id — YouTube is the only provider with a reliable
+        embed + thumbnail URL, so X/Instagram/TikTok/Threads return
+        empty ``embed_url``/``thumbnail_url``. Callers must fall back to
+        open-in-browser (or a local cached thumbnail) for those.
+        """
+        pid = str(post_id or "").strip()
+        plat = str(platform or "").lower()
+        if not pid:
+            return {"url": "", "embed_url": "", "thumbnail_url": ""}
+        if plat == "youtube":
+            return {
+                "url": f"https://www.youtube.com/watch?v={pid}",
+                "embed_url": f"https://www.youtube.com/embed/{pid}",
+                "thumbnail_url": f"https://i.ytimg.com/vi/{pid}/hqdefault.jpg",
+            }
+        if plat == "x":
+            return {
+                "url": f"https://x.com/i/status/{pid}",
+                "embed_url": "",
+                "thumbnail_url": "",
+            }
+        if plat == "instagram":
+            return {
+                "url": f"https://www.instagram.com/p/{pid}/",
+                "embed_url": "",
+                "thumbnail_url": "",
+            }
+        if plat == "tiktok":
+            return {
+                "url": f"https://www.tiktok.com/video/{pid}",
+                "embed_url": "",
+                "thumbnail_url": "",
+            }
+        if plat == "threads":
+            return {
+                "url": f"https://www.threads.net/post/{pid}",
+                "embed_url": "",
+                "thumbnail_url": "",
+            }
+        return {"url": "", "embed_url": "", "thumbnail_url": ""}
+
+    def get_lineup(self) -> list[dict[str, Any]]:
+        """Latest snapshot per tracked post across every platform.
+
+        This is the read model behind the desktop video lineup: it lists
+        *every* video the analytics collector has ever recorded metrics
+        for (not just today's sessions), newest snapshot first. Each
+        entry carries the cleaned per-post metrics plus derived
+        url/embed_url/thumbnail_url links (see ``post_links``).
+
+        Returns:
+            List of dicts with: platform, post_id, captured_at, views,
+            likes, comments, shares, reposts, saves, url, embed_url,
+            thumbnail_url. Sorted newest-first by captured_at.
+        """
+        rows = self.latest()
+        lineup: list[dict[str, Any]] = []
+        for row in rows:
+            entry: dict[str, Any] = {
+                key: row.get(key)
+                for key in (
+                    "platform",
+                    "post_id",
+                    "captured_at",
+                    "views",
+                    "likes",
+                    "comments",
+                    "shares",
+                    "reposts",
+                    "saves",
+                )
+            }
+            entry.update(self.post_links(str(entry.get("platform") or ""), str(entry.get("post_id") or "")))
+            lineup.append(entry)
+        lineup.sort(key=lambda e: str(e.get("captured_at") or ""), reverse=True)
+        return lineup

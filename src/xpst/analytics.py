@@ -80,6 +80,13 @@ def platform_metric_capability(platform: str) -> dict[str, Any]:
     }
 
 
+# How long a verified YouTube ownership set stays trusted before it is
+# re-fetched. Verifying requires channels.list + a fully paginated
+# playlistItems walk, so it is cached much longer than metric data.
+OWNED_IDS_TTL = 3600
+
+
+
 class PlatformMetrics:
     """Represents metrics for a single post on a single platform."""
 
@@ -149,6 +156,17 @@ class AnalyticsCollector:
         from xpst.analytics_store import AnalyticsStore
 
         self.store = AnalyticsStore(Path(self.config_dir) / "analytics.db")
+        # YouTube ownership state: the set of video ids on the authenticated
+        # channel's uploads playlist. None means "not yet verified or the
+        # verification failed"; callers fail closed rather than persisting
+        # unverified ids (root-cause hardening for skewed dashboard
+        # aggregates caused by foreign/test-post ids entering snapshots).
+        self._owned_yt_ids: set[str] | None = None
+        self._owned_yt_ids_ts: float = 0
+        # Warned-foreign dedup: log at most ONE warning per unowned post id
+        # per process instead of spamming every collection run.
+        self._warned_foreign: set[str] = set()
+        self._warned_youtube_unverified = False
 
     def _load_config(self) -> None:
         """Load xPST config.yaml."""
@@ -160,6 +178,209 @@ class AnalyticsCollector:
                 self._config = yaml.safe_load(f) or {}
         else:
             self._config = {}
+
+    # ── Ownership verification ──────────────────────────────────────────
+    # Root-cause hardening for skewed analytics: every post id that enters
+    # metric_snapshots must be attributable to Tyler's own account before
+    # it is persisted. YouTube is verified against the authenticated
+    # channel's uploads playlist (authoritative, covers uploads made
+    # outside xPST too); X/Instagram are checked against state.json, which
+    # xPST itself writes at post time (source of truth for identity).
+
+    def _youtube_token_path(self) -> Path | None:
+        """Resolve the YouTube OAuth token file, or None when absent.
+
+        Prefers the default credentials dir, then honors a config-specified
+        ``token_file`` override. Shared by the collector, channel discovery
+        and the ownership check so all three agree on the credential.
+        """
+        token_path = Path(self.config_dir) / "credentials" / "youtube_token.json"
+        if not token_path.exists():
+            token_path = Path(
+                self._config.get("accounts", {}).get("youtube", {}).get(
+                    "token_file", str(token_path)
+                )
+            ).expanduser()
+        if not token_path.exists():
+            return None
+        return token_path
+
+    def _get_owned_youtube_ids(self) -> set[str] | None:
+        """Set of video ids owned by the authenticated YouTube channel.
+
+        Ownership is verified against the channel's OWN uploads playlist:
+        ``channels.list(mine=True)`` → ``contentDetails.relatedPlaylists.uploads``
+        → ``playlistItems`` (fully paginated, not capped at recent uploads).
+        This is the one authoritative source: ids recorded in state.json can
+        go stale when test posts are deleted from the channel, and videos
+        uploaded outside xPST must still be covered.
+
+        Returns:
+            Verified id set (possibly empty for a channel with no uploads),
+            or ``None`` when ownership cannot be determined (no token,
+            network/auth error). ``None`` is never cached, so a transient
+            failure retries on the next call while callers fail closed.
+        """
+        now = time.time()
+        if self._owned_yt_ids is not None and (now - self._owned_yt_ids_ts) < OWNED_IDS_TTL:
+            return self._owned_yt_ids
+        try:
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
+
+            token_path = self._youtube_token_path()
+            if token_path is None:
+                return None
+
+            creds = Credentials.from_authorized_user_file(str(token_path))
+            service = build("youtube", "v3", credentials=creds)
+
+            channels = service.channels().list(part="contentDetails", mine=True).execute()
+            owned: set[str] = set()
+            if not channels.get("items"):
+                # Authenticated but no channel attached → the account owns
+                # nothing, so every id fails the ownership check.
+                logger.debug("YouTube ownership check: no channel on this account")
+            else:
+                uploads = channels["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+                page_token: str | None = None
+                while True:
+                    resp = (
+                        service.playlistItems()
+                        .list(
+                            part="contentDetails",
+                            playlistId=uploads,
+                            maxResults=50,
+                            pageToken=page_token,
+                        )
+                        .execute()
+                    )
+                    for item in resp.get("items", []):
+                        owned.add(item["contentDetails"]["videoId"])
+                    page_token = resp.get("nextPageToken")
+                    if not page_token:
+                        break
+
+            self._owned_yt_ids = owned
+            self._owned_yt_ids_ts = now
+            logger.debug(
+                "YouTube ownership verified: %d uploads on the channel playlist", len(owned)
+            )
+            return owned
+        except Exception as e:  # network / auth / quota → fail closed
+            logger.warning("YouTube ownership check failed: %s", e)
+            return None
+
+    def _state_platform_ids(self, platform: str) -> set[str]:
+        """Post ids for a platform recorded in xPST's own state.json.
+
+        state.json is written by xPST at post time, so on platforms without
+        a channel-discovery API (X, Instagram) it is the source of truth for
+        identity: an id that never appears there was never posted by us.
+
+        Returns:
+            Set of recorded post ids (empty when the file is absent or the
+            platform has never been posted to).
+        """
+        state_path = Path(self.config_dir) / "state.json"
+        if not state_path.exists():
+            return set()
+        try:
+            with open(state_path) as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return set()
+
+        ids: set[str] = set()
+        for _video_id, data in state.get("posted_videos", {}).items():
+            info = (data.get("posted_to") or {}).get(platform) or {}
+            # Production state stores the platform id under "id"; legacy
+            # fixtures used "post_id".
+            post_id = info.get("id") or info.get("post_id")
+            if post_id:
+                ids.add(str(post_id))
+        return ids
+
+    def _warn_once_foreign(self, platform: str, post_id: str, reason: str) -> None:
+        """Log one warning per unowned post id, never spamming repeats.
+
+        ``post_id`` is logged once per process for a given (platform, id);
+        subsequent collections silently skip the id.
+        """
+        key = f"{platform}:{post_id}"
+        if key in self._warned_foreign:
+            return
+        self._warned_foreign.add(key)
+        logger.warning(
+            "Skipping %s analytics for unowned post %s (%s)", platform, post_id, reason
+        )
+
+    def _filter_owned_snapshots(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Drop snapshot rows whose post id is not attributable to our account.
+
+        Enforced at the persistence boundary (in addition to the per-platform
+        collectors) so no foreign id can ever enter ``metric_snapshots``,
+        even if a collector is bypassed or mocked.
+
+        - youtube: id must be on the authenticated channel's uploads
+          playlist; when ownership cannot be verified the row is dropped
+          (fail closed — unverified ids are exactly the skew source).
+        - x/instagram: id must be recorded in state.json (written by xPST at
+          post time). Only enforced when state holds at least one recorded id
+          for the platform, so a fresh install with no post history keeps
+          working.
+        - everything else (tiktok/threads): passed through.
+        """
+        yt_owned: set[str] | None = None
+        yt_checked = False
+        state_cache: dict[str, set[str] | None] = {}
+
+        def recorded_ids(platform: str) -> set[str] | None:
+            if platform not in state_cache:
+                ids = self._state_platform_ids(platform)
+                state_cache[platform] = ids if ids else None
+            return state_cache[platform]
+
+        filtered: list[dict[str, Any]] = []
+        for row in rows:
+            platform = row.get("platform")
+            post_id = row.get("post_id")
+            if not platform or not post_id:
+                continue
+            if platform == "youtube":
+                if not yt_checked:
+                    yt_owned = self._get_owned_youtube_ids()
+                    yt_checked = True
+                if yt_owned is None:
+                    if not self._warned_youtube_unverified:
+                        self._warned_youtube_unverified = True
+                        logger.warning(
+                            "YouTube ownership could not be verified; dropping %d unverifiable "
+                            "snapshot(s) this round (fail closed)",
+                            sum(1 for r in rows if r.get("platform") == "youtube" and r.get("post_id")),
+                        )
+                    continue
+                if str(post_id) in yt_owned:
+                    filtered.append(row)
+                else:
+                    self._warn_once_foreign(
+                        "youtube",
+                        str(post_id),
+                        "video is not on the authenticated channel's uploads playlist",
+                    )
+            elif platform in ("x", "instagram"):
+                allowed = recorded_ids(str(platform))
+                if allowed is not None and str(post_id) not in allowed:
+                    self._warn_once_foreign(
+                        str(platform),
+                        str(post_id),
+                        f"post id not recorded in xPST state.json for {platform}",
+                    )
+                else:
+                    filtered.append(row)
+            else:
+                filtered.append(row)
+        return filtered
 
     def _is_cache_valid(self) -> bool:
         """Check if cached data is still within TTL."""
@@ -305,7 +526,13 @@ class AnalyticsCollector:
         self._cache = data
         self._cache_time = time.time()
 
-        # Persist snapshots (append-only; failures never block collection)
+        # Persist snapshots (append-only; failures never block collection).
+        # Ownership gate at the persistence boundary: a foreign post id
+        # (stale test post, video uploaded by someone else's channel) must
+        # never enter metric_snapshots — that was the root cause of the
+        # skewed views/likes/comments aggregates. The per-platform
+        # collectors already filter; this second gate keeps the invariant
+        # even if a collector is bypassed or mocked.
         try:
             rows = [
                 {"platform": platform, "post_id": post_id, **metrics}
@@ -314,7 +541,7 @@ class AnalyticsCollector:
                 if isinstance(metrics, dict)
             ]
             if rows:
-                self.store.record_snapshots(rows)
+                self.store.record_snapshots(self._filter_owned_snapshots(rows))
         except Exception as e:
             logger.warning(f"Analytics persistence failed: {e}")
 
@@ -346,22 +573,34 @@ class AnalyticsCollector:
         return {m["post_id"]: m for m in metrics_list}
 
     async def _collect_youtube(self, video_ids: list[str]) -> list[dict]:
-        """Fetch YouTube metrics via Data API v3."""
+        """Fetch YouTube metrics via Data API v3.
+
+        Ownership gate: only videos on the authenticated channel's uploads
+        playlist are returned. Foreign ids (stale test posts, other
+        channels' videos) are skipped with one warning per id. When
+        ownership cannot be verified we fail closed and return nothing,
+        so unverified metrics can never enter the cache or snapshots.
+        """
+        if not video_ids:
+            return []
         try:
             from google.oauth2.credentials import Credentials
             from googleapiclient.discovery import build
 
-            token_path = Path(self.config_dir) / "credentials" / "youtube_token.json"
-            if not token_path.exists():
-                # Try config-specified path
-                token_path = Path(
-                    self._config.get("accounts", {}).get("youtube", {}).get(
-                        "token_file", "~/.xpst/credentials/youtube_token.json"
-                    )
-                ).expanduser()
-
-            if not token_path.exists():
+            token_path = self._youtube_token_path()
+            if token_path is None:
                 logger.debug("YouTube token not found, skipping YouTube analytics")
+                return []
+
+            owned = self._get_owned_youtube_ids()
+            if owned is None:
+                if not self._warned_youtube_unverified:
+                    self._warned_youtube_unverified = True
+                    logger.warning(
+                        "YouTube ownership could not be verified; skipping %d requested video(s) "
+                        "this round (fail closed)",
+                        len(video_ids),
+                    )
                 return []
 
             creds = Credentials.from_authorized_user_file(str(token_path))
@@ -376,10 +615,18 @@ class AnalyticsCollector:
                     .execute()
                 )
                 for item in resp.get("items", []):
+                    video_id = item["id"]
+                    if video_id not in owned:
+                        self._warn_once_foreign(
+                            "youtube",
+                            video_id,
+                            "video is not on the authenticated channel's uploads playlist",
+                        )
+                        continue
                     stats = item.get("statistics", {})
                     results.append({
                         "platform": "youtube",
-                        "post_id": item["id"],
+                        "post_id": video_id,
                         "views": int(stats.get("viewCount", 0)),
                         "likes": int(stats.get("likeCount", 0)),
                         "comments": int(stats.get("commentCount", 0)),
@@ -423,7 +670,18 @@ class AnalyticsCollector:
                 client.load_settings(str(session_path))
 
             results = []
+            # Identity gate: only media ids xPST recorded at post time in
+            # state.json are ours (enforced only when state has evidence —
+            # empty state means nothing posted yet, not that ids are foreign).
+            state_ids = self._state_platform_ids("instagram")
             for media_id in media_ids:
+                if state_ids and str(media_id) not in state_ids:
+                    self._warn_once_foreign(
+                        "instagram",
+                        str(media_id),
+                        "media id is not recorded in xPST state.json",
+                    )
+                    continue
                 try:
                     media_pk = int(media_id) if str(media_id).isdigit() else media_id
 
@@ -513,8 +771,19 @@ class AnalyticsCollector:
             client = twikit.Client("en-US")
             client.load_cookies(str(cookies_path))
 
+            # Identity gate: only tweet ids xPST recorded at post time in
+            # state.json are ours. Enforced only when state has at least one
+            # recorded id — an empty state means "nothing posted yet", not
+            # "everything is foreign", so fresh installs keep working.
+            state_ids = self._state_platform_ids("x")
+
             results = []
             for tweet_id in tweet_ids:
+                if state_ids and str(tweet_id) not in state_ids:
+                    self._warn_once_foreign(
+                        "x", str(tweet_id), "tweet id is not recorded in xPST state.json"
+                    )
+                    continue
                 try:
                     tweet = await client.get_tweet_by_id(tweet_id)
                     results.append({
