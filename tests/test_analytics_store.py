@@ -88,6 +88,40 @@ class TestAnalyticsStore:
         assert store.snapshot_count() == 1
         assert store.latest("x")[0]["views"] == 2
 
+    def test_delete_youtube_snapshots_not_in(self, tmp_path):
+        """Purge removes ONLY youtube rows absent from a verified owned set
+        and never touches other platforms (identity there is state.json's)."""
+        store = _store(tmp_path)
+        store.record_snapshots([
+            {"platform": "youtube", "post_id": "owned1", "views": 1,
+             "timestamp": "2026-08-27T10:00:00+00:00"},
+            {"platform": "youtube", "post_id": "stale_foreign", "views": 999,
+             "timestamp": "2026-08-27T10:00:00+00:00"},
+            {"platform": "x", "post_id": "keep_x", "views": 2,
+             "timestamp": "2026-08-27T10:00:00+00:00"},
+            {"platform": "instagram", "post_id": "keep_ig", "views": 3,
+             "timestamp": "2026-08-27T10:00:00+00:00"},
+        ])
+        deleted = store.delete_youtube_snapshots_not_in({"owned1"})
+        assert deleted == 1
+        assert {str(r["post_id"]) for r in store.latest("youtube")} == {"owned1"}
+        assert {str(r["post_id"]) for r in store.latest("x")} == {"keep_x"}
+        assert {str(r["post_id"]) for r in store.latest("instagram")} == {"keep_ig"}
+
+    def test_delete_youtube_snapshots_not_in_empty_owned_set(self, tmp_path):
+        """An empty verified owned set (channel owns nothing) removes every
+        youtube row — ownership was positively verified, so none are ours."""
+        store = _store(tmp_path)
+        store.record_snapshots([
+            {"platform": "youtube", "post_id": "a", "views": 1,
+             "timestamp": "2026-08-27T10:00:00+00:00"},
+            {"platform": "x", "post_id": "b", "views": 2,
+             "timestamp": "2026-08-27T10:00:00+00:00"},
+        ])
+        assert store.delete_youtube_snapshots_not_in(set()) == 1
+        assert store.latest("youtube") == []
+        assert {str(r["post_id"]) for r in store.latest("x")} == {"b"}
+
 
 class TestCollectorPersistence:
     def test_collect_all_records_snapshots(self, tmp_path):
