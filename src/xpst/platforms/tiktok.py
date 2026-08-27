@@ -16,12 +16,20 @@ Upload specs:
 Docs: https://developers.tiktok.com/doc/content-posting-api
 """
 
+import time
 from pathlib import Path
 
 import httpx
 
 from xpst.config import XPSTConfig
-from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
+from xpst.platforms.base import (
+    DeleteOutcome,
+    DeleteResult,
+    PlatformHealth,
+    PlatformRegistry,
+    PlatformUploader,
+    UploadResult,
+)
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
 
@@ -422,23 +430,145 @@ class TikTokUploader(PlatformUploader):
                 error=f"Health check failed: {str(e)[:200]}",
             )
 
-    async def delete(self, post_id: str) -> bool:
-        """Delete a TikTok post by publish_id.
+    async def delete(
+        self,
+        post_id: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """Delete a TikTok post via the best-effort web-session fallback.
 
-        Note: TikTok's Content Posting API does not expose a delete endpoint.
-        This is a best-effort no-op that logs a warning.
+        The TikTok Content Posting API has no delete endpoint (verified, Aug
+        2026), so deletion uses an authenticated ``DELETE`` against the
+        www.tiktok.com web endpoint with the cookie jar we already export for
+        the source side (explicit ``tiktok.cookies_file``, else the
+        CDP-extracted Netscape jar at ``<config_dir>/credentials/
+        tiktok_cookies.txt``).
+
+        On success (HTTP 200 with ``code == 0``) the post is gone and state is
+        marked ``deleted='via-web'``. On any failure the result is ``pending``
+        so the UI can surface the share URL for one-tap manual removal. The
+        adapter contract (``DeleteResult``) stays stable so an official API
+        delete endpoint can be wired here later without any UI change.
 
         Args:
-            post_id: The publish_id of the post to delete.
+            post_id: The post/publish id of the TikTok video to delete.
+            soft: Ignored — TikTok deletes are always hard.
+            visibility: Ignored — TikTok has no soft delete.
 
         Returns:
-            False always — deletion must be done manually in the TikTok app.
+            DeleteResult with outcome DELETED (via-web) or PENDING.
         """
-        logger.warning(
-            "TikTok Content Posting API does not support programmatic deletion "
-            "(post_id=%s). Delete manually in the TikTok app.", post_id
+        cookies = self._load_tiktok_web_cookies()
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.tiktok.com/",
+        }
+        if cookies:
+            headers["Cookie"] = cookies
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.delete(
+                    "https://www.tiktok.com/api/post/item/delete/",
+                    params={"video_id": post_id},
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                code = data.get("code")
+                if code == 0:
+                    logger.info(f"Deleted TikTok post via web session (video_id={post_id})")
+                    return DeleteResult(
+                        outcome=DeleteOutcome.DELETED,
+                        platform=self.platform_name,
+                        post_id=post_id,
+                        detail="via-web",
+                    )
+                msg = str(data.get("msg") or data.get("message") or data)[:200]
+                logger.warning(
+                    f"TikTok web delete returned code={code} for {post_id}: {msg}"
+                )
+                return DeleteResult(
+                    outcome=DeleteOutcome.PENDING,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                    detail=f"web API code={code}: {msg}",
+                )
+        except Exception as e:
+            logger.error(f"Failed to delete TikTok post {post_id} via web session: {e}")
+            return DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail=str(e)[:200],
+            )
+
+    # ── Best-effort web-session cookie support ─────────────────────────────
+
+    def _tiktok_cookie_jar_path(self) -> Path | None:
+        """Locate an exported Netscape cookie jar for the TikTok web session.
+
+        Resolution order mirrors the source-side strategy (see
+        ``sources/tiktok.py::_build_base_command``): explicit
+        ``tiktok.cookies_file`` first, then the CDP-extracted default jar at
+        ``<config_dir>/credentials/tiktok_cookies.txt``.
+
+        Returns:
+            Path to an existing jar, or None if none is available.
+        """
+        explicit = getattr(self.config.tiktok, "cookies_file", None)
+        if explicit:
+            jar = Path(explicit).expanduser()
+            if jar.exists():
+                return jar
+        default_jar = (
+            Path(self.config.config_dir).expanduser() / "credentials" / "tiktok_cookies.txt"
         )
-        return False
+        if default_jar.exists():
+            return default_jar
+        return None
+
+    def _load_tiktok_web_cookies(self) -> str:
+        """Build a ``Cookie`` header value from the exported Netscape jar.
+
+        Only cookies scoped to tiktok.com domains are included; expired
+        cookies are skipped. Returns an empty string when no usable jar (or no
+        matching cookies) exists — the web delete then simply is more likely
+        to come back ``pending``.
+        """
+        jar = self._tiktok_cookie_jar_path()
+        if jar is None:
+            logger.debug("No TikTok cookie jar available for web-session delete")
+            return ""
+        try:
+            now = time.time()
+            pairs: list[str] = []
+            for line in jar.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 7:
+                    continue
+                domain, _inc_sub, _path, _sec, expires, name, value = parts[:7]
+                if not domain or name == "" or value == "":
+                    continue
+                if not (domain.rstrip(".").endswith("tiktok.com")):
+                    continue
+                if expires.strip().isdigit():
+                    exp = int(expires)
+                    if exp != 0 and exp < now:
+                        continue  # expired
+                pairs.append(f"{name}={value}")
+            return "; ".join(pairs)
+        except OSError as e:
+            logger.debug(f"Could not read TikTok cookie jar {jar}: {e}")
+            return ""
 
 
 PlatformRegistry.register("tiktok", TikTokUploader)

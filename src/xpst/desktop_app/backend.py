@@ -933,39 +933,50 @@ class AppController(QObject):
         def _run() -> None:
             try:
                 deleted_from_platform = False
+                outcome = "pending"
+                message = ""
 
-                # Try to delete from the actual platform via engine
+                # Try to delete from the actual platform via engine.
+                # The engine routes through the Phase-1.2 delete contract
+                # (DeleteResult) and owns all state updates (tombstones,
+                # visibility, delete_pending) — see engine.delete_post.
                 if self._ensure_engine():
                     try:
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
-                        deleted_from_platform = loop.run_until_complete(
+                        result = loop.run_until_complete(
                             self._engine.delete_post(post_id, platform)
                         )
                         loop.close()
+                        deleted_from_platform = result.ok
+                        outcome = result.outcome.value
+                        message = result.message
                     except Exception as exc:
                         logger.warning(
                             "Platform delete failed for %s/%s: %s",
                             post_id, platform, exc,
                         )
 
-                # Remove from local state regardless
-                posted = self._state._state.get("posted_videos", {})
-                if post_id in posted:
-                    posted_to = posted[post_id].get("posted_to", {})
-                    if platform in posted_to:
-                        del posted_to[platform]
-                        logger.info(
-                            "Removed %s/%s from state (platform_delete=%s)",
-                            post_id, platform, deleted_from_platform,
-                        )
+                # Remove from local state regardless ONLY when the engine did
+                # not handle state (e.g. engine unavailable). When the engine
+                # ran, the record was tombstoned/soft-hidden/marked pending there.
+                if self._ensure_engine() is False:
+                    posted = self._state._state.get("posted_videos", {})
+                    if post_id in posted:
+                        posted_to = posted[post_id].get("posted_to", {})
+                        if platform in posted_to:
+                            del posted_to[platform]
+                            logger.info(
+                                "Removed %s/%s from state (platform_delete=%s)",
+                                post_id, platform, deleted_from_platform,
+                            )
 
-                    # If no platforms left, remove the entire video entry
-                    if not posted_to:
-                        del posted[post_id]
-                        logger.info("Removed video entry %s (no platforms left)", post_id)
+                        # If no platforms left, remove the entire video entry
+                        if not posted_to:
+                            del posted[post_id]
+                            logger.info("Removed video entry %s (no platforms left)", post_id)
 
-                    self._state.save()
+                        self._state.save()
 
                 self.refreshData()
 
@@ -973,6 +984,8 @@ class AppController(QObject):
                     "ok": True,
                     "removed": f"{post_id}/{platform}",
                     "platform_deleted": deleted_from_platform,
+                    "outcome": outcome,
+                    "message": message,
                 }, default=str)
                 self.postComplete.emit(result)
             except Exception as exc:

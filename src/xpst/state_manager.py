@@ -73,19 +73,28 @@ class StateManager:
     # ── Video Tracking ──
 
     def is_posted(self, video_id: str, platform: str) -> bool:
-        """Check if video has been posted to a platform."""
+        """Check if video has been posted to a platform.
+
+        A hard-deleted post leaves a tombstone (``deleted: True``) so history
+        is kept, but it does NOT count as posted — the video can be re-posted.
+        """
         video = self._state["posted_videos"].get(video_id)
         if not video:
             return False
-        return platform in video.get("posted_to", {})
+        entry = video.get("posted_to", {}).get(platform)
+        if not entry:
+            return False
+        return not entry.get("deleted", False)
 
     def is_fully_cross_posted(self, video_id: str, platforms: list[str]) -> bool:
-        """Check if video has been posted to all target platforms."""
+        """Check if video has been posted to all target platforms (tombstones excluded)."""
         video = self._state["posted_videos"].get(video_id)
         if not video:
             return False
         posted_to = video.get("posted_to", {})
-        return all(p in posted_to for p in platforms)
+        return all(
+            p in posted_to and not posted_to[p].get("deleted", False) for p in platforms
+        )
 
     def add_posted_video(
         self,
@@ -229,6 +238,117 @@ class StateManager:
                     if content_hash and content_hash in state["content_hashes"]:
                         del state["content_hashes"][content_hash]
                     del state["posted_videos"][video_id]
+        return state
+
+    # ── Delete / unpublish state discipline (Phase-1.2 D5) ──
+
+    def _platform_entry(
+        self, state: dict[str, Any], video_id: str, platform: str
+    ) -> dict[str, Any] | None:
+        """Return the ``posted_to[platform]`` entry for a video, if any."""
+        video = state["posted_videos"].get(video_id)
+        if not video:
+            return None
+        return video.get("posted_to", {}).get(platform)
+
+    def record_delete_tombstone(
+        self,
+        video_id: str,
+        platform: str,
+        *,
+        reason: str = "hard_delete",
+        detail: str | None = None,
+    ) -> None:
+        """Mark a platform post as hard-deleted, keeping the row as a tombstone.
+
+        The entry keeps ``id``/``url``/``timestamp`` (so analytics can label the
+        row "removed from platform") and gains ``deleted``/``deleted_at``/
+        ``deleted_reason``. ``is_posted()`` excludes tombstones so the video
+        can be re-posted, and a later successful post overwrites the entry.
+        """
+        self._store.update(
+            lambda state: self._record_delete_tombstone_inner(state, video_id, platform, reason, detail)
+        )
+
+    def _record_delete_tombstone_inner(
+        self,
+        state: dict[str, Any],
+        video_id: str,
+        platform: str,
+        reason: str,
+        detail: str | None,
+    ) -> dict[str, Any]:
+        entry = self._platform_entry(state, video_id, platform)
+        if entry is None:
+            return state
+        entry["deleted"] = True
+        entry["deleted_at"] = _utc_now_iso()
+        entry["deleted_reason"] = reason
+        if detail:
+            entry["deleted_detail"] = detail
+        # A hard delete supersedes any earlier soft/pending markers.
+        entry.pop("delete_pending", None)
+        entry.pop("delete_pending_at", None)
+        entry.pop("visibility", None)
+        return state
+
+    def set_visibility(self, video_id: str, platform: str, visibility: str) -> None:
+        """Record a soft-hide (reversible unpublish) for a platform post.
+
+        Marks the target visibility (e.g. ``private``/``unlisted``) on the
+        existing entry. The post stays posted — metrics and URL are kept — and
+        ``is_posted()`` keeps returning True.
+        """
+        self._store.update(
+            lambda state: self._set_visibility_inner(state, video_id, platform, visibility)
+        )
+
+    def _set_visibility_inner(
+        self, state: dict[str, Any], video_id: str, platform: str, visibility: str
+    ) -> dict[str, Any]:
+        entry = self._platform_entry(state, video_id, platform)
+        if entry is None:
+            return state
+        entry["visibility"] = visibility
+        entry["soft_hidden"] = True
+        entry["soft_hidden_at"] = _utc_now_iso()
+        return state
+
+    def mark_delete_pending(
+        self,
+        video_id: str,
+        platform: str,
+        *,
+        reason: str = "pending",
+        detail: str | None = None,
+    ) -> None:
+        """Mark a platform post as delete-pending (confirmation outstanding).
+
+        The entry stays posted with all metrics/URL intact; the UI surfaces
+        ``delete_pending`` together with the share URL so the user can remove
+        the post manually in one tap.
+        """
+        self._store.update(
+            lambda state: self._mark_delete_pending_inner(state, video_id, platform, reason, detail)
+        )
+
+    def _mark_delete_pending_inner(
+        self,
+        state: dict[str, Any],
+        video_id: str,
+        platform: str,
+        reason: str,
+        detail: str | None,
+    ) -> dict[str, Any]:
+        entry = self._platform_entry(state, video_id, platform)
+        if entry is None:
+            return state
+        entry["delete_pending"] = True
+        entry["delete_pending_at"] = _utc_now_iso()
+        entry["delete_pending_reason"] = reason
+        if detail:
+            entry["delete_pending_detail"] = detail
+        entry["deleted"] = False
         return state
 
     # ── Content Hash Deduplication ──
