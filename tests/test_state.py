@@ -136,3 +136,50 @@ class TestStateManager:
         assert len(dlq) > 0
         assert dlq[0]["video_id"] == "video1"
         assert dlq[0]["platform"] == "x"
+
+    def test_get_last_wake_check_none_before_update(self, tmp_path):
+        """get_last_wake_check returns None when never recorded"""
+        state = StateManager(str(tmp_path))
+        assert state.get_last_wake_check() is None
+
+    def test_get_last_wake_check_roundtrip(self, tmp_path):
+        """update then read back the wake check timestamp as datetime"""
+        from datetime import datetime
+
+        state = StateManager(str(tmp_path))
+        state.update_last_wake_check()
+
+        last = state.get_last_wake_check()
+        assert isinstance(last, datetime)
+
+    def test_scheduler_needs_catch_up_no_crash(self, tmp_path):
+        """Scheduler catch-up heuristic works against the state manager.
+
+        Regression guard for the scheduler contract: the scheduler calls
+        engine.state.get_last_wake_check(); it must exist and return a
+        datetime after a wake check has been recorded (previously missing,
+        which broke watch-mode catch-up detection silently).
+        """
+        from datetime import datetime
+
+        from xpst.config import XPSTConfig
+        from xpst.scheduler import Scheduler
+
+        state = StateManager(str(tmp_path))
+        state.update_last_wake_check()
+
+        assert isinstance(state.get_last_wake_check(), datetime)
+
+        cfg = XPSTConfig.load()
+        cfg.config_dir = str(tmp_path)
+
+        class _FakeEngine:
+            state = None
+
+            async def check_and_post(self, **kwargs):  # type: ignore[no-untyped-def]
+                return []
+
+        _FakeEngine.state = state  # type: ignore[assignment]
+        sched = Scheduler(_FakeEngine(), cfg)
+        # Freshly recorded -> far below the 2x-interval catch-up threshold
+        assert sched._needs_catch_up() is False
