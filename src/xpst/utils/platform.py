@@ -73,17 +73,56 @@ def resolve_ffmpeg_path() -> str | None:
 
     Returns the path from ``XPST_FFMPEG_PATH`` when set and pointing at an
     existing file; otherwise falls back to ``shutil.which(get_ffmpeg_name())``.
-    Returns None when no ffmpeg binary can be found.
+    When PATH lookup fails (GUI-launched macOS apps get a minimal PATH that
+    misses /opt/homebrew/bin and ~/bin), common install locations are probed
+    directly. Returns None when no ffmpeg binary can be found.
     """
     env_path = os.environ.get("XPST_FFMPEG_PATH")
     if env_path and os.path.exists(env_path):
         return env_path
-    return shutil.which(get_ffmpeg_name())
+    found = shutil.which(get_ffmpeg_name())
+    if found:
+        return found
+    # GUI-launch fallback: probe well-known locations missed by the minimal
+    # PATH inside .app bundles (Finder/Spotlight launches don't source the
+    # user's shell profile).
+    home = Path.home()
+    candidates = [
+        home / "bin" / get_ffmpeg_name(),
+        Path("/opt/homebrew/bin") / get_ffmpeg_name(),
+        Path("/usr/local/bin") / get_ffmpeg_name(),
+        home / ".local" / "bin" / get_ffmpeg_name(),
+    ]
+    if sys.platform != "darwin":
+        candidates.append(Path("/usr/bin") / get_ffmpeg_name())
+    for cand in candidates:
+        try:
+            if cand.is_file() and os.access(cand, os.X_OK):
+                return str(cand)
+        except OSError:
+            continue
+    return None
 
 
 def resolve_ffprobe_path() -> str | None:
-    """Resolve the ffprobe binary path via PATH lookup (no env override)."""
-    return shutil.which(get_ffprobe_name())
+    """Resolve the ffprobe binary path.
+
+    Honors PATH first; when that fails (GUI-launched apps with a minimal
+    PATH) probes the same well-known locations as :func:`resolve_ffmpeg_path`.
+    """
+    found = shutil.which(get_ffprobe_name())
+    if found:
+        return found
+    home = Path.home()
+    for base in (home / "bin", Path("/opt/homebrew/bin"), Path("/usr/local/bin"),
+                 home / ".local" / "bin"):
+        cand = base / get_ffprobe_name()
+        try:
+            if cand.is_file() and os.access(cand, os.X_OK):
+                return str(cand)
+        except OSError:
+            continue
+    return None
 
 
 def get_ytdlp_fallback_path() -> Path:
