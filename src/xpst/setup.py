@@ -129,8 +129,8 @@ def install_yt_dlp() -> tuple[bool, str]:
             target = Path.home() / ".local" / "bin"
             target.mkdir(parents=True, exist_ok=True)
             url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
-            urllib.request.urlretrieve(url, target / "yt-dlp")  # noqa: S310 - fixed https URL
-            os.chmod(target / "yt-dlp", 0o755)
+            urllib.request.urlretrieve(url, target / "yt-dlp")  # nosec B310 - fixed https URL to official yt-dlp release
+            os.chmod(target / "yt-dlp", 0o755)  # nosec B103 - executable installer binary, world-executable by design
             version = check_yt_dlp()
             if version:
                 console.print(f"  ✅ yt-dlp {version} installed to {target}")
