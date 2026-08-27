@@ -477,7 +477,8 @@ def start_dashboard(
     Launches a FastAPI/uvicorn server with health, metrics, and state
     endpoints.  No NiceGUI or graphical UI required.
 
-    Install ``xpst[dashboard]`` for the NiceGUI web dashboard, or use
+    The dashboard is self-contained pure FastAPI (the ``dashboard`` extra is a
+    no-op since the NiceGUI fallback UI was removed). For a GUI, use
     ``xpst app`` for the native PySide6 desktop application.
 
     Args:

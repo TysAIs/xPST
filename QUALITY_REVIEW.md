@@ -18,10 +18,10 @@ upload/video/analytics pipeline. Every finding carries a `file:line` reference.
 | R2 | **HIGH** | In-process state reads are unsynchronized while writers mutate the same dict → `RuntimeError: dictionary changed size during iteration` / torn reads | `state_manager.py:75-88,257`, `state.py:39,250-256` |
 | Q1 | **CRITICAL** | `ContentPage.qml` has an unclosed function → the entire Library page fails to compile/load | `desktop_app/qml/pages/ContentPage.qml:185` |
 | Q2 | **CRITICAL** | `DetailPanel.qml` instantiates objects inside a bare `if {}` block (invalid QML) → page fails to load | `desktop_app/qml/pages/DetailPanel.qml:279,417,533` |
-| C1 | **HIGH** | Crash recovery only knows 3 of 6 platforms — tiktok/threads/linkedin incomplete uploads are invisible | `crash_recovery.py:56` |
+| C1 | **HIGH** | Crash recovery only knows 3 of 5 platforms — tiktok/threads incomplete uploads are invisible | `crash_recovery.py:56` |
 | M1 | **CRITICAL** | MCP server is fail-open: no auth, guardrails off by default; any local agent can post/delete/ingest | `mcp/server.py:604-641` |
 | M2 | **CRITICAL** | Path traversal in MCP `workspace` and `video_id` args | `knowledge/workspace.py:20-27,69-81` |
-| P1 | **CRITICAL** | TikTok/LinkedIn read the entire video into RAM (`f.read()`) → OOM on large files | `platforms/tiktok.py:216`, `platforms/linkedin.py:198` |
+| P1 | **CRITICAL** | TikTok read the entire video into RAM (`f.read()`) → OOM on large files | `platforms/tiktok.py:216` |
 | U1 | **HIGH** | The 300s ffmpeg encode runs synchronously on the asyncio event loop, freezing all concurrent uploads | `services/upload_service.py:259→651`, `utils/video.py:273` |
 | S1 | **HIGH** | `schedule.json` is written non-atomically and with no lock; a crash mid-write or a corrupt file silently wipes ALL scheduled posts | `schedule_manager.py:85-89,79-81` |
 
@@ -127,14 +127,14 @@ facade's cached `.state`/`._state` still point at the old one. `backfill` reads
 
 ## 2. Error recovery
 
-### C1 — HIGH — Crash recovery is blind to 3 of 6 platforms
+### C1 — HIGH — Crash recovery is blind to 3 of 5 platforms
 **`crash_recovery.py:56`**
 
 `find_incomplete_uploads` hardcodes `all_platforms = {"youtube", "x", "instagram"}`.
-The project now supports six platforms. A video posted to YouTube but missing on
-LinkedIn/Threads/TikTok is **not** reported as incomplete, so recovery never
+The project now supports five platforms. A video posted to YouTube but missing on
+Threads/TikTok is **not** reported as incomplete, so recovery never
 resumes it. This directly answers "does crash_recovery recover from all failure
-modes?" — no, it ignores half the platforms.
+modes?" — no, it ignores most of the platforms.
 
 - **Fix:** Derive `all_platforms` from the configured/enabled platform set.
 
@@ -186,8 +186,8 @@ bytes without re-probing integrity, so a truncated leftover can be uploaded as a
   refresh token being configured.
 - **P3 — HIGH:** Partial-upload server state is never aborted. If the API times out
   after a container/asset/media session is created but before publish
-  (`instagram.py:362→235`, `x.py:165-216`, `tiktok.py:175-237`,
-  `linkedin.py:159-210`), the orphaned resource is abandoned; retry starts a fresh
+  (`instagram.py:362→235`, `x.py:165-216`, `tiktok.py:175-237`), the orphaned
+  resource is abandoned; retry starts a fresh
   one.
 - **P4 — MEDIUM:** X thread/carousel (`x.py:449-461`) posts tweet-by-tweet; cookie
   expiry after the first tweet leaves a partially-published thread but the caller is
@@ -212,12 +212,12 @@ bytes without re-probing integrity, so a truncated leftover can be uploaded as a
 
 ## 3. Resource leaks
 
-- **P1 — CRITICAL:** `tiktok.py:216` and `linkedin.py:198` do
+- **P1 — CRITICAL:** `tiktok.py:216` does
   `video_bytes = f.read()` — the whole file into RAM (base validator allows up to
   1GB, `base.py:207`). httpx then often doubles it during encoding → OOM on a
   memory-constrained host. Instagram (`instagram.py:377`) and X (`x.py:189`) stream
-  correctly; TikTok/LinkedIn should too (pass the file object as `content=`).
-- **httpx.AsyncClient:** No leaks found — every instance across all six adapters
+  correctly; TikTok should too (pass the file object as `content=`).
+- **httpx.AsyncClient:** No leaks found — every instance across all five adapters
   uses `async with`. The two grep hits (`instagram.py:295,328`) are type-annotated
   function *parameters*, not constructions. ✅
 - **File handles:** all `open()` calls in `src/xpst/` use `with`; the grep hits for
@@ -255,7 +255,7 @@ bytes without re-probing integrity, so a truncated leftover can be uploaded as a
   `is_platform_compliant` (`video.py:200`) calls it with no try/except (MEDIUM, U7).
 - **Empty / oversized caption — MEDIUM (P5):** oversized captions are truncated on
   every platform (good), but **empty** captions are unvalidated. YouTube degrades to
-  a `"New Short"` title (`youtube.py:181-186`); X/TikTok/Threads/LinkedIn send empty
+  a `"New Short"` title (`youtube.py:181-186`); X/TikTok/Threads send empty
   text and surface an opaque API error.
 - **Empty `platform_list`:** `post_manual(platforms=None)` defaults to all enabled
   (`engine.py:584-585`); an explicit `[]` yields a `CrossPostResult` with no results
@@ -272,7 +272,6 @@ bytes without re-probing integrity, so a truncated leftover can be uploaded as a
   - X 140s / 512MB (`x.py:11-14`) — none enforced.
   - Threads `MAX_VIDEO_DURATION_SECONDS`/`MAX_VIDEO_SIZE_GB` (`threads.py:42-43`) —
     defined, never referenced.
-  - LinkedIn `MAX_VIDEO_SIZE_GB` (`linkedin.py:40`) — defined, never referenced.
 - **P7 — HIGH:** `base.py:206-209` `_validate_video` uses a **local** `max_size_gb=1`
   instead of a class attribute, so subclasses' `MAX_VIDEO_SIZE_GB` overrides have no
   effect — every platform shares a hardcoded 1GB limit regardless of its real
@@ -326,7 +325,7 @@ bytes without re-probing integrity, so a truncated leftover can be uploaded as a
 ## 6. Performance
 
 - **U8 — HIGH (analytics N+1):** Instagram (`analytics.py:275-318`, 2 calls/post),
-  X (`:342-357`, 1/post), TikTok/Threads/LinkedIn (`:381-484`, a full
+  X (`:342-357`, 1/post), TikTok/Threads (`:381-484`, a full
   `yt_dlp.extract_info` per post) all loop one network call per post. Only YouTube
   batches (50 ids/request, `:220-226`). 1,000 posts → 1,000+ sequential round-trips.
 - **U1 — HIGH (sync I/O on async path):** the 300s ffmpeg encode
@@ -359,7 +358,6 @@ bytes without re-probing integrity, so a truncated leftover can be uploaded as a
 | TikTok | token expires mid-upload | **No recovery** — refresh method exists but is never called (P2); also reports success while still `PROCESSING` (`tiktok.py:251-266`) |
 | X | cookies expire mid-session | **Partial thread left published**, reported as total failure (P4, `x.py:449-461`) |
 | Threads | post too long | Caption truncated (✅) but duration/size limits are dead constants (P6) |
-| LinkedIn | exceeds size limit | **Not enforced** — declared 200MB/1GB limits ignored; whole file read into RAM (P1) |
 
 Additional: **P9 — MEDIUM:** `tiktok._is_sandbox()` returns `True` when the platform
 is merely *disabled* (`tiktok.py:308-312`), yet `upload()` still performs the real
@@ -451,7 +449,7 @@ notes (`pydantic-settings>=2.14.2`, `msgpack>=1.2.1`). Findings:
 - **QML binding loops:** none found.
 - **State write atomicity against process kill:** `os.replace` is atomic; a SIGKILL
   cannot corrupt `state.json` (only power loss can — R6).
-- **Caption oversize truncation:** consistently handled on all six platforms.
+- **Caption oversize truncation:** consistently handled on all five platforms.
 - **`yaml.safe_load`** is used (not `yaml.load`) — no code-execution risk from config.
 
 ---
