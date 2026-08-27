@@ -193,7 +193,10 @@ class AntiBotProtection:
     def get_daily_limit(self, platform: str) -> int:
         """Get conservative daily upload limit for a platform.
 
-        These are well below platform maximums to reduce ban risk.
+        Prefers the config-derived limits injected at construction
+        (``daily_limits``, populated from ``config.rate_limits``) so the
+        anti-bot guardrail enforces the SAME single source of truth as the
+        quota manager. Falls back to the built-in conservative defaults.
 
         Args:
             platform: Platform name.
@@ -201,6 +204,8 @@ class AntiBotProtection:
         Returns:
             Maximum uploads per day.
         """
+        if platform in self._custom_limits:
+            return self._custom_limits[platform]
         return CONSERVATIVE_DAILY_LIMITS.get(platform, 3)
 
     def can_upload(self, platform: str) -> bool:
@@ -220,7 +225,8 @@ class AntiBotProtection:
         limit = self.get_daily_limit(platform)
         count = self._platform_upload_counts.get(platform, 0)
 
-        if count >= limit:
+        # limit <= 0 means "no daily cap" — never false-block.
+        if limit and limit > 0 and count >= limit:
             logger.warning(
                 f"Daily limit reached for {platform}: {count}/{limit}"
             )

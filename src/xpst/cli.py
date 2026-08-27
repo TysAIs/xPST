@@ -644,8 +644,10 @@ def quota(ctx: click.Context, as_json: bool):
         remaining = info.get("remaining", 0)
         auth_mode = info.get("auth_mode", "—")
 
-        # Color-code remaining
-        if remaining == 0:
+        # Color-code remaining (None = no cap / unlimited tracking)
+        if remaining is None:
+            remaining_str = "[dim]unlimited[/dim]"
+        elif remaining == 0:
             remaining_str = f"[red]{remaining}[/red]"
         elif remaining <= 2:
             remaining_str = f"[yellow]{remaining}[/yellow]"

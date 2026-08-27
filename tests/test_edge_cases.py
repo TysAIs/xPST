@@ -970,7 +970,8 @@ class TestQuotaEdgeCases:
         assert manager.can_upload("unknown_platform")
 
     def test_quota_from_dict_unknown_fields(self, tmp_path):
-        """Quota with unknown fields in dict should crash."""
+        """Quota with unknown fields in dict is tolerated (forward-compat):
+        an upgraded quota file must never crash the loader."""
         data = {
             "platform": "youtube",
             "daily_limit": 6,
@@ -978,8 +979,9 @@ class TestQuotaEdgeCases:
             "last_reset": "",
             "unknown_field": "value",
         }
-        with pytest.raises(TypeError):
-            PlatformQuota.from_dict(data)
+        quota = PlatformQuota.from_dict(data)
+        assert quota.daily_limit == 6
+        assert quota.used_today == 0
 
     def test_quota_hourly_limit_enforcement(self):
         """Hourly limit should block uploads when exceeded."""
