@@ -25,7 +25,14 @@ if TYPE_CHECKING:
     import httpx
 
     from xpst.config import XPSTConfig
-from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
+from xpst.platforms.base import (
+    DeleteOutcome,
+    DeleteResult,
+    PlatformHealth,
+    PlatformRegistry,
+    PlatformUploader,
+    UploadResult,
+)
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
 
@@ -618,16 +625,38 @@ class InstagramUploader(PlatformUploader):
                 error=f"Health check failed: {str(e)[:200]}",
             )
 
-    async def delete(self, post_id: str) -> bool:
-        """Delete a post from Instagram"""
+    async def delete(
+        self,
+        post_id: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """Delete a post from Instagram (hard delete via instagrapi)."""
         try:
             client = await self._get_client()
             result = client.media_delete(post_id)
-            logger.info(f"Deleted Instagram post: {post_id}")
-            return result
+            if result:
+                logger.info(f"Deleted Instagram post: {post_id}")
+                return DeleteResult(
+                    outcome=DeleteOutcome.DELETED,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                )
+            return DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail="instagrapi media_delete returned False",
+            )
         except Exception as e:
             logger.error(f"Failed to delete Instagram post {post_id}: {e}")
-            return False
+            return DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail=str(e)[:200],
+            )
 
     async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
         """Upload a carousel/album to Instagram.

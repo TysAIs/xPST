@@ -13,6 +13,7 @@ Example plugin:
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,116 @@ from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, Provi
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class DeleteOutcome(str, Enum):
+    """Explicit outcome of a platform delete/unpublish attempt (Phase-1.2 D5).
+
+    Every platform delete MUST resolve to one of these values — there are no
+    silent failures. The UI renders the matching ``DeleteResult.message``
+    verbatim so the user always sees exactly what happened.
+    """
+
+    DELETED = "deleted"  # hard delete confirmed; state keeps a tombstone
+    SOFT_HIDDEN = "soft_hidden"  # reversible unpublish (e.g. YouTube private/unlisted)
+    PENDING = "pending"  # not confirmed; user must act (e.g. TikTok web-session fallback failed)
+    UNSUPPORTED = "unsupported"  # platform has no deletable post / no delete API
+
+
+# UI-facing messages per outcome. ``{platform}`` is always substituted; the
+# share URL is appended by the engine for pending/unsupported results so callers
+# never see a bare enum without an actionable message.
+_DELETE_UI_MESSAGES: dict[DeleteOutcome, str] = {
+    DeleteOutcome.DELETED: "Deleted from {platform}",
+    DeleteOutcome.SOFT_HIDDEN: "Unpublished on {platform} (reversible)",
+    DeleteOutcome.PENDING: "Delete pending on {platform} - remove manually",
+    DeleteOutcome.UNSUPPORTED: "{platform} does not support deleting this post",
+}
+
+
+def delete_ui_message(outcome: DeleteOutcome, platform: str) -> str:
+    """Return the UI-facing message that corresponds to ``outcome``.
+
+    ``platform`` is substituted into the template; the share URL is appended
+    separately (see :meth:`DeleteResult.with_share_url`).
+    """
+    return _DELETE_UI_MESSAGES[outcome].format(platform=platform)
+
+
+@dataclass
+class DeleteResult:
+    """Result of a platform delete/unpublish attempt (Phase-1.2 D5 contract).
+
+    Every platform ``delete()`` MUST return a ``DeleteResult`` whose
+    ``outcome`` is an explicit :class:`DeleteOutcome` — never ``None`` and
+    never a bare bool. ``message`` is the UI-facing text matching the outcome.
+    """
+
+    outcome: DeleteOutcome
+    platform: str
+    post_id: str
+    message: str = ""
+    share_url: str | None = None
+    detail: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.message:
+            self.message = delete_ui_message(self.outcome, self.platform)
+
+    @property
+    def ok(self) -> bool:
+        """True when the post is no longer publicly visible (deleted or hidden)."""
+        return self.outcome in (DeleteOutcome.DELETED, DeleteOutcome.SOFT_HIDDEN)
+
+    def with_share_url(self, share_url: str) -> "DeleteResult":
+        """Return a copy carrying ``share_url`` and an actionable message.
+
+        Used by the engine to surface a manual-removal link on
+        pending/unsupported results — the adapter itself never needs the URL.
+        """
+        message = self.message
+        if share_url and self.outcome in (DeleteOutcome.PENDING, DeleteOutcome.UNSUPPORTED):
+            message = f"{message}: {share_url}"
+        return DeleteResult(
+            outcome=self.outcome,
+            platform=self.platform,
+            post_id=self.post_id,
+            message=message,
+            share_url=share_url or self.share_url,
+            detail=self.detail,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the result for CLI/MCP/UI consumers."""
+        return {
+            "outcome": self.outcome.value,
+            "platform": self.platform,
+            "post_id": self.post_id,
+            "message": self.message,
+            "share_url": self.share_url,
+            "detail": self.detail,
+            "deleted": self.ok,
+        }
+
+
+def normalize_delete_result(raw: Any, platform: str, post_id: str) -> DeleteResult:
+    """Coerce an adapter's ``delete()`` return into the DeleteResult contract.
+
+    Accepts a proper :class:`DeleteResult` (the contract), and tolerates legacy
+    bare ``bool``/``None`` returns from third-party adapters so the engine and
+    UI never see an unexpected type (a ``True`` legacy return is treated as a
+    confirmed hard delete; anything else is ``pending``).
+    """
+    if isinstance(raw, DeleteResult):
+        return raw
+    if raw is True:
+        return DeleteResult(outcome=DeleteOutcome.DELETED, platform=platform, post_id=post_id)
+    return DeleteResult(
+        outcome=DeleteOutcome.PENDING,
+        platform=platform,
+        post_id=post_id,
+        detail="adapter did not return a DeleteResult",
+    )
 
 
 @dataclass
@@ -124,9 +235,37 @@ class PlatformUploader(ABC):
         """
         return True
 
-    async def delete(self, post_id: str) -> bool:
-        """Delete a post from this platform. Override in subclasses."""
-        raise NotImplementedError(f"Delete not implemented for {self.__class__.__name__}")
+    async def delete(
+        self,
+        post_id: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """Delete (or unpublish) a post from this platform.
+
+        Subclasses MUST override this and return a :class:`DeleteResult` with
+        an explicit outcome — the engine and UI rely on the contract and there
+        are no silent failures. The default reports the platform as not
+        supporting deletion.
+
+        Args:
+            post_id: The platform-side id of the post to delete/unpublish.
+            soft: If True, request a reversible unpublish/hide instead of a
+                hard delete where the platform offers one (e.g. YouTube
+                ``status.privacyStatus=private``). Ignored on platforms that
+                only support hard deletes.
+            visibility: Optional target visibility for soft hides (platform
+                specific, e.g. ``private``/``unlisted`` for YouTube).
+
+        Returns:
+            DeleteResult with an explicit outcome and UI-facing message.
+        """
+        return DeleteResult(
+            outcome=DeleteOutcome.UNSUPPORTED,
+            platform=self.platform_name,
+            post_id=post_id,
+        )
 
     async def get_followers(self) -> int:
         """Return the current follower count for this platform's account.

@@ -565,17 +565,25 @@ class TestToSWarnings:
 class TestDeletePost:
     """Delete must resolve the platform post id from state, which stores it
     under ``id`` (see state.py mark_video_posted / state_manager.py). The
-    delete path used to read ``post_id`` and always failed."""
+    delete path used to read ``post_id`` and always failed. Since Phase-1.2
+    the engine routes every delete through the DeleteResult contract and
+    leaves a tombstone for hard deletes (D5 §3.6)."""
 
     @pytest.mark.asyncio
     async def test_delete_post_resolves_id_key(self, tmp_path):
         """delete_post finds the post recorded under the canonical ``id`` key."""
+        from xpst.platforms.base import DeleteOutcome, DeleteResult
+
         config = _make_config(tmp_path)
         (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
 
         engine = CrossPostEngine(config)
         mock_uploader = _make_mock_uploader("x", success=True)
-        mock_uploader.delete = AsyncMock(return_value=True)
+        mock_uploader.delete = AsyncMock(
+            return_value=DeleteResult(
+                outcome=DeleteOutcome.DELETED, platform="x", post_id="status-999"
+            )
+        )
         engine._platforms["x"] = mock_uploader
 
         engine.state.mark_video_posted(
@@ -584,33 +592,72 @@ class TestDeletePost:
             post_url="https://x.com/i/status/status-999",
         )
 
-        ok = await engine.delete_post("test-video-abc", "x")
+        result = await engine.delete_post("test-video-abc", "x")
 
-        assert ok is True
-        mock_uploader.delete.assert_awaited_once_with("status-999")
-        # successful delete removes the state entry
-        assert engine.state.get_post_data("test-video-abc", "x") is None
+        assert result.outcome == DeleteOutcome.DELETED
+        assert result.ok is True
+        assert "Deleted from x" in result.message
+        mock_uploader.delete.assert_awaited_once_with("status-999", soft=False, visibility=None)
+        # successful hard delete leaves a tombstone — history is kept
+        data = engine.state.get_post_data("test-video-abc", "x")
+        assert data is not None
+        assert data["id"] == "status-999"
+        assert data["url"] == "https://x.com/i/status/status-999"
+        assert data["deleted"] is True
+        assert data["deleted_at"]
+        assert data["deleted_reason"] == "hard_delete"
+        # …but the video is NOT considered posted anymore (re-postable)
+        assert engine.state.is_posted("test-video-abc", "x") is False
 
     @pytest.mark.asyncio
-    async def test_delete_post_missing_id_returns_false(self, tmp_path):
-        """delete_post fails cleanly when no post was recorded for the video."""
+    async def test_delete_post_missing_id_returns_unsupported(self, tmp_path):
+        """delete_post fails cleanly (explicit unsupported) when no post was recorded."""
+        from xpst.platforms.base import DeleteOutcome
+
         config = _make_config(tmp_path)
         (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
 
         engine = CrossPostEngine(config)
         engine._platforms["x"] = _make_mock_uploader("x", success=True)
 
-        ok = await engine.delete_post("nonexistent", "x")
-        assert ok is False
+        result = await engine.delete_post("nonexistent", "x")
+        assert result.outcome == DeleteOutcome.UNSUPPORTED
+        assert result.ok is False
+        assert "No post data found" in result.message
 
     @pytest.mark.asyncio
-    async def test_delete_post_missing_platform_returns_false(self, tmp_path):
+    async def test_delete_post_missing_platform_returns_unsupported(self, tmp_path):
         """delete_post fails cleanly when the platform uploader is absent."""
+        from xpst.platforms.base import DeleteOutcome
+
         config = _make_config(tmp_path)
         (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
 
         engine = CrossPostEngine(config)
         engine.state.mark_video_posted("v1", "tiktok", post_id="tk-1")
 
-        ok = await engine.delete_post("v1", "tiktok")
-        assert ok is False
+        result = await engine.delete_post("v1", "tiktok")
+        assert result.outcome == DeleteOutcome.UNSUPPORTED
+        assert result.ok is False
+        assert "not available" in result.message
+
+    @pytest.mark.asyncio
+    async def test_delete_post_legacy_bool_adapter_is_normalized(self, tmp_path):
+        """A legacy adapter returning a bare bool is coerced into the contract."""
+        from xpst.platforms.base import DeleteOutcome
+
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
+        mock_uploader = _make_mock_uploader("x", success=True)
+        mock_uploader.delete = AsyncMock(return_value=True)  # legacy bool
+        engine._platforms["x"] = mock_uploader
+
+        engine.state.mark_video_posted("v1", "x", post_id="t1", post_url="https://x.com/i/status/t1")
+
+        result = await engine.delete_post("v1", "x")
+        assert result.outcome == DeleteOutcome.DELETED
+        assert result.ok is True
+        # tombstone written even for legacy-true adapters
+        assert engine.state.get_post_data("v1", "x")["deleted"] is True

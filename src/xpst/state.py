@@ -80,6 +80,33 @@ class StateManager:
     def remove_post(self, video_id: str, platform: str) -> None:
         return self._new_manager.remove_post(video_id, platform)
 
+    def record_delete_tombstone(
+        self,
+        video_id: str,
+        platform: str,
+        *,
+        reason: str = "hard_delete",
+        detail: str | None = None,
+    ) -> None:
+        return self._new_manager.record_delete_tombstone(
+            video_id, platform, reason=reason, detail=detail
+        )
+
+    def set_visibility(self, video_id: str, platform: str, visibility: str) -> None:
+        return self._new_manager.set_visibility(video_id, platform, visibility)
+
+    def mark_delete_pending(
+        self,
+        video_id: str,
+        platform: str,
+        *,
+        reason: str = "pending",
+        detail: str | None = None,
+    ) -> None:
+        return self._new_manager.mark_delete_pending(
+            video_id, platform, reason=reason, detail=detail
+        )
+
     def get_by_hash(self, content_hash: str) -> str | None:
         return self._new_manager.get_by_hash(content_hash)
 

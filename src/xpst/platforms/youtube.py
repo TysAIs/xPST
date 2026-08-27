@@ -17,7 +17,14 @@ import asyncio
 from pathlib import Path
 
 from xpst.config import XPSTConfig
-from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
+from xpst.platforms.base import (
+    DeleteOutcome,
+    DeleteResult,
+    PlatformHealth,
+    PlatformRegistry,
+    PlatformUploader,
+    UploadResult,
+)
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
 from xpst.utils.secure_io import write_text_0600
@@ -333,16 +340,53 @@ class YouTubeUploader(PlatformUploader):
                 error=f"Health check failed: {str(e)[:200]}",
             )
 
-    async def delete(self, post_id: str) -> bool:
-        """Delete a video from YouTube"""
+    async def delete(
+        self,
+        post_id: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """Delete or unpublish a video on YouTube (Phase-1.2 D5).
+
+        Hard delete (irreversible): ``videos.delete``.
+        Soft delete / reversible "Unpublish": ``videos.update`` with
+        ``status.privacyStatus`` set to ``visibility`` (``private`` or
+        ``unlisted``) — the video keeps its metrics and can be re-published.
+        """
         try:
             service = await self._get_service()
+            if soft:
+                target = (visibility or "private").lower()
+                if target not in ("private", "unlisted"):
+                    logger.warning(f"Invalid YouTube soft-delete visibility {target!r}, using 'private'")
+                    target = "private"
+                service.videos().update(
+                    part="status",
+                    body={"id": post_id, "status": {"privacyStatus": target}},
+                ).execute()
+                logger.info(f"Unpublished YouTube video {post_id} (privacyStatus={target})")
+                return DeleteResult(
+                    outcome=DeleteOutcome.SOFT_HIDDEN,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                    detail=f"privacyStatus={target}",
+                )
             service.videos().delete(id=post_id).execute()
             logger.info(f"Deleted YouTube video: {post_id}")
-            return True
+            return DeleteResult(
+                outcome=DeleteOutcome.DELETED,
+                platform=self.platform_name,
+                post_id=post_id,
+            )
         except Exception as e:
             logger.error(f"Failed to delete YouTube video {post_id}: {e}")
-            return False
+            return DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail=str(e)[:200],
+            )
 
     async def get_followers(self) -> int:
         """Return subscriber count for the authenticated YouTube channel."""
