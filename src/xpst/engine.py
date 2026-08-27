@@ -30,7 +30,13 @@ from xpst.anti_bot import AntiBotProtection
 from xpst.config import XPSTConfig
 from xpst.crash_recovery import CrashRecoveryManager
 from xpst.monitor import NewPost, PostMonitor
-from xpst.platforms.base import PlatformUploader, UploadResult
+from xpst.platforms.base import (
+    DeleteOutcome,
+    DeleteResult,
+    PlatformUploader,
+    UploadResult,
+    normalize_delete_result,
+)
 from xpst.services.source_service import SourceService
 from xpst.services.upload_service import UploadService
 from xpst.sources.base import VideoMetadata
@@ -781,21 +787,50 @@ class CrossPostEngine:
 
         return results
 
-    async def delete_post(self, video_id: str, platform: str) -> bool:
-        """Delete a previously posted video from a platform.
+    async def delete_post(
+        self,
+        video_id: str,
+        platform: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """Delete or unpublish a previously posted video (Phase-1.2 D5 contract).
+
+        Every call returns an explicit :class:`DeleteResult` — never ``None``
+        and never a bare bool, so the UI always knows what happened:
+
+        - ``deleted``: hard delete confirmed on the platform; state keeps a
+          tombstone (platform, id, url, deleted_at, reason) for analytics.
+        - ``soft_hidden``: reversible unpublish (e.g. YouTube
+          ``status.privacyStatus=private|unlisted``); state records the new
+          visibility and keeps metrics.
+        - ``pending``: deletion could not be confirmed (e.g. TikTok web-session
+          fallback failed); state is marked ``delete_pending`` and the result
+          carries the share URL for one-tap manual removal.
+        - ``unsupported``: the platform (or the recorded data) cannot delete;
+          nothing is changed silently.
 
         Args:
             video_id: Video identifier in state.
             platform: Platform name to delete from.
+            soft: Request a reversible unpublish instead of a hard delete
+                where the platform supports it (YouTube only today).
+            visibility: Target visibility for soft hides (YouTube:
+                ``private`` or ``unlisted``).
 
         Returns:
-            True if deletion succeeded, False otherwise.
+            DeleteResult with an explicit outcome and UI-facing message.
         """
-
         post_data = self.state.get_post_data(video_id, platform)
         if not post_data:
             logger.error(f"No post data found for {video_id} on {platform}")
-            return False
+            return DeleteResult(
+                outcome=DeleteOutcome.UNSUPPORTED,
+                platform=platform,
+                post_id="",
+                message=f"No post data found for {video_id} on {platform}",
+            )
 
         # State schema stores the platform post id under "id" (see state.py
         # mark_video_posted / state_manager.py record_posted). Accept "post_id"
@@ -803,21 +838,63 @@ class CrossPostEngine:
         post_id = post_data.get("post_id") or post_data.get("id")
         if not post_id:
             logger.error(f"No post id found for {video_id} on {platform}")
-            return False
+            return DeleteResult(
+                outcome=DeleteOutcome.UNSUPPORTED,
+                platform=platform,
+                post_id="",
+                message=f"No post id found for {video_id} on {platform}",
+            )
         uploader = self._platforms.get(platform)
         if not uploader:
             logger.error(f"Platform {platform} not available")
-            return False
+            return DeleteResult(
+                outcome=DeleteOutcome.UNSUPPORTED,
+                platform=platform,
+                post_id=post_id,
+                message=f"Platform {platform} not available for deletion",
+            )
+
+        share_url = str(post_data.get("url") or "")
 
         try:
-            result = await uploader.delete(post_id)
-            if result:
-                self.state.remove_post(video_id, platform)
-                self.state.save()
-            return result
+            raw = await uploader.delete(post_id, soft=soft, visibility=visibility)
+            result = normalize_delete_result(raw, platform, post_id)
         except Exception as e:
             logger.error(f"Delete failed for {video_id} on {platform}: {e}")
-            return False
+            result = DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=platform,
+                post_id=post_id,
+                detail=str(e)[:200],
+            )
+
+        # State discipline (D5 §3.6): hard deletes leave a tombstone, soft
+        # hides update visibility, pending marks are surfaced — never a silent
+        # removal of context.
+        if result.outcome == DeleteOutcome.DELETED:
+            self.state.record_delete_tombstone(
+                video_id,
+                platform,
+                reason="hard_delete",
+                detail=result.detail,
+            )
+            self.state.save()
+        elif result.outcome == DeleteOutcome.SOFT_HIDDEN:
+            self.state.set_visibility(video_id, platform, visibility or "private")
+            self.state.save()
+        elif result.outcome == DeleteOutcome.PENDING:
+            self.state.mark_delete_pending(
+                video_id,
+                platform,
+                reason="delete_pending",
+                detail=result.detail,
+            )
+            self.state.save()
+            result = result.with_share_url(share_url)
+        else:  # unsupported
+            result = result.with_share_url(share_url)
+
+        return result
 
     def _get_monitor(self) -> PostMonitor:
         """Get or create the PostMonitor instance.

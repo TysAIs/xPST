@@ -27,7 +27,14 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
+from xpst.platforms.base import (
+    DeleteOutcome,
+    DeleteResult,
+    PlatformHealth,
+    PlatformRegistry,
+    PlatformUploader,
+    UploadResult,
+)
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
 
@@ -332,9 +339,25 @@ class MessengerAdapter(PlatformUploader):
             "me/messages", params={"messaging_type": messaging_type}, data=data
         )
 
-    async def delete(self, post_id: str) -> bool:
-        """No-op (Messenger sends have no deletable post). ``post_id`` accepted for contract."""
-        return True
+    async def delete(
+        self,
+        post_id: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """No-op (Messenger sends have no deletable post).
+
+        Reports ``unsupported`` per the Phase-1.2 D5 delete contract so the
+        CLI/UI never see a silent failure; the state record is simply kept.
+        ``post_id`` is accepted for contract compatibility.
+        """
+        return DeleteResult(
+            outcome=DeleteOutcome.UNSUPPORTED,
+            platform=self.platform_name,
+            post_id=post_id,
+            message="Messenger messages have no deletable post — nothing to delete",
+        )
 
     # ── Contract: upload() thin wrapper ────────────────────────────────
     async def upload(self, video_path: Path, caption: str) -> UploadResult:

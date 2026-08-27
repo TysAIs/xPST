@@ -22,7 +22,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from xpst.anti_bot import AntiBotProtection
-from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
+from xpst.platforms.base import (
+    DeleteOutcome,
+    DeleteResult,
+    PlatformHealth,
+    PlatformRegistry,
+    PlatformUploader,
+    UploadResult,
+)
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
 
@@ -538,16 +545,31 @@ class XUploader(PlatformUploader):
                 error=f"Health check failed: {str(e)[:200]}",
             )
 
-    async def delete(self, post_id: str) -> bool:
-        """Delete a tweet from X"""
+    async def delete(
+        self,
+        post_id: str,
+        *,
+        soft: bool = False,
+        visibility: str | None = None,
+    ) -> DeleteResult:
+        """Delete a tweet from X (hard delete only — no soft delete exists)."""
         try:
             client = await self._get_client()
             await client.delete_tweet(post_id)
             logger.info(f"Deleted X tweet: {post_id}")
-            return True
+            return DeleteResult(
+                outcome=DeleteOutcome.DELETED,
+                platform=self.platform_name,
+                post_id=post_id,
+            )
         except Exception as e:
             logger.error(f"Failed to delete X tweet {post_id}: {e}")
-            return False
+            return DeleteResult(
+                outcome=DeleteOutcome.PENDING,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail=str(e)[:200],
+            )
 
     async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
         """Upload a carousel as a thread on X/Twitter.

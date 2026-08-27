@@ -1341,12 +1341,23 @@ def diagnostics(ctx: click.Context, output: str | None, log_lines: int, as_json:
 @main.command()
 @click.argument('video_id')
 @click.option('--platform', '-p', help='Platform to delete from (default: all)')
+@click.option('--soft', is_flag=True, help='Unpublish instead of hard-delete (YouTube: sets privacyStatus=private)')
+@click.option('--visibility', type=click.Choice(['private', 'unlisted']), default=None,
+              help='Target visibility for soft-delete/unpublish (YouTube only)')
 @click.option('--yes', '-y', is_flag=True, help='Skip confirmation')
 @json_option
 @click.pass_context
-def delete(ctx: click.Context, video_id: str, platform: str, yes: bool, as_json: bool):
-    """Delete a posted video from platforms"""
+def delete(ctx: click.Context, video_id: str, platform: str, soft: bool, visibility: str | None, yes: bool, as_json: bool):
+    """Delete a posted video from platforms.
+
+    Routes every platform through the Phase-1.2 delete contract: each result
+    carries an explicit outcome (deleted / soft_hidden / pending / unsupported)
+    plus a UI-facing message — no silent failures. Use --soft to unpublish
+    (reversible, YouTube privacyStatus=private|unlisted) instead of hard-deleting.
+    """
     import asyncio
+
+    from xpst.platforms.base import DeleteOutcome
 
     if not yes and not as_json:
         click.confirm(f'Delete {video_id} from {platform or "all platforms"}?', abort=True) # nosec B608 - click.confirm prompt, not SQL
@@ -1360,13 +1371,14 @@ def delete(ctx: click.Context, video_id: str, platform: str, yes: bool, as_json:
         """Execute deletion across all target platforms."""
         results = []
         for p in platforms:
-            result = await engine.delete_post(video_id, p)
-            results.append({"platform": p, "deleted": result})
-            if not as_json:
-                if result:
-                    click.echo(f'  ✓ Deleted from {p}')
-                else:
-                    click.echo(f'  ✗ Failed to delete from {p}') # nosec B608 - click.echo message, not SQL
+            result = await engine.delete_post(video_id, p, soft=soft, visibility=visibility)
+            results.append(result.to_dict())
+            if result.outcome in (DeleteOutcome.DELETED, DeleteOutcome.SOFT_HIDDEN):
+                click.echo(f"  \u2713 {result.message}")
+            elif result.outcome == DeleteOutcome.PENDING:
+                click.echo(f"  \u26a0 {result.message}")
+            else:
+                click.echo(f"  \u2717 {result.message}")  # noqa: SIM114 - distinct glyph per outcome
         return results
 
     results = asyncio.run(do_delete())
