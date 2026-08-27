@@ -423,13 +423,15 @@ Rectangle {
             Layout.rightMargin: theme.spacingSm
             Layout.bottomMargin: theme.spacingSm
             radius: theme.radiusMd
-            color: themeMouse.containsMouse ? theme.surfaceAlt : "transparent"
+            color: themeSwitchHover.hovered ? theme.surfaceAlt : "transparent"
+            HoverHandler { id: themeSwitchHover }
 
             RowLayout {
                 anchors.fill: parent
                 anchors.leftMargin: theme.spacingMd
                 spacing: theme.spacingMd
 
+                // Sun (light) / Moon (dark) with a proper toggle switch.
                 Text {
                     text: theme.darkMode ? theme.iconMoon : theme.iconSun
                     font.family: theme.iconFontFamily
@@ -439,20 +441,41 @@ Rectangle {
                     horizontalAlignment: Text.AlignHCenter
                 }
                 Text {
-                    text: theme.darkMode ? "Dark Mode" : "Light Mode"
+                    text: "Appearance"
                     font.pixelSize: 13
                     color: theme.textSecondary
                     visible: sidebar.expanded
                 }
                 Item { Layout.fillWidth: true }
-            }
-
-            MouseArea {
-                id: themeMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: theme.darkMode = !theme.darkMode
+                Switch {
+                    id: themeSwitch
+                    visible: sidebar.expanded
+                    checked: theme.darkMode
+                    Accessible.role: Accessible.CheckBox
+                    Accessible.name: "Dark mode"
+                    indicator: Rectangle {
+                        implicitWidth: 34; implicitHeight: 18
+                        radius: 9
+                        color: themeSwitch.checked ? theme.accent : theme.border
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                        Rectangle {
+                            x: themeSwitch.checked ? parent.width - width - 2 : 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 14; height: 14; radius: 7
+                            color: "#ffffff"
+                            Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                        }
+                    }
+                    onToggled: theme.darkMode = checked
+                }
+                // Compact icon-only toggle when the sidebar is collapsed.
+                MouseArea {
+                    visible: !sidebar.expanded
+                    anchors.fill: undefined
+                    Layout.preferredWidth: 24
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: theme.darkMode = !theme.darkMode
+                }
             }
         }
 
