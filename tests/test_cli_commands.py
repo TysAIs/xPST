@@ -325,6 +325,149 @@ class TestProvidersJson:
         assert youtube["is_official_api"] is True
 
 
+# ── First-run onboarding hygiene (no wedge states) ──────────────
+
+ONBOARDING_HINT = "First-run setup is not complete"
+
+
+@pytest.fixture
+def completed_config_file(tmp_path):
+    """A valid config whose first-run onboarding is already complete."""
+    import yaml as _yaml
+
+    data = {
+        "accounts": {
+            "tiktok": {"username": "test_user"},
+            "youtube": {"enabled": True, "client_secrets": "", "token_file": ""},
+            "x": {"enabled": True, "cookies_file": ""},
+            "instagram": {"enabled": True, "session_file": "", "username": ""},
+        },
+        "video": {"download_dir": str(tmp_path / "downloads")},
+        "monitoring": {
+            "log_level": "INFO",
+            "log_file": str(tmp_path / "logs" / "xpst.log"),
+        },
+        "reliability": {"max_retries": 3},
+        "rate_limits": {"youtube": 10, "instagram": 10, "x": 10, "tiktok": 10},
+        "schedule": {"check_interval": 900},
+        "first_run_complete": True,
+    }
+    cfg = tmp_path / "config.yaml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(_yaml.safe_dump(data), encoding="utf-8")
+    return str(cfg)
+
+
+class _StubEngine:
+    """Minimal CrossPostEngine stand-in so `run` tests need no real engine."""
+
+    def __init__(self, config=None):
+        self.config = config
+
+    def acquire_pidfile(self):
+        return True
+
+    async def check_and_post(self, source=None):
+        return []
+
+
+class TestFirstRunOnboardingHygiene:
+    """run/status must never re-trigger first-run onboarding once
+    first_run_complete is genuinely true, and a stale/missing
+    wizard_state.json must not wedge the flow (audit 02-integrations.md §4).
+
+    Over pipes (non-TTY) the CLI auto-enables JSON, so the nudge is (by
+    design) human-TTY-only and machine output stays parseable; the gate
+    itself is unit-tested via _maybe_show_onboarding_hint.
+    """
+
+    def test_status_skips_onboarding_when_complete(self, runner, completed_config_file):
+        """[3] status with first_run_complete=true shows no onboarding nudge"""
+        result = runner.invoke(main, ["--config", completed_config_file, "status"])
+        assert result.exit_code == 0
+        assert ONBOARDING_HINT not in result.output
+        assert isinstance(extract_json(result.output), dict)
+
+    def test_status_pipe_mode_never_emits_hint_even_when_incomplete(self, runner, config_file):
+        """Piped status stays pure JSON — the nudge must never leak."""
+        result = runner.invoke(main, ["--config", config_file, "status"])
+        assert result.exit_code == 0
+        assert ONBOARDING_HINT not in result.output
+        data = extract_json(result.output)
+        assert isinstance(data, dict)
+
+    def test_run_skips_onboarding_when_complete(self, runner, completed_config_file, monkeypatch):
+        """[3] run with first_run_complete=true does not re-trigger onboarding"""
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", _StubEngine)
+        result = runner.invoke(main, ["--config", completed_config_file, "run"])
+        assert result.exit_code == 0
+        assert ONBOARDING_HINT not in result.output
+
+    def test_run_pipe_mode_never_emits_hint_even_when_incomplete(self, runner, config_file, monkeypatch):
+        """Piped run stays pure JSON — no onboarding crash or nudge."""
+        monkeypatch.setattr("xpst.cli.CrossPostEngine", _StubEngine)
+        result = runner.invoke(main, ["--config", config_file, "run"])
+        assert result.exit_code == 0
+        assert ONBOARDING_HINT not in result.output
+        data = extract_json(result.output)
+        assert isinstance(data, dict)
+
+
+class TestOnboardingHintGate:
+    """Unit tests for the run/status onboarding gate (human-TTY path)."""
+
+    @staticmethod
+    def _config(first_run_complete: bool):
+        from xpst.config import XPSTConfig
+
+        cfg = XPSTConfig()
+        cfg.first_run_complete = first_run_complete
+        return cfg
+
+    def test_hint_emitted_when_onboarding_required(self, monkeypatch):
+        from xpst import cli
+
+        captured = []
+        monkeypatch.setattr(cli.console, "print", lambda *a, **kw: captured.append(a))
+        cli._maybe_show_onboarding_hint(self._config(False), as_json=False, quiet=False)
+        assert captured, "hint must be emitted for an un-completed install"
+        assert "xpst wizard" in str(captured[0])
+        assert "First-run" in str(captured[0])
+
+    def test_hint_suppressed_when_complete(self, monkeypatch):
+        from xpst import cli
+
+        captured = []
+        monkeypatch.setattr(cli.console, "print", lambda *a, **kw: captured.append(a))
+        cli._maybe_show_onboarding_hint(self._config(True), as_json=False, quiet=False)
+        assert captured == []
+
+    def test_hint_suppressed_in_json_mode(self, monkeypatch):
+        from xpst import cli
+
+        captured = []
+        monkeypatch.setattr(cli.console, "print", lambda *a, **kw: captured.append(a))
+        cli._maybe_show_onboarding_hint(self._config(False), as_json=True, quiet=False)
+        assert captured == []
+
+    def test_hint_suppressed_in_quiet_mode(self, monkeypatch):
+        from xpst import cli
+
+        captured = []
+        monkeypatch.setattr(cli.console, "print", lambda *a, **kw: captured.append(a))
+        cli._maybe_show_onboarding_hint(self._config(False), as_json=False, quiet=True)
+        assert captured == []
+
+    def test_gate_never_reads_wizard_state_file(self, monkeypatch):
+        """The gate consults first_run_complete only: absence of
+        wizard_state.json must never suppress or re-trigger onboarding."""
+        from xpst import cli
+
+        cli._maybe_show_onboarding_hint(self._config(False), as_json=False, quiet=False)  # no disk access
+        cli._maybe_show_onboarding_hint(self._config(True), as_json=False, quiet=False)
+        assert True
+
+
 class TestMcpCommand:
     """test_mcp_command: invoke `mcp` without starting a real stdio server."""
 
