@@ -73,6 +73,51 @@ def test_is_frozen_false_when_meipass_absent(monkeypatch):
     assert rp.is_frozen() is False
 
 
+def test_frozen_darwin_app_falls_back_to_resources_side(monkeypatch, tmp_path):
+    # macOS .app split WITHOUT PyInstaller's side cross-linking: data exists
+    # only under Contents/Resources, while sys._MEIPASS points at
+    # Contents/Frameworks. The lookup must resolve to the data side, not
+    # return a dead _MEIPASS-path that callers then have to guess about.
+    frameworks = tmp_path / "xPST.app" / "Contents" / "Frameworks"
+    resources = tmp_path / "xPST.app" / "Contents" / "Resources"
+    (resources / "assets" / "fonts").mkdir(parents=True)
+    (resources / "assets" / "fonts" / "lucide.ttf").write_bytes(b"font")
+    monkeypatch.setattr(sys, "platform", "darwin", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(frameworks), raising=False)
+    got = rp.resource_path("assets", "fonts", "lucide.ttf")
+    assert got == resources / "assets" / "fonts" / "lucide.ttf"
+    assert got.exists()
+
+
+def test_frozen_darwin_app_prefers_meipass_when_present(monkeypatch, tmp_path):
+    # Normal PyInstaller 6.x .app behavior: the _MEIPASS candidate exists
+    # (cross-linked) and must win over the Resources-side duplicate.
+    frameworks = tmp_path / "xPST.app" / "Contents" / "Frameworks"
+    resources = tmp_path / "xPST.app" / "Contents" / "Resources"
+    (frameworks / "assets").mkdir(parents=True)
+    (frameworks / "assets" / "x.txt").write_bytes(b"meipass")
+    (resources / "assets").mkdir(parents=True)
+    (resources / "assets" / "x.txt").write_bytes(b"resources")
+    monkeypatch.setattr(sys, "platform", "darwin", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(frameworks), raising=False)
+    got = rp.resource_path("assets", "x.txt")
+    assert got == frameworks / "assets" / "x.txt"
+    assert got.exists()
+
+
+def test_frozen_non_macos_layout_single_base(monkeypatch):
+    # One-folder (Linux/Windows) frozen layouts have no Resources sibling;
+    # the result must remain rooted at _MEIPASS even when the file is absent.
+    monkeypatch.setattr(sys, "platform", "linux", raising=False)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", "/tmp/_MEIfake-linux", raising=False)
+    assert rp.resource_path("assets", "icon.png") == Path(
+        "/tmp/_MEIfake-linux/assets/icon.png"
+    )
+
+
 def test_first_existing_returns_first_match(tmp_path):
     missing = tmp_path / "nope.png"
     real = tmp_path / "real.png"

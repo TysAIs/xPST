@@ -5,6 +5,7 @@ contract: nuggets resolve to performance history by (platform, post_id).
 """
 
 import asyncio
+import time
 from unittest.mock import patch
 
 from xpst.analytics import AnalyticsCollector
@@ -92,6 +93,11 @@ class TestCollectorPersistence:
     def test_collect_all_records_snapshots(self, tmp_path):
         """collect_all must append snapshots for every collected post (G22)."""
         collector = AnalyticsCollector(config_dir=str(tmp_path))
+        # The persistence ownership gate requires youtube ids to be verified
+        # against the channel uploads playlist; there is no token in tmp_path,
+        # so preload the verified set (v1/v2 are owned uploads).
+        collector._owned_yt_ids = {"v1", "v2"}
+        collector._owned_yt_ids_ts = time.time()
 
         async def fake_platform(platform, ids):
             return {
