@@ -35,6 +35,13 @@ Page {
     readonly property int timestampRole: 261
     readonly property int thumbnailRole: 262
     readonly property int postIdRole: 263
+    readonly property int viewsRole: 264
+    readonly property int likesRole: 265
+    readonly property int commentsRole: 266
+    readonly property int sharesRole: 267
+    readonly property int urlRole: 268
+    readonly property int embedUrlRole: 269
+    readonly property int videoPathRole: 270
 
     // Settings persistence for sort option (#21)
     Settings {
@@ -117,7 +124,14 @@ Page {
                     status: postModel.data(idx, statusRole) || "posted",
                     timestamp: postModel.data(idx, timestampRole) || "",
                     thumbnail: postModel.data(idx, thumbnailRole) || "",
-                    postId: postModel.data(idx, postIdRole) || ""
+                    postId: postModel.data(idx, postIdRole) || "",
+                    views: postModel.data(idx, viewsRole) || 0,
+                    likes: postModel.data(idx, likesRole) || 0,
+                    comments: postModel.data(idx, commentsRole) || 0,
+                    shares: postModel.data(idx, sharesRole) || 0,
+                    url: postModel.data(idx, urlRole) || "",
+                    embedUrl: postModel.data(idx, embedUrlRole) || "",
+                    videoPath: postModel.data(idx, videoPathRole) || ""
                 })
             }
         }
@@ -126,6 +140,7 @@ Page {
         if (sortOption === 1) posts.sort(function(a, b) { return (a.timestamp || "").localeCompare(b.timestamp || "") })
         if (sortOption === 2) posts.sort(function(a, b) { return (a.platform || "").localeCompare(b.platform || "") })
         if (sortOption === 3) posts.sort(function(a, b) { return (a.status || "").localeCompare(b.status || "") })
+        if (sortOption === 4) posts.sort(function(a, b) { return (b.views || 0) - (a.views || 0) })
         return posts
     }
 
@@ -411,6 +426,38 @@ Page {
         if (deleteConfirmDialog.visible) deleteConfirmDialog.close()
         if (smartDeleteDialog.visible) smartDeleteDialog.close()
         if (postPreviewDialog.visible) postPreviewDialog.close()
+        if (playbackOverlay.visible) playbackOverlay.close()
+    }
+
+    // Format a number compactly (1234 -> "1.2K").
+    function compactNumber(n) {
+        n = Number(n) || 0
+        if (n < 1000) return String(n)
+        if (n < 1000000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K"
+        return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M"
+    }
+
+    // ── In-app playback (Item: "play it within XPST") ───────────────
+    // Local files play through the embedded MediaPlayer; YouTube posts
+    // play in-app via the WebEngine embed; every other platform (X/IG/
+    // TikTok/Threads) shows the thumbnail inline with an open-in-browser
+    // fallback (their embeds are unreliable inside the app).
+    function openPlayback(post) {
+        if (!post) return
+        var localFile = post.videoPath || post.local_path || post.path || ""
+        if (localFile) {
+            contentPage.previewVideoPath = localFile
+            contentPage.previewVideoTitle = post.title || post.caption || "Untitled"
+            videoPreviewDialog.open()
+            return
+        }
+        playbackOverlay.videoTitle = post.title || post.caption || "Video"
+        playbackOverlay.platform = post.platform || ""
+        playbackOverlay.embedUrl = post.embedUrl || ""
+        playbackOverlay.postUrl = post.url || ""
+        playbackOverlay.thumbnail = post.thumbnail || ""
+        playbackOverlay.caption = post.caption || ""
+        playbackOverlay.open()
     }
 
     // ── Post Preview / Preflight Dialog ───────────────────────────
@@ -1668,13 +1715,13 @@ Page {
                 // Sort dropdown
                 ComboBox {
                     id: sortCombo
-                    model: ["Newest", "Oldest", "Platform", "Status"]
+                    model: ["Newest", "Oldest", "Platform", "Status", "Top views"]
                     currentIndex: contentPage.sortOption
                     onCurrentIndexChanged: {
                         contentPage.sortOption = currentIndex
                         contentPage.currentPage = 1
                     }
-                    Layout.preferredWidth: 120
+                    Layout.preferredWidth: 132
                     Accessible.name: "Sort content by"
                     Accessible.role: Accessible.ComboBox
                 }
@@ -1912,15 +1959,13 @@ Page {
                                     visible: thumbImage.status !== Image.Ready
                                 }
 
-                                // Click to preview video (Item 5 - now with embedded player)
+                                // Click to preview/play the video: local
+                                // files open the embedded player, remote
+                                // posts open the in-app playback overlay.
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        contentPage.previewVideoPath = modelData.thumbnail || ""
-                                        contentPage.previewVideoTitle = modelData.title || "Untitled"
-                                        videoPreviewDialog.open()
-                                    }
+                                    onClicked: contentPage.openPlayback(modelData)
                                 }
                             }
 

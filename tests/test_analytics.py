@@ -191,6 +191,11 @@ class TestCollectYouTube:
         }))
 
         collector = AnalyticsCollector(config_dir=str(tmp_path))
+        # Preload a verified ownership set: vid1/vid2 are on the
+        # authenticated channel's uploads playlist (the ownership gate
+        # requires this before any metrics are returned).
+        collector._owned_yt_ids = {"vid1", "vid2"}
+        collector._owned_yt_ids_ts = time.time()
 
         mock_response = {
             "items": [
@@ -820,3 +825,266 @@ class TestCLIAnalytics:
         # Check that 'analytics' is in the command names
         cmd_names = list(main.commands.keys())
         assert "analytics" in cmd_names
+
+
+# ── Ownership filtering (analytics hardening) ──────────────────────────────
+
+class TestOwnershipFiltering:
+    """Foreign post ids must never persist or surface in analytics.
+
+    Root cause of the skewed views/likes/comments dashboard aggregates was
+    metric_snapshots rows for video ids that were NOT on the authenticated
+    YouTube channel (stale test posts / foreign videos). These tests pin
+    the ownership gate at BOTH the producer (``_collect_youtube`` /
+    ``_collect_x`` / ``_collect_instagram``) and the persistence boundary
+    (``collect_all`` → ``_filter_owned_snapshots``).
+
+    YouTube authority: the authenticated channel's uploads playlist
+    (``channels.list mine=True`` → ``relatedPlaylists.uploads`` →
+    ``playlistItems``). X/Instagram authority: state.json, which xPST
+    itself writes at post time.
+    """
+
+    @pytest.mark.asyncio
+    async def test_youtube_foreign_ids_in_batch_are_not_persisted(self, tmp_path):
+        """The regression (analytics hardening): a snapshot batch containing
+        foreign ids against a fake channel uploads set must persist ONLY the
+        owned ids — foreign ids must NOT enter metric_snapshots."""
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        # Fake channel uploads set = the verified ownership cache (what
+        # _get_owned_youtube_ids loads from the channel's uploads playlist).
+        collector._owned_yt_ids = {"owned1", "owned2"}
+        collector._owned_yt_ids_ts = time.time()
+
+        def row(pid: str, views: int) -> dict:
+            return {
+                "platform": "youtube", "post_id": pid, "views": views,
+                "likes": 1, "comments": 0, "shares": 0,
+                "timestamp": "2026-08-27T00:00:00+00:00",
+            }
+
+        # A snapshot batch containing foreign ids, as a collector would
+        # hand it to the persistence layer:
+        owned1 = row("owned1", 10)
+        foreign = row("foreign_video_id", 9001)  # NOT on the channel
+        owned2 = row("owned2", 20)
+
+        with patch.object(
+            collector, "_collect_youtube", return_value=[owned1, foreign, owned2]
+        ):
+            data = await collector.collect_all({
+                "youtube": ["owned1", "foreign_video_id", "owned2"],
+            })
+
+        assert set(data["youtube"]) == {"owned1", "foreign_video_id", "owned2"}
+        # The persisted set (what the dashboard aggregates) is clean:
+        persisted = collector.store.latest("youtube")
+        persisted_ids = {str(p["post_id"]) for p in persisted}
+        assert persisted_ids == {"owned1", "owned2"}
+        assert "foreign_video_id" not in persisted_ids
+        # Foreign id is warned exactly once, never spammed.
+        assert "youtube:foreign_video_id" in collector._warned_foreign
+
+    @pytest.mark.asyncio
+    async def test_youtube_producer_skips_foreign_ids(self, tmp_path):
+        """_collect_youtube must not return metrics for videos that are not
+        on the authenticated channel's uploads playlist."""
+        creds_dir = tmp_path / "credentials"
+        creds_dir.mkdir()
+        (creds_dir / "youtube_token.json").write_text('{"token": "fake"}')
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        collector._owned_yt_ids = {"vid1", "vid2"}
+        collector._owned_yt_ids_ts = time.time()
+
+        mock_response = {
+            "items": [
+                {"id": "vid1", "statistics": {"viewCount": "1", "likeCount": "1", "commentCount": "1"}},
+                {"id": "foreign9", "statistics": {"viewCount": "999", "likeCount": "9", "commentCount": "9"}},
+            ]
+        }
+        mock_service = MagicMock()
+        mock_service.videos.return_value.list.return_value.execute.return_value = mock_response
+
+        import google.oauth2.credentials
+        import googleapiclient.discovery
+
+        with patch.object(google.oauth2.credentials, "Credentials") as mock_creds_cls, \
+             patch.object(googleapiclient.discovery, "build", return_value=mock_service):
+            mock_creds_cls.from_authorized_user_file.return_value = MagicMock()
+            result = await collector._collect_youtube(["vid1", "foreign9"])
+
+        assert [r["post_id"] for r in result] == ["vid1"]
+        assert "youtube:foreign9" in collector._warned_foreign
+
+    @pytest.mark.asyncio
+    async def test_youtube_fail_closed_when_ownership_unverifiable(self, tmp_path):
+        """When the uploads playlist cannot be fetched, the collector fails
+        closed: no unverified metrics are returned (and none persisted)."""
+        creds_dir = tmp_path / "credentials"
+        creds_dir.mkdir()
+        (creds_dir / "youtube_token.json").write_text('{"token": "fake"}')
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        collector._owned_yt_ids = None
+        collector._owned_yt_ids_ts = 0
+
+        mock_service = MagicMock()
+        mock_service.videos.return_value.list.return_value.execute.return_value = {
+            "items": [{"id": "vid1", "statistics": {"viewCount": "1"}}]
+        }
+
+        import google.oauth2.credentials
+        import googleapiclient.discovery
+
+        with patch.object(google.oauth2.credentials, "Credentials") as mock_creds_cls, \
+             patch.object(googleapiclient.discovery, "build", return_value=mock_service), \
+             patch.object(collector, "_get_owned_youtube_ids", return_value=None):
+            mock_creds_cls.from_authorized_user_file.return_value = MagicMock()
+            result = await collector._collect_youtube(["vid1"])
+
+        assert result == []
+        assert collector._warned_youtube_unverified is True
+
+    def test_owned_ids_fetch_paginates_whole_playlist(self, tmp_path):
+        """_get_owned_youtube_ids walks EVERY page of the uploads playlist —
+        a truncated set would silently drop legitimate older uploads from
+        analytics."""
+        creds_dir = tmp_path / "credentials"
+        creds_dir.mkdir()
+        (creds_dir / "youtube_token.json").write_text('{"token": "fake"}')
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+
+        page1 = {
+            "items": [{"contentDetails": {"videoId": f"vid{i}"}} for i in range(3)],
+            "nextPageToken": "tok2",
+        }
+        page2 = {
+            "items": [
+                {"contentDetails": {"videoId": "vid_old_1"}},
+                {"contentDetails": {"videoId": "vid_old_2"}},
+            ]
+        }
+        pages = iter([page1, page2])
+        mock_service = MagicMock()
+        mock_service.channels.return_value.list.return_value.execute.return_value = {
+            "items": [{"contentDetails": {"relatedPlaylists": {"uploads": "UU123"}}}]
+        }
+        mock_service.playlistItems.return_value.list.return_value.execute.side_effect = (
+            lambda: next(pages)
+        )
+
+        import google.oauth2.credentials
+        import googleapiclient.discovery
+
+        with patch.object(google.oauth2.credentials, "Credentials") as mock_creds_cls, \
+             patch.object(googleapiclient.discovery, "build", return_value=mock_service):
+            mock_creds_cls.from_authorized_user_file.return_value = MagicMock()
+            owned = collector._get_owned_youtube_ids()
+
+        assert owned == {"vid0", "vid1", "vid2", "vid_old_1", "vid_old_2"}
+        assert mock_service.playlistItems.return_value.list.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_x_skips_ids_not_recorded_in_state(self, tmp_path):
+        """_collect_x only tracks tweet ids that exist in our own state.json
+        (written by xPST at post time — source of truth for identity)."""
+        creds_dir = tmp_path / "credentials"
+        creds_dir.mkdir()
+        (creds_dir / "x_cookies.json").write_text('{"auth_token": "fake"}')
+        (tmp_path / "state.json").write_text(json.dumps({
+            "posted_videos": {
+                "v1": {"posted_to": {"x": {"id": "real_tweet"}}},
+            }
+        }))
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+
+        mock_tweet = MagicMock()
+        mock_tweet.view_count = 10
+        mock_tweet.favorite_count = 1
+        mock_tweet.reply_count = 0
+        mock_tweet.retweet_count = 0
+        mock_client = MagicMock()
+        mock_client.get_tweet_by_id = AsyncMock(return_value=mock_tweet)
+
+        import twikit
+
+        with patch.object(twikit, "Client", return_value=mock_client):
+            result = await collector._collect_x(["real_tweet", "foreign_tweet"])
+
+        assert [r["post_id"] for r in result] == ["real_tweet"]
+        assert mock_client.get_tweet_by_id.await_count == 1
+        assert "x:foreign_tweet" in collector._warned_foreign
+
+    @pytest.mark.asyncio
+    async def test_instagram_skips_ids_not_recorded_in_state(self, tmp_path):
+        """_collect_instagram only tracks media ids recorded in state.json."""
+        creds_dir = tmp_path / "credentials"
+        creds_dir.mkdir()
+        (creds_dir / "instagram_session.json").write_text(json.dumps({
+            "authorization_data": {"sessionid": "fake"}
+        }))
+        (tmp_path / "state.json").write_text(json.dumps({
+            "posted_videos": {"v1": {"posted_to": {"instagram": {"id": "real_media"}}}}
+        }))
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+
+        mock_info = MagicMock()
+        mock_info.like_count = 1
+        mock_info.comment_count = 0
+        mock_info.play_count = 5
+
+        import instagrapi
+
+        mock_client = MagicMock(spec=instagrapi.Client)
+        mock_client.media_info.return_value = mock_info
+        mock_client.insights_media.return_value = {}
+
+        with patch.object(instagrapi, "Client", return_value=mock_client):
+            result = await collector._collect_instagram(["real_media", "foreign_media"])
+
+        assert [r["post_id"] for r in result] == ["real_media"]
+        assert "instagram:foreign_media" in collector._warned_foreign
+
+    @pytest.mark.asyncio
+    async def test_x_foreign_rows_not_persisted(self, tmp_path):
+        """Persistence gate mirrors the producer: an x row whose id is not
+        recorded in state.json is not written, even if a producer passed it
+        through."""
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        (tmp_path / "state.json").write_text(json.dumps({
+            "posted_videos": {"v1": {"posted_to": {"x": {"id": "state_tweet"}}}},
+        }))
+
+        def row(pid: str, views: int) -> dict:
+            return {
+                "platform": "x", "post_id": pid, "views": views,
+                "likes": 0, "comments": 0, "shares": 0,
+                "timestamp": "2026-08-27T00:00:00+00:00",
+            }
+
+        with patch.object(
+            collector, "_collect_x", return_value=[row("state_tweet", 5), row("ghost", 99)]
+        ):
+            await collector.collect_all({"x": ["state_tweet", "ghost"]})
+
+        persisted = collector.store.latest("x")
+        assert {str(p["post_id"]) for p in persisted} == {"state_tweet"}
+        assert "x:ghost" in collector._warned_foreign
+
+    @pytest.mark.asyncio
+    async def test_x_foreign_rows_tolerated_when_state_empty(self, tmp_path):
+        """No state evidence → no judgement: explicit ids keep working on a
+        fresh install (nothing posted yet ≠ everything is foreign)."""
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+
+        def row(pid: str) -> dict:
+            return {
+                "platform": "x", "post_id": pid, "views": 1,
+                "likes": 0, "comments": 0, "shares": 0,
+                "timestamp": "2026-08-27T00:00:00+00:00",
+            }
+
+        with patch.object(collector, "_collect_x", return_value=[row("any_id")]):
+            await collector.collect_all({"x": ["any_id"]})
+
+        persisted = collector.store.latest("x")
+        assert {str(p["post_id"]) for p in persisted} == {"any_id"}
