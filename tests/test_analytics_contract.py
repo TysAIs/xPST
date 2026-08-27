@@ -68,18 +68,22 @@ class TestCapabilityContract:
 
 # ── X collector: twikit primary, optional API v2 behind a flag ───────────
 
-def _extract_cli_json(output: str) -> dict:
-    """Extract the JSON object from CLI output that may carry log/prefix text
-    (click CliRunner mixes stderr log lines into ``output``; prefixes may
-    even contain braces/brackets). Try candidate ``{`` starts from the RIGHT
-    (the report root is the JSON object ending at the last ``}``) and parse
-    each span; surface the raw output in the assertion message when nothing
-    parses so CI failures are self-diagnosing."""
+def _parse_cli_json(output: str) -> dict:
+    """Parse the JSON document embedded in CLI output.
+
+    CliRunner/console capture can carry platform console artifacts ahead of or
+    behind the emitted document (observed on Windows — log lines mixed into
+    ``output`` may even contain their own braces/brackets). The contract is
+    the document itself. Try candidate ``{`` starts from the RIGHT (the root
+    object ends at the last ``}``; inner candidates fail on trailing data)
+    and surface the raw output when nothing parses, so CI failures are
+    self-diagnosing.
+    """
     stripped = output.strip()
     starts = [i for i, ch in enumerate(stripped) if ch == "{"]
     end = stripped.rfind("}")
     if end == -1:
-        raise AssertionError(f"no JSON object in CLI output: {output[:300]!r}")
+        raise AssertionError(f"no JSON document in output: {output[:300]!r}")
     for start in reversed(starts):
         if start >= end:
             continue
@@ -87,7 +91,7 @@ def _extract_cli_json(output: str) -> dict:
             return json.loads(stripped[start : end + 1])
         except json.JSONDecodeError:
             continue
-    raise AssertionError(f"CLI output contained no parseable JSON object: {output[:500]!r}")
+    raise AssertionError(f"output contained no parseable JSON document: {output[:500]!r}")
 
 def _x_config(tmp_path, **x_overrides) -> str:
     x_cfg = {
@@ -381,20 +385,6 @@ class TestReportCacheTtl:
         assert report["platforms"]["youtube"]["totals"]["views"] == 42
 
 
-
-def _parse_cli_json(output: str):
-    """Parse the JSON document embedded in CLI output.
-
-    CliRunner/console capture can carry platform console artifacts ahead of or
-    behind the emitted document (observed on Windows); the contract is the
-    document itself. If the payload were malformed, the field assertions below
-    would fail loudly.
-    """
-    start = output.find("{")
-    end = output.rfind("}")
-    assert start != -1 and end > start, f"no JSON doc in output: {output!r}"
-    return json.loads(output[start:end + 1])
-
 class TestCliAnalyticsJson:
     def test_analytics_json_report_shape(self, tmp_path, monkeypatch):
         """xpst analytics --json emits the contract report: per-platform
@@ -445,7 +435,7 @@ class TestCliAnalyticsJson:
         # The CLI may prefix JSON with log lines (click mixes stderr into
         # output; repo convention — see scripts.clean_install_smoke), so
         # extract the JSON object tolerantly.
-        payload = _extract_cli_json(result.output)
+        payload = _parse_cli_json(result.output)
         assert "generated_at" in payload
         assert set(payload["platforms"]) == {"youtube", "x"}
 
@@ -473,6 +463,6 @@ class TestCliAnalyticsJson:
 
         result = CliRunner().invoke(cli, ["analytics", "--json"])
         assert result.exit_code == 0, result.output
-        payload = _extract_cli_json(result.output)
+        payload = _parse_cli_json(result.output)
         assert "platforms" in payload
         assert "generated_at" in payload
