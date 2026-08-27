@@ -318,7 +318,8 @@ class TestConfigProxyAuthMode:
 # ═══════════════════════════════════════════════════════════════
 
 class TestQuotaManagerAuthMode:
-    """Test auth_mode-aware quota limits."""
+    """Auth mode never overrides config — config is the single source of
+    truth for daily limits (audit wave 1)."""
 
     def test_default_quotas_without_config(self, tmp_path):
         """Without config, should use default conservative limits."""
@@ -327,12 +328,14 @@ class TestQuotaManagerAuthMode:
         assert qm.get_remaining("instagram")["daily"] == 5
         assert qm.get_remaining("x")["daily"] == 5
 
-    def test_graph_api_increases_instagram_limit(self, tmp_path):
-        """Graph API mode should increase Instagram limit to 25."""
+    def test_graph_api_does_not_override_config_instagram_limit(self, tmp_path):
+        """Graph API auth mode must NOT silently raise IG to 25 — the
+        config rate_limits value wins (audit: runtime 25 vs config 5)."""
         config = XPSTConfig()
         config.instagram.auth_mode = "graph_api"
         qm = QuotaManager(str(tmp_path), config=config)
-        assert qm.quotas["instagram"].daily_limit == 25
+        assert qm.quotas["instagram"].daily_limit == config.rate_limits.instagram
+        assert qm.quotas["instagram"].daily_limit == 5
 
     def test_session_mode_keeps_instagram_conservative(self, tmp_path):
         """Session mode should keep Instagram limit at 5."""
@@ -341,19 +344,23 @@ class TestQuotaManagerAuthMode:
         qm = QuotaManager(str(tmp_path), config=config)
         assert qm.quotas["instagram"].daily_limit == 5
 
-    def test_api_v2_increases_x_limit(self, tmp_path):
-        """API v2 mode should increase X limit to 17."""
+    def test_api_v2_does_not_override_config_x_limit(self, tmp_path):
+        """API v2 auth mode must NOT silently raise X to 17 — the config
+        rate_limits value wins (audit: runtime 10 vs config 5)."""
         config = XPSTConfig()
         config.x.auth_mode = "api_v2"
         qm = QuotaManager(str(tmp_path), config=config)
-        assert qm.quotas["x"].daily_limit == 17
+        assert qm.quotas["x"].daily_limit == config.rate_limits.x
+        assert qm.quotas["x"].daily_limit == 5
 
-    def test_cookies_mode_keeps_x_conservative(self, tmp_path):
-        """Cookies mode should set X limit to 10 (conservative)."""
+    def test_cookies_mode_keeps_x_at_config_limit(self, tmp_path):
+        """Cookies mode must NOT silently pin X to 10 — the config
+        rate_limits value wins."""
         config = XPSTConfig()
         config.x.auth_mode = "cookies"
         qm = QuotaManager(str(tmp_path), config=config)
-        assert qm.quotas["x"].daily_limit == 10
+        assert qm.quotas["x"].daily_limit == config.rate_limits.x
+        assert qm.quotas["x"].daily_limit == 5
 
     def test_youtube_quota_units(self, tmp_path):
         """YouTube quota units should be correctly calculated."""

@@ -158,7 +158,7 @@ class CrossPostEngine:
         # Initialize security components
         self.credentials = CredentialStore(config.config_dir)
         self.session_manager = SessionManager(config.config_dir)
-        self.quota_manager = QuotaManager(config.config_dir)
+        self.quota_manager = QuotaManager(config.config_dir, config=config)
 
         # Initialize notifications
         self.notifier = WebhookNotifier(
