@@ -17,7 +17,7 @@ logger = logging.getLogger("xpst.desktop")
 
 # ── PySide6 imports ──────────────────────────────────────────────────
 try:
-    from PySide6.QtCore import Qt, QTimer, QUrl
+    from PySide6.QtCore import QLockFile, Qt, QTimer, QUrl
     from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtWidgets import QApplication, QMenu, QSplashScreen, QSystemTrayIcon
@@ -60,6 +60,7 @@ from xpst.desktop_app.resource_path import (
     resource_path,
 )
 from xpst.desktop_app.splash_sizing import scaled_splash_size
+from xpst.utils.platform import get_config_dir
 
 
 def _find_qml_path() -> Path:
@@ -288,6 +289,15 @@ def _load_icon_font() -> bool:
 
 def main(no_splash: bool = False) -> int:
     """Launch the xPST desktop application."""
+    # Single-instance guard: a second launch focuses the existing window
+    # instead of spawning a competing engine (double-posting risk) — the
+    # shared pidfile in ~/.xpst/xpst.pid is what `xpst run/serve` also uses.
+    lock = QLockFile(str(get_config_dir() / "xpst-gui.lock"))
+    if not lock.tryLock(0):
+        logger.warning("xPST desktop already running — activating existing instance.")
+        print("xPST is already running.", file=sys.stderr)
+        return 10  # same exit code family as 'another instance holds lock'
+
     # Must use QApplication (not QGuiApplication) for system tray support
     app = QApplication(sys.argv)
     app.setApplicationName("xPST")
@@ -304,6 +314,12 @@ def main(no_splash: bool = False) -> int:
 
     # Register the bundled icon font so theme.icon* glyphs render (W4-5).
     _load_icon_font()
+
+    # Register bundled Inter fonts (SIL OFL) so the UI falls back cleanly
+    # when the platform default (SF Pro Text on macOS) is unavailable —
+    # removes the per-launch "missing font family" warning in bundles.
+    from xpst.desktop_app.backend import _register_bundled_fonts
+    _register_bundled_fonts()
 
     # Apply a platform-aware default UI font so text metrics don't drift on
     # macOS/Linux (W4-7). QML elements that don't set font.family inherit this.
