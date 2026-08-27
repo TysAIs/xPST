@@ -221,6 +221,13 @@ class AppController(QObject):
         # MCP server subprocess (started/stopped from the Settings page).
         self._mcp_process = None
 
+        # Live per-platform auth truth fetched by _run_health_check from
+        # engine.check_health() (authoritative session validity). Empty until
+        # the first background check lands; state.json health alone defaults
+        # every platform to "ok", which previously let the Dashboard claim
+        # "Connected" for expired sessions (#user-report 2026-08-27).
+        self._live_auth: dict[str, dict[str, Any]] = {}
+
         # Wire error signal to notification signal
         self.error.connect(lambda msg: self.notification.emit(msg, True))
         self.postComplete.connect(
@@ -479,6 +486,21 @@ class AppController(QObject):
                         info["enabled"] = True
                 except Exception:
                     info["enabled"] = True
+
+            # Live auth truth from engine.check_health(): when a background
+            # health check has landed, an expired/absent session downgrades
+            # the displayed status — state.json "ok" alone is never trusted
+            # to mean "Connected".
+            live = self._live_auth.get(plat)
+            if isinstance(live, dict):
+                info["authenticated"] = bool(live.get("authenticated", False))
+                info["session_valid"] = bool(live.get("session_valid", False))
+                if not (info["authenticated"] and info["session_valid"]):
+                    err = str(live.get("error") or "")
+                    info["status"] = "disabled" if err == "disabled" else "error"
+                    info["auth_error"] = err or "Session invalid or missing"
+                else:
+                    info["status"] = "ok"
 
             health[plat] = info
 
@@ -2147,13 +2169,43 @@ class AppController(QObject):
         return 300_000  # 5 minutes
 
     def _run_health_check(self) -> None:
-        """Run platform health check in a background thread."""
+        """Run platform health check in a background thread.
+
+        Fetches the authoritative per-platform auth state from
+        ``engine.check_health()`` (never on the GUI thread — each uploader
+        performs real network/session validation) and merges it into the
+        cached platform health so the Dashboard shows session-validated
+        "Connected" / honest error states instead of stale state.json data.
+        """
         def _check() -> None:
+            try:
+                self._refresh_platform_health()
+            except Exception as exc:
+                logger.warning("Background health check failed: %s", exc)
+
+            if self._ensure_engine():
+                try:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        health = loop.run_until_complete(self._engine.check_health())
+                    finally:
+                        loop.close()
+                    platforms = health.get("platforms", {})
+                    if isinstance(platforms, dict):
+                        self._live_auth = {
+                            name: info for name, info in platforms.items()
+                            if isinstance(info, dict)
+                        }
+                except Exception as exc:
+                    logger.warning("Live auth check failed: %s", exc)
+                    return  # keep previous _live_auth
+
             try:
                 self._refresh_platform_health()
                 self.dataChanged.emit()
             except Exception as exc:
-                logger.warning("Background health check failed: %s", exc)
+                logger.warning("Background health refresh failed: %s", exc)
 
         t = threading.Thread(target=_check, daemon=True)
         t.start()

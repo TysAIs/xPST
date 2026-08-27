@@ -388,6 +388,7 @@ Page {
                                     width: 10; height: 10; radius: 5
                                     color: {
                                         var s = modelData.status || "unknown"
+                                        if (s === "disabled") return theme.textMuted
                                         if (s === "ok" || s === "healthy" || s === "connected") return theme.success
                                         if (s === "warning" || s === "degraded") return theme.warning
                                         if (s === "error" || s === "failed") return theme.error
@@ -407,7 +408,9 @@ Page {
                                             var s = modelData.status || "unknown"
                                             if (s === "ok" || s === "healthy" || s === "connected") return "Connected"
                                             if (s === "warning" || s === "degraded") return "Degraded"
-                                            if (s === "error" || s === "failed") return "Error"
+                                            if (s === "error" || s === "failed")
+                                                return (modelData.auth_error && modelData.auth_error.length > 0) ? "Not connected" : "Error"
+                                            if (s === "disabled") return "Disabled"
                                             return "Unknown"
                                         }
                                         font.pixelSize: 12

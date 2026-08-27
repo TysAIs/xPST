@@ -27,8 +27,10 @@ class TestSetupPrerequisites:
             assert check_ffmpeg() is True
 
     def test_check_ffmpeg_not_found(self):
-        """Test ffmpeg check when ffmpeg is missing."""
-        with patch("shutil.which", return_value=None):
+        """Test ffmpeg check when ffmpeg is missing (PATH + known locations)."""
+        with patch("shutil.which", return_value=None), \
+             patch("pathlib.Path.home", return_value=Path("/nonexistent")), \
+             patch.object(Path, "is_file", return_value=False):
             assert check_ffmpeg() is False
 
     def test_check_yt_dlp_found(self):
