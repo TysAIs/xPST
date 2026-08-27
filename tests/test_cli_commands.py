@@ -367,6 +367,9 @@ class _StubEngine:
     def acquire_pidfile(self):
         return True
 
+    def release_pidfile(self):
+        return None
+
     async def check_and_post(self, source=None):
         return []
 

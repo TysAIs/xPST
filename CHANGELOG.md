@@ -7,7 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No changes since 1.0.0.
+### Added
+- **`xpst serve` daemon supervisor** — a single supervised long-running
+  process that acquires the engine pidfile (safely rejecting a live holder,
+  overwriting stale pidfiles left by crashed processes, releasing on
+  graceful shutdown), runs the configured scheduler loop (reusing the
+  existing Scheduler/ScheduleManager; scheduled posts + new-video watch
+  checks), and optionally serves the FastAPI dashboard. Handles
+  SIGTERM/SIGINT (clean shutdown) and SIGHUP (continue) and emits
+  launchctl/systemd-friendly start/health/stop log lines. Flags:
+  `--no-dashboard`, `--port`, `--host`, `--interval`, `--source`.
+- **Consistent pidfile handling across commands** — `run`, `watch`, `post`,
+  and the desktop `app` all route through the shared pidfile helper
+  (`xpst.utils.pidfile`). Automatic engine loops (`run`/`watch`/`serve`)
+  hold the exclusive lock and release it on exit (a one-shot `run` no longer
+  leaves a stale pidfile behind); manual actions (`post`, desktop) use
+  advisory verify-and-warn semantics so they work alongside a running
+  daemon.
+- **`xpst schedule install` now launches `xpst serve`** — the macOS
+  LaunchAgent runs the supervisor continuously (RunAtLoad + KeepAlive), the
+  Linux crontab entry is a pidfile-guarded, idempotent keep-alive tick, and
+  the Windows scheduled task runs `serve` at logon. Legacy `schedule run`
+  cron/plist/task entries are cleaned up on install and uninstall.
+- **`get_last_wake_check()` on state managers** — implements the accessor
+  the scheduler's sleep/wake catch-up heuristic already depended on
+  (previously a latent `AttributeError` silently swallowed by `watch`).
+
+### Fixed
+- A one-shot `xpst run` no longer leaves a stale `xpst.pid` behind (the
+  pidfile is always released on exit).
 
 ## [1.0.0] - 2026-08-18
 
