@@ -20,6 +20,7 @@ Uses Click for CLI framework with rich for beautiful output.
 import asyncio
 import importlib.metadata
 import json as _json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -1420,6 +1421,66 @@ def bio(ctx: click.Context, port: int, host: str, as_json: bool):
         return
     console.print(f"[bold blue]Link-in-Bio:[/bold blue] {url}")
     console.print("[dim]Start the dashboard with `xpst dashboard`, then share this URL.[/dim]")
+
+
+# ──────────────────────────────────────────────
+# Local Web UI Command (Phase 1 product UI, arch D1)
+# ──────────────────────────────────────────────
+
+@main.command()
+@click.option("--port", "-p", default=8080, type=int,
+              help="UI server HTTP port (default: 8080)")
+@click.option("--no-browser", is_flag=True,
+              help="Do not open the default browser (server/agent mode)")
+@json_option
+@click.pass_context
+def ui(ctx: click.Context, port: int, no_browser: bool, as_json: bool):
+    """Launch the local web UI (dashboard server + default browser)
+
+    Starts the xPST dashboard API server on 127.0.0.1 (loopback only) and
+    opens the default browser to the UI once the server is accepting
+    connections. Pass --no-browser for server/agent mode: the server stays
+    up until SIGINT/SIGTERM (graceful shutdown) and a readiness line with
+    the UI URL and PID is printed for scripts/MCP to parse.
+    """
+    config_path = ctx.obj.get("config_path")
+    config_dir = str(get_config_dir())
+    if config_path:
+        config_dir = str(Path(config_path).parent)
+    else:
+        try:
+            cfg = load_config(config_path)
+            config_dir = cfg.config_dir
+        except Exception as e:
+            logger.debug("Could not load config for ui: %s", e)
+
+    url = f"http://127.0.0.1:{port}"
+
+    def _on_ready(ready_url: str) -> None:
+        # Printed only once the server is actually accepting connections,
+        # so scripts/MCP can rely on it as a hard readiness signal.
+        payload = {"url": ready_url, "pid": os.getpid()}
+        if as_json:
+            json_output(payload, True)
+            return
+        console.print(
+            f"[bold green]xPST UI ready[/bold green] at {ready_url} "
+            f"(pid {os.getpid()})"
+        )
+        console.print("[dim]Press Ctrl+C to stop[/dim]")
+
+    if not as_json:
+        console.print(f"[bold blue]Starting xPST UI on {url}[/bold blue] ...")
+
+    from xpst.dashboard.server import serve_ui
+
+    serve_ui(
+        port=port,
+        host="127.0.0.1",
+        config_dir=config_dir,
+        open_browser=not no_browser,
+        on_started=_on_ready,
+    )
 
 
 # ──────────────────────────────────────────────

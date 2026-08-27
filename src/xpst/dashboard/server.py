@@ -24,10 +24,14 @@ import importlib.metadata
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -500,3 +504,70 @@ def start_dashboard(
 
     app = _create_app(config_dir)
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def serve_ui(
+    port: int = 8080,
+    host: str = "127.0.0.1",
+    config_dir: str = "~/.xpst",
+    open_browser: bool = True,
+    on_started: Callable[[str], None] | None = None,
+) -> None:
+    """Start the local web UI: dashboard server + optional default-browser launch.
+
+    This is the Phase-1 product-UI entry point (arch decision D1): the same
+    FastAPI app as :func:`start_dashboard` -- every existing JSON endpoint is
+    served unchanged -- but run programmatically so the caller learns the
+    exact moment the server is accepting connections and SIGINT/SIGTERM
+    trigger uvicorn's graceful shutdown instead of an abrupt process exit
+    (which would leave the port in a half-open state and confuse scripts).
+
+    Args:
+        port: HTTP port to listen on. Defaults to 8080.
+        host: Bind address. Defaults to ``127.0.0.1`` (loopback only).
+        config_dir: Path to xPST config directory for reading state.
+        open_browser: If ``True``, open the user's default browser to the UI
+            URL once the server is ready. Pass ``False`` for server/agent
+            mode (``xpst ui --no-browser``).
+        on_started: Optional callback invoked with the UI URL after the
+            server has bound its socket and is accepting connections. It is
+            used to print the machine-readable readiness line (URL + PID)
+            for scripts/MCP and is never invoked if startup fails.
+    """
+    import threading
+    import webbrowser
+
+    app = _create_app(config_dir)
+    url = f"http://{host}:{port}"
+
+    if open_browser:
+        def _open_browser() -> None:
+            try:
+                webbrowser.open(url)
+            except Exception as exc:
+                logger.warning("Failed to open browser at %s: %s", url, exc)
+
+        # webbrowser.open can block (LaunchServices round-trip on macOS);
+        # never stall the event loop or the readiness callback.
+        threading.Thread(target=_open_browser, daemon=True).start()
+
+    class _ReadyServer(uvicorn.Server):
+        """uvicorn.Server that fires ``on_started`` once it is listening."""
+
+        def __init__(self, config: uvicorn.Config, started: Callable[[str], None] | None):
+            super().__init__(config)
+            self._started_cb = started
+
+        async def startup(self, sockets=None):
+            await super().startup(sockets)
+            if self._started_cb is not None and self.started:
+                try:
+                    self._started_cb(url)
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning("UI readiness callback failed: %s", exc)
+
+    server = _ReadyServer(
+        uvicorn.Config(app, host=host, port=port, log_level="info"),
+        started=on_started,
+    )
+    server.run()
