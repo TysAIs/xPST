@@ -23,6 +23,62 @@ logger = get_logger(__name__)
 # Default cache TTL in seconds (15 minutes)
 CACHE_TTL = 900
 
+# ── Per-platform metric capability contract (architecture §2.5) ─────────────
+# Canonical metric families every platform row can carry (schema-compatible
+# with the snapshot store). A value a platform's integration cannot truthfully
+# provide is reported as MISSING — never fabricated as a real zero
+# (replaces the old "best-effort scrape that surfaces as real 0" behavior
+# for TikTok/Threads).
+ANALYTICS_METRIC_FAMILIES: tuple[str, ...] = (
+    "views",
+    "likes",
+    "comments",
+    "shares",
+    "saves",
+    "reposts",
+)
+
+# Platform-specific metrics beyond the canonical families.
+_PLATFORM_EXTRA_METRICS: dict[str, tuple[str, ...]] = {
+    "x": ("quotes", "bookmarks"),
+}
+
+# Capability contract: metric names each platform's live integration can
+# truthfully report (audit-map/03-architecture.md §2). Platforms with an
+# empty tuple (Threads — no official metrics API on the consumer token)
+# contribute no metrics.
+PLATFORM_METRIC_CAPABILITIES: dict[str, tuple[str, ...]] = {
+    "youtube": ("views", "likes", "comments"),
+    "x": ("views", "likes", "comments", "shares", "reposts", "quotes", "bookmarks"),
+    "tiktok": ("views", "likes", "comments", "shares"),
+    "instagram": ("views", "likes", "comments", "shares", "saves"),
+    "threads": (),
+}
+
+# TikTok Content Posting API: 6 requests/min per user token (§2.3). Calls are
+# spaced at least 60/6 = 10s apart and retried through the existing quota/retry
+# helpers (utils/retry.retry_operation) with a fast fixed backoff.
+TIKTOK_ANALYTICS_RATE_PER_MIN = 6
+TIKTOK_ANALYTICS_MIN_INTERVAL = 60.0 / TIKTOK_ANALYTICS_RATE_PER_MIN
+TIKTOK_API_BASE = "https://open.tiktokapis.com"
+
+
+def platform_metric_capability(platform: str) -> dict[str, Any]:
+    """Capability contract for one platform (architecture §2.5).
+
+    Returns ``{"platform", "available", "missing"}`` where ``available`` is
+    the metric names the platform's live integration can truthfully provide
+    for a CONNECTED account and ``missing`` is the canonical metric families
+    it cannot (so the UI renders only what the platform can actually show).
+    """
+    available = list(PLATFORM_METRIC_CAPABILITIES.get(platform, ()))
+    universe = set(ANALYTICS_METRIC_FAMILIES).union(_PLATFORM_EXTRA_METRICS.get(platform, ()))
+    return {
+        "platform": platform,
+        "available": available,
+        "missing": sorted(universe - set(available)),
+    }
+
 
 class PlatformMetrics:
     """Represents metrics for a single post on a single platform."""
@@ -82,6 +138,11 @@ class AnalyticsCollector:
         self._cache_ttl = cache_ttl
         self._config: dict[str, Any] = {}
         self._load_config()
+        # TikTok Content Posting rate pacing (6 req/min per user token).
+        # `_sleep` is injectable so tests can assert pacing without sleeping.
+        self._tt_last_request: float = 0.0
+        self._tt_pace: float = TIKTOK_ANALYTICS_MIN_INTERVAL
+        self._sleep: Any = asyncio.sleep
         # Persistent snapshot store (G22): every collection appends one
         # snapshot per post, giving real trend history and the join surface
         # for KB performance weighting (platform + post_id).
@@ -107,6 +168,98 @@ class AnalyticsCollector:
     def get_cached(self) -> dict[str, Any]:
         """Return cached analytics data (may be empty/stale)."""
         return self._cache
+
+    # ── Capability contract (architecture §2.5) ──────────────────────────
+
+    def get_metrics_capability(self, platform: str) -> dict[str, Any]:
+        """Capability contract for one platform: ``available`` vs ``missing``.
+
+        The UI/API renders only ``available`` metrics for a CONNECTED
+        account; ``missing`` metrics are shown as unavailable instead of
+        fabricated real zeros.
+        """
+        return platform_metric_capability(platform)
+
+    def get_metrics_capabilities(self) -> dict[str, Any]:
+        """Per-platform capability contract exposed to the UI/API.
+
+        Returns ``{platform: {"platform", "available", "missing"}}`` for
+        every platform xPST can render. Consumers must also respect each
+        platform's connection state (an unconfigured account provides
+        nothing, so the UI should render an empty state).
+        """
+        return {
+            platform: platform_metric_capability(platform)
+            for platform in PLATFORM_METRIC_CAPABILITIES
+        }
+
+    def build_report(
+        self,
+        data: dict[str, dict],
+        requested: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
+        """Aggregate analytics report (Phase 1.1 analytics-to-contract).
+
+        For every platform that was part of the run (present in ``data`` or
+        requested with post ids): an ``as_of`` timestamp, the metrics that
+        were ACTUALLY available this run vs missing, and the values. Metrics
+        a platform cannot provide — or that could not be collected this run
+        (no token, API failure) — are listed as missing and never surface as
+        fabricated real zeros.
+
+        Returns:
+            ``{"generated_at", "platforms": {platform: {
+            "as_of", "posts", "metrics_available", "metrics_missing",
+            "totals", "post_metrics"}}}``
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        platforms: dict[str, Any] = {}
+        names = set(data)
+        if requested:
+            names.update(k for k, v in requested.items() if v)
+
+        for platform in sorted(names):
+            posts_data = {
+                post_id: metrics
+                for post_id, metrics in (data.get(platform, {}) or {}).items()
+                if isinstance(metrics, dict)
+            }
+            universe = set(ANALYTICS_METRIC_FAMILIES).union(
+                _PLATFORM_EXTRA_METRICS.get(platform, ())
+            )
+            capability = set(PLATFORM_METRIC_CAPABILITIES.get(platform, ()))
+
+            populated: set[str] = set()
+            totals: dict[str, int] = {}
+            timestamps: list[str] = []
+            for metrics in posts_data.values():
+                for key, value in metrics.items():
+                    if key in universe and isinstance(value, (int, float)) and not isinstance(value, bool):
+                        totals[key] = totals.get(key, 0) + int(value)
+                        populated.add(key)
+                ts = metrics.get("timestamp")
+                if isinstance(ts, str) and ts:
+                    timestamps.append(ts)
+
+            available = sorted(populated & capability)
+            as_of = max(timestamps) if timestamps else now
+            platforms[platform] = {
+                "as_of": as_of,
+                "posts": len(posts_data),
+                "metrics_available": available,
+                "metrics_missing": sorted(universe - set(available)),
+                "totals": {key: totals[key] for key in available},
+                "post_metrics": {
+                    post_id: {
+                        key: value
+                        for key, value in metrics.items()
+                        if key in available or key in ("platform", "post_id", "timestamp")
+                    }
+                    for post_id, metrics in posts_data.items()
+                },
+            }
+
+        return {"generated_at": now, "platforms": platforms}
 
     async def collect_all(self, post_ids: dict[str, list[str]] | None = None) -> dict[str, dict]:
         """Collect analytics from all platforms in parallel.
@@ -324,7 +477,31 @@ class AnalyticsCollector:
             return []
 
     async def _collect_x(self, tweet_ids: list[str]) -> list[dict]:
-        """Fetch X/Twitter metrics via twikit."""
+        """Fetch X/Twitter metrics.
+
+        Primary backend is twikit (free, shipped, no paid API — architecture
+        §2.1). An optional X API v2 metrics backend is enabled by the config
+        flag ``accounts.x.metrics_backend: api_v2`` (or the existing
+        ``accounts.x.auth_mode: api_v2`` used by the uploader); if it fails
+        or v2 credentials are absent the collector degrades gracefully to the
+        twikit path so analytics never fails because one backend errors.
+        """
+        if self._x_metrics_backend() == "api_v2":
+            try:
+                v2_results = await self._collect_x_api_v2(tweet_ids)
+                if v2_results:
+                    return v2_results
+            except Exception as exc:  # noqa: BLE001 — degrade to twikit
+                logger.warning("X API v2 analytics failed (%s); degrading to twikit", exc)
+        return await self._collect_x_twikit(tweet_ids)
+
+    async def _collect_x_twikit(self, tweet_ids: list[str]) -> list[dict]:
+        """Fetch X/Twitter public metrics via twikit (per-tweet lookup).
+
+        ``view_count, favorite_count, reply_count, retweet_count,
+        quote_count, bookmark_count`` come from the twikit Tweet object
+        (public metrics — no paid API). Failures skip the individual tweet
+        and never break collection."""
         try:
             import twikit
 
@@ -351,6 +528,7 @@ class AnalyticsCollector:
                         "shares": getattr(tweet, "retweet_count", 0) or 0,
                         "reposts": getattr(tweet, "retweet_count", 0) or 0,
                         "quotes": getattr(tweet, "quote_count", 0) or 0,
+                        "bookmarks": getattr(tweet, "bookmark_count", 0) or 0,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
                 except Exception as e:
@@ -362,91 +540,275 @@ class AnalyticsCollector:
             logger.warning(f"X analytics failed: {e}")
             return []
 
-    async def _collect_tiktok(self, video_ids: list[str]) -> list[dict]:
-        """Fetch TikTok metrics via yt-dlp metadata extraction."""
-        results = []
-        try:
-            import yt_dlp
+    async def _collect_x_api_v2(self, tweet_ids: list[str]) -> list[dict]:
+        """Optional X API v2 metrics via OAuth 1.0a user context.
 
-            # Resolve the account's real handle — the @_ placeholder only
-            # works while TikTok tolerates it (ISC-124).
-            username = (
-                (self._config.get("tiktok") or {}).get("username")
-                or (self._config.get("accounts") or {}).get("tiktok", {}).get("username")
-                or "_"
-            )
+        Uses the same credentials as the uploader's ``api_v2`` path
+        (``accounts.x.api_key/api_secret/access_token/access_token_secret``)
+        and reads ``GET /2/tweets`` with ``tweet.fields=public_metrics,
+        organic_metrics,created_at``. Returns [] when v2 credentials are
+        absent so the caller degrades to the twikit path (no paid plan is
+        ever required — architecture §2.1).
+        """
+        x_cfg = (self._config.get("accounts") or {}).get("x", {}) or {}
+        if not all(
+            [
+                x_cfg.get("api_key"),
+                x_cfg.get("api_secret"),
+                x_cfg.get("access_token"),
+                x_cfg.get("access_token_secret"),
+            ]
+        ):
+            logger.debug("X API v2 credentials not configured — falling back to twikit")
+            return []
 
-            for video_id in video_ids:
-                try:
-                    url = f"https://www.tiktok.com/@{username}/video/{video_id}"
-                    ydl_opts = {
-                        "quiet": True,
-                        "skip_download": True,
-                        "extract_flat": False,
-                        "no_warnings": True,
-                    }
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(url, download=False)
+        from authlib.integrations.httpx_client import AsyncOAuth1Client
 
+        results: list[dict] = []
+        async with AsyncOAuth1Client(
+            x_cfg.get("api_key"),
+            x_cfg.get("api_secret"),
+            x_cfg.get("access_token"),
+            x_cfg.get("access_token_secret"),
+            timeout=30,
+        ) as client:
+            for i in range(0, len(tweet_ids), 100):
+                batch = tweet_ids[i : i + 100]
+                response = await client.get(
+                    "https://api.twitter.com/2/tweets",
+                    params={
+                        "ids": ",".join(batch),
+                        "tweet.fields": "public_metrics,organic_metrics,created_at",
+                    },
+                )
+                response.raise_for_status()
+                for tweet in response.json().get("data") or []:
+                    public = tweet.get("public_metrics", {}) or {}
+                    organic = tweet.get("organic_metrics", {}) or {}
+                    views = public.get("view_count") or organic.get("impression_count")
                     results.append({
-                        "platform": "tiktok",
-                        "post_id": video_id,
-                        "views": info.get("view_count", 0) or 0,
-                        "likes": info.get("like_count", 0) or 0,
-                        "comments": info.get("comment_count", 0) or 0,
-                        "shares": info.get("repost_count", 0) or 0,
+                        "platform": "x",
+                        "post_id": str(tweet.get("id", "")),
+                        "views": int(views or 0),
+                        "likes": int(public.get("like_count", 0) or 0),
+                        "comments": int(public.get("reply_count", 0) or 0),
+                        "shares": int(public.get("retweet_count", 0) or 0),
+                        "reposts": int(public.get("retweet_count", 0) or 0),
+                        "quotes": int(public.get("quote_count", 0) or 0),
+                        "bookmarks": int(public.get("bookmark_count", 0) or 0),
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
-                except Exception as e:
-                    logger.debug(f"TikTok metrics failed for {video_id}: {e}")
-        except ImportError:
-            logger.debug("yt-dlp not available for TikTok metrics")
+        return results
+
+    def _tiktok_access_token(self) -> str:
+        """Existing Content Posting API access token (config.yaml
+        ``accounts.tiktok.access_token``) — the same OAuth user token the
+        uploader uses. No new auth flow (architecture §2.3)."""
+        tiktok = (self._config.get("accounts") or {}).get("tiktok", {}) or {}
+        token = str(
+            tiktok.get("access_token")
+            or (self._config.get("tiktok") or {}).get("access_token")
+            or ""
+        ).strip()
+        return token
+
+    def _x_metrics_backend(self) -> str:
+        """Analytics backend for X: primary = twikit (free, shipped, no paid
+        API). An optional X API v2 metrics backend is enabled by the config
+        flag ``accounts.x.metrics_backend: api_v2`` (falls back to the
+        existing ``accounts.x.auth_mode: api_v2`` flag used by the
+        uploader); otherwise twikit is used (architecture §2.1)."""
+        x_cfg = (self._config.get("accounts") or {}).get("x", {}) or {}
+        backend = str(x_cfg.get("metrics_backend") or x_cfg.get("auth_mode") or "cookies")
+        return "api_v2" if backend == "api_v2" else "twikit"
+
+    async def _pace_tiktok(self) -> None:
+        """Space TikTok Content Posting calls to the 6 req/min per-user-token
+        limit (§2.3). Tests disable pacing via ``_tt_pace = 0`` or assert it
+        via the injectable ``_sleep``."""
+        if self._tt_pace <= 0 or not self._tt_last_request:
+            return
+        elapsed = time.monotonic() - self._tt_last_request
+        if elapsed < self._tt_pace:
+            await self._sleep(self._tt_pace - elapsed)
+
+    @staticmethod
+    def _tiktok_videos_from(data: dict) -> list[dict]:
+        """Extract the video list from any documented TikTok response shape
+        (Content Posting/Display: ``data.videos``, ``data.list``,
+        ``data.items``, or an id-keyed map)."""
+        payload = data.get("data", data)
+        if not isinstance(payload, dict):
+            return []
+        videos = (
+            payload.get("videos")
+            or payload.get("list")
+            or payload.get("items")
+            or payload.get("video_list")
+            or []
+        )
+        if isinstance(videos, dict):
+            videos = list(videos.values())
+        return [v for v in videos if isinstance(v, dict)]
+
+    @staticmethod
+    def _tiktok_metric_value(container: dict, *keys: str) -> int | None:
+        """First int value found in the container or its nested stats blocks.
+        Returns None when absent so callers omit the metric entirely instead
+        of surfacing a fabricated zero."""
+        blocks: list[dict] = [container]
+        for block_name in ("post_info", "metrics", "stats", "data"):
+            block = container.get(block_name)
+            if isinstance(block, dict):
+                blocks.append(block)
+        for block in blocks:
+            for key in keys:
+                value = block.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    return int(value)
+        return None
+
+    @classmethod
+    def _tiktok_parse_item(cls, item: dict) -> dict | None:
+        """Map one TikTok video object to the canonical metrics row.
+
+        Fields per architecture §2.3: view_count, like_count, comment_count,
+        share_count (play_count accepted for the Display API). Only metrics
+        actually present in the payload are emitted."""
+        meta = item.get("post_info")
+        if not isinstance(meta, dict):
+            meta = item
+        post_id = str(
+            item.get("id")
+            or item.get("video_id")
+            or item.get("publish_id")
+            or meta.get("id")
+            or ""
+        )
+        if not post_id:
+            return None
+        view_count = cls._tiktok_metric_value(meta, "view_count", "play_count")
+        like_count = cls._tiktok_metric_value(meta, "like_count")
+        comment_count = cls._tiktok_metric_value(meta, "comment_count")
+        share_count = cls._tiktok_metric_value(meta, "share_count", "repost_count")
+
+        row: dict[str, Any] = {
+            "platform": "tiktok",
+            "post_id": post_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        for name, value in (
+            ("views", view_count),
+            ("likes", like_count),
+            ("comments", comment_count),
+            ("shares", share_count),
+        ):
+            if value is not None:
+                row[name] = value
+        return row
+
+    async def _tiktok_request(
+        self,
+        client: Any,
+        headers: dict[str, str],
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> list[dict]:
+        """One rate-paced, retried TikTok analytics call.
+
+        Paced to the 6 req/min per-user-token limit, retried on retryable
+        HTTP errors (429 etc.) through the existing retry helper, then the
+        video list is extracted defensively. Returns [] on failure so the
+        collector degrades instead of raising.
+        """
+        from xpst.utils.retry import RetryConfig, retry_operation
+
+        async def _call() -> dict:
+            await self._pace_tiktok()
+            if method == "GET":
+                response = await client.get(url, headers=headers)
+            else:
+                response = await client.post(url, headers=headers, json=kwargs.get("json") or {})
+            response.raise_for_status()
+            self._tt_last_request = time.monotonic()
+            return response.json()
+
+        data = await retry_operation(
+            _call,
+            platform="tiktok",
+            config=RetryConfig(
+                max_retries=2,
+                backoff_base=1,
+                backoff_max=5,
+                fixed_delays=[0.5, 1.0],
+            ),
+        )
+        return self._tiktok_videos_from(data)
+
+    async def _collect_tiktok(self, video_ids: list[str]) -> list[dict]:
+        """Fetch TikTok metrics via the official Content Posting API.
+
+        Uses the EXISTING Content Posting token (``accounts.tiktok.access_token``
+        — no new auth) and queries own published videos through:
+
+        - ``POST /v2/post/publish/video/list/query/``  (filtered list query)
+        - ``GET  /v2/post/publish/video/feed/``       (own published feed)
+
+        carrying ``view_count, like_count, comment_count, share_count``
+        (architecture §2.3). Requests respect the 6 req/min per-user-token
+        limit and route through the existing quota/retry helpers. Any failure
+        degrades to [] so the metrics are reported as missing — never
+        fabricated as real zeros (replaces the yt-dlp best-effort scrape).
+        """
+        token = self._tiktok_access_token()
+        if not token:
+            logger.debug("TikTok access token not configured — TikTok metrics marked missing")
+            return []
+
+        headers = {"Authorization": f"Bearer {token}"}
+        results: list[dict] = []
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=30) as client:
+                filter_body: dict[str, Any] = {"max_count": 20}
+                if video_ids:
+                    filter_body["filters"] = {"video_ids": video_ids[:100]}
+                videos = await self._tiktok_request(
+                    client,
+                    headers,
+                    "POST",
+                    f"{TIKTOK_API_BASE}/v2/post/publish/video/list/query/",
+                    json=filter_body,
+                )
+                if not videos:
+                    videos = await self._tiktok_request(
+                        client,
+                        headers,
+                        "GET",
+                        f"{TIKTOK_API_BASE}/v2/post/publish/video/feed/?max_count=20",
+                    )
+                for item in videos:
+                    parsed = self._tiktok_parse_item(item)
+                    if parsed:
+                        results.append(parsed)
+        except Exception as exc:  # noqa: BLE001 — degrade, never raise into collect_all
+            logger.warning("TikTok analytics failed: %s", exc)
 
         return results
 
     async def _collect_threads(self, post_ids: list[str]) -> list[dict]:
-        """Fetch Threads metrics via yt-dlp metadata extraction (best effort).
+        """Fetch Threads metrics.
 
-        Threads has no stable public metrics API, so we attempt yt-dlp
-        extraction like TikTok and skip gracefully when it is unavailable.
+        Threads has no official metrics API on the consumer token
+        (architecture §3.5 — publish/delete only), so no metrics are
+        fabricated here: the capability contract (``PLATFORM_METRIC_
+        CAPABILITIES["threads"] == ()``) reports every metric as missing and
+        the UI renders them as unavailable instead of surfacing the old
+        best-effort scrape's real zeros.
         """
-        results = []
-        try:
-            import yt_dlp
-
-            username = (
-                (self._config.get("threads") or {}).get("username")
-                or (self._config.get("accounts") or {}).get("threads", {}).get("username")
-                or "_"
-            )
-
-            for post_id in post_ids:
-                try:
-                    url = f"https://www.threads.net/@{username}/post/{post_id}"
-                    ydl_opts = {
-                        "quiet": True,
-                        "skip_download": True,
-                        "extract_flat": False,
-                        "no_warnings": True,
-                    }
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(url, download=False)
-
-                    results.append({
-                        "platform": "threads",
-                        "post_id": post_id,
-                        "views": info.get("view_count", 0) or 0,
-                        "likes": info.get("like_count", 0) or 0,
-                        "comments": info.get("comment_count", 0) or 0,
-                        "shares": info.get("repost_count", 0) or 0,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
-                except Exception as e:
-                    logger.debug(f"Threads metrics failed for {post_id}: {e}")
-        except ImportError:
-            logger.debug("yt-dlp not available for Threads metrics")
-
-        return results
+        return []
 
     def _discover_post_ids(self) -> dict[str, list[str]]:
         """Discover post IDs from state.json for each platform.
@@ -478,7 +840,9 @@ class AnalyticsCollector:
                 # Support both "id" (production state.json) and "post_id" (legacy/test fixtures)
                 post_id = info.get("id") or info.get("post_id")
                 if post_id:
-                    post_ids[platform].append(post_id)
+                    # Unknown platforms (e.g. "messenger" posts in real state)
+                    # must never crash discovery — setdefault degrades to []
+                    post_ids.setdefault(platform, []).append(post_id)
 
         return post_ids
 
