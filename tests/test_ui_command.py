@@ -109,6 +109,15 @@ def test_ui_serves_health_then_graceful_shutdown():
     # SIGTERM must stop the server (rc -15 = terminated by our SIGTERM, or 0 on
     # uvicorn builds that do not re-raise the captured signal). A crash or a
     # hang that forced ``proc.kill`` would surface as any other return code.
-    assert proc.returncode in (0, -_signal.SIGTERM), (
-        f"unexpected exit rc={proc.returncode} after SIGTERM: {err}"
-    )
+    # POSIX: macos/ubuntu CI assert the graceful path strictly.
+    # Windows: subprocess.terminate() is TerminateProcess (hard kill, rc=1) —
+    # uvicorn's graceful-stop handler cannot observe a real SIGTERM there, so
+    # accept rc=1 as the truthful Windows semantics for a clean stop.
+    if os.name == "nt":
+        assert proc.returncode in (0, 1, -_signal.SIGTERM), (
+            f"unexpected exit rc={proc.returncode} after terminate on Windows: {err}"
+        )
+    else:
+        assert proc.returncode in (0, -_signal.SIGTERM), (
+            f"unexpected exit rc={proc.returncode} after SIGTERM: {err}"
+        )
