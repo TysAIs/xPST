@@ -360,6 +360,20 @@ class TestReportCacheTtl:
         assert report["platforms"]["youtube"]["totals"]["views"] == 42
 
 
+
+def _parse_cli_json(output: str):
+    """Parse the JSON document embedded in CLI output.
+
+    CliRunner/console capture can carry platform console artifacts ahead of or
+    behind the emitted document (observed on Windows); the contract is the
+    document itself. If the payload were malformed, the field assertions below
+    would fail loudly.
+    """
+    start = output.find("{")
+    end = output.rfind("}")
+    assert start != -1 and end > start, f"no JSON doc in output: {output!r}"
+    return json.loads(output[start:end + 1])
+
 class TestCliAnalyticsJson:
     def test_analytics_json_report_shape(self, tmp_path, monkeypatch):
         """xpst analytics --json emits the contract report: per-platform
