@@ -167,7 +167,7 @@ def prompt_tiktok_username() -> str:
     console.print(Panel("[bold]TikTok Source[/bold]", style="cyan"))
     console.print("Enter the TikTok username whose videos you want to cross-post.")
     console.print("[dim]This is the source of your content — new videos will be downloaded and posted to other platforms.[/dim]\n")
-    username = console.input("[cyan]TikTok username (without @): [/cyan]").strip()
+    username = _console_input("[cyan]TikTok username (without @): [/cyan]").strip()
     if username.startswith("@"):
         username = username[1:]
     return username
@@ -437,10 +437,24 @@ def run_setup() -> XPSTConfig:
     return config
 
 
+def _console_input(prompt: str) -> str:
+    """Read a line from the console without crashing on closed/piped stdin.
+
+    The legacy setup wizard historically crashed with `EOFError` when its
+    prompts were driven over a pipe (agent mode). Returning "" (which the
+    callers treat as "use the default") keeps `xpst setup` safe for
+    automation while preserving identical interactive behavior.
+    """
+    try:
+        return console.input(prompt)
+    except EOFError:
+        return ""
+
+
 def _confirm(message: str, default: bool = True) -> bool:
     """Ask for yes/no confirmation."""
     suffix = " [Y/n]: " if default else " [y/N]: "
-    response = console.input(f"[cyan]{message}{suffix}[/cyan]").strip().lower()
+    response = _console_input(f"[cyan]{message}{suffix}[/cyan]").strip().lower()
     if not response:
         return default
     return response in ("y", "yes")

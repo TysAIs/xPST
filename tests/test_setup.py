@@ -82,3 +82,50 @@ class TestConfirmPrompt:
         # Default True: empty input returns True
         # Default False: empty input returns False
         assert True  # Placeholder - interactive tests need console mocking
+
+
+class TestLegacyPipedInputSafety:
+    """The legacy setup wizard must never crash with EOFError on pipes.
+
+    The polished wizard.py replaced what used to crash with EOFError when
+    driven over closed/piped stdin. These guards keep `xpst setup` (kept for
+    compatibility) safe under automation without changing interactive prompts.
+    """
+
+    def test_confirm_returns_default_on_eoferror_pipe(self, monkeypatch):
+        """_confirm degrades to its default when stdin closes (EOF)."""
+        from xpst import setup
+
+        def _eof(*args, **kwargs):
+            raise EOFError
+
+        monkeypatch.setattr(setup.console, "input", _eof)
+        assert setup._confirm("Continue?", default=True) is True
+        assert setup._confirm("Skip?", default=False) is False
+
+    def test_prompt_tiktok_username_returns_empty_on_eoferror_pipe(self, monkeypatch):
+        """prompt_tiktok_username returns '' (no crash) on a closed pipe."""
+        from xpst import setup
+
+        def _eof(*args, **kwargs):
+            raise EOFError
+
+        monkeypatch.setattr(setup.console, "input", _eof)
+        assert setup.prompt_tiktok_username() == ""
+
+    def test_console_input_catches_eoferror(self, monkeypatch):
+        """The guard helper itself swallows EOFError and returns ''."""
+        from xpst import setup
+
+        def _eof(*args, **kwargs):
+            raise EOFError
+
+        monkeypatch.setattr(setup.console, "input", _eof)
+        assert setup._console_input("prompt> ") == ""
+
+    def test_console_input_passthrough(self, monkeypatch):
+        """Interactive input is passed through unchanged."""
+        from xpst import setup
+
+        monkeypatch.setattr(setup.console, "input", lambda prompt: "hello")
+        assert setup._console_input("prompt> ") == "hello"
