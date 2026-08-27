@@ -382,6 +382,27 @@ class AnalyticsCollector:
                 filtered.append(row)
         return filtered
 
+    def _purge_stale_youtube_snapshots(self) -> None:
+        """Remove pre-existing foreign youtube rows from ``metric_snapshots``.
+
+        Complements the persistence gate: the gate stops NEW unowned ids from
+        being written, this removes unowned rows that are ALREADY present —
+        the original skew incident (stale test posts, videos deleted from the
+        channel, rows persisted before ownership verification existed).
+
+        Only ever runs on a VERIFIED ownership set: when ownership cannot be
+        determined (``None`` — no token or API failure) nothing is purged, so
+        a transient ownership failure can never wipe real history. Failures
+        here are logged and never block collection.
+        """
+        try:
+            owned = self._get_owned_youtube_ids()
+            if owned is None:
+                return
+            self.store.delete_youtube_snapshots_not_in(owned)
+        except Exception as e:  # defensive — collection must never break
+            logger.warning("YouTube stale-snapshot purge failed: %s", e)
+
     def _is_cache_valid(self) -> bool:
         """Check if cached data is still within TTL."""
         return (time.time() - self._cache_time) < self._cache_ttl and bool(self._cache)
@@ -534,6 +555,11 @@ class AnalyticsCollector:
         # collectors already filter; this second gate keeps the invariant
         # even if a collector is bypassed or mocked.
         try:
+            # Self-healing half of the invariant: purge youtube rows whose
+            # id is not on the VERIFIED ownership set, so the skew can
+            # never be reintroduced by stale history predating the gate
+            # (no-op when nothing is stale or ownership is unverifiable).
+            self._purge_stale_youtube_snapshots()
             rows = [
                 {"platform": platform, "post_id": post_id, **metrics}
                 for platform, posts in data.items()

@@ -1088,3 +1088,58 @@ class TestOwnershipFiltering:
 
         persisted = collector.store.latest("x")
         assert {str(p["post_id"]) for p in persisted} == {"any_id"}
+
+    @pytest.mark.asyncio
+    async def test_stale_foreign_youtube_rows_are_purged(self, tmp_path):
+        """Self-healing: pre-existing foreign youtube rows (the exact
+        original-skew shape — rows persisted before ownership verification
+        existed) are REMOVED on the next verified collection, not merely
+        prevented from growing. Non-youtube rows are never touched."""
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        collector._owned_yt_ids = {"owned1"}
+        collector._owned_yt_ids_ts = time.time()
+        # Pre-existing rows, as if a prior run (or test post) had written
+        # them before the ownership gate existed.
+        collector.store.record_snapshots([
+            {"platform": "youtube", "post_id": "owned1", "views": 10, "likes": 1,
+             "comments": 0, "shares": 0, "timestamp": "2026-08-26T10:00:00+00:00"},
+            {"platform": "youtube", "post_id": "stale_test_post", "views": 9000,
+             "likes": 99, "comments": 9, "shares": 0, "timestamp": "2026-08-26T10:00:00+00:00"},
+            {"platform": "x", "post_id": "keep_x", "views": 1,
+             "timestamp": "2026-08-26T10:00:00+00:00"},
+        ])
+
+        with patch.object(
+            collector,
+            "_collect_youtube",
+            return_value=[{
+                "platform": "youtube", "post_id": "owned1", "views": 11,
+                "likes": 1, "comments": 0, "shares": 0,
+                "timestamp": "2026-08-27T00:00:00+00:00",
+            }],
+        ):
+            await collector.collect_all({"youtube": ["owned1"]})
+
+        persisted_yt = {str(p["post_id"]) for p in collector.store.latest("youtube")}
+        assert persisted_yt == {"owned1"}
+        assert collector.store.history("youtube", "stale_test_post") == []
+        # The youtube-only purge never touches other platforms.
+        assert {str(p["post_id"]) for p in collector.store.latest("x")} == {"keep_x"}
+
+    @pytest.mark.asyncio
+    async def test_no_purge_when_ownership_unverifiable(self, tmp_path):
+        """The purge must fail CLOSED: when ownership cannot be verified
+        (None), existing rows are left untouched — a transient ownership
+        check failure must never wipe real history."""
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        collector.store.record_snapshots([
+            {"platform": "youtube", "post_id": "mystery1", "views": 5,
+             "timestamp": "2026-08-26T10:00:00+00:00"},
+        ])
+
+        with patch.object(collector, "_get_owned_youtube_ids", return_value=None), \
+             patch.object(collector, "_collect_youtube", return_value=[]):
+            await collector.collect_all({"youtube": ["mystery1"]})
+
+        persisted = {str(p["post_id"]) for p in collector.store.latest("youtube")}
+        assert persisted == {"mystery1"}
