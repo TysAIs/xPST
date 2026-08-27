@@ -299,7 +299,8 @@ def run(ctx: click.Context, source: str, bidirectional: bool, dry_run: bool, as_
 
     engine = CrossPostEngine(config)
 
-    # R1 fix: enforce single instance to prevent double-posting
+    # Single-instance guard via the shared pidfile helper (prevents
+    # double-posting when another run/watch/serve instance is active).
     try:
         engine.acquire_pidfile()
     except Exception as e:
@@ -308,6 +309,20 @@ def run(ctx: click.Context, source: str, bidirectional: bool, dry_run: bool, as_
         ctx.exit(1)
         return
 
+    try:
+        _run_check_and_post(engine, source, bidirectional, dry_run, as_json, quiet)
+    finally:
+        # Always release so a one-shot `run` never leaves a stale pidfile.
+        engine.release_pidfile()
+
+
+def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool, as_json: bool, quiet: bool) -> None:
+    """Execute a single check-and-post cycle.
+
+    Extracted from the ``run`` command so the pidfile guard in ``run`` can
+    release the shared lock in a ``finally`` block (a one-shot ``run`` must
+    never leave a stale pidfile behind).
+    """
     # --source all implies bidirectional
     if source == "all":
         bidirectional = True
@@ -395,39 +410,51 @@ def watch(ctx: click.Context, interval: int | None, source: str, bidirectional: 
 
     scheduler = Scheduler(engine, config)
 
-    # Display results after each scheduler cycle via a hook
-    import time as _time
-    while True:
-        try:
-            if bidirectional:
-                # Use jittered interval for human-like timing
-                jittered = engine.anti_bot.get_jittered_interval(check_interval)
-                results = asyncio.run(engine.check_and_post_bidirectional())
-            else:
-                if scheduler._needs_catch_up():
-                    console.print("[yellow]Mac was asleep. Running catch-up...[/yellow]")
-                    scheduler._run_check(catch_up=True, source=source)
+    # Single-instance guard via the shared pidfile helper: a long-running
+    # watch loop must not run concurrently with another watch/serve loop
+    # or it would double-post. Release on exit (incl. exceptions).
+    try:
+        engine.acquire_pidfile()
+    except Exception as e:
+        console.print(f"[bold red]Error:[/bold red] Another xPST instance is already running. {e}")
+        sys.exit(EXIT_GENERAL)
+
+    try:
+        # Display results after each scheduler cycle via a hook
+        import time as _time
+        while True:
+            try:
+                if bidirectional:
+                    # Use jittered interval for human-like timing
+                    jittered = engine.anti_bot.get_jittered_interval(check_interval)
+                    results = asyncio.run(engine.check_and_post_bidirectional())
                 else:
-                    scheduler._run_check(catch_up=False, source=source)
-                results = scheduler.last_results
-                jittered = check_interval
+                    if scheduler._needs_catch_up():
+                        console.print("[yellow]Mac was asleep. Running catch-up...[/yellow]")
+                        scheduler._run_check(catch_up=True, source=source)
+                    else:
+                        scheduler._run_check(catch_up=False, source=source)
+                    results = scheduler.last_results
+                    jittered = check_interval
 
-            for result in results:
-                _display_result(result)
+                for result in results:
+                    _display_result(result)
 
-            engine.state.update_last_wake_check()
-            engine.state.save()
+                engine.state.update_last_wake_check()
+                engine.state.save()
 
-            console.print(f"[dim]Next check in {jittered:.0f}s...[/dim]")
-            _time.sleep(jittered)
+                console.print(f"[dim]Next check in {jittered:.0f}s...[/dim]")
+                _time.sleep(jittered)
 
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Stopped by user[/yellow]")
-            break
-        except Exception as e:
-            logger.error(f"Error in watch loop: {e}")
-            console.print(f"[red]Error:[/red] {e}")
-            _time.sleep(60)
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Stopped by user[/yellow]")
+                break
+            except Exception as e:
+                logger.error(f"Error in watch loop: {e}")
+                console.print(f"[red]Error:[/red] {e}")
+                _time.sleep(60)
+    finally:
+        engine.release_pidfile()
 
 
 @main.command()
@@ -479,6 +506,19 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
             console.print(f"[bold blue]Posting to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
 
     engine = CrossPostEngine(config)
+
+    # Route through the shared pidfile helper: a manual post may run even
+    # while a daemon/watch instance holds the pidfile (advisory semantics —
+    # warn, never block a deliberate user action).
+    from xpst.utils.pidfile import PidfileLock
+
+    _pid = PidfileLock(config.config_dir)
+    if _pid.verify():
+        if not quiet:
+            console.print(
+                "[yellow]Note:[/yellow] Another xPST instance is running — "
+                "manual post proceeds."
+            )
 
     if len(media_paths) > 1:
         result = asyncio.run(engine.post_manual_carousel(media_paths, caption, platform_list))
@@ -1419,6 +1459,48 @@ def delete(ctx: click.Context, video_id: str, platform: str, soft: bool, visibil
 
 
 @main.command()
+@click.option("--no-dashboard", "no_dashboard", is_flag=True, help="Do not start the FastAPI dashboard server")
+@click.option("--port", "-p", default=None, type=int, help="Dashboard HTTP port (default: config monitoring.healthcheck_port)")
+@click.option("--host", default="127.0.0.1", help="Dashboard bind host (default: 127.0.0.1)")
+@click.option("--interval", "-i", default=None, type=int, help="Scheduler check interval in seconds (default: config schedule.check_interval)")
+@click.option("--source", "-s", default=None, type=click.Choice(_SOURCE_CHOICES), help="Video source for the watch check (default: tiktok)")
+@click.pass_context
+def serve(ctx: click.Context, no_dashboard: bool, port: int | None, host: str, interval: int | None, source: str | None):
+    """Run the xPST supervisor daemon: scheduler loop + optional dashboard.
+
+    Runs the configured scheduler loop (reusing the existing Scheduler and
+    ScheduleManager) under the shared engine pidfile, and optionally serves
+    the FastAPI dashboard. Designed to be run supervised by launchd,
+    systemd, or a process manager — handles SIGTERM/SIGINT gracefully,
+    releases the pidfile on shutdown, and logs health lines to stderr/log
+    file suitable for supervisor collection.
+
+    \b
+    Examples:
+        xpst serve                  # daemon: scheduler + dashboard (default port)
+        xpst serve --no-dashboard   # scheduler loop only (headless)
+        xpst serve --port 9000      # scheduler + dashboard on port 9000
+    """
+    config = load_config(ctx.obj.get("config_path"))
+    setup_logging(
+        log_level=config.monitoring.log_level,
+        log_file=config.monitoring.log_file,
+    )
+    from xpst.serve import run_serve
+
+    chosen_source = source or "tiktok"
+    exit_code = run_serve(
+        config,
+        no_dashboard=no_dashboard,
+        host=host,
+        port=port,
+        check_interval=interval,
+        source=chosen_source,
+    )
+    ctx.exit(exit_code)
+
+
+@main.command()
 @click.option("--port", "-p", default=8080, type=int, help="Dashboard HTTP port")
 @click.option("--host", default="127.0.0.1",
               help="Bind address (default: 127.0.0.1, loopback only)")
@@ -1544,6 +1626,14 @@ def app(ctx: click.Context, port: int | None, no_splash: bool):
         sys.exit(EXIT_GENERAL)
 
     from xpst.desktop_app.main import main as pyside_main
+
+    # Route through the shared pidfile helper (advisory): never block the
+    # desktop app because a daemon/CLI instance is running — warn instead.
+    from xpst.utils.pidfile import PidfileLock
+
+    _pid = PidfileLock(str(get_config_dir()))
+    if _pid.verify():
+        logger.info("Another xPST instance is running — desktop app proceeds alongside it.")
 
     console.print("[bold blue]Launching xPST desktop app…[/bold blue]")
     sys.exit(pyside_main(no_splash=no_splash))
@@ -2835,7 +2925,6 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
         plist_dir = Path(os.path.expanduser("~/Library/LaunchAgents"))
         plist_dir.mkdir(parents=True, exist_ok=True)
         plist_path = plist_dir / "com.xpst.schedule.plist"
-        interval_sec = interval * 60
         plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -2846,13 +2935,11 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
     <key>ProgramArguments</key>
     <array>
         <string>{xpst_bin}</string>
-        <string>schedule</string>
-        <string>run</string>
-        <string>--quiet</string>
+        <string>serve</string>
     </array>
-    <key>StartInterval</key>
-    <integer>{interval_sec}</integer>
     <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
     <string>{get_config_dir() / "logs" / "launchagent.log"}</string>
@@ -2885,10 +2972,11 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
 
         if result.returncode == 0:
             if as_json:
-                json_output({"ok": True, "os": "macos", "path": str(plist_path), "interval_min": interval}, True)
+                json_output({"ok": True, "os": "macos", "path": str(plist_path), "command": "serve", "supervised": True}, True)
             else:
                 console.print(f"[green]✓[/green] LaunchAgent installed: [bold]{plist_path}[/bold]")
-                console.print(f"  Runs every {interval} minutes")
+                console.print("  Runs `xpst serve` continuously (scheduler + dashboard)")
+                console.print("  KeepAlive restarts it automatically if it exits")
                 console.print("  Logs: ~/.xpst/logs/launchagent.log")
                 console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
@@ -2911,26 +2999,19 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
 
         # cron does NOT expand '~', so the log path must be fully resolved.
         cron_log = get_config_dir() / "logs" / "cron.log"
-        cron_line = f"*/{interval} * * * * {xpst_bin} schedule run --quiet >> {cron_log} 2>&1"
+        # The pidfile guard makes repeated `serve` invocations idempotent:
+        # if the daemon is already running the new process exits 0, so this
+        # periodic tick doubles as a poor-man's supervisor (self-healing).
+        cron_line = f"*/{interval} * * * * {xpst_bin} serve >> {cron_log} 2>&1"
 
         # Read existing crontab
         existing = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         lines = existing.stdout.strip().split("\n") if existing.returncode == 0 and existing.stdout.strip() else []
-        marker = "# xPST schedule runner"
+        marker = "# xPST serve supervisor"
 
-        # Remove old xpst entry if present
-        filtered = []
-        skip_next = False
-        for line in lines:
-            if marker in line:
-                skip_next = True
-                continue
-            if skip_next and "xpst schedule run" in line:
-                skip_next = False
-                continue
-            skip_next = False
-            filtered.append(line)
-
+        # Remove old xpst entries (legacy `schedule run` ticks and any prior
+        # install) before appending the new supervisor line.
+        filtered = _crontab_without_xpst(lines)
         filtered.append(marker)
         filtered.append(cron_line)
         new_crontab = "\n".join(filtered) + "\n"
@@ -2938,9 +3019,10 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
         proc = subprocess.run(["crontab", "-"], input=new_crontab, capture_output=True, text=True)
         if proc.returncode == 0:
             if as_json:
-                json_output({"ok": True, "os": "linux", "interval_min": interval}, True)
+                json_output({"ok": True, "os": "linux", "interval_min": interval, "command": "serve"}, True)
             else:
-                console.print(f"[green]✓[/green] Crontab entry installed (every {interval} minutes)")
+                console.print(f"[green]✓[/green] Crontab entry installed (every {interval} minutes, keep-alive)")
+                console.print("  Runs `xpst serve` (pidfile-guarded; idempotent)")
                 console.print("  Logs: ~/.xpst/logs/cron.log")
                 console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
@@ -2953,19 +3035,19 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
 
     elif system == "Windows":
         import subprocess
-        task_name = "XpstScheduleRun"
-        cmd = f'"{xpst_bin}" schedule run --quiet'
+        task_name = "XpstServeSupervisor"
+        cmd = f'"{xpst_bin}" serve'
 
         result = subprocess.run(
             ["schtasks", "/Create", "/TN", task_name, "/TR", cmd,
-             "/SC", "MINUTE", "/MO", str(interval), "/F"],
+             "/SC", "ONLOGON", "/F"],
             capture_output=True, text=True,
         )
         if result.returncode == 0:
             if as_json:
-                json_output({"ok": True, "os": "windows", "task": task_name, "interval_min": interval}, True)
+                json_output({"ok": True, "os": "windows", "task": task_name, "command": "serve"}, True)
             else:
-                console.print(f"[green]✓[/green] Scheduled task '{task_name}' created (every {interval} minutes)")
+                console.print(f"[green]✓[/green] Scheduled task '{task_name}' created (runs `xpst serve` at logon)")
                 console.print("  Uninstall: [dim]xpst schedule install --remove[/dim]")
             return True
         else:
@@ -2981,6 +3063,27 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
         else:
             console.print(f"[red]Unsupported OS:[/red] {system}")
         return False
+
+
+def _crontab_without_xpst(lines: list[str]) -> list[str]:
+    """Filter out any prior xPST scheduler entries from a crontab listing.
+
+    Removes both the legacy marker + ``schedule run`` ticks and the current
+    ``serve`` supervisor marker + line, including the xPST comment markers.
+    """
+    filtered: list[str] = []
+    skip_next = False
+    for line in lines:
+        markerish = "# xPST" in line
+        xpst_cmd = ("xpst schedule run" in line) or ("xpst serve" in line)
+        if skip_next:
+            skip_next = False
+            continue
+        if markerish or xpst_cmd:
+            skip_next = True  # swallow the marker/command line pair
+            continue
+        filtered.append(line)
+    return [line for line in filtered if line.strip()]
 
 
 def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
@@ -3027,17 +3130,7 @@ def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
             return True
 
         lines = existing.stdout.strip().split("\n")
-        filtered = []
-        skip_next = False
-        for line in lines:
-            if "# xPST schedule runner" in line:
-                skip_next = True
-                continue
-            if skip_next and "xpst schedule run" in line:
-                skip_next = False
-                continue
-            skip_next = False
-            filtered.append(line)
+        filtered = _crontab_without_xpst(lines)
 
         new_crontab = "\n".join(filtered) + "\n" if filtered else ""
         if new_crontab.strip():
@@ -3053,7 +3146,12 @@ def _uninstall_os_scheduler(system: str, xpst_bin: str, as_json: bool) -> bool:
 
     elif system == "Windows":
         import subprocess
-        task_name = "XpstScheduleRun"
+        task_name = "XpstServeSupervisor"
+        # Ensure a legacy Task Scheduler entry is removed as well.
+        subprocess.run(
+            ["schtasks", "/Delete", "/TN", "XpstScheduleRun", "/F"],
+            capture_output=True, text=True,
+        )
         result = subprocess.run(
             ["schtasks", "/Delete", "/TN", task_name, "/F"],
             capture_output=True, text=True,
