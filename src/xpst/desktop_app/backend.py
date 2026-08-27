@@ -584,6 +584,21 @@ class AppController(QObject):
                     }
                     output.append(entry)
 
+            # Merge tracked videos from metric_snapshots (the video lineup)
+            # so the Dashboard and Library surface real analytics even when
+            # state.json has no posted_videos record for them yet. Dedup by
+            # (platform, postId) — state rows win over snapshot-only rows.
+            existing_keys = {
+                (str(p.get("platform", "")).lower(), str(p.get("postId", "")))
+                for p in output
+            }
+            for entry in self._build_lineup_rows():
+                key = (str(entry.get("platform", "")).lower(), str(entry.get("postId", "")))
+                if key in existing_keys:
+                    continue
+                existing_keys.add(key)
+                output.append(entry)
+
             # Sort newest first, limit to 50
             output.sort(key=lambda p: p.get("timestamp", ""), reverse=True)
             self._recent_posts = json.dumps(output[:50], default=str)
@@ -1326,6 +1341,163 @@ class AppController(QObject):
         }
         return json.dumps(status, default=str)
 
+    # ── Video lineup (desktop Library) ───────────────────────────────
+
+    def _build_lineup_rows(self) -> list[dict[str, Any]]:
+        """Merged video lineup rows (metrics + local state), newest first.
+
+        Sources: AnalyticsStore metric_snapshots (every tracked post,
+        across platforms) joined with local state for human captions and
+        playable local files. Persisted-data only — no network. The
+        rows mirror the PostListModel contract (title/postId/platform/
+        status/timestamp/thumbnail) plus lineup extras (url/embedUrl/
+        videoPath/views/likes/comments/shares).
+        """
+        analytics = self._get_analytics()
+        if analytics is None:
+            return []
+        try:
+            rows = analytics.get_video_lineup()
+        except Exception as exc:
+            logger.warning("Video lineup refresh error: %s", exc)
+            return []
+
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            platform = str(r.get("platform") or "").lower()
+            post_id = str(r.get("post_id") or "")
+            video_id = str(r.get("video_id") or post_id or "")
+            if not platform or not post_id:
+                continue
+            ts = str(r.get("captured_at") or r.get("downloaded_at") or "")
+            metrics = {
+                "views": r.get("views") or 0,
+                "likes": r.get("likes") or 0,
+                "comments": r.get("comments") or 0,
+                "shares": r.get("shares") or 0,
+            }
+            entry: dict[str, Any] = {
+                "title": video_id,
+                "caption": r.get("caption") or "",
+                "platform": platform,
+                "status": r.get("status") or "tracked",
+                "timestamp": ts,
+                "postId": post_id,
+                "url": r.get("url") or "",
+                "embedUrl": r.get("embed_url") or "",
+                "thumbnail": r.get("thumbnail") or r.get("thumbnail_url") or "",
+                "videoPath": r.get("video_path") or "",
+                **metrics,
+                "platforms": {
+                    platform: {
+                        **metrics,
+                        "post_url": r.get("url") or "",
+                        "timestamp": ts,
+                    }
+                },
+            }
+            out.append(entry)
+        out.sort(key=lambda e: str(e.get("timestamp") or ""), reverse=True)
+        return out
+
+    @Slot(result=str)
+    def getVideoLineup(self) -> str:
+        """Return the full video lineup as JSON.
+
+        Every tracked video across platforms with metrics, links, and
+        (when available) local playback path. Read-only and offline —
+        safe to call from the GUI thread.
+        """
+        try:
+            rows = self._build_lineup_rows()
+            return json.dumps({"ok": True, "posts": rows, "count": len(rows)}, default=str)
+        except Exception as exc:
+            logger.error("getVideoLineup error: %s", exc)
+            return json.dumps({"ok": False, "posts": [], "count": 0, "error": str(exc)})
+
+    @Slot(result=str)
+    def getQueueData(self) -> str:
+        """Return the pending upload queue as JSON.
+
+        Two lists feed the visible queue: ``scheduled`` (ScheduleManager
+        entries that are still pending, nearest scheduled_time first) and
+        ``pending`` (state.json videos tracked locally that have not been
+        posted anywhere yet). Each scheduled entry is flagged ``due``
+        when its time has already arrived.
+        """
+        from datetime import datetime
+
+        try:
+            scheduled: list[dict[str, Any]] = []
+            from xpst.schedule_manager import ScheduleManager
+
+            manager = ScheduleManager()
+            now = datetime.now()
+            for entry in manager.list():
+                if entry.get("status") != "pending":
+                    continue
+                try:
+                    due = datetime.fromisoformat(str(entry.get("scheduled_time") or "")) <= now
+                except (ValueError, TypeError):
+                    due = False
+                scheduled.append({**entry, "due": due})
+
+            pending: list[dict[str, Any]] = []
+            if self._state is not None:
+                posted = self._state._state.get("posted_videos", {})
+                for video_id, vdata in posted.items():
+                    if vdata.get("posted_to"):
+                        continue
+                    pending.append({
+                        "video_id": video_id,
+                        "caption": vdata.get("caption") or "",
+                        "downloaded_at": vdata.get("downloaded_at") or "",
+                        "status": "pending",
+                        "thumbnail": vdata.get("thumbnail") or "",
+                    })
+
+            return json.dumps(
+                {
+                    "ok": True,
+                    "scheduled": scheduled,
+                    "pending": pending,
+                    "scheduled_count": len(scheduled),
+                    "pending_count": len(pending),
+                },
+                default=str,
+            )
+        except Exception as exc:
+            logger.error("getQueueData error: %s", exc)
+            return json.dumps(
+                {"ok": False, "scheduled": [], "pending": [], "scheduled_count": 0, "pending_count": 0, "error": str(exc)}
+            )
+
+    @Slot(str)
+    def openExternal(self, url: str) -> None:
+        """Open ``url`` in the user's system browser (out-of-app fallback).
+
+        Used for platforms without a reliable in-app embed (X/Instagram/
+        TikTok/Threads). Prefers QDesktopServices; falls back to the
+        stdlib webbrowser module if PySide6 is unavailable.
+        """
+        if not url:
+            return
+        try:
+            if HAS_PYSIDE6:
+                from PySide6.QtCore import QUrl
+                from PySide6.QtGui import QDesktopServices
+
+                QDesktopServices.openUrl(QUrl(url))
+                return
+        except Exception as exc:
+            logger.debug("QDesktopServices.openUrl failed (%s); using webbrowser", exc)
+        try:
+            import webbrowser
+
+            webbrowser.open(url)
+        except Exception as exc:
+            logger.warning("openExternal failed for %s: %s", url, exc)
+
     @Slot(str, result=str)
     def saveShortcuts(self, shortcuts_json: str) -> str:
         """Save custom keyboard shortcuts to config.
@@ -1642,12 +1814,22 @@ class AppController(QObject):
     def getThumbnail(self, video_path: str) -> str:
         """Generate or retrieve a cached thumbnail for a video file/URL.
 
-        Returns a file:// URL to the thumbnail image, or empty string on failure.
+        Local video files get a frame extracted via FFmpeg; remote
+        thumbnail URLs (e.g. YouTube ``i.ytimg.com``) are downloaded
+        once and cached under ``~/.xpst/cache/`` so the lineup shows an
+        inline thumbnail without re-downloading. Returns a ``file://``
+        URL to the thumbnail image, or empty string on failure.
         """
         import hashlib
 
         if not video_path:
             return ""
+
+        # Remote URLs: cache the download (never the bare URL) locally so
+        # zero personal data and no repeated network traffic — the cache
+        # lives under the user's config dir, outside the repo.
+        if video_path.startswith("http://") or video_path.startswith("https://"):
+            return self._cache_remote_thumbnail(video_path)
 
         # Create a deterministic cache key from the path
         cache_key = hashlib.md5(video_path.encode(), usedforsecurity=False).hexdigest()
@@ -1682,6 +1864,54 @@ class AppController(QObject):
             logger.debug("Thumbnail extraction failed for %s: %s", video_path, exc)
 
         return ""
+
+    def _cache_remote_thumbnail(self, url: str, max_bytes: int = 5 * 1024 * 1024) -> str:
+        """Download ``url`` once into the local cache dir; return a file URI.
+
+        The cache dir is ``<config>/cache`` (zero personal data in the
+        repo). A failed or over-large download is a silent no-op that
+        returns "" so callers degrade to a placeholder instead of
+        blocking the UI thread behind a slow network call.
+        """
+        import hashlib
+        import urllib.request
+
+        cache_dir = get_config_dir() / "cache"
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return ""
+
+        key = hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()
+        # Preserve a sane extension from the URL so Qt can sniff the type.
+        ext = ".jpg"
+        try:
+            from urllib.parse import urlparse
+
+            path_ext = Path(urlparse(url).path).suffix.lower()
+            if path_ext in {".jpg", ".jpeg", ".png", ".webp"}:
+                ext = path_ext
+        except Exception:
+            pass
+        dest = cache_dir / f"{key}{ext}"
+
+        # Cached already → skip the network call entirely.
+        if dest.exists() and dest.stat().st_size > 0:
+            return dest.as_uri()
+
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "xPST/1.0 (+https://tysais.github.io/xPST/)"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = resp.read(max_bytes + 1)
+                if len(data) > max_bytes:
+                    return ""
+                if not data:
+                    return ""
+                dest.write_bytes(data)
+                return dest.as_uri() if dest.stat().st_size > 0 else ""
+        except Exception as exc:
+            logger.debug("Remote thumbnail cache failed for %s: %s", url, exc)
+            return ""
 
     @Slot(str, result=str)
     def getLocalVideos(self, folder_path: str = "") -> str:

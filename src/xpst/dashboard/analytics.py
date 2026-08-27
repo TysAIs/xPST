@@ -27,6 +27,10 @@ except ImportError:
     CredentialStore = None
     HAS_CREDENTIAL_STORE = False
 
+# AnalyticsStore backs the persisted metric_snapshots read model (used by
+# get_video_lineup). Core xpst module — always present, no optional guard.
+from xpst.analytics_store import AnalyticsStore
+
 # Platform color scheme for dashboard
 PLATFORM_COLORS = {
     "youtube": "#ff0000",
@@ -531,6 +535,140 @@ class AnalyticsCollector:
             )
         posts.sort(key=lambda p: p.get("downloaded_at") or "", reverse=True)
         return posts
+
+    def get_video_lineup(self) -> list[dict[str, Any]]:
+        """Merged video lineup: every tracked platform post + local state.
+
+        Each entry joins the cleaned metric_snapshots read model (see
+        ``AnalyticsStore.get_lineup``) with the local state record when
+        one exists, so the desktop Library can show real metrics AND any
+        human caption / local file path we have on disk. Zero network:
+        this is a persisted-data read, safe on any thread.
+
+        Entries are deduped by ``(platform, post_id)`` and sorted
+        newest-first by the most recent metric capture. State-only posts
+        with no snapshots yet are appended (metrics all 0) so nothing
+        tracked locally ever disappears from the lineup.
+        """
+        store = self._store()
+        lineup: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+
+        try:
+            for entry in store.get_lineup():
+                platform = str(entry.get("platform") or "").lower()
+                post_id = str(entry.get("post_id") or "")
+                if not platform or not post_id:
+                    continue
+                seen.add((platform, post_id))
+                video = self._match_state_video(platform, post_id)
+                if video:
+                    entry["video_id"] = video["video_id"]
+                    entry["caption"] = video.get("caption") or ""
+                    entry["video_path"] = video.get("video_path") or ""
+                    entry["thumbnail"] = video.get("thumbnail") or ""
+                    entry["status"] = video.get("status", "posted")
+                    entry["downloaded_at"] = video.get("downloaded_at") or ""
+                else:
+                    entry["video_id"] = post_id
+                    entry["caption"] = ""
+                    entry["video_path"] = ""
+                    entry["thumbnail"] = entry.get("thumbnail_url") or ""
+                    entry["status"] = "tracked"
+                    entry["downloaded_at"] = entry.get("captured_at") or ""
+                lineup.append(entry)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Lineup snapshot read failed: %s", exc)
+
+        # Append local state-only videos (tracked locally, metrics not yet
+        # recorded) so they stay visible as pending/source items.
+        state = load_state(self.config_dir)
+        for video_id, data in state.get("posted_videos", {}).items():
+            for platform, pinfo in (data.get("posted_to", {}) or {}).items():
+                plat = str(platform or "").lower()
+                pid = str(pinfo.get("id") or video_id or "")
+                if (plat, pid) in seen:
+                    continue
+                seen.add((plat, pid))
+                ts = str(pinfo.get("timestamp") or data.get("downloaded_at") or "")
+                entry: dict[str, Any] = {
+                    "platform": plat,
+                    "post_id": pid,
+                    "video_id": video_id,
+                    "caption": data.get("caption") or "",
+                    "video_path": "",
+                    "thumbnail": data.get("thumbnail") or "",
+                    "status": "posted",
+                    "captured_at": ts,
+                    "downloaded_at": ts,
+                    "views": 0,
+                    "likes": 0,
+                    "comments": 0,
+                    "shares": 0,
+                    "reposts": None,
+                    "saves": None,
+                }
+                entry.update(AnalyticsStore.post_links(plat, pid))
+                lineup.append(entry)
+
+        lineup.sort(key=lambda e: str(e.get("captured_at") or ""), reverse=True)
+        return lineup
+
+    def _match_state_video(
+        self, platform: str, post_id: str
+    ) -> dict[str, Any] | None:
+        """Find the local state record owning ``(platform, post_id)``.
+
+        Walks state.json ``posted_videos`` looking for a ``posted_to``
+        entry whose platform post id matches. Returns the video record
+        enriched with a lookable ``video_path`` (local downloads are
+        stored under the video id with a playable extension when
+        present) or ``None``.
+        """
+        state = load_state(self.config_dir)
+        for video_id, data in state.get("posted_videos", {}).items():
+            posted_to = data.get("posted_to", {}) or {}
+            for plat, pinfo in posted_to.items():
+                if str(plat or "").lower() != platform:
+                    continue
+                pid = str(pinfo.get("id") or "")
+                if pid and pid == post_id:
+                    video_path = ""
+                    local_raw = data.get("local_path") or data.get("video_path") or ""
+                    if local_raw:
+                        video_path = str(local_raw)
+                    elif self._local_downloaded(video_id):
+                        # No explicit path was persisted; any playable file
+                        # already in the downloads dir is the best we can do.
+                        video_path = str(self._find_local_download(video_id) or "")
+                    return {
+                        "video_id": video_id,
+                        "caption": data.get("caption") or "",
+                        "video_path": video_path,
+                        "thumbnail": data.get("thumbnail") or "",
+                        "status": "posted" if posted_to else "pending",
+                        "downloaded_at": data.get("downloaded_at")
+                        or pinfo.get("timestamp")
+                        or "",
+                    }
+        return None
+
+    def _local_downloaded(self, video_id: str) -> bool:
+        return self._find_local_download(video_id) is not None
+
+    def _find_local_download(self, video_id: str) -> Path | None:
+        """Return the first playable local file matching ``video_id``."""
+        try:
+            downloads = Path(self.config_dir).expanduser() / "downloads"
+            if not downloads.is_dir():
+                return None
+            for ext in (".mp4", ".mov", ".m4v", ".webm", ".mkv"):
+                candidate = downloads / f"{video_id}{ext}"
+                if candidate.is_file():
+                    return candidate
+        except Exception:  # pragma: no cover - defensive
+            return None
+        return None
 
     def _store(self):
         from xpst.analytics_store import AnalyticsStore
