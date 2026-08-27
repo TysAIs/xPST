@@ -71,7 +71,8 @@ class PlatformQuota:
         """Check if we can upload"""
         self._check_reset()
 
-        if self.used_today >= self.daily_limit:
+        # daily_limit <= 0 means "no daily cap" — never false-block.
+        if self.daily_limit and self.daily_limit > 0 and self.used_today >= self.daily_limit:
             return False
 
         return not (self.hourly_limit and self.used_this_hour >= self.hourly_limit)
@@ -83,9 +84,17 @@ class PlatformQuota:
         if self.hourly_limit:
             self.used_this_hour += 1
 
-    def remaining_today(self) -> int:
-        """Get remaining uploads today"""
+    def remaining_today(self) -> int | None:
+        """Get remaining uploads today (actual capacity: used vs limit).
+
+        Returns the honest ``limit - used`` figure so remaining never
+        masquerades as the limit itself. Returns ``None`` when there is no
+        daily cap (``daily_limit <= 0``), matching the "unlimited tracking"
+        convention used elsewhere in the codebase.
+        """
         self._check_reset()
+        if not self.daily_limit or self.daily_limit <= 0:
+            return None
         return max(0, self.daily_limit - self.used_today)
 
     def remaining_this_hour(self) -> int | None:
@@ -137,8 +146,13 @@ class PlatformQuota:
 
     @classmethod
     def from_dict(cls, data: dict) -> "PlatformQuota":
-        """Create from dictionary"""
-        return cls(**data)
+        """Create from dictionary (established on-disk format).
+
+        Tolerates unknown keys added by newer versions so an upgraded
+        quota file never crashes the loader.
+        """
+        known = {f.name for f in cls.__dataclass_fields__.values()}
+        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 class QuotaManager:
@@ -176,12 +190,15 @@ class QuotaManager:
         self.state_file = self.state_dir / "quotas.json"
         self._config = config
 
-        # Load or create quotas
+        # Load or create quotas. The on-disk file is the USAGE LEDGER
+        # (used/last-reset counts); it is never the authority for limits.
         self.quotas: dict[str, PlatformQuota] = self._load_quotas()
 
-        # Apply auth_mode-aware limits if config provided
+        # Single source of truth: the config definition wins. Derive and
+        # validate limits from config so the quota file — and every guardrail
+        # that reads it — can never contradict config.
         if config:
-            self._apply_auth_mode_limits()
+            self._apply_config_limits()
 
     def _load_quotas(self) -> dict[str, PlatformQuota]:
         """Load quotas from file or create defaults"""
@@ -232,6 +249,10 @@ class QuotaManager:
     def preflight(self, platform: str) -> None:
         """Pre-flight quota check — raise before any upload work happens.
 
+        Blocks ONLY on a genuinely exhausted state (remaining daily capacity
+        is zero, or the optional hourly window is spent). Logs loudly when it
+        blocks so false refusals are visible in the logs.
+
         Args:
             platform: Platform name.
 
@@ -240,7 +261,13 @@ class QuotaManager:
                 Carries structured remaining-quota detail via ``to_dict()``.
         """
         if not self.can_upload(platform):
-            raise QuotaExhaustedError(platform, self.get_remaining(platform))
+            remaining = self.get_remaining(platform)
+            logger.error(
+                "QUOTA_EXHAUSTED: blocking %s upload — remaining daily capacity "
+                "is 0 (limit reached); hourly remaining=%s",
+                platform, remaining.get("hourly"),
+            )
+            raise QuotaExhaustedError(platform, remaining)
 
     def record_upload(self, platform: str) -> None:
         """
@@ -255,7 +282,7 @@ class QuotaManager:
             self.save()
 
             remaining = quota.remaining_today()
-            if remaining <= 2:
+            if remaining is not None and remaining <= 2:
                 logger.warning(f"⚠️ {platform} quota low: {remaining} remaining today")
 
     def get_remaining(self, platform: str) -> dict:
@@ -319,34 +346,57 @@ class QuotaManager:
 
         self.save()
 
-    def _apply_auth_mode_limits(self) -> None:
-        """Adjust daily limits based on auth_mode in config.
+    def _config_limits(self) -> dict[str, int]:
+        """Daily limits derived EXCLUSIVELY from config (``rate_limits``).
 
-        - Instagram graph_api → 25/day (official API max)
-        - Instagram session → 5/day (conservative, anti-bot)
-        - X api_v2 → 17/day (free tier max)
-        - X cookies → 10/day (conservative, anti-bot)
+        The config block is the single source of truth for per-platform
+        daily upload limits. Platforms configured with a ``None``/unset value
+        are simply not governed by config and keep their on-disk/default
+        limits.
         """
-        if not self._config:
-            return
+        if not self._config or not getattr(self._config, "rate_limits", None):
+            return {}
+        rl = self._config.rate_limits
+        return {
+            name: int(getattr(rl, name))
+            for name in ("youtube", "instagram", "x", "tiktok", "threads")
+            if getattr(rl, name, None) is not None
+        }
 
-        # Instagram auth_mode
-        ig_auth = getattr(self._config.instagram, "auth_mode", "session")
-        if ig_auth == "graph_api":
-            if "instagram" in self.quotas:
-                self.quotas["instagram"].daily_limit = 25
-        else:
-            if "instagram" in self.quotas:
-                self.quotas["instagram"].daily_limit = 5
+    def _apply_config_limits(self) -> None:
+        """Make config the single source of truth for daily limits.
 
-        # X auth_mode
-        x_auth = getattr(self._config.x, "auth_mode", "cookies")
-        if x_auth == "api_v2":
-            if "x" in self.quotas:
-                self.quotas["x"].daily_limit = 17
-        else:
-            if "x" in self.quotas:
-                self.quotas["x"].daily_limit = 10
+        Replaces the historical auth_mode-based magic overrides
+        (Instagram 25/day, X 10/17/day) which silently contradicted
+        ``config.rate_limits`` and caused the config (5) / file (5) /
+        runtime (25, 10) divergence. Limits now come solely from
+        ``config.rate_limits``; the on-disk quota file is treated as a usage
+        ledger and is re-validated — and re-written when it contradicts
+        config — so the file can never disagree with the config definition.
+        Usage counters (``used_today`` / reset timestamps) are preserved.
+
+        Backward compatible: platforms not present in ``config.rate_limits``
+        keep their on-disk limits untouched.
+        """
+        changed = False
+        for platform, limit in self._config_limits().items():
+            existing = self.quotas.get(platform)
+            if existing is None:
+                self.quotas[platform] = PlatformQuota(
+                    platform=platform, daily_limit=limit
+                )
+                changed = True
+            elif existing.daily_limit != limit:
+                logger.warning(
+                    "Quota limit for %s is %s on disk but %s in config — "
+                    "config wins; rewriting quota state file",
+                    platform, existing.daily_limit, limit,
+                )
+                existing.daily_limit = limit
+                changed = True
+        if changed:
+            # Converge the on-disk file to config so it never contradicts it.
+            self.save()
 
     def get_youtube_quota_units(self) -> dict:
         """Get YouTube API quota in units (not just upload count).
