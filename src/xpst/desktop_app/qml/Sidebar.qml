@@ -34,30 +34,23 @@ Rectangle {
         anchors.fill: parent
         spacing: 0
 
-        // Logo
+        // Logo — big mark, top-left (image carries the brand; no text beside it)
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 64
+            Layout.preferredHeight: 72
             color: "transparent"
 
-            RowLayout {
-                anchors.centerIn: parent
-                spacing: theme.spacingSm
-
-                Image {
-                    source: typeof logoUrl !== "undefined" ? logoUrl : ""
-                    sourceSize: Qt.size(40, 40)
-                    fillMode: Image.PreserveAspectCrop
-                    Layout.preferredWidth: 32
-                    Layout.preferredHeight: 32
-                }
-                Text {
-                    text: "xPST"
-                    font.pixelSize: 18
-                    font.weight: Font.DemiBold
-                    color: theme.textPrimary
-                    visible: sidebar.expanded
-                }
+            Image {
+                id: sidebarLogo
+                source: typeof logoUrl !== "undefined" ? logoUrl : ""
+                sourceSize: Qt.size(96, 96)
+                fillMode: Image.PreserveAspectFit
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                Layout.preferredWidth: 52
+                Layout.preferredHeight: 52
+                visible: true
             }
         }
 
