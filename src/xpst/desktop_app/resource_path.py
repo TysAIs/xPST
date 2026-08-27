@@ -39,13 +39,48 @@ def get_base_path() -> Path:
     return Path(__file__).resolve().parent.parent.parent.parent
 
 
+def _frozen_resource_bases() -> list[Path]:
+    """Ordered candidate resource bases for a frozen build (defensive).
+
+    PyInstaller 6.x macOS .app bundles split their payload between
+    ``Contents/Frameworks`` (the binary side — this is what ``sys._MEIPASS``
+    points at) and ``Contents/Resources`` (the data side: QML, assets, Python
+    packages), then hard-link the two sides so either root resolves every
+    file. That linking is an implementation detail that can differ between
+    PyInstaller versions, so for macOS .app layouts we probe the data side
+    as a fallback. Every other frozen layout (one-folder) has exactly one
+    base, returned as-is.
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    if not (is_frozen() and meipass):
+        return []
+    base = Path(meipass)
+    if (
+        sys.platform == "darwin"
+        and base.name == "Frameworks"
+        and base.parent.name == "Contents"
+    ):
+        return [base, base.parent / "Resources"]
+    return [base]
+
+
 def resource_path(*relative_parts: str) -> Path:
     """Resolve a resource path relative to the frozen bundle or source tree.
 
     Accepts one or more path segments (e.g. ``resource_path("assets",
     "icon.png")``). The returned path is not guaranteed to exist; callers
     should check ``.exists()`` and fall back as appropriate.
+
+    In a frozen build the path resolves against the resource base; on a macOS
+    .app bundle the data side (``Contents/Resources``) is probed as fallback
+    when the ``_MEIPASS`` candidate is absent, preferring whichever actually
+    exists. The return value always roots at a *candidate* base so callers
+    that only check ``.exists()`` behave identically in every layout.
     """
+    bases = _frozen_resource_bases()
+    if bases:
+        candidates = [base.joinpath(*relative_parts) for base in bases]
+        return first_existing(*candidates) or candidates[0]
     return get_base_path().joinpath(*relative_parts)
 
 

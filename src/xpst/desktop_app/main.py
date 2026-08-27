@@ -358,6 +358,16 @@ def main(no_splash: bool = False) -> int:
     engine.rootContext().setContextProperty(
         "logoHorizontalUrl", _logo_horizontal.as_uri() if _logo_horizontal else ""
     )
+    # Expose the bundled icon-font URL so QML's Icons.qml loads the real font.
+    # In a frozen .app a hardcoded relative URL from the QML file resolves one
+    # level above the data side (Contents/Resources) and logs a FontLoader
+    # error on every launch; an absolute URL resolved frozen-aware via
+    # resource_path works in every layout. Empty string → Icons.qml falls back
+    # to its document-relative path (standalone QML tooling).
+    _icon_font = icon_glyphs.icon_font_path()
+    engine.rootContext().setContextProperty(
+        "iconFontUrl", _icon_font.as_uri() if _icon_font.exists() else ""
+    )
     if splash:
         splash.showMessage("Starting engine...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
     app.processEvents()
