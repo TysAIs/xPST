@@ -33,6 +33,19 @@ except Exception as exc:  # pragma: no cover - exercised only when PySide6/Qt is
     print("Raw import error:")
     raise SystemExit(1) from exc
 
+# QtWebEngine is an optional part of the PySide6 desktop extra. It is only
+# needed for in-app YouTube playback (PlaybackOverlay); a build without it
+# still runs — the lineup falls back to open-in-browser. Initialise before
+# any QML is loaded so the WebEngineView type is registered (registrations
+# are cheap; Chromium's heavy processes only spawn when a view is created).
+try:
+    from PySide6.QtWebEngineQuick import QtWebEngineQuick
+
+    _WEBENGINE_OK = True
+except ImportError:  # pragma: no cover - older/minimal PySide6 builds
+    QtWebEngineQuick = None  # type: ignore[assignment,misc]
+    _WEBENGINE_OK = False
+
 # ── xPST desktop modules ────────────────────────────────────────────
 from xpst.desktop_app import icon_glyphs
 from xpst.desktop_app.backend import (
@@ -306,7 +319,14 @@ def main(no_splash: bool = False) -> int:
         splash.showMessage("Loading config...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
         app.processEvents()
 
-    # Create QML engine
+    # Create QML engine. When QtWebEngine is available, register the
+    # WebEngineView QML module first (PlaybackOverlay needs it); the core
+    # Chromium processes stay dormant until a view is actually created.
+    if _WEBENGINE_OK and QtWebEngineQuick is not None:
+        try:
+            QtWebEngineQuick.initialize()
+        except Exception as exc:
+            logger.warning("QtWebEngine init failed; YouTube in-app playback disabled: %s", exc)
     engine = QQmlApplicationEngine()
     if splash:
         splash.showMessage("Initializing state...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
@@ -326,13 +346,21 @@ def main(no_splash: bool = False) -> int:
     # Create backend objects (lightweight - defer heavy init)
     controller = AppController()
     post_model = PostListModel()
-    post_model.load_from_state()
+    # The Library is driven by the merged video lineup (metric_snapshots +
+    # local state), not just state.json posted_videos — so tracked videos
+    # with real metrics are visible even when state has no record yet.
+    try:
+        lineup = controller._build_lineup_rows()
+        post_model.load_lineup(lineup)
+    except Exception as exc:
+        logger.warning("Initial lineup load failed, falling back to state: %s", exc)
+        post_model.load_from_state()
     if splash:
         splash.showMessage("Loading plugins...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
     app.processEvents()
 
-    # Connect controller refresh to model reload
-    controller.dataChanged.connect(lambda: post_model.load_from_state())
+    # Connect controller refresh to model reload (lineup-driven).
+    controller.dataChanged.connect(lambda: post_model.load_lineup(controller._build_lineup_rows()))
 
     # Expose to QML
     engine.rootContext().setContextProperty("controller", controller)
@@ -357,6 +385,16 @@ def main(no_splash: bool = False) -> int:
     )
     engine.rootContext().setContextProperty(
         "logoHorizontalUrl", _logo_horizontal.as_uri() if _logo_horizontal else ""
+    )
+    # Expose the bundled icon-font URL so QML's Icons.qml loads the real font.
+    # In a frozen .app a hardcoded relative URL from the QML file resolves one
+    # level above the data side (Contents/Resources) and logs a FontLoader
+    # error on every launch; an absolute URL resolved frozen-aware via
+    # resource_path works in every layout. Empty string → Icons.qml falls back
+    # to its document-relative path (standalone QML tooling).
+    _icon_font = icon_glyphs.icon_font_path()
+    engine.rootContext().setContextProperty(
+        "iconFontUrl", _icon_font.as_uri() if _icon_font.exists() else ""
     )
     if splash:
         splash.showMessage("Starting engine...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)

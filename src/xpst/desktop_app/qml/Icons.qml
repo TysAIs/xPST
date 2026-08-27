@@ -14,10 +14,16 @@ import QtQuick 2.15
 QtObject {
     id: icons
 
-    // Load the bundled font relative to this Icons.qml file (assets/fonts/).
-    // Path: src/xpst/desktop_app/qml/Icons.qml -> project root is 4 dirs up.
+    // Load the bundled font. The desktop app injects `iconFontUrl` (an
+    // absolute URL resolved frozen-aware via resource_path in main.py):
+    // in a frozen .app bundle the data side lives under Contents/Resources,
+    // so a fixed relative depth from this file cannot reach it in every
+    // layout and previously logged a FontLoader error on every launch. The
+    // document-relative fallback covers standalone QML tooling run from a
+    // source tree, where assets/ is four levels up (repo root).
     property FontLoader _loader: FontLoader {
-        source: Qt.resolvedUrl("../../../../assets/fonts/lucide.ttf")
+        source: iconFontUrl ? Qt.resolvedUrl(iconFontUrl)
+                            : Qt.resolvedUrl("../../../../assets/fonts/lucide.ttf")
     }
 
     // The family name the bundled TTF registers as. Falls back to the loader's
