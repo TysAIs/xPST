@@ -218,6 +218,19 @@ class PlatformRegistry:
 
     _registry: dict[str, type[PlatformUploader]] = {}
 
+    # Legacy/mangled names that must resolve to the canonical platform key.
+    # Previously, auto_discover registered every PlatformUploader subclass under
+    # its mangled class name IN ADDITION to the explicit module-level register()
+    # calls, so MessengerAdapter was exposed both as "messenger" and
+    # "messengeradapter". Existing user data (config/state) may still reference
+    # the legacy name — resolve it via this alias, no data migration required.
+    _ALIASES: dict[str, str] = {"messengeradapter": "messenger"}
+
+    @classmethod
+    def _canonical_name(cls, name: str) -> str:
+        """Resolve a legacy/mangled name to the canonical platform key."""
+        return cls._ALIASES.get(name, name)
+
     @classmethod
     def register(cls, name: str, uploader_class: type[PlatformUploader]) -> None:
         """
@@ -227,7 +240,8 @@ class PlatformRegistry:
             name: Platform name
             uploader_class: Uploader class
         """
-        cls._registry[name] = uploader_class
+        # Canonicalize so a legacy alias can never introduce a duplicate key.
+        cls._registry[cls._canonical_name(name)] = uploader_class
 
     @classmethod
     def get(cls, name: str, config: XPSTConfig) -> PlatformUploader:
@@ -244,6 +258,9 @@ class PlatformRegistry:
         Raises:
             KeyError: If platform not found
         """
+        # Backward-compat: legacy/mangled names (e.g. "messengeradapter") must
+        # still resolve to the canonical platform.
+        name = cls._canonical_name(name)
         if name not in cls._registry:
             raise KeyError(f"Platform not found: {name}. Available: {list(cls._registry.keys())}")
 
@@ -251,8 +268,15 @@ class PlatformRegistry:
 
     @classmethod
     def list_platforms(cls) -> list[str]:
-        """List all registered platforms"""
-        return list(cls._registry.keys())
+        """List all registered platforms (canonical names only, deduplicated)."""
+        result: list[str] = []
+        seen: set[str] = set()
+        for name in cls._registry:
+            canonical = cls._canonical_name(name)
+            if canonical not in seen:
+                seen.add(canonical)
+                result.append(canonical)
+        return result
 
     @classmethod
     def list_manifests(cls, config: XPSTConfig) -> list[ProviderManifest]:
@@ -267,7 +291,17 @@ class PlatformRegistry:
 
     @classmethod
     def auto_discover(cls) -> None:
-        """Auto-discover and register all platform modules in this package."""
+        """Auto-discover and register all platform modules in this package.
+
+        Explicit module-level ``PlatformRegistry.register(...)`` calls are the
+        single source of truth for built-in platforms; this method guarantees
+        those modules are imported (triggering their explicit registration).
+        Any ``PlatformUploader`` subclass that does not self-register (e.g.
+        third-party plugin modules) is registered under the *module name* as
+        its canonical key — never a mangled class name — so a physical platform
+        can never appear more than once (see audit: ``MessengerAdapter`` was
+        previously exposed as both ``messenger`` and ``messengeradapter``).
+        """
 
         import importlib
         import pkgutil
@@ -288,6 +322,8 @@ class PlatformRegistry:
                     isinstance(value, type)
                     and issubclass(value, PlatformUploader)
                     and value is not PlatformUploader
+                    # Skip subclasses already explicitly registered (module-level
+                    # register() calls are the source of truth).
+                    and value not in cls._registry.values()
                 ):
-                    name = value.__name__.lower().replace("uploader", "")
-                    cls.register(name, value)
+                    cls.register(modname, value)

@@ -66,8 +66,10 @@ def appsecret_proof(page_token: str, app_secret: str | None) -> str | None:
 class MessengerAdapter(PlatformUploader):
     """Official Messenger Platform adapter — text send + ManyChat-lite auto-reply.
 
-    Registered in ``PlatformRegistry`` under the name ``messenger`` and
-    auto-discovered from the ``platforms/`` package. Idle when disabled.
+    Registered in ``PlatformRegistry`` under the canonical name ``messenger``
+    (module-level ``register()`` call is the source of truth; auto-discover no
+    longer re-registers it under the mangled class name ``messengeradapter``).
+    Idle when disabled.
     """
 
     MAX_CAPTION_LENGTH = MESSENGER_MAX_TEXT_LENGTH
@@ -77,6 +79,16 @@ class MessengerAdapter(PlatformUploader):
         super().__init__(config)
         self._page_token: str | None = None
         self._app_secret: str | None = None
+
+    @property
+    def platform_name(self) -> str:
+        """Return the canonical platform key (``messenger``).
+
+        The default derivation from the class name would yield the mangled
+        ``messengeradapter`` — override so instance identity always matches the
+        canonical registry key and the manifest.
+        """
+        return "messenger"
 
     # ── Manifest ────────────────────────────────────────────────────────
     @property
