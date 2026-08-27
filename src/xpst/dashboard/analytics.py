@@ -560,6 +560,27 @@ class AnalyticsCollector:
             logger.debug("Snapshot read failed: %s", exc)
         return engagement
 
+    def get_available_metrics(self, platform: str) -> dict[str, Any]:
+        """Capability contract for one platform (architecture §2.5):
+        which metrics its live integration can truthfully provide vs missing.
+        The UI renders only ``available`` metrics for a connected account —
+        missing metrics are shown as unavailable, never fabricated zeros."""
+        from xpst.analytics import platform_metric_capability
+
+        return platform_metric_capability(platform)
+
+    def get_metrics_capabilities(self) -> dict[str, Any]:
+        """Per-platform capability contract exposed via the analytics API
+        (architecture §2.5). Returns ``{platform: {platform, available,
+        missing}}`` so the UI/API can render only what each platform can
+        actually provide."""
+        from xpst.analytics import PLATFORM_METRIC_CAPABILITIES, platform_metric_capability
+
+        return {
+            platform: platform_metric_capability(platform)
+            for platform in PLATFORM_METRIC_CAPABILITIES
+        }
+
     def get_analytics_payload(self, live: bool = False) -> dict[str, Any]:
         """QML-ready analytics payload (G19) matching AnalyticsPage's
         contract: summary.total_*, platforms[].platform/total_*, top_posts[]
@@ -587,6 +608,7 @@ class AnalyticsCollector:
                 "total_likes": metrics.get("likes", 0),
                 "total_comments": metrics.get("comments", 0),
                 "total_shares": metrics.get("shares", 0),
+                "available_metrics": self.get_available_metrics(platform),
             })
 
         prev_totals = None
