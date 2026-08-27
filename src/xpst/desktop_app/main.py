@@ -80,8 +80,8 @@ def _create_splash() -> QSplashScreen:
     # assets/). The splash keeps its programmatic fallback below, so a missing
     # image is non-fatal here — only the tray/app icon hard-fails (W3-6).
     splash_image = first_existing(
-        resource_path("assets", "xpst-full.png"),
         resource_path("assets", "icon.png"),
+        resource_path("assets", "xpst-full.png"),
     )
 
     pixmap = QPixmap(str(splash_image)) if splash_image is not None else None
