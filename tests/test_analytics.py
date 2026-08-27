@@ -150,6 +150,26 @@ class TestDiscoverPostIds:
         ids = collector._discover_post_ids()
         assert ids == {}
 
+    def test_unknown_platform_does_not_crash(self, tmp_path):
+        """Real state.json can contain platforms outside the known set
+        (e.g. messenger); discovery must degrade instead of KeyError."""
+        state = {
+            "posted_videos": {
+                "vid1": {
+                    "posted_to": {
+                        "messenger": {"post_id": "m_1", "url": "..."},
+                        "youtube": {"post_id": "yt_a", "url": "..."},
+                    }
+                }
+            }
+        }
+        state_path = tmp_path / "state.json"
+        state_path.write_text(json.dumps(state))
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        ids = collector._discover_post_ids()
+        assert ids["youtube"] == ["yt_a"]
+        assert ids["messenger"] == ["m_1"]
+
 
 # ── YouTube collection ──────────────────────────────────────────────────
 
@@ -419,50 +439,169 @@ class TestCollectX:
 
 # ── TikTok collection ──────────────────────────────────────────────────
 
+def _tiktok_mock_client(
+    post_payload: dict, get_payload: dict | None = None
+) -> tuple[MagicMock, MagicMock]:
+    """Build a mock httpx.AsyncClient context returning the given payloads."""
+    import httpx
+
+    post_resp = MagicMock()
+    post_resp.json.return_value = post_payload
+    post_resp.raise_for_status.return_value = None
+    get_resp = MagicMock()
+    get_resp.json.return_value = get_payload if get_payload is not None else post_payload
+    get_resp.raise_for_status.return_value = None
+
+    http = MagicMock()
+    http.post = AsyncMock(return_value=post_resp)
+    http.get = AsyncMock(return_value=get_resp)
+    async_client = MagicMock()
+    async_client.__aenter__.return_value = http
+    async_client.__aexit__.return_value = False
+
+    return MagicMock(spec=httpx.AsyncClient, return_value=async_client), http
+
+
 class TestCollectTikTok:
-    """Test TikTok metrics collection with mocked yt-dlp."""
+    """Test TikTok metrics collection via the official Content Posting API
+    (architecture §2.3) with mocked HTTP responses — no live network."""
 
     @pytest.mark.asyncio
-    async def test_collect_tiktok_success(self, tmp_path):
+    async def test_collect_tiktok_success_list_query(self, tmp_path):
+        """POST /v2/post/publish/video/list/query/ shape → parsed metrics."""
+        import httpx
+
+        (tmp_path / "config.yaml").write_text(
+            "accounts:\n  tiktok:\n    access_token: test-token\n"
+        )
         collector = AnalyticsCollector(config_dir=str(tmp_path))
+        # Requests are spaced to 6 req/min in production; disabled in tests.
+        collector._tt_pace = 0
 
-        mock_info = {
-            "view_count": 50000,
-            "like_count": 2000,
-            "comment_count": 300,
-            "repost_count": 100,
+        payload = {
+            "data": {
+                "videos": [
+                    {
+                        "id": "123456789",
+                        "create_time": 1700000000,
+                        "title": "t",
+                        "view_count": 50000,
+                        "like_count": 2000,
+                        "comment_count": 300,
+                        "share_count": 100,
+                    }
+                ]
+            }
         }
+        async_client_cls, http = _tiktok_mock_client(payload)
 
-        mock_ydl = MagicMock()
-        mock_ydl.extract_info.return_value = mock_info
-        mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
-        mock_ydl.__exit__ = MagicMock(return_value=False)
-
-        import yt_dlp
-        with patch.object(yt_dlp, "YoutubeDL", return_value=mock_ydl):
+        with patch.object(httpx, "AsyncClient", async_client_cls):
             result = await collector._collect_tiktok(["123456789"])
 
         assert len(result) == 1
         assert result[0]["platform"] == "tiktok"
+        assert result[0]["post_id"] == "123456789"
         assert result[0]["views"] == 50000
         assert result[0]["likes"] == 2000
+        assert result[0]["comments"] == 300
+        assert result[0]["shares"] == 100
+        # The Content Posting API is queried with the existing Bearer token.
+        _, kwargs = http.post.call_args
+        assert kwargs["headers"]["Authorization"] == "Bearer test-token"
+        assert kwargs["json"]["filters"]["video_ids"] == ["123456789"]
 
     @pytest.mark.asyncio
-    async def test_collect_tiktok_no_ytdlp(self, tmp_path):
+    async def test_collect_tiktok_feed_fallback(self, tmp_path):
+        """Empty list/query degrades to GET /v2/post/publish/video/feed/."""
+        import httpx
+
+        (tmp_path / "config.yaml").write_text(
+            "accounts:\n  tiktok:\n    access_token: test-token\n"
+        )
         collector = AnalyticsCollector(config_dir=str(tmp_path))
+        collector._tt_pace = 0
 
-        import builtins
-        real_import = builtins.__import__
+        feed_payload = {
+            "data": {
+                "videos": [
+                    {
+                        "id": "999",
+                        "post_info": {
+                            "id": "999",
+                            "view_count": 1200,
+                            "like_count": 88,
+                            "comment_count": 7,
+                            "share_count": 2,
+                        },
+                    }
+                ]
+            }
+        }
+        async_client_cls, http = _tiktok_mock_client({"data": {"videos": []}}, feed_payload)
 
-        def mock_import(name, *args, **kwargs):
-            if name == "yt_dlp":
-                raise ImportError("No module named 'yt_dlp'")
-            return real_import(name, *args, **kwargs)
+        with patch.object(httpx, "AsyncClient", async_client_cls):
+            result = await collector._collect_tiktok(["999"])
 
-        with patch("builtins.__import__", side_effect=mock_import):
-            result = await collector._collect_tiktok(["123456789"])
+        assert len(result) == 1
+        assert result[0]["views"] == 1200
+        assert result[0]["likes"] == 88
+        # feed called after list/query returned no videos
+        assert http.get.call_count == 1
+        assert "video/feed/" in http.get.call_args.args[0]
 
+    @pytest.mark.asyncio
+    async def test_collect_tiktok_no_token(self, tmp_path):
+        """No Content Posting token → [] (metrics reported missing), never
+        a best-effort scrape fabricating zeros."""
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        result = await collector._collect_tiktok(["123456789"])
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_collect_tiktok_missing_metric_is_omitted(self, tmp_path):
+        """A metric absent from the payload is omitted from the row instead
+        of surfacing as a fabricated real zero."""
+        import httpx
+
+        (tmp_path / "config.yaml").write_text(
+            "accounts:\n  tiktok:\n    access_token: test-token\n"
+        )
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        collector._tt_pace = 0
+
+        payload = {"data": {"videos": [{"id": "123", "view_count": 10}]}}
+        async_client_cls, _ = _tiktok_mock_client(payload)
+
+        with patch.object(httpx, "AsyncClient", async_client_cls):
+            result = await collector._collect_tiktok(["123"])
+
+        assert len(result) == 1
+        assert result[0]["views"] == 10
+        assert "likes" not in result[0]
+        assert "shares" not in result[0]
+
+    @pytest.mark.asyncio
+    async def test_collect_tiktok_rate_pacing(self, tmp_path):
+        """Calls within the 6 req/min window are spaced via the injectable
+        sleep; stale windows do not sleep."""
+        (tmp_path / "config.yaml").write_text(
+            "accounts:\n  tiktok:\n    access_token: test-token\n"
+        )
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        collector._tt_pace = 10.0
+        sleep_mock = AsyncMock()
+        collector._sleep = sleep_mock
+
+        # Fresh request window → pace sleeps before the next call.
+        collector._tt_last_request = time.monotonic()
+        await collector._pace_tiktok()
+        sleep_mock.assert_awaited_once()
+
+        # Old request (≥ window) → no sleep.
+        collector._tt_last_request = time.monotonic() - 60
+        collector._sleep = AsyncMock()
+        await collector._pace_tiktok()
+        collector._sleep.assert_not_awaited()
 
 
 # ── Parallel collection (collect_all) ───────────────────────────────────
