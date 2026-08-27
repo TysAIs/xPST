@@ -33,7 +33,7 @@ xPST is a modular, plugin-based system for cross-posting video content across so
 │  │  Anti-Bot Pacing │ Quota Manager │ Credential Store  │   │
 │  └──────────────────────────────────────────────────────┘   │
 │                                                              │
-│  Surfaces: CLI (37 cmds) │ Desktop (10 QML pages)          │
+│  Surfaces: CLI (38 cmds) │ Desktop (10 QML pages)          │
 │            Dashboard (FastAPI) │ MCP Server (28 tools)      │
 └─────────────────────────────────────────────────────────────┘
 ```

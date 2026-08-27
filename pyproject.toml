@@ -78,17 +78,17 @@ mcp = [
     "mcp[cli]>=1.0.0,<2.0.0",
 ]
 desktop = [
-    # Full desktop app: native PySide6/QML UI plus the pywebview fallback.
+    # Full desktop app: native PySide6/QML UI.
     "PySide6>=6.5.0,<7.0.0",
-    "pywebview>=4.0,<6.0.0",
 ]
 windows = [
     "pywin32>=306; platform_system == 'Windows'",
     "winshell>=0.6; platform_system == 'Windows'",
 ]
 dashboard = [
-    "nicegui>=1.4.0,<4.0.0",
-    "plotly>=5.18.0,<7.0.0",
+    # Kept as a no-op for compatibility (`full` references it). The shipped
+    # dashboard is pure FastAPI (src/xpst/dashboard/server.py); the
+    # nicegui/plotly fallback UI was removed with src/xpst/desktop.py.
 ]
 knowledge = [
     # Upper bounds (G48): these are data-coupled deps — an uncapped major
