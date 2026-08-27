@@ -1199,14 +1199,17 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
 @click.pass_context
 def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_post: bool, as_json: bool = False):
     """Show cross-platform analytics summary"""
+    # Bound up front: used by the cross-post branch AND the JSON report
+    # below (a nested import inside `if cross_post` previously made `_json`
+    # a function-local name that was unbound on every other code path).
+    import json as _json
+
     if ctx.invoked_subcommand is not None:
         return
 
     # Cross-post correlation analytics (B1): one video → multiple platforms
     # aggregated as a single entry with totals and per-platform breakdown.
     if cross_post:
-        import json as _json
-
         from xpst.dashboard.analytics import AnalyticsCollector
 
         collector = AnalyticsCollector(load_config(ctx.obj.get("config_path")).config_dir)
@@ -1249,9 +1252,9 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
     total_ids = sum(len(v) for v in post_ids.values())
     if total_ids == 0:
         if as_json:
-            import json as _json
-
-            click.echo(_json.dumps({"platforms": {}}))
+            click.echo(
+                _json.dumps(collector.build_report({}, requested=post_ids), indent=2)
+            )
         else:
             console.print("[yellow]No posts found in state. Run `xpst run` first.[/yellow]")
         return
@@ -1262,25 +1265,11 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
     # Collect analytics
     data = asyncio.run(collector.collect_all(post_ids))
 
-    # G24: machine-readable output for agents/scripts. The flag existed but
-    # the body unconditionally printed tables.
+    # G24: machine-readable output for agents/scripts. Phase 1.1 contract:
+    # an aggregate report — per platform: as-of timestamp, metrics available
+    # vs missing, and values (architecture §2.5) — never fabricated zeros.
     if as_json:
-        import json as _json
-
-        payload = {
-            "platforms": {
-                platform: {
-                    "posts": len(posts_data),
-                    "views": sum(m.get("views", 0) for m in posts_data.values()),
-                    "likes": sum(m.get("likes", 0) for m in posts_data.values()),
-                    "comments": sum(m.get("comments", 0) for m in posts_data.values()),
-                    "shares": sum(m.get("shares", 0) for m in posts_data.values()),
-                    "post_metrics": posts_data,
-                }
-                for platform, posts_data in data.items()
-            },
-        }
-        click.echo(_json.dumps(payload, indent=2, default=str))
+        click.echo(_json.dumps(collector.build_report(data, requested=post_ids), indent=2, default=str))
         return
 
     # Display summary table
