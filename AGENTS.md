@@ -19,8 +19,7 @@ python -m pytest tests/        # full suite (1555 passed, 2 skipped)
 | Layer | Location | Responsibility |
 |-------|----------|----------------|
 | **CLI** | `src/xpst/cli.py` | 38 commands, `--json`, `--dry-run`, structured exit codes |
-| **Engine v2** | `src/xpst/engine_v2.py` | Orchestrates use-cases via DI |
-| **Use-Cases** | `src/xpst/usecases/` | `FetchNewVideos`, `CrossPostVideo`, `ManualPost`, `Backfill`, `HealthCheck`, `DeletePost` |
+| **Engine** | `src/xpst/engine.py` | `CrossPostEngine` orchestrator (check_and_post, backfill, delete_post, health) |
 | **Platforms** | `src/xpst/platforms/` | YouTube, X, Instagram uploaders (auth via SessionManager) |
 | **Sources** | `src/xpst/sources/` | TikTok, Instagram Reels, Local files |
 | **State** | `src/xpst/state_store.py` + `state_manager.py` | Atomic I/O + business logic (thread-safe) |
