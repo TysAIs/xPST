@@ -7,10 +7,10 @@
 ```bash
 cd ~/XPST
 source .venv/bin/activate
-python -m xpst --help          # CLI with 38 commands
+python -m xpst --help          # CLI with 40 commands
 python -m xpst run             # Run the cross-posting engine
 python -m xpst dashboard       # Start FastAPI dashboard (port 8080)
-python -m xpst desktop         # Launch PySide6/QML desktop app
+python -m xpst app             # Launch PySide6/QML desktop app (command was renamed from `desktop`)
 python -m pytest tests/        # full suite (1555 passed, 2 skipped)
 ```
 
@@ -18,7 +18,7 @@ python -m pytest tests/        # full suite (1555 passed, 2 skipped)
 
 | Layer | Location | Responsibility |
 |-------|----------|----------------|
-| **CLI** | `src/xpst/cli.py` | 38 commands, `--json`, `--dry-run`, structured exit codes |
+| **CLI** | `src/xpst/cli.py` | 40 commands, `--json`, `--dry-run`, structured exit codes |
 | **Engine** | `src/xpst/engine.py` | `CrossPostEngine` orchestrator (check_and_post, backfill, delete_post, health) |
 | **Platforms** | `src/xpst/platforms/` | YouTube, X, Instagram uploaders (auth via SessionManager) |
 | **Sources** | `src/xpst/sources/` | TikTok, Instagram Reels, Local files |
