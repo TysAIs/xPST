@@ -16,8 +16,8 @@ issue to propose or upvote an item.
 
 ## Shipped in v1.0.0
 
-- ✅ **Six-platform posting** — YouTube Shorts, X, Instagram Reels, TikTok,
-  Threads, LinkedIn, across engine, scheduler, dashboard, desktop app, and
+- ✅ **Five-platform posting** — YouTube Shorts, X, Instagram Reels, TikTok,
+  Threads, across engine, scheduler, dashboard, desktop app, and
   analytics.
 - ✅ **TikTok posting** via the official Content Posting API v2.
 - ✅ **Official-API-first auth** — Instagram Graph API as primary mode; official
@@ -25,7 +25,7 @@ issue to propose or upvote an item.
 - ✅ **Per-video and cross-post analytics** — per-platform metrics plus combined
   metrics for the same video posted to multiple platforms.
 - ✅ **Follower tracking** and **best-time-to-post** analysis.
-- ✅ **23 MCP tools** for AI-agent control, plus a full CLI surface.
+- ✅ **28 MCP tools** for AI-agent control, plus a full CLI surface.
 - ✅ **Caption suggestions** with per-platform character limits.
 - ✅ **Personal knowledge base** with source provenance and zero-config
   deterministic extraction.
@@ -72,7 +72,7 @@ Larger features targeted at the next minor release.
 ### Analytics
 - **Expanded per-platform analytics** — fill gaps where a platform exposes
   metrics behind a Business/Creator account or additional API scopes
-  (e.g. Instagram saves/shares, richer TikTok and LinkedIn metrics).
+  (e.g. Instagram saves/shares, richer TikTok metrics).
 - **Trend history & reporting** — chart engagement over time from the persistent
   snapshot store; exportable reports.
 - **Engagement-weighted suggestions** — feed performance history back into
