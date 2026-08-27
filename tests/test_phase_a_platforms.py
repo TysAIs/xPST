@@ -267,12 +267,66 @@ class TestTikTokUploader:
         assert count == 0
 
     @pytest.mark.asyncio
-    async def test_delete_returns_false(self) -> None:
+    async def test_delete_returns_pending_without_cookie_jar(self) -> None:
+        from xpst.platforms.base import DeleteOutcome
         from xpst.platforms.tiktok import TikTokUploader
 
         uploader = TikTokUploader(_make_config())
-        # TikTok API has no delete endpoint — should return False without raising
-        assert await uploader.delete("pub1") is False
+        # TikTok's Content Posting API has no delete endpoint — the web-session
+        # fallback runs without an exported cookie jar, so the result is an
+        # explicit ``pending`` (no silent failure).
+        responses = [_FakeResponse(200, {"code": 1, "msg": "unauthenticated"})]
+        with _patch_httpx(responses):
+            result = await uploader.delete("pub1")
+        assert result.outcome == DeleteOutcome.PENDING
+        assert result.ok is False
+        assert "tiktok" in result.message.lower()
+        assert result.detail
+
+    @pytest.mark.asyncio
+    async def test_delete_web_session_success_marks_via_web(self, tmp_path: Path) -> None:
+        from xpst.platforms.base import DeleteOutcome
+        from xpst.platforms.tiktok import TikTokUploader
+
+        config = _make_config()
+        config.config_dir = str(tmp_path)
+        jar = tmp_path / "tiktok_cookies.txt"
+        jar.write_text(
+            ".tiktok.com\tTRUE\t/\tFALSE\t0\tsessionid\tabc123\n"
+            ".tiktok.com\tTRUE\t/\tTRUE\t0\ttt_webid\tdemo\n",
+            encoding="utf-8",
+        )
+        config.tiktok.cookies_file = str(jar)
+
+        cm = _mock_async_client([_FakeResponse(200, {"code": 0, "msg": "success"})])
+        client = cm.__aenter__.return_value
+        with patch("httpx.AsyncClient", return_value=cm):
+            uploader = TikTokUploader(config)
+            result = await uploader.delete("pub1")
+
+        assert result.outcome == DeleteOutcome.DELETED
+        assert result.ok is True
+        assert result.detail == "via-web"
+        # the authenticated web DELETE is issued against the right endpoint
+        client.delete.assert_awaited_once()
+        call_params = client.delete.await_args.kwargs.get("params", {})
+        assert call_params.get("video_id") == "pub1"
+        sent_headers = client.delete.await_args.kwargs.get("headers", {})
+        assert "sessionid=abc123" in sent_headers.get("Cookie", "")
+
+    @pytest.mark.asyncio
+    async def test_delete_web_session_failure_is_pending(self) -> None:
+        from xpst.platforms.base import DeleteOutcome
+        from xpst.platforms.tiktok import TikTokUploader
+
+        uploader = TikTokUploader(_make_config())
+        # HTTP 500 from the web endpoint → pending, marked for manual removal
+        responses = [_FakeResponse(500, text="boom")]
+        with _patch_httpx(responses):
+            result = await uploader.delete("pub1")
+
+        assert result.outcome == DeleteOutcome.PENDING
+        assert result.ok is False
 
 
 # ---------------------------------------------------------------------------
@@ -415,12 +469,16 @@ class TestThreadsUploader:
 
     @pytest.mark.asyncio
     async def test_delete_success(self) -> None:
+        from xpst.platforms.base import DeleteOutcome
         from xpst.platforms.threads import ThreadsUploader
 
         responses = [_FakeResponse(200, {})]
         with _patch_httpx(responses):
             uploader = ThreadsUploader(_make_config())
-            assert await uploader.delete("media1") is True
+            result = await uploader.delete("media1")
+
+        assert result.outcome == DeleteOutcome.DELETED
+        assert result.ok is True
 
 
 # ---------------------------------------------------------------------------
