@@ -291,8 +291,15 @@ class SessionManager:
                 "X cookies not found. Run: xpst auth x"
             )
 
-        # Create client
-        client = twikit.Client("en-US")
+        # Create client — with the anti-bot rotated User-Agent. A default
+        # twikit UA gets HTML/blocked responses from X ("Couldn't get
+        # KEY_BYTE indices"), which surfaces as a bogus "X authentication
+        # failed" health check even when cookies are perfectly valid (the
+        # XUploader path already rotates UAs; this is the same fix applied
+        # to the SessionManager flow used by check_health/serve/dashboard).
+        from xpst.platforms.x import AntiBotProtection
+
+        client = twikit.Client("en-US", user_agent=AntiBotProtection().get_user_agent())
 
         try:
             # Try cookie-based auth
