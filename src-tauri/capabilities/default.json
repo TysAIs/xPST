@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "POC capability: core + updater + deep-link permissions",
+  "description": "Default capability: core window/webview + updater + deep-link permissions",
   "windows": ["main"],
   "permissions": [
     "core:default",

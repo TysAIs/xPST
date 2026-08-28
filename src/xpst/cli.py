@@ -1600,7 +1600,8 @@ def serve(ctx: click.Context, no_dashboard: bool, port: int | None, host: str, i
 
 
 @main.command()
-@click.option("--port", "-p", default=8080, type=int, help="Dashboard HTTP port")
+@click.option("--port", "-p", default=8080, type=int, envvar="XPST_DASHBOARD_PORT",
+              help="Dashboard HTTP port (env: XPST_DASHBOARD_PORT)")
 @click.option("--host", default="127.0.0.1",
               help="Bind address (default: 127.0.0.1, loopback only)")
 @click.option("--api-only", is_flag=True, default=True, hidden=True,
