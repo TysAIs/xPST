@@ -287,6 +287,95 @@ def _load_icon_font() -> bool:
     return True
 
 
+def _make_macos_unified_window(engine) -> None:
+    """macOS-only: render the titlebar transparent and let the app fill the
+    whole window (traffic lights still controlled natively by the OS/titlebar
+    so close/minimize/zoom keep working and stay accessible).
+
+    Achieved by flipping the native NSWindow into a full-size content view:
+      - NSWindowStyleMaskFullSizeContentView (bit 14) so the QML canvas begins
+        under the titlebar region;
+      - setTitlebarAppearsTransparent:YES so the OS chrome visually hides;
+      - titleVisibility = NSWindowTitleHidden so our own header/branding text
+        is the only title (the app already draws its 44–48px logo header).
+
+    Implemented via the Objective-C runtime through ctypes only on darwin;
+    on any other platform or any native-call failure this is a strict no-op
+    and the app keeps the normal titlebar (return value ignored).
+    """
+    if sys.platform != "darwin":
+        return
+    if engine is None:
+        return
+    try:
+        import ctypes
+        import ctypes.util
+
+        root = engine.rootObjects()[0]
+        if root is None:
+            return
+        win_handle = root.windowHandle()
+        if win_handle is None or not win_handle.winId():
+            logger.debug("macOS unified titlebar: no window handle yet, skipped")
+            return
+
+        appkit = ctypes.util.find_library("AppKit")
+        objcruntime = ctypes.util.find_library("objc")
+        if not appkit or not objcruntime:
+            logger.debug("macOS unified titlebar: native libs missing, skipped")
+            return
+
+        objc = ctypes.cdll.LoadLibrary(objcruntime)
+        objc.objc_msgSend.restype = ctypes.c_void_p
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+
+        sel_register = objc.sel_registerName
+        sel_register.restype = ctypes.c_void_p
+        sel_register.argtypes = [ctypes.c_char_p]
+
+        def sel(name: str) -> ctypes.c_void_p:
+            return sel_register(name.encode("utf-8"))
+
+        ns_view = ctypes.c_void_p(win_handle.winId())
+        window = objc.objc_msgSend(ns_view, sel("window"))
+        if not window:
+            logger.debug("macOS unified titlebar: no NSWindow, skipped")
+            return
+
+        # styleMask → add NSWindowStyleMaskFullSizeContentView (1 << 15) so
+        # content fills the window INCLUDING under the (now transparent)
+        # titlebar. NSWindowStyleMaskFullScreen (1 << 7) arrives preset by Qt
+        # even outside fullscreen transitions, and AppKit raises
+        # NSGenericException ("set on a window outside of a full screen
+        # transition") if we echo it back — so clear it, then set the mask.
+        full_size_content_mask = 1 << 15
+        full_screen_style_bit = 1 << 7
+        objc.objc_msgSend.restype = ctypes.c_ulonglong
+        style_mask = objc.objc_msgSend(window, sel("styleMask")) or 0
+        new_mask = (style_mask & ~full_screen_style_bit) | full_size_content_mask
+        if new_mask != style_mask:
+            objc.objc_msgSend.argtypes = [
+                ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulonglong,
+            ]
+            objc.objc_msgSend(window, sel("setStyleMask:"), new_mask)
+
+        # titlebarAppearsTransparent = YES
+        objc.objc_msgSend.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool,
+        ]
+        objc.objc_msgSend(window, sel("setTitlebarAppearsTransparent:"), True)
+
+        # titleVisibility = NSWindowTitleHidden
+        objc.objc_msgSend.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long,
+        ]
+        objc.objc_msgSend(window, sel("setTitleVisibility:"), 1)  # NSWindowTitleHidden
+
+        logger.info("macOS unified titlebar applied (full-size content view)")
+    except Exception as exc:  # noqa: BLE001 - native path never breaks the app
+        logger.debug("macOS unified titlebar skipped: %s", exc)
+
+
 def main(no_splash: bool = False) -> int:
     """Launch the xPST desktop application."""
     # Single-instance guard: a second launch focuses the existing window
@@ -412,6 +501,11 @@ def main(no_splash: bool = False) -> int:
     engine.rootContext().setContextProperty(
         "iconFontUrl", _icon_font.as_uri() if _icon_font.exists() else ""
     )
+    # macOS unified hidden-titlebar flag (see _make_macos_unified_window):
+    # lets QML pad the traffic-light zone on macOS only; false everywhere else.
+    engine.rootContext().setContextProperty(
+        "macUnifiedTitlebar", sys.platform == "darwin"
+    )
     if splash:
         splash.showMessage("Starting engine...", Qt.AlignBottom | Qt.AlignHCenter, Qt.white)
     app.processEvents()
@@ -447,6 +541,12 @@ def main(no_splash: bool = False) -> int:
             splash.close()
         logger.error("Failed to load QML — check main.qml for errors")
         return 1
+
+    # macOS: unified hidden-titlebar window with the traffic lights embedded
+    # into the canvas (full-size content view behind the title bar). Function
+    # no-ops safely on every other platform / when the native call fails, so
+    # this never breaks a build.
+    _make_macos_unified_window(engine)
 
     # Close splash as soon as the window is up. Use finish() so the splash
     # hides exactly when the root window shows; keep a short fallback timer.
