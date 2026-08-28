@@ -39,6 +39,7 @@ use tauri::{Manager, RunEvent, WebviewWindow, Url};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
 
 /// How long to wait for the engine to become healthy before giving up.
 const ENGINE_HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
@@ -412,6 +413,86 @@ fn boot_engine(app: tauri::AppHandle) {
     drain.abort();
 }
 
+// ---------------------------------------------------------------------------
+// Updater E2E (Phase 2).
+//
+// The setup hook writes boot-version markers so an E2E test can PROVE the
+// running process's version (marker file written by the app itself):
+//   $WORK/started-<version>.txt — one file per boot (canonical /private/tmp
+//   path: tauri-plugin-updater refuses to run when current_exe() crosses a
+//   symlink, and /tmp is a symlink to /private/tmp on macOS)
+//   $WORK/current.txt           — overwritten with the latest boot's version
+//
+// The updater check is OPT-IN via XPST_UPDATER_CHECK=1 so normal boots never
+// auto-update. On match: check() -> download_and_install() -> restart().
+const UPDATER_MARKER_DIR: &str = "/private/tmp/xpst-updater-e2e";
+
+fn write_version_marker(version: &str) {
+    if std::fs::create_dir_all(UPDATER_MARKER_DIR).is_err() {
+        return;
+    }
+    let stamp = format!(
+        "{} {}",
+        version,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs().to_string())
+            .unwrap_or_default()
+    );
+    std::fs::write(format!("{UPDATER_MARKER_DIR}/started-{version}.txt"), &stamp).ok();
+    std::fs::write(format!("{UPDATER_MARKER_DIR}/current.txt"), &stamp).ok();
+}
+
+fn run_updater_check(handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        tauri::async_runtime::block_on(async move {
+            let updater = match handle.updater() {
+                Ok(u) => u,
+                Err(e) => {
+                    eprintln!("[xpst-updater] updater() failed: {e}");
+                    return;
+                }
+            };
+            match updater.check().await {
+                Ok(Some(update)) => {
+                    println!(
+                        "[xpst-updater] update available: {} -> {}",
+                        update.current_version, update.version
+                    );
+                    let mut downloaded: usize = 0;
+                    match update
+                        .download_and_install(
+                            |chunk, total| {
+                                downloaded += chunk;
+                                if let Some(t) = total {
+                                    println!("[xpst-updater] downloaded {downloaded}/{t} bytes");
+                                }
+                            },
+                            || {
+                                println!("[xpst-updater] download finished; installing");
+                            },
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            println!(
+                                "[xpst-updater] installed; restarting into {}",
+                                update.version
+                            );
+                            handle.restart();
+                        }
+                        Err(e) => {
+                            eprintln!("[xpst-updater] download_and_install failed: {e}");
+                        }
+                    }
+                }
+                Ok(None) => println!("[xpst-updater] no update available"),
+                Err(e) => eprintln!("[xpst-updater] check failed: {e}"),
+            }
+        });
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     BOOT_START.get_or_init(Instant::now);
@@ -450,6 +531,13 @@ pub fn run() {
                 }
             });
             shell_log(&format!("SHELL_STARTED pid={}", std::process::id()));
+
+            // Updater E2E (Phase 2): boot-version marker + opt-in update check.
+            let version = app.package_info().version.to_string();
+            write_version_marker(&version);
+            if std::env::var("XPST_UPDATER_CHECK").ok().as_deref() == Some("1") {
+                run_updater_check(app.handle().clone());
+            }
 
             // In-process boot-to-visible probe: the window is created
             // (visible) from config before setup runs, so elapsed time here
