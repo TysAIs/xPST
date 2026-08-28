@@ -34,9 +34,14 @@ def main() -> None:
     threading.Thread(target=_watch_parent, daemon=True).start()
 
     from xpst.dashboard.server import start_dashboard
+    from xpst.utils.logger import setup_logging
 
     port = int(os.environ.get("XPST_DASHBOARD_PORT", "8080"))
     config_dir = os.environ.get("XPST_CONFIG_DIR", "~/.xpst")
+    # Stderr logging (no file handler): keeps uvicorn + xpst INFO lines —
+    # including OAUTH_CALLBACK_RECEIVED from the deep-link OAuth route —
+    # visible to the shell harness / scripts/deeplink-e2e.sh.
+    setup_logging()
     start_dashboard(port=port, host="127.0.0.1", config_dir=os.path.expanduser(config_dir))
 
 
