@@ -84,13 +84,48 @@ rm -f "$XPST_SHELL_LOG" "$XPST_DEEPLINK_MARKER"
 "$BIN_PATH" >/dev/null 2>&1 &
 sleep 3 # window settle (cold boot ~0.25 s median; 3 s is generous)
 COUNT1=$(pgrep -f "$BIN_DIR" | wc -l | tr -d ' ')
+echo "process listing after first launch:"; pgrep -fl "$BIN_DIR" || true
 [[ "$COUNT1" == "1" ]] || fail "expected 1 instance after first launch, found $COUNT1"
 
+# GUI evidence: the app's window must actually be on screen (not headless).
+APP_PID="$(pgrep -f "$BIN_DIR" | head -1)"
+if command -v swift >/dev/null 2>&1 && [[ -n "$APP_PID" ]]; then
+  cat > "$WORK/winlister.swift" <<'SWIFT'
+import CoreGraphics
+import Foundation
+let pid = Int32(CommandLine.arguments[1])!
+let opts = CGWindowListOption([.optionOnScreenOnly, .excludeDesktopElements])
+if let info = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String: Any]] {
+    let mine = info.filter { ($0[kCGWindowOwnerPID as String] as? Int32) == pid }
+    for w in mine {
+        let name = w[kCGWindowName as String] as? String ?? ""
+        let owner = w[kCGWindowOwnerName as String] as? String ?? ""
+        print("WINDOW owner=\(owner) name=\(name)")
+    }
+    print("WINDOW_COUNT=\(mine.count)")
+}
+SWIFT
+  WIN_OUT="$(swift "$WORK/winlister.swift" "$APP_PID" 2>/dev/null)"
+  echo "GUI window evidence (CGWindowList, pid $APP_PID):"
+  echo "$WIN_OUT"
+  echo "$WIN_OUT" | grep -q "WINDOW_COUNT=[1-9]" \
+    && pass "app window is on screen (live GUI)" \
+    || fail "no on-screen window found for pid $APP_PID"
+fi
+
 "$BIN_PATH" >/dev/null 2>&1 &
+SECOND_PID=$!
 sleep 3
 COUNT2=$(pgrep -f "$BIN_DIR" | wc -l | tr -d ' ')
+echo "process listing after second launch (pid $SECOND_PID should be gone):"
+pgrep -fl "$BIN_DIR" || true
 if [[ "$COUNT2" == "1" ]]; then
-  pass "second launch exited; exactly 1 process remains"
+  if ! kill -0 "$SECOND_PID" 2>/dev/null; then
+    pass "second launch (pid $SECOND_PID) exited; exactly 1 process remains"
+  else
+    pass "exactly 1 process remains, but second pid $SECOND_PID still alive?!"
+    fail "second instance did not exit"
+  fi
 else
   fail "expected 1 process after second launch, found $COUNT2"
 fi
@@ -150,6 +185,8 @@ if [[ -n "$ENGINE_PID" ]]; then
   if grep -q "DEEPLINK_FORWARDED url=$DEEPLINK_URL outcome=forwarded:" "$XPST_SHELL_LOG" \
      && grep -q "ENGINE_RECEIVED_CALLBACK" "$WORK/engine.log"; then
     pass "URL forwarded to engine at 127.0.0.1:$XPST_ENGINE_PORT/oauth/callback"
+    echo "engine-side evidence (stub engine received the forwarded callback):"
+    cat "$WORK/engine.log"
   else
     fail "forwarding outcome not forwarded: $(grep DEEPLINK_FORWARDED "$XPST_SHELL_LOG" || echo none)"
   fi
