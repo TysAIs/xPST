@@ -427,6 +427,7 @@ def test_parallel_manager_adds_no_lost_entries(tmp_path):
     assert len({e["id"] for e in entries}) == 5
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="flock cross-process locking is POSIX-only")
 def test_parallel_cli_schedule_add(tmp_path):
     """Five concurrent `xpst schedule add` processes: all succeed, none lost."""
     home_dir = tmp_path / "conc-home"
