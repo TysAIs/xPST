@@ -15,7 +15,10 @@
 #      http://127.0.0.1:<port>/oauth/callback (engine's dashboard, port
 #      XPST_ENGINE_PORT, default 8080). Without an engine up, the shell logs
 #      outcome=engine_unreachable — that is still a PASS for shell routing;
-#      with the engine up, outcome=forwarded:<status> is required here.
+#      with the engine up, outcome=forwarded:200 is required here and the
+#      engine must be the REAL FastAPI dashboard (started via
+#      scripts/engine_entry.py), whose OAUTH_CALLBACK_RECEIVED log line
+#      proves the actual route handled the forwarded URL.
 #
 # Scheme registration / lsregister fallback (dev machines):
 #   Info.plist registration normally happens at install time (Finder /
@@ -167,33 +170,33 @@ echo
 echo "== 4. Deep link at runtime (with engine forwarding) =="
 rm -f "$XPST_DEEPLINK_MARKER"
 ENGINE_PID=""
-if command -v python3 >/dev/null 2>&1; then
-  # Minimal stand-in engine: FastAPI dashboard is absent in this harness, so
-  # bind 127.0.0.1:$XPST_ENGINE_PORT and answer POST /oauth/callback 200.
-  python3 - "$XPST_ENGINE_PORT" >"$WORK/engine.log" 2>&1 <<'PY' &
-import http.server, sys
-
-class H(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        n = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(n)
-        if self.path == "/oauth/callback":
-            print("ENGINE_RECEIVED_CALLBACK", body.decode(), flush=True)
-            self.send_response(200)
-            self.send_header("Content-Length", "2")
-            self.end_headers()
-            self.wfile.write(b"ok")
-        else:
-            self.send_response(404)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-    def log_message(self, *a):
-        pass
-
-http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
-PY
+if command -v uv >/dev/null 2>&1; then
+  # REAL engine: run the actual FastAPI dashboard (the same _create_app the
+  # PyInstaller sidecar bundles) on 127.0.0.1:$XPST_ENGINE_PORT, so
+  # outcome=forwarded:200 proves the REAL POST /oauth/callback route —
+  # not a stub HTTP server.
+  XPST_DASHBOARD_PORT="$XPST_ENGINE_PORT" PYTHONPATH="$REPO_ROOT/src" \
+    uv run --quiet --extra dev python scripts/engine_entry.py >"$WORK/engine.log" 2>&1 &
   ENGINE_PID=$!
-  sleep 1
+  for _ in $(seq 1 40); do # up to 20 s (uv env sync can be slow on cold start)
+    if curl -sf -o /dev/null "http://127.0.0.1:$XPST_ENGINE_PORT/health"; then break; fi
+    sleep 0.5
+  done
+fi
+
+if [[ -n "$ENGINE_PID" ]] && curl -sf -o /dev/null "http://127.0.0.1:$XPST_ENGINE_PORT/health"; then
+  pass "real engine dashboard healthy on 127.0.0.1:$XPST_ENGINE_PORT"
+  # Direct probe of the real route (mirrors what the shell will POST).
+  CB_STATUS="$(curl -s -o "$WORK/curl-body.json" -w '%{http_code}' -X POST \
+    -H 'Content-Type: application/json' \
+    -d '{"source":"deeplink-e2e","url":"xpst://callback?code=e2e-direct&state=e2e-direct"}' \
+    "http://127.0.0.1:$XPST_ENGINE_PORT/oauth/callback")"
+  echo "direct POST /oauth/callback -> HTTP $CB_STATUS body: $(cat "$WORK/curl-body.json" 2>/dev/null)"
+  [[ "$CB_STATUS" == "200" ]] \
+    && pass "real dashboard /oauth/callback route answers 200" \
+    || fail "real dashboard /oauth/callback route got HTTP $CB_STATUS"
+else
+  echo "NOTE: uv/engine unavailable — skipped live engine check"
 fi
 
 open "$DEEPLINK_URL" || fail "open $DEEPLINK_URL"
@@ -215,16 +218,18 @@ grep -q "DEEPLINK_RECEIVED url=$DEEPLINK_URL" "$XPST_SHELL_LOG" \
 
 if [[ -n "$ENGINE_PID" ]]; then
   sleep 1
-  if grep -q "DEEPLINK_FORWARDED url=$DEEPLINK_URL outcome=forwarded:" "$XPST_SHELL_LOG" \
-     && grep -q "ENGINE_RECEIVED_CALLBACK" "$WORK/engine.log"; then
-    pass "URL forwarded to engine at 127.0.0.1:$XPST_ENGINE_PORT/oauth/callback"
-    echo "engine-side evidence (stub engine received the forwarded callback):"
-    cat "$WORK/engine.log"
+  if grep -q "DEEPLINK_FORWARDED url=$DEEPLINK_URL outcome=forwarded:200" "$XPST_SHELL_LOG" \
+     && grep -q "OAUTH_CALLBACK_RECEIVED" "$WORK/engine.log"; then
+    pass "URL forwarded to the REAL engine route at 127.0.0.1:$XPST_ENGINE_PORT/oauth/callback (200)"
+    echo "engine-side evidence (real dashboard route log line):"
+    grep "OAUTH_CALLBACK_RECEIVED" "$WORK/engine.log"
+    echo "shell-side outcome line:"
+    grep "DEEPLINK_FORWARDED" "$XPST_SHELL_LOG"
   else
-    fail "forwarding outcome not forwarded: $(grep DEEPLINK_FORWARDED "$XPST_SHELL_LOG" || echo none)"
+    fail "forwarding outcome not forwarded:200 (shell: $(grep DEEPLINK_FORWARDED "$XPST_SHELL_LOG" || echo none); engine: $(grep -c OAUTH_CALLBACK_RECEIVED "$WORK/engine.log" 2>/dev/null || echo 0) route lines)"
   fi
 else
-  echo "NOTE: no python3 — skipped live engine check; shell-side outcome: $(grep -o 'outcome=[a-z_:0-9]*' "$XPST_SHELL_LOG" | tail -1)"
+  echo "NOTE: no engine — skipped live engine check; shell-side outcome: $(grep -o 'outcome=[a-z_:0-9]*' "$XPST_SHELL_LOG" | tail -1)"
 fi
 
 echo
