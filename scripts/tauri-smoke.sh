@@ -70,7 +70,7 @@ done
 # Webview navigation evidence (printed ~2s after the ready marker).
 WEBVIEW_URL=""
 for _ in $(seq 1 10); do
-    WEBVIEW_URL="$(sed -n 's/^WEBVIEW_URL=//p' "$LOG" | head -1)"
+    WEBVIEW_URL="$(sed -n 's/^.*WEBVIEW_URL=//p' "$LOG" | head -1)"
     [[ -n "$WEBVIEW_URL" ]] && break
     sleep 1
 done
@@ -86,8 +86,8 @@ if [[ -z "$READY" ]]; then
     exit 1
 fi
 
-BOOT="$(sed -n 's/^BOOT_TO_READY_SECS=//p' "$LOG" | head -1)"
-HEALTH_WAIT="$(sed -n 's/^ENGINE_HEALTH_WAIT_SECS=//p' "$LOG" | head -1)"
+BOOT="$(sed -n 's/^.*BOOT_TO_READY_SECS=//p' "$LOG" | head -1)"
+HEALTH_WAIT="$(sed -n 's/^.*ENGINE_HEALTH_WAIT_SECS=//p' "$LOG" | head -1)"
 
 echo "==> Engine healthy: health_wait=${HEALTH_WAIT}s boot_to_ready=${BOOT}s"
 
@@ -105,7 +105,7 @@ fi
 # Gate: boot-to-VISIBLE window must stay under 1s (size/boot gates).
 # boot_to_ready additionally includes the PyInstaller onefile extraction
 # (~1.5s) and is reported but not gated.
-VIS="$(sed -n 's/^BOOT_TO_VISIBLE_SECS=//p' "$LOG" | head -1)"
+VIS="$(sed -n 's/^.*BOOT_TO_VISIBLE_SECS=//p' "$LOG" | head -1)"
 if [[ -n "$VIS" ]] && awk -v b="$VIS" -v l="$BOOT_LIMIT_SECS" 'BEGIN { exit (b+0 <= l+0) ? 0 : 1 }'; then
     echo "PASS: boot_to_visible ${VIS}s <= ${BOOT_LIMIT_SECS}s (boot_to_ready=${BOOT}s)"
 else
