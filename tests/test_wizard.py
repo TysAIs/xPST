@@ -247,3 +247,71 @@ def test_mark_onboarding_complete_writes_both_state_files(tmp_path):
     persisted = json.loads((tmp_path / "wizard_state.json").read_text())
     assert persisted["completed"] is True
     _assert_persisted_state(tmp_path, expected_first_run=True, completed_state=True)
+
+
+# ── YouTube GCP guide (`xpst connect youtube --guide`) ────────
+
+YOUTUBE_DOCS_URL = (
+    "https://github.com/TysAIs/xPST/blob/main/docs/youtube-oauth-production.md"
+)
+
+
+def _yt_guide_text() -> str:
+    return "\n".join(s.text for s in wiz.youtube_gcp_steps())
+
+
+def test_youtube_gcp_guide_golden_urls():
+    text = _yt_guide_text()
+    assert "https://console.cloud.google.com/projectcreate" in text
+    assert "https://console.cloud.google.com/auth/audience" in text
+    assert "https://console.cloud.google.com/auth/clients" in text
+    # Legacy credentials UI kept as a fallback path
+    assert "https://console.cloud.google.com/apis/credentials" in text
+
+
+def test_youtube_gcp_guide_publish_to_production_warning():
+    text = _yt_guide_text()
+    assert "Publish App" in text
+    assert "7 DAYS" in text
+    assert "already published to production" in text
+    assert "docs/youtube-oauth-production.md" in text
+
+
+def test_youtube_gcp_guide_desktop_app_and_secrets_path():
+    text = _yt_guide_text()
+    assert "Desktop app" in text
+    assert (
+        wiz.YOUTUBE_SECRETS_PATH
+        == "~/.xpst/credentials/youtube_client_secrets.json"
+    )
+    assert wiz.YOUTUBE_SECRETS_PATH in text
+
+
+def test_youtube_guide_single_source_of_truth():
+    """PLATFORM_GUIDES, the JSON payload and the markdown renderer must all
+    come from the same generator so they cannot drift apart."""
+    guide = wiz.PLATFORM_GUIDES["youtube"]
+    generated = wiz.youtube_gcp_guide()
+    assert guide.title == generated.title
+    assert [s.text for s in guide.steps] == [s.text for s in generated.steps]
+
+    payload = wiz.youtube_guide_payload()
+    assert payload["steps"] == [s.text for s in guide.steps]
+    assert payload["app_status"] == "in_production"
+    assert payload["docs_url"] == YOUTUBE_DOCS_URL
+    assert payload["docs_file"] == "docs/youtube-oauth-production.md"
+    assert payload["client_secrets_path"] == wiz.YOUTUBE_SECRETS_PATH
+    assert payload["next_action"] == "xpst connect youtube"
+
+
+def test_youtube_guide_markdown_reuses_wizard_renderer(tmp_path):
+    md = wiz.render_youtube_guide_markdown()
+    assert md.startswith("## YouTube Shorts")
+    assert f"More details: {YOUTUBE_DOCS_URL}" in md
+    assert "https://console.cloud.google.com/projectcreate" in md
+
+    # `xpst wizard --export-md` renders the same youtube section
+    out = wiz.export_markdown(tmp_path / "guide.md")
+    text = out.read_text()
+    assert "https://console.cloud.google.com/projectcreate" in text
+    assert YOUTUBE_DOCS_URL in text
