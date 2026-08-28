@@ -565,7 +565,8 @@ class XPSTConfig:
                 ) from e
             from xpst.config_migration import _BoundedSafeLoader
             try:
-                file_config = yaml.load(text, Loader=_BoundedSafeLoader)
+                # nosec B506 on next line: _BoundedSafeLoader subclasses SafeLoader.
+                file_config = yaml.load(text, Loader=_BoundedSafeLoader)  # nosec B506
             except yaml.YAMLError as e:
                 backup = _backup_corrupt_config_file(cfg_path)
                 raise ValueError(

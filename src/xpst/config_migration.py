@@ -49,7 +49,8 @@ class _BoundedSafeLoader(yaml.SafeLoader):
 def _safe_load_yaml(path: Path):
     """Load a YAML file with the bounded loader. Raises on invalid YAML."""
     with open(path) as f:
-        return yaml.load(f, Loader=_BoundedSafeLoader)
+        # nosec B506 on next line: _BoundedSafeLoader subclasses SafeLoader.
+        return yaml.load(f, Loader=_BoundedSafeLoader)  # nosec B506
 
 
 def _looks_like_xpst_config(data) -> bool:
