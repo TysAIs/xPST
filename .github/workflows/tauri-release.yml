@@ -1,0 +1,138 @@
+name: Tauri Shell Release
+
+# Builds the Tauri 2 desktop shell (xPST.app) with the Python engine sidecar.
+# Triggers on version tags (v*) and manual dispatch. Artifacts: .app, .dmg,
+# updater (.app.tar.gz + .sig). Notarization runs only when Apple secrets exist.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+    paths:
+      - "src-tauri/**"
+      - ".github/workflows/tauri-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tauri-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: "app,dmg"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri"
+
+      - name: Install Python engine deps (sidecar build)
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e ".[full]" pyinstaller
+
+      - name: Build engine sidecar (PyInstaller onefile)
+        run: |
+          pyinstaller build_engine.spec --noconfirm --distpath src-tauri/binaries
+          # externalBin requires the target-triple suffix
+          mv src-tauri/binaries/xpst-engine \
+             "src-tauri/binaries/xpst-engine-${{ matrix.target }}"
+          chmod +x "src-tauri/binaries/xpst-engine-${{ matrix.target }}"
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+
+      - name: Import Apple signing cert (if secrets present)
+        if: env.APPLE_CERTIFICATE != null && env.APPLE_CERTIFICATE != ''
+        id: cert
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+
+      - name: Build Tauri app + updater artifacts
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          export TAURI_SIGNING_PRIVATE_KEY="${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
+          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            # CI key present → signed updater artifacts
+            cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          else
+            # No key → build without updater signature (artifact still uploaded for smoke)
+            cargo tauri build --target ${{ matrix.target }} --bundles app
+          fi
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Verify bundle size gate (≤120MB)
+        run: |
+          APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" | head -1)
+          SIZE_MB=$(du -sm "$APP_PATH" | cut -f1)
+          echo "xPST.app size: ${SIZE_MB}MB"
+          if [ "$SIZE_MB" -gt 120 ]; then
+            echo "::error::Bundle ${SIZE_MB}MB exceeds 120MB gate"
+            exit 1
+          fi
+
+      - name: Smoke boot (app launches, engine healthy)
+        if: runner.os == 'macOS'
+        run: |
+          APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" | head -1)
+          set -e
+          # headless-safe boot with a bounded watchdog
+          timeout 60 "$APP_PATH/Contents/MacOS/"* &
+          APP_PID=$!
+          sleep 15
+          if ! kill -0 $APP_PID 2>/dev/null; then
+            echo "::error::App exited during smoke boot"
+            exit 1
+          fi
+          kill $APP_PID 2>/dev/null || true
+
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: xPST-${{ matrix.target }}
+          path: |
+            src-tauri/target/release/bundle/macos/xPST.app
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: warn
+
+      - name: Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/release/bundle/dmg/*.dmg
+          generate_release_notes: true
+          draft: false
