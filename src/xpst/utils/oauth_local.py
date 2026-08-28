@@ -35,6 +35,7 @@ Example:
         exchange_code_for_token(result.code)
 """
 
+import queue
 import threading
 import urllib.parse
 from dataclasses import dataclass
@@ -187,6 +188,88 @@ def start_listener(
     """
     with LocalOAuthListener(port=port, path=path, state=state) as listener:
         return listener.wait(timeout=timeout)
+
+
+# ── External (deep-link) code intake ─────────────────────────────
+#
+# When the engine runs as a Tauri sidecar it must NOT bind its own OAuth
+# listener port: the Tauri shell owns the xpst:// scheme registration,
+# receives the redirect, and forwards the URL as a JSON POST to the
+# dashboard's ``/oauth/callback`` route (src/xpst/dashboard/server.py).
+# That route stashes the authorization code here; a future
+# ``xpst connect <platform>`` running in sidecar mode calls
+# :func:`consume_external_code` instead of :meth:`LocalOAuthListener.wait`.
+#
+# The slot is a bounded FIFO queue guarded by ``queue.Queue``'s internal
+# lock — thread-safe across the uvicorn event loop thread (producer) and
+# any sync consumer thread.
+
+_EXTERNAL_CODE_QUEUE: queue.Queue[AuthCodeResult] = queue.Queue(maxsize=16)
+
+
+def receive_external_code(
+    code: str | None,
+    state: str | None = None,
+    error: str | None = None,
+    error_description: str | None = None,
+) -> AuthCodeResult:
+    """Stash an OAuth authorization code received via an external channel.
+
+    Thread-safe. Called by the dashboard's ``POST /oauth/callback`` route
+    when the Tauri shell forwards an ``xpst://`` URL. Also accepts provider
+    error parameters so a failing consent flow surfaces to the consumer
+    instead of hanging.
+
+    When the queue is full, the oldest entry is dropped first: codes are
+    single-use and short-lived, so stale entries are worthless.
+
+    Returns the stashed :class:`AuthCodeResult`.
+    """
+    result = AuthCodeResult(
+        success=code is not None and error is None,
+        code=code,
+        state=state,
+        error=error,
+        error_description=error_description,
+    )
+    try:
+        _EXTERNAL_CODE_QUEUE.put_nowait(result)
+    except queue.Full:
+        logger.warning("External OAuth code queue full — dropping oldest entry")
+        try:
+            _EXTERNAL_CODE_QUEUE.get_nowait()
+        except queue.Empty:  # pragma: no cover - another consumer raced us
+            pass
+        _EXTERNAL_CODE_QUEUE.put_nowait(result)
+    logger.info(
+        "External OAuth code received: code_present=%s state=%s error=%s",
+        code is not None,
+        state,
+        error,
+    )
+    return result
+
+
+def consume_external_code(timeout: float | None = None) -> AuthCodeResult:
+    """Pop the next externally received OAuth code (blocking, thread-safe).
+
+    Sidecar-mode replacement for :meth:`LocalOAuthListener.wait`: blocks
+    until :func:`receive_external_code` delivers a result or ``timeout``
+    elapses (raises ``TimeoutError``, mirroring ``wait()``). Pass a small
+    ``timeout`` to poll.
+
+    Args:
+        timeout: Seconds to wait; defaults to 300 (same as ``wait()``).
+
+    Returns:
+        The next :class:`AuthCodeResult` in FIFO order.
+    """
+    if timeout is None:
+        timeout = 300.0
+    try:
+        return _EXTERNAL_CODE_QUEUE.get(timeout=timeout)
+    except queue.Empty:
+        raise TimeoutError(f"No external OAuth code arrived within {timeout:g}s") from None
 
 
 # ── internals ────────────────────────────────────────────────────

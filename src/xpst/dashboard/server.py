@@ -13,6 +13,8 @@ Endpoints:
     GET /state    — current xPST state summary
     GET /bio      — public, mobile-first link-in-bio page
     GET/POST /bio/edit — auth-protected link-in-bio editor
+    POST /oauth/callback — xpst:// deep-link OAuth redirect intake (Tauri
+        shell forwarding; auth-exempt like /health)
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ import hmac
 import importlib.metadata
 import json
 import logging
+import urllib.parse
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -34,6 +37,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
+
+# POST /oauth/callback body cap (~8 KiB): the route is auth-exempt (public)
+# and only ever receives one tiny JSON object from the Tauri shell.
+_OAUTH_CALLBACK_MAX_BODY = 8 * 1024
 
 _DASHBOARD_INDEX_HTML = """<!doctype html>
 <html lang="en">
@@ -164,6 +171,60 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
             logger.warning("Health check failed: %s", exc)
             return {"status": "error", "detail": str(exc)}
 
+    # ── OAuth callback (Tauri deep-link forwarding) ──────────────────────
+    @app.post("/oauth/callback", name="oauth_callback", response_model=None)
+    async def oauth_callback(request: Request) -> JSONResponse | dict:
+        """Receive an ``xpst://`` OAuth redirect forwarded by the Tauri shell.
+
+        The shell is a local dumb pipe: it POSTs ``{"source": "tauri-deep-link",
+        "url": "xpst://callback?code=...&state=..."}``. Auth-exempt like
+        /health — OAuth browser redirects cannot attach Basic auth, and the
+        body is hard-capped and scheme-validated because the route is public.
+        On code+state the authorization code is stashed into the engine-level
+        external-code slot (xpst.utils.oauth_local.receive_external_code) for
+        a sidecar-mode ``xpst connect`` consumer to pick up.
+        """
+        # Size limit first: never buffer an oversized public payload.
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit() and int(content_length) > _OAUTH_CALLBACK_MAX_BODY:
+            return JSONResponse({"detail": "Payload too large"}, status_code=413)
+        body = await request.body()
+        if len(body) > _OAUTH_CALLBACK_MAX_BODY:
+            return JSONResponse({"detail": "Payload too large"}, status_code=413)
+        try:
+            payload = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+        if not isinstance(payload, dict):
+            return JSONResponse({"detail": "Invalid JSON body"}, status_code=400)
+
+        url = payload.get("url")
+        source = payload.get("source", "unknown")
+        if not isinstance(url, str) or not url.lower().startswith("xpst://"):
+            logger.warning("OAuth callback rejected: non-xpst URL from source=%s", source)
+            return JSONResponse({"detail": "Expected an xpst:// callback URL"}, status_code=400)
+
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        code = query.get("code", [None])[0]
+        state = query.get("state", [None])[0]
+        error = query.get("error", [None])[0]
+        error_description = query.get("error_description", [None])[0]
+
+        if code or error:
+            from xpst.utils.oauth_local import receive_external_code
+
+            receive_external_code(
+                code=code, state=state, error=error, error_description=error_description
+            )
+        logger.info(
+            "OAUTH_CALLBACK_RECEIVED source=%s code_present=%s state=%s error=%s",
+            source,
+            code is not None,
+            state,
+            error,
+        )
+        return {"received": True, "code_present": code is not None, "state": state}
+
     # ── Metrics endpoint ────────────────────────────────────────────────
     @app.get("/metrics")
     def metrics():
@@ -213,9 +274,10 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
 
         class BasicAuthMiddleware(BaseHTTPMiddleware):
             async def dispatch(self, request: Request, call_next):
-                # Skip auth for health, metrics, and the public bio page.
-                # /bio/edit stays protected (admin only).
-                if request.url.path in ("/health", "/metrics", "/bio"):
+                # Skip auth for health, metrics, the public bio page, and the
+                # OAuth callback (browser redirects / the Tauri shell cannot
+                # attach Basic auth). /bio/edit stays protected (admin only).
+                if request.url.path in ("/health", "/metrics", "/bio", "/oauth/callback"):
                     return await call_next(request)
 
                 auth_header = request.headers.get("Authorization", "")
