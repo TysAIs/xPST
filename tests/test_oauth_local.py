@@ -126,7 +126,9 @@ class TestTimeoutAndLifecycle:
             listener.start()  # second call is an idempotent no-op
             with pytest.raises(TimeoutError, match="Timed out"):
                 listener.wait(timeout=0.3)
-        with pytest.raises(httpx.ConnectError):
+        # After the timeout the socket is closed. Windows may answer a closed
+        # loopback port with a connect timeout instead of a refused error.
+        with pytest.raises((httpx.ConnectError, httpx.ConnectTimeout)):
             httpx.get(f"http://127.0.0.1:{listener.port}/callback?code=x", timeout=2.0)
 
     def test_start_listener_timeout(self):
@@ -138,8 +140,8 @@ class TestTimeoutAndLifecycle:
         listener.start()
         port = listener.port
         listener.close()
-        listener.close()
-        with pytest.raises(httpx.ConnectError):
+        listener.close()  # idempotent
+        with pytest.raises((httpx.ConnectError, httpx.ConnectTimeout)):
             httpx.get(f"http://127.0.0.1:{port}/callback?code=x", timeout=2.0)
 
     def test_wait_before_start_raises(self):
