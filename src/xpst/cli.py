@@ -23,6 +23,8 @@ import json as _json
 import os
 import shutil
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from typing import Any
 
@@ -92,6 +94,32 @@ def json_output(data: object, as_json: bool) -> None:
     """
     if as_json:
         click.echo(_json.dumps(data, default=str, ensure_ascii=False))
+
+
+@contextmanager
+def keep_stdout_json(enabled: bool) -> Iterator[None]:
+    """Route human-facing Rich prints to stderr while stdout carries JSON.
+
+    Some library helpers (``connect.test_connections``, ``updater.update_all``)
+    print Rich progress to stdout. In JSON mode that would corrupt the
+    machine-readable contract, so redirect stdout to stderr for the duration
+    of the call.
+
+    Args:
+        enabled: When ``True`` (i.e. JSON output requested), redirect.
+    """
+    if enabled:
+        with redirect_stdout(sys.stderr):
+            yield
+    else:
+        yield
+
+
+def _error_payload(code: str, message: str, **extra: object) -> dict:
+    """Build a stable, actionable error object for ``--json`` error output."""
+    payload: dict = {"ok": False, "error": {"code": code, "message": message}}
+    payload["error"].update(extra)
+    return payload
 
 
 def _maybe_show_onboarding_hint(config, as_json: bool, quiet: bool) -> None:
@@ -182,13 +210,36 @@ def main(ctx: click.Context, config: str | None, verbose: bool, quiet: bool, jso
 # ──────────────────────────────────────────────
 
 @main.command()
-def setup():
+@json_option
+@click.pass_context
+def setup(ctx: click.Context, as_json: bool):
     """Interactive first-time setup wizard
 
     Full system configuration: requirements check (auto-installs
     yt-dlp if missing), directories, content source, platform links.
     Only linking accounts? `xpst wizard` is faster.
     """
+    # Agent-safety gate: setup writes config based on interactive prompts.
+    # On closed/piped stdin the EOF-as-default path would silently write a
+    # default config; agents get data instead.
+    if as_json or not sys.stdin.isatty():
+        payload = {
+            "ok": False,
+            "error": {
+                "code": "INTERACTIVE_REQUIRED",
+                "message": (
+                    "setup is an interactive wizard and was not run. "
+                    "No config was written."
+                ),
+            },
+            "hint": "xpst wizard --json (agent checklist) or run `xpst setup` in a terminal",
+        }
+        if as_json:
+            json_output(payload, True)
+        else:
+            console.print("[yellow]setup is interactive — nothing was changed.[/yellow]")
+            console.print("[dim]Run `xpst setup` in a terminal, or `xpst wizard` for account linking.[/dim]")
+        sys.exit(EXIT_CONFIG_ERROR)
     from xpst.setup import run_setup
     run_setup()
 
@@ -241,7 +292,10 @@ def update(check_only: bool, components: bool, as_json: bool):
         packages = check_updates()
     else:
         if as_json:
-            packages = update_all(check_only=False)
+            # update_all prints Rich progress to stdout — keep it off the
+            # machine-readable channel (stderr instead).
+            with keep_stdout_json(True):
+                packages = update_all(check_only=False)
             json_output([{"name": p.name, "installed": p.current_version, "latest": p.latest_version, "updatable": p.updatable} for p in packages], True)
             return
         console.print("[bold blue]Updating dependencies...[/bold blue]\n")
@@ -482,8 +536,18 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
     platform_list = platforms.split(",") if platforms else None
 
     if dry_run:
-        engine = CrossPostEngine(config)
-        targets = platform_list or list(engine._platforms.keys())
+        # Do NOT instantiate CrossPostEngine for a dry run: its __init__
+        # performs crash recovery and may create/rotate state files. Resolve
+        # targets straight from config flags instead.
+        targets = platform_list or [
+            name for name, enabled in (
+                ("youtube", config.youtube.enabled),
+                ("x", config.x.enabled),
+                ("instagram", config.instagram.enabled),
+                ("tiktok", config.tiktok.enabled),
+                ("threads", config.threads.enabled),
+            ) if enabled
+        ]
         info = {
             "dry_run": True,
             "video": str(media_paths[0]),
@@ -987,9 +1051,11 @@ def health(ctx: click.Context, as_json: bool):
 @click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
 @click.option("--guide", is_flag=True, help="Print the step-by-step setup guide for the platform (YouTube: Google Cloud OAuth) and exit")
 @click.option("--test", "test_only", is_flag=True, help="Test existing connections only")
+@click.option("--dry-run", "dry_run", is_flag=True,
+              help="Show what connect would do (platform, steps, config impact) without connecting or writing config")
 @json_option
 @click.pass_context
-def connect(ctx: click.Context, platform: str | None, guide: bool, test_only: bool, as_json: bool):
+def connect(ctx: click.Context, platform: str | None, guide: bool, test_only: bool, dry_run: bool, as_json: bool):
     """Connect social media accounts (one platform at a time)
 
     Use when you need to link or re-link a SPECIFIC account, e.g.
@@ -1005,7 +1071,68 @@ def connect(ctx: click.Context, platform: str | None, guide: bool, test_only: bo
         _connect_guide(platform, as_json)
         return
 
+    if dry_run:
+        from xpst.wizard import PLATFORM_GUIDES
+
+        targets = [platform] if platform else ["tiktok", "youtube", "instagram", "x", "threads", "messenger"]
+        plan = {
+            "dry_run": True,
+            "platforms": targets,
+            "steps": {
+                p: [s.text for s in PLATFORM_GUIDES[p].steps] for p in targets
+            },
+            "config_impact": "accounts.<platform>.enabled=true + platform credentials",
+        }
+        if as_json:
+            json_output(plan, True)
+        else:
+            if not ctx.obj.get("quiet", False):
+                console.print("[bold blue]Dry run — connect plan (nothing connected):[/bold blue]")
+            for p in targets:
+                console.print(f"  [bold]{p}[/bold]:")
+                for i, step in enumerate(plan["steps"][p], 1):
+                    console.print(f"    {i}. {step}")
+        return
+
     from xpst.connect import run_connect
+
+    # Agent-safety gate: the connection flow is a prompt-driven interactive
+    # wizard. On closed/piped stdin it must not prompt (EOFError churn),
+    # fall back to "yes" defaults (which would open browsers), or emit
+    # non-JSON output. Refuse cleanly instead — agents get data, not windows.
+    interactive = sys.stdin.isatty()
+    if not interactive and not test_only:
+        message = (
+            "connect requires an interactive terminal. "
+            "Use `xpst connect <platform> --guide` for setup steps, "
+            "`xpst connect --test` for a non-mutating health check, "
+            "or `xpst wizard` for the agent-mode checklist."
+        )
+        if as_json:
+            json_output(_error_payload(
+                "INTERACTIVE_REQUIRED", message,
+                platform=platform, hint="xpst connect --test --json"), True)
+        else:
+            console.print("[red]connect requires an interactive terminal.[/red]")
+            console.print("[dim]Try:[/dim] xpst connect <platform> --guide  ·  "
+                          "xpst connect --test  ·  xpst wizard")
+        sys.exit(EXIT_AUTH_FAILURE)
+
+    if test_only and as_json:
+        import asyncio as _asyncio
+
+        from xpst.connect import test_connections
+
+        config = load_config(ctx.obj.get("config_path"))
+        with keep_stdout_json(True):
+            results = _asyncio.run(test_connections(config))
+        if platform:
+            results = {p: ok for p, ok in results.items() if p == platform}
+        json_output({"mode": "test", "platforms": results,
+                     "all_pass": bool(results) and all(results.values())}, True)
+        if not (results and all(results.values())):
+            sys.exit(EXIT_AUTH_FAILURE)
+        return
 
     platforms = [platform] if platform else None
     success = run_connect(platforms=platforms, test_only=test_only)
@@ -1516,9 +1643,12 @@ def diagnostics(ctx: click.Context, output: str | None, log_lines: int, as_json:
 @click.option('--visibility', type=click.Choice(['private', 'unlisted']), default=None,
               help='Target visibility for soft-delete/unpublish (YouTube only)')
 @click.option('--yes', '-y', is_flag=True, help='Skip confirmation')
+@click.option('--dry-run', 'dry_run', is_flag=True,
+              help='Show what would be deleted without contacting any platform')
 @json_option
 @click.pass_context
-def delete(ctx: click.Context, video_id: str, platform: str, soft: bool, visibility: str | None, yes: bool, as_json: bool):
+def delete(ctx: click.Context, video_id: str, platform: str, soft: bool, visibility: str | None,
+           yes: bool, dry_run: bool, as_json: bool):
     """Delete a posted video from platforms.
 
     Routes every platform through the Phase-1.2 delete contract: each result
@@ -1530,13 +1660,60 @@ def delete(ctx: click.Context, video_id: str, platform: str, soft: bool, visibil
 
     from xpst.platforms.base import DeleteOutcome
 
-    if not yes and not as_json:
+    config = load_config(ctx.obj.get("config_path"))
+
+    # Resolve the destination list straight from config flags — do NOT
+    # instantiate CrossPostEngine here: its __init__ performs crash recovery
+    # and may create/rotate state files, which --dry-run must never do.
+    all_dest_platforms = [
+        name for name, enabled in (
+            ("youtube", config.youtube.enabled),
+            ("x", config.x.enabled),
+            ("instagram", config.instagram.enabled),
+            ("tiktok", config.tiktok.enabled),
+            ("threads", config.threads.enabled),
+        ) if enabled
+    ]
+    platforms = [platform] if platform else all_dest_platforms
+
+    if dry_run:
+        plan = {
+            "dry_run": True,
+            "video_id": video_id,
+            "platforms": platforms,
+            "soft": bool(soft),
+            "visibility": visibility,
+        }
+        if as_json:
+            json_output(plan, True)
+        else:
+            if not ctx.obj.get("quiet", False):
+                console.print("[bold blue]Dry run — would delete:[/bold blue]")
+            console.print(f"  Video: {video_id}")
+            console.print(f"  Platforms: {', '.join(platforms)}")
+            console.print(f"  Mode: {'soft (unpublish)' if soft else 'hard delete'}")
+        return
+
+    # Destructive-action guard: in non-interactive/JSON mode an explicit --yes
+    # is REQUIRED. Previously, piped invocations (auto-JSON) silently deleted
+    # without confirmation — a dangerous default for scripted/agent use.
+    if not yes and (as_json or not sys.stdin.isatty()):
+        message = (
+            "Refusing to delete without confirmation. Re-run with --yes "
+            "to confirm deletion of this video."
+        )
+        if as_json:
+            json_output(_error_payload(
+                "CONFIRMATION_REQUIRED", message,
+                video_id=video_id, platforms=platforms, hint="--yes"), True)
+        else:
+            console.print("[red]Refusing to delete without confirmation.[/red]")
+            console.print(f"[dim]Re-run with --yes to confirm deletion of {video_id}.[/dim]")
+        sys.exit(EXIT_GENERAL)
+    if not yes:
         click.confirm(f'Delete {video_id} from {platform or "all platforms"}?', abort=True) # nosec B608 - click.confirm prompt, not SQL
 
-    config = load_config(ctx.obj.get("config_path"))
     engine = CrossPostEngine(config)
-
-    platforms = [platform] if platform else list(engine._platforms.keys())
 
     async def do_delete() -> list[dict]:
         """Execute deletion across all target platforms."""
@@ -1760,8 +1937,8 @@ def start():
 
 
 @mcp.command(name="list")
-@click.option("--json", "json_output", is_flag=True, help="Output as JSON")
-def mcp_list(json_output: bool):
+@json_option
+def mcp_list(as_json: bool):
     """List all available MCP tools"""
     import importlib.util
 
@@ -1771,7 +1948,7 @@ def mcp_list(json_output: bool):
 
     from xpst.mcp.server import TOOLS
 
-    if json_output:
+    if as_json:
         tools_data = [{"name": t.name, "description": t.description} for t in TOOLS]
         click.echo(_json.dumps(tools_data, indent=2))
     else:
@@ -2144,8 +2321,9 @@ def state(ctx: click.Context):
 
 @state.command("export")
 @click.argument("output", type=click.Path(dir_okay=False))
+@json_option
 @click.pass_context
-def state_export(ctx: click.Context, output: str) -> None:
+def state_export(ctx: click.Context, output: str, as_json: bool) -> None:
     """Export state.json to OUTPUT (validated copy)."""
     import json as _json
     import shutil
@@ -2154,20 +2332,27 @@ def state_export(ctx: click.Context, output: str) -> None:
     config = load_config(ctx.obj.get("config_path"))
     src = _Path(config.config_dir).expanduser() / "state.json"
     if not src.exists():
-        console.print("[yellow]No state.json to export.[/yellow]")
+        if as_json:
+            json_output(_error_payload("NO_STATE_FILE", "No state.json to export."), True)
+        else:
+            console.print("[yellow]No state.json to export.[/yellow]")
         raise SystemExit(1)
     _json.loads(src.read_text(encoding="utf-8"))  # refuse to export corrupt state
     dest = _Path(output).expanduser()
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dest)
-    console.print(f"[green]Exported[/green] {src} -> {dest}")
+    if as_json:
+        json_output({"ok": True, "exported": str(dest), "source": str(src)}, True)
+    else:
+        console.print(f"[green]Exported[/green] {src} -> {dest}")
 
 
 @state.command("import")
 @click.argument("source", type=click.Path(exists=True, dir_okay=False))
 @click.option("--yes", is_flag=True, help="Skip confirmation")
+@json_option
 @click.pass_context
-def state_import(ctx: click.Context, source: str, yes: bool) -> None:
+def state_import(ctx: click.Context, source: str, yes: bool, as_json: bool) -> None:
     """Restore state.json from SOURCE (current state is backed up first)."""
     import json as _json
     import shutil
@@ -2179,7 +2364,12 @@ def state_import(ctx: click.Context, source: str, yes: bool) -> None:
     incoming = _Path(source).expanduser()
     data = _json.loads(incoming.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or "posted_videos" not in data:
-        console.print("[red]Not a valid xPST state file (no posted_videos).[/red]")
+        if as_json:
+            json_output(_error_payload(
+                "INVALID_STATE_FILE", "Not a valid xPST state file (no posted_videos).",
+                source=str(incoming)), True)
+        else:
+            console.print("[red]Not a valid xPST state file (no posted_videos).[/red]")
         raise SystemExit(1)
     if not yes and not click.confirm(f"Replace {dest} with {incoming}?"):
         return
@@ -2188,18 +2378,24 @@ def state_import(ctx: click.Context, source: str, yes: bool) -> None:
             f"state.json.pre-import-{_dt.now().strftime('%Y%m%d-%H%M%S')}"
         )
         shutil.copy2(dest, backup)
-        console.print(f"[dim]Current state backed up to {backup.name}[/dim]")
+        if not as_json:
+            console.print(f"[dim]Current state backed up to {backup.name}[/dim]")
     shutil.copy2(incoming, dest)
-    console.print(
-        f"[green]Imported[/green] {len(data.get('posted_videos', {}))} posted-video "
-        "records. Review with `xpst status` before the next run."
-    )
+    if as_json:
+        json_output({"ok": True, "imported": str(incoming),
+                     "posted_videos": len(data.get("posted_videos", {}))}, True)
+    else:
+        console.print(
+            f"[green]Imported[/green] {len(data.get('posted_videos', {}))} posted-video "
+            "records. Review with `xpst status` before the next run."
+        )
 
 
 @state.command("backup")
 @click.option("--keep", default=10, help="Backups to retain")
+@json_option
 @click.pass_context
-def state_backup(ctx: click.Context, keep: int) -> None:
+def state_backup(ctx: click.Context, keep: int, as_json: bool) -> None:
     """Snapshot state.json into ~/.xpst/backups/ with rotation."""
     import shutil
     from datetime import datetime as _dt
@@ -2208,7 +2404,10 @@ def state_backup(ctx: click.Context, keep: int) -> None:
     config = load_config(ctx.obj.get("config_path"))
     src = _Path(config.config_dir).expanduser() / "state.json"
     if not src.exists():
-        console.print("[yellow]No state.json to back up.[/yellow]")
+        if as_json:
+            json_output(_error_payload("NO_STATE_FILE", "No state.json to back up."), True)
+        else:
+            console.print("[yellow]No state.json to back up.[/yellow]")
         return
     backups = _Path(config.config_dir).expanduser() / "backups"
     backups.mkdir(parents=True, exist_ok=True)
@@ -2217,7 +2416,11 @@ def state_backup(ctx: click.Context, keep: int) -> None:
     existing = sorted(backups.glob("state-*.json"))
     for old in existing[:-keep] if keep > 0 else []:
         old.unlink(missing_ok=True)
-    console.print(f"[green]Backed up[/green] to {dest} ({min(len(existing), keep)} retained)")
+    if as_json:
+        json_output({"ok": True, "backup": str(dest),
+                     "retained": min(len(existing), keep)}, True)
+    else:
+        console.print(f"[green]Backed up[/green] to {dest} ({min(len(existing), keep)} retained)")
 
 
 @main.group()
@@ -2231,7 +2434,7 @@ def failures(ctx: click.Context):
 
 
 @failures.command("list")
-@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@json_option
 @click.pass_context
 def failures_list(ctx: click.Context, as_json: bool) -> None:
     """List failed uploads recorded in the dead-letter queue."""
@@ -2263,8 +2466,9 @@ def failures_list(ctx: click.Context, as_json: bool) -> None:
 @failures.command("retry")
 @click.argument("video_id")
 @click.option("--platform", "-p", required=True, help="Platform to retry")
+@json_option
 @click.pass_context
-def failures_retry(ctx: click.Context, video_id: str, platform: str) -> None:
+def failures_retry(ctx: click.Context, video_id: str, platform: str, as_json: bool) -> None:
     """Retry one failed upload by re-posting its source file."""
     import asyncio as _asyncio
     from pathlib import Path as _Path
@@ -2276,10 +2480,20 @@ def failures_retry(ctx: click.Context, video_id: str, platform: str) -> None:
     sm = StateManager(config.config_dir)
     video = sm.get_video(video_id)
     if video is None:
-        console.print(f"[red]Unknown video id: {video_id}[/red]")
+        if as_json:
+            json_output(_error_payload(
+                "VIDEO_NOT_FOUND", f"Unknown video id: {video_id}", video_id=video_id), True)
+        else:
+            console.print(f"[red]Unknown video id: {video_id}[/red]")
         raise SystemExit(1)
     if not video.get("errors", {}).get(platform):
-        console.print(f"[yellow]{video_id} has no recorded failure on {platform}.[/yellow]")
+        if as_json:
+            json_output(_error_payload(
+                "NO_RECORDED_FAILURE",
+                f"{video_id} has no recorded failure on {platform}.",
+                video_id=video_id, platform=platform), True)
+        else:
+            console.print(f"[yellow]{video_id} has no recorded failure on {platform}.[/yellow]")
         raise SystemExit(1)
 
     # Find a local file to re-post: the original download if it survives.
@@ -2287,14 +2501,23 @@ def failures_retry(ctx: click.Context, video_id: str, platform: str) -> None:
     candidates = sorted(download_dir.glob(f"*{video_id.split(':')[-1]}*"))
     candidates = [p for p in candidates if p.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}]
     if not candidates:
-        console.print(
-            f"[red]No local file for {video_id} in {download_dir}.[/red] "
+        message = (
+            f"No local file for {video_id} in {download_dir}. "
             "Re-run the source cycle (`xpst run`) or post manually with `xpst post`."
         )
+        if as_json:
+            json_output(_error_payload("NO_LOCAL_FILE", message,
+                                       video_id=video_id, platform=platform), True)
+        else:
+            console.print(f"[red]No local file for {video_id} in {download_dir}.[/red] "
+                          "Re-run the source cycle (`xpst run`) or post manually with `xpst post`.")
         raise SystemExit(1)
 
     engine = CrossPostEngine(config)
-    console.print(f"Retrying {video_id} on {platform} from {candidates[0].name}...")
+    if as_json:
+        click.echo(f"Retrying {video_id} on {platform}...", err=True)
+    else:
+        console.print(f"Retrying {video_id} on {platform} from {candidates[0].name}...")
     result = _asyncio.run(
         engine.post_manual(candidates[0], video.get("caption") or "", [platform])
     )
@@ -2302,9 +2525,18 @@ def failures_retry(ctx: click.Context, video_id: str, platform: str) -> None:
     if upload and upload.success:
         sm.clear_dead_letter_queue(video_id)
         sm.save()
-        console.print(f"[green]Retry succeeded[/green]: {upload.post_url or 'posted'}")
+        if as_json:
+            json_output({"ok": True, "video_id": video_id, "platform": platform,
+                         "post_url": upload.post_url or None}, True)
+        else:
+            console.print(f"[green]Retry succeeded[/green]: {upload.post_url or 'posted'}")
     else:
-        console.print(f"[red]Retry failed[/red]: {upload.error if upload else 'no result'}")
+        error = upload.error if upload else "no result"
+        if as_json:
+            json_output(_error_payload("RETRY_FAILED", str(error or "retry failed"),
+                                       video_id=video_id, platform=platform), True)
+        else:
+            console.print(f"[red]Retry failed[/red]: {error}")
         raise SystemExit(1)
 
 
@@ -2329,14 +2561,24 @@ def config_show(ctx: click.Context, raw: bool, config_file: str | None, as_json:
 
     config_path = config_file or os.path.expanduser("~/.xpst/config.yaml")
     if not Path(config_path).exists():
-        console.print(f"[red]Config file not found:[/red] {config_path}")
+        if as_json:
+            json_output(_error_payload(
+                "CONFIG_FILE_NOT_FOUND", f"Config file not found: {config_path}",
+                path=config_path, hint="run `xpst wizard` or `xpst setup` to create one"), True)
+        else:
+            console.print(f"[red]Config file not found:[/red] {config_path}")
         sys.exit(EXIT_CONFIG_ERROR)
 
     with open(config_path) as f:
         try:
             raw_config = yaml.safe_load(f) or {}
         except yaml.YAMLError as exc:
-            console.print(f"[red]Invalid YAML in {config_path}:[/red] {exc}")
+            if as_json:
+                json_output(_error_payload(
+                    "INVALID_YAML", f"Invalid YAML in {config_path}: {exc}",
+                    path=config_path), True)
+            else:
+                console.print(f"[red]Invalid YAML in {config_path}:[/red] {exc}")
             sys.exit(EXIT_CONFIG_ERROR)
 
     if not raw:
@@ -2428,7 +2670,7 @@ def config_validate(ctx: click.Context, config_file: str | None, as_json: bool):
     """Validate configuration for errors.
 
     Checks required fields, path existence, and platform config validity.
-    Exit code 0 if valid, 4 if invalid.
+    Exit code 0 if valid, 2 (config error) if invalid.
     """
     import os
 
@@ -2784,9 +3026,11 @@ def schedule(ctx: click.Context):
 @click.option("--at", "scheduled_time", required=True, help="Scheduled time (ISO or 'YYYY-MM-DD HH:MM')")
 @click.option("--platforms", "-p", default=None, help="Comma-separated target platforms")
 @click.option("--repeat", "repeat_rule", default=None, type=click.Choice(["none", "daily", "weekly", "monthly"]), help="Repeat schedule")
+@click.option("--dry-run", "dry_run", is_flag=True,
+              help="Validate the entry and show it without writing to the schedule store")
 @json_option
 @click.pass_context
-def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: str, platforms: str | None, repeat_rule: str | None, as_json: bool):
+def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: str, platforms: str | None, repeat_rule: str | None, dry_run: bool, as_json: bool):
     """Schedule a post for later publishing.
 
     Examples:
@@ -2796,11 +3040,32 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
     """
     from datetime import datetime
 
-    from xpst.schedule_manager import ScheduleManager
+    from xpst.schedule_manager import MAX_CAPTION_LENGTH, ScheduleManager
 
     video_path = Path(file)
     if not video_path.exists():
-        console.print(f"[red]File not found:[/red] {file}")
+        if as_json:
+            json_output(_error_payload(
+                "FILE_NOT_FOUND", f"File not found: {file}", file=file), True)
+        else:
+            console.print(f"[red]File not found:[/red] {file}")
+        sys.exit(EXIT_GENERAL)
+
+    # Memory-bound guard: a multi-megabyte caption argument must fail fast
+    # with an actionable error instead of being silently persisted (and
+    # re-read into memory by every scheduler tick).
+    if len(caption) > MAX_CAPTION_LENGTH:
+        message = (
+            f"Caption is {len(caption):,} characters; the limit is "
+            f"{MAX_CAPTION_LENGTH:,}. Shorten the caption (platforms cap "
+            "captions at a few thousand characters)."
+        )
+        if as_json:
+            json_output(_error_payload(
+                "CAPTION_TOO_LONG", message,
+                caption_length=len(caption), max_caption_length=MAX_CAPTION_LENGTH), True)
+        else:
+            console.print(f"[red]Caption too long:[/red] {message}")
         sys.exit(EXIT_GENERAL)
 
     # Parse scheduled time
@@ -2812,8 +3077,15 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
         except ValueError:
             continue
     if dt is None:
-        console.print(f"[red]Invalid date format:[/red] {scheduled_time}")
-        console.print("[dim]Use: 'YYYY-MM-DD HH:MM' or ISO format[/dim]")
+        if as_json:
+            json_output(_error_payload(
+                "INVALID_DATE_FORMAT",
+                f"Invalid date format: {scheduled_time}. "
+                "Use 'YYYY-MM-DD HH:MM' or ISO format.",
+                value=scheduled_time), True)
+        else:
+            console.print(f"[red]Invalid date format:[/red] {scheduled_time}")
+            console.print("[dim]Use: 'YYYY-MM-DD HH:MM' or ISO format[/dim]")
         sys.exit(EXIT_CONFIG_ERROR)
 
     platform_list = (
@@ -2823,8 +3095,31 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
         console.print(f"[red]Invalid platforms:[/red] no usable platform names in {platforms!r}")
         sys.exit(EXIT_CONFIG_ERROR)
 
-    manager = ScheduleManager()
     effective_repeat = repeat_rule if repeat_rule and repeat_rule != "none" else None
+
+    if dry_run:
+        plan = {
+            "dry_run": True,
+            "video_path": str(video_path.resolve()),
+            "caption": caption,
+            "scheduled_time": dt.isoformat(),
+            "platforms": platform_list,
+            "repeat_rule": effective_repeat,
+        }
+        if as_json:
+            json_output(plan, True)
+        else:
+            if not ctx.obj.get("quiet", False):
+                console.print("[bold blue]Dry run — would schedule:[/bold blue]")
+            console.print(f"  File:     {video_path}")
+            console.print(f"  Caption:  {caption[:60]}{'...' if len(caption) > 60 else ''}")
+            console.print(f"  Time:     {dt.strftime('%Y-%m-%d %H:%M')}")
+            console.print(f"  Platforms: {', '.join(platform_list) if platform_list else 'all enabled'}")
+            if effective_repeat:
+                console.print(f"  Repeat:   {effective_repeat}")
+        return
+
+    manager = ScheduleManager()
     entry = manager.add(
         video_path=str(video_path.resolve()),
         caption=caption,
@@ -2895,13 +3190,34 @@ def schedule_list(ctx: click.Context, as_json: bool):
 
 @schedule.command("remove")
 @click.argument("entry_id")
+@click.option("--dry-run", "dry_run", is_flag=True,
+              help="Show which entry would be removed without modifying the schedule store")
 @json_option
 @click.pass_context
-def schedule_remove(ctx: click.Context, entry_id: str, as_json: bool):
+def schedule_remove(ctx: click.Context, entry_id: str, dry_run: bool, as_json: bool):
     """Remove a scheduled post by ID"""
     from xpst.schedule_manager import ScheduleManager
 
     manager = ScheduleManager()
+    if dry_run:
+        entry = next((e for e in manager.list() if e.get("id") == entry_id), None)
+        plan = {
+            "dry_run": True,
+            "entry_id": entry_id,
+            "found": entry is not None,
+            "entry": entry,
+        }
+        if as_json:
+            json_output(plan, True)
+        else:
+            if not ctx.obj.get("quiet", False):
+                console.print("[bold blue]Dry run — would remove:[/bold blue]")
+            if entry:
+                console.print(f"  ID: [bold]{entry_id}[/bold] — {entry.get('caption', '')[:60]}")
+            else:
+                console.print(f"  ID: [bold]{entry_id}[/bold] — [yellow]not found[/yellow]")
+        return
+
     if manager.remove(entry_id):
         if as_json:
             json_output({"ok": True, "removed": entry_id}, True)
@@ -2909,7 +3225,8 @@ def schedule_remove(ctx: click.Context, entry_id: str, as_json: bool):
             console.print(f"[green]✓ Removed scheduled post [bold]{entry_id}[/bold][/green]")
     else:
         if as_json:
-            json_output({"ok": False, "error": f"Post not found: {entry_id}"}, True)
+            json_output(_error_payload(
+                "POST_NOT_FOUND", f"Post not found: {entry_id}", entry_id=entry_id), True)
         else:
             console.print(f"[red]Post not found:[/red] {entry_id}")
         sys.exit(EXIT_GENERAL)

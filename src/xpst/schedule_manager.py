@@ -28,7 +28,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 try:
     import fcntl  # POSIX advisory locking
@@ -41,11 +41,22 @@ except ImportError:
 
 from xpst.utils.logger import get_logger
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+try:
+    import fcntl  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - non-POSIX fallback
+    fcntl = None  # type: ignore[assignment]
+
 logger = get_logger(__name__)
 
 # Hard cap on caption size. A 10 MB caption would be persisted to
 # schedule.json on every save and passed to every platform uploader;
-# reject it at add() time with an actionable error instead.
+# reject it at add() time with an actionable error instead. The limit is
+# shared with the CLI (CAPTION_TOO_LONG): captions are re-read into memory
+# by every scheduler tick, so bound them well above any platform limit but
+# far below unbounded payload sizes (e.g. accidental 1 MB shell arguments).
 MAX_CAPTION_LENGTH = 100_000
 
 
@@ -295,12 +306,17 @@ class ScheduleManager:
         Returns:
             True if removed, False if not found.
         """
-        with self._lock:
-            original_count = len(self._entries)
-            self._entries = [e for e in self._entries if e.get("id") != entry_id]
-            removed = len(self._entries) < original_count
-            if removed:
-                self._save()
+        with self._process_lock():
+            with self._lock:
+                # Reload under the process lock so the removal applies on
+                # top of the latest on-disk state (other processes may have
+                # added entries since this instance last loaded).
+                self._reload_locked()
+                original_count = len(self._entries)
+                self._entries = [e for e in self._entries if e.get("id") != entry_id]
+                removed = len(self._entries) < original_count
+                if removed:
+                    self._save()
         if removed:
             logger.info(f"Removed scheduled post {entry_id}")
         return removed
@@ -396,18 +412,20 @@ class ScheduleManager:
             success: Whether the post succeeded.
             error: Error message if failed.
         """
-        with self._lock:
-            for entry in self._entries:
-                if entry.get("id") == entry_id:
-                    entry["status"] = "completed" if success else "failed"
-                    entry["completed_at"] = datetime.now().isoformat()
-                    if error:
-                        entry["error"] = error
-                    # Auto-create next occurrence for recurring entries
-                    if success and entry.get("repeat_rule"):
-                        self._create_next_occurrence(entry)
-                    break
-            self._save()
+        with self._process_lock():
+            with self._lock:
+                self._reload_locked()
+                for entry in self._entries:
+                    if entry.get("id") == entry_id:
+                        entry["status"] = "completed" if success else "failed"
+                        entry["completed_at"] = datetime.now().isoformat()
+                        if error:
+                            entry["error"] = error
+                        # Auto-create next occurrence for recurring entries
+                        if success and entry.get("repeat_rule"):
+                            self._create_next_occurrence(entry)
+                        break
+                self._save()
 
     def _create_next_occurrence(self, entry: dict[str, Any]) -> None:
         """Create the next occurrence of a recurring schedule entry.
