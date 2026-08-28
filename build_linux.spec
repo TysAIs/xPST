@@ -20,6 +20,33 @@ assets_dir = project_root / "assets"
 # ignores a missing icon, so this is best-effort.
 linux_icon = assets_dir / "icon.png"
 
+# Module excludes shared with build_macos.spec / build_windows.spec — see the
+# rationale block in build_macos.spec for why each entry is safe to drop
+# (unused by the app or lazily imported behind try/except).
+EXCLUDED_MODULES = [
+    "tkinter",
+    "matplotlib",
+    "scipy",
+    "numpy",
+    "pandas",
+    "av",
+    "faster_whisper",
+    "PySide6.QtWebEngineCore",
+    "PySide6.QtWebEngine",
+    "PySide6.QtWebEngineWidgets",
+    "PySide6.QtWebEngineQuick",
+    "lancedb",
+    "pyarrow",
+    "onnxruntime",
+    "fastembed",
+    "tokenizers",
+    "hf_xet",
+    "mypy",
+    "PySide6.QtPdf",
+    "PySide6.QtQuick3D",
+    "PySide6.QtGraphs",
+]
+
 a = Analysis(
     [str(src_dir / "xpst" / "desktop_app" / "main.py")],
     pathex=[str(src_dir)],
@@ -64,12 +91,77 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "scipy", "numpy", "pandas"],
+    excludes=EXCLUDED_MODULES,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
 )
+
+# Keep only the static discovery docs the app builds services for
+# (youtube v3, youtubeAnalytics v2); the discovery_cache package itself stays
+# importable — see the matching comment in build_macos.spec.
+_KEEP_DOCS = ("discovery_cache/documents/youtube.v3.json", "discovery_cache/documents/youtubeAnalytics.v2.json")
+a.datas = [
+    entry
+    for entry in a.datas
+    if "discovery_cache/documents/" not in entry[0]
+    or entry[0].replace("\\", "/").endswith(_KEEP_DOCS)
+]
+
+# Qt ships its full framework/QML-plugin tree even for modules the app never
+# uses. The PySide6 module excludes above do not stop PyInstaller's Qt hooks
+# from collecting those frameworks/QML plugins, so drop them explicitly here
+# — from both binaries and datas — by name. The app's QML imports only:
+# QtCore, QtGui, QtWidgets, QtQml, QtQuick (+Controls.Material / Layouts /
+# Dialogs / styles) and QtMultimedia (ContentPage.qml / DetailPanel.qml).
+# QtWebEngineView in PlaybackOverlay.qml is instantiated through a Loader and
+# is optional (main.py logs a warning when QtWebEngine is absent). Keep-list
+# neighbours (QtShaderTools, QtQuickDialogs2*, QtQuickControls2 styles,
+# QtOpenGL, QtLabs*) are intentionally NOT dropped to avoid breaking
+# QtQuick internals.
+_QT_DROP_SUBSTRINGS = (
+    "QtWebEngine",
+    "QtPdf",
+    "QtQuick3D",
+    "QtGraphs",
+    "Qt3D",
+    "QtCharts",
+    "QtDataVisualization",
+    "QtLocation",
+    "QtPositioning",
+    "QtSensors",
+    "QtWebSockets",
+    "QtWebChannel",
+    "QtTextToSpeech",
+    "QtVirtualKeyboard",
+    "QtTest",
+    "QtScxml",
+    "QtStateMachine",
+    "QtRemoteObjects",
+    "QtSpatialAudio",
+    "QtWebView",
+    "Qt5Compat",
+    "QtSerialPort",
+    "QtHelp",
+    "QtUiTools",
+    "QtSql",
+    "QtNfc",
+    "QtBluetooth",
+    "QtGamepad",
+    "QtNetworkAuth",
+    "QtDesigner",
+    "QtUiPlugin",
+)
+
+
+def _keep_entry(entry):
+    name = entry[0].replace("\\", "/")
+    return not any(pat in name for pat in _QT_DROP_SUBSTRINGS)
+
+
+a.binaries = [entry for entry in a.binaries if _keep_entry(entry)]
+a.datas = [entry for entry in a.datas if _keep_entry(entry)]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
