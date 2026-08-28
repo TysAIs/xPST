@@ -164,7 +164,12 @@ class YouTubeUploader(PlatformUploader):
             build_kwargs = {"http": authorized_http}
             logger.debug(f"Proxy applied to YouTube client: {self.config.youtube.proxy}")
 
-        service = build("youtube", "v3", **build_kwargs)
+        # static_discovery=True: read the discovery doc bundled in
+        # googleapiclient.discovery_cache (documents/youtube.v3.json) instead
+        # of fetching it over the network. This is also the library default
+        # when no discoveryServiceUrl is passed, but we set it explicitly
+        # because the bundle strips all other APIs' docs (see build_*.spec).
+        service = build("youtube", "v3", static_discovery=True, **build_kwargs)
         return service
 
     async def upload(self, video_path: Path, caption: str) -> UploadResult:
