@@ -78,6 +78,39 @@ echo "== 2. lsregister -f (scheme re-registration fallback) =="
 "$LSREGISTER" -f "$APP_BUNDLE" && pass "lsregister -f ok (scheme claim refreshed)" \
   || fail "lsregister -f failed"
 
+# 2b. Dev machines often carry MULTIPLE registered copies of the app (stale
+# worktrees/clone leftovers), and `lsregister -f` refreshes registration but
+# does NOT change which copy LaunchServices treats as the DEFAULT handler for
+# xpst:// — the URL then silently routes to a stale clone and this E2E fails
+# with no marker. Force the freshly-built app to be the default handler.
+if command -v swift >/dev/null 2>&1; then
+  cat > "$WORK/setdefault.swift" <<'SWIFT'
+import CoreServices
+import Foundation
+let appPath = CommandLine.arguments[1]
+guard let bundle = Bundle(url: URL(fileURLWithPath: appPath)),
+      let bid = bundle.bundleIdentifier else {
+    print("NO_BUNDLE_ID"); exit(1)
+}
+LSSetDefaultHandlerForURLScheme("xpst" as CFString, bid as CFString)
+let probe = URL(string: "xpst://selfcheck")!
+if let handler = LSCopyDefaultApplicationURLForURL(probe as CFURL, .all, nil)?.takeRetainedValue() {
+    print("DEFAULT_HANDLER=\(handler)")
+} else {
+    print("DEFAULT_HANDLER=none")
+}
+SWIFT
+  echo "== 2b. default-handler pinning for xpst:// =="
+  OUT="$(swift "$WORK/setdefault.swift" "$APP_BUNDLE" 2>/dev/null)"
+  echo "$OUT"
+  EXPECTED="file://$APP_BUNDLE/"
+  if echo "$OUT" | grep -q "DEFAULT_HANDLER=$EXPECTED"; then
+    pass "default xpst:// handler is the freshly-built app"
+  else
+    fail "default xpst:// handler is not this app (got: $OUT)"
+  fi
+fi
+
 echo
 echo "== 3. Single instance: launch twice =="
 rm -f "$XPST_SHELL_LOG" "$XPST_DEEPLINK_MARKER"
