@@ -15,6 +15,9 @@ Key findings (updated 2026-06-11, fidelity-first):
   height-keyed `scale=-2:{res}` crushed 1080x1920 portrait video to 608x1080
   (Instagram: 406x720) — the direct cause of degraded upload quality.
 - Instagram Reels: 1080x1920 @ CRF 20, High@L4.0, fixed GOP 72, bt.709, yuv420p
+- TikTok: dedicated profile — 1080x1920 @ CRF 20, maxrate 10M/bufsize 20M,
+  GOP = 2*source fps (30fps→60, 60fps→120), +faststart, yuv420p, AAC 128k
+  @ 44.1kHz; hardware encoder auto-detection with libx264 fallback
 - X/Twitter: up to 1920 long edge @ 10 Mbps, High@L4.0, yuv420p (REQUIRED), keyint=90
 - YouTube: long edge 1920 (upscaled if smaller, to avoid the low-bitrate tier),
   8 Mbps, High Profile, closed GOP 15, bt.709, yuv420p
@@ -22,6 +25,7 @@ Key findings (updated 2026-06-11, fidelity-first):
   the old forced `-r 30` halved them.
 """
 
+import os
 import re
 import subprocess
 import sys
@@ -37,6 +41,96 @@ from xpst.utils.platform import (
 )
 
 logger = get_logger(__name__)
+
+# Hardware H.264 encoders probed via `ffmpeg -encoders`, in preference order.
+# On macOS VideoToolbox is the native path; elsewhere NVIDIA NVENC wins,
+# then Intel QSV, then VAAPI.
+HW_ENCODER_CANDIDATES: tuple[str, ...] = (
+    "h264_videotoolbox",
+    "h264_nvenc",
+    "h264_qsv",
+    "h264_vaapi",
+)
+
+HW_ENCODER_ENV_VAR = "XPST_HW_ENCODER"
+
+
+def detect_hardware_encoder(ffmpeg_path: str | None = None) -> str | None:
+    """Probe ffmpeg for an available hardware H.264 encoder.
+
+    Runs ``ffmpeg -encoders`` and returns the first candidate present, in
+    platform-preference order (videotoolbox first on macOS, nvenc first
+    elsewhere). Returns ``None`` when no hardware encoder is available —
+    callers fall back to libx264.
+    """
+    ordered = (
+        ("h264_videotoolbox", "h264_nvenc", "h264_qsv", "h264_vaapi")
+        if sys.platform == "darwin"
+        else ("h264_nvenc", "h264_qsv", "h264_vaapi", "h264_videotoolbox")
+    )
+    available = _available_hw_encoders(ffmpeg_path)
+    for name in ordered:
+        if name in available:
+            return name
+    return None
+
+
+def _available_hw_encoders(ffmpeg_path: str | None = None) -> set[str]:
+    """Return the set of hardware H.264 encoder names ffmpeg exposes."""
+    binary = ffmpeg_path or resolve_ffmpeg_path() or get_ffmpeg_name()
+    try:
+        result = subprocess.run(
+            [binary, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (FileNotFoundError, PermissionError, OSError, subprocess.TimeoutExpired):
+        return set()
+    if result.returncode != 0:
+        return set()
+    names: set[str] = set()
+    for line in result.stdout.splitlines():
+        m = re.match(r"\s*[A-Za-z\.]+\s+(\S+)", line)
+        if m and m.group(1) in HW_ENCODER_CANDIDATES:
+            names.add(m.group(1))
+    return names
+
+
+def resolve_encoder(
+    ffmpeg_path: str | None = None,
+    config_hw_encoder: str | None = None,
+) -> str:
+    """Resolve which encoder to use.
+
+    Priority: XPST_HW_ENCODER env var > ``config.hw_encoder`` field >
+    auto-detection. "libx264" (or "none"/"software"/"cpu") forces software
+    encoding. An explicit override ffmpeg does not actually expose falls back
+    to auto-detection with a warning rather than failing at encode time.
+    """
+    override = (os.environ.get(HW_ENCODER_ENV_VAR, "") or config_hw_encoder or "").strip()
+    available = _available_hw_encoders(ffmpeg_path)
+    if override:
+        if override.lower() in ("libx264", "none", "software", "cpu"):
+            return "libx264"
+        if override in HW_ENCODER_CANDIDATES and override in available:
+            logger.info("Using hardware encoder (override): %s", override)
+            return override
+        logger.warning(
+            "Encoder override %s=%s not available in ffmpeg; falling back to auto-detection",
+            HW_ENCODER_ENV_VAR,
+            override,
+        )
+    detected = detect_hardware_encoder(ffmpeg_path)
+    if detected:
+        logger.info("Using hardware encoder: %s", detected)
+        return detected
+    return "libx264"
+
+
+def _uses_hw_encoder(cmd: list[str]) -> bool:
+    """Whether an ffmpeg command line encodes video with a hardware encoder."""
+    return any(name in cmd for name in HW_ENCODER_CANDIDATES)
 
 
 def build_scale_filter(long_edge: int, *, upscale: bool = False, flags: str = "") -> str:
@@ -200,8 +294,9 @@ class VideoProcessor:
         nothing, so the pipeline can skip the re-encode entirely. Fidelity
         invariant: never spend a quality generation on compliant media.
         """
-        # TikTok/Threads use the Instagram profile for compliance checks
-        check_platform = platform if platform in ("youtube", "instagram", "x") else "instagram"
+        # TikTok uses its own dedicated profile for compliance checks;
+        # Threads and any other platform fall back to Instagram's.
+        check_platform = platform if platform in ("youtube", "instagram", "x", "tiktok") else "instagram"
         info = self.get_video_info(video_path)
         streams = info.get("streams", [])
         video = next((s for s in streams if s.get("codec_type") == "video"), None)
@@ -264,13 +359,12 @@ class VideoProcessor:
         # Build FFmpeg command based on platform
         if platform == "youtube":
             cmd = self._build_youtube_cmd(input_path, output_path, config)
-        elif platform == "instagram":
+        elif platform == "instagram" or platform == "threads":
             cmd = self._build_instagram_cmd(input_path, output_path, config)
         elif platform == "x":
             cmd = self._build_x_cmd(input_path, output_path, config)
-        elif platform in ("tiktok", "threads"):
-            # TikTok/Threads: use high-quality generic profile (same as Instagram)
-            cmd = self._build_instagram_cmd(input_path, output_path, config)
+        elif platform == "tiktok":
+            cmd = self._build_tiktok_cmd(input_path, output_path, config)
         else:
             raise ValueError(f"Unknown platform: {platform}")
 
@@ -281,6 +375,23 @@ class VideoProcessor:
             text=True,
             timeout=300,  # 5 minute timeout
         )
+
+        # Quality guard: if a hardware encoder failed at runtime, fall back
+        # to libx264 (preset slow, then medium) so the upload still ships.
+        if result.returncode != 0 and _uses_hw_encoder(cmd):
+            logger.warning(
+                "Hardware encoder failed for %s (%s); falling back to libx264: %s",
+                platform,
+                next(n for n in HW_ENCODER_CANDIDATES if n in cmd),
+                result.stderr[-200:] if result.stderr else "no stderr",
+            )
+            if output_path.exists():
+                output_path.unlink()
+            for preset in ("slow", "medium"):
+                cmd = self._build_tiktok_cmd(input_path, output_path, config, encoder="libx264", sw_preset=preset)
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                if result.returncode == 0:
+                    break
 
         if result.returncode != 0:
             logger.error(f"FFmpeg failed for {platform}: {result.stderr[:500]}")
@@ -349,6 +460,119 @@ class VideoProcessor:
             "-movflags", "+faststart",
             "-sn",  # No subtitles
             str(output_path),
+        ]
+
+    def _build_tiktok_cmd(
+        self,
+        input_path: Path,
+        output_path: Path,
+        config: EncodingConfig,
+        encoder: str | None = None,
+        sw_preset: str = "slow",
+    ) -> list[str]:
+        """
+        Build FFmpeg command for TikTok encoding.
+
+        TikTok optimal settings (dedicated profile — no longer shared with
+        Instagram):
+        - Long edge 1920 (1080x1920 portrait preserved; never upscaled)
+        - CRF 20 quality floor, maxrate 10M / bufsize 20M
+        - GOP = 2 * source fps (30fps→60, 60fps→120), probed per encode and
+          capped at 2 * fps_cap
+        - H.264 High Profile @ Level 4.0, closed GOP
+        - Frame rate capped at 60 (source rate preserved below the cap)
+        - yuv420p pixel format, bt.709 color space
+        - AAC 128k @ 44.1 kHz audio
+        - movflags +faststart for progressive playback
+        - Hardware encoder auto-detection (XPST_HW_ENCODER env or
+          config.hw_encoder); hardware runs bitrate-capped (CRF does not
+          apply); libx264 preset slow is the fallback.
+        """
+        resolution = config.resolution or 1920
+        fps_cap = config.fps or 60
+        color = config.color or "bt709"
+        pix_fmt = config.pix_fmt or "yuv420p"
+        chosen = encoder or resolve_encoder(self.ffmpeg_path, config.hw_encoder)
+        source_fps = self._source_fps(input_path)
+        gop = config.gop or self._tiktok_gop(source_fps, fps_cap)
+
+        return [
+            self.ffmpeg_path,
+            "-y",  # Overwrite output
+            "-i", str(input_path),
+            "-vf", f"{build_scale_filter(resolution)},setsar=1,format={pix_fmt}",
+            *self._encoder_video_args(chosen, config, gop, sw_preset=sw_preset),
+            "-color_primaries", color,
+            "-color_trc", color,
+            "-colorspace", color,
+            "-fpsmax", str(fps_cap),
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-ar", "44100",
+            "-movflags", "+faststart",
+            "-sn",  # No subtitles
+            str(output_path),
+        ]
+
+    def _source_fps(self, video_path: Path) -> float | None:
+        """Probe a source video's frame rate (None when probing fails)."""
+        try:
+            info = self.get_video_info(video_path)
+        except Exception as e:  # noqa: BLE001 - probe failure must not break encoding
+            logger.debug("Source fps probe failed: %s", e)
+            return None
+        video = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), None)
+        if video is None:
+            return None
+        return _parse_frame_rate(video.get("avg_frame_rate") or video.get("r_frame_rate") or "")
+
+    @staticmethod
+    def _tiktok_gop(source_fps: float | None, fps_cap: int) -> int:
+        """TikTok GOP = 2 * effective fps (30fps→60, 60fps→120).
+
+        Unknown frame rate defaults to 30fps → GOP 60; the effective rate is
+        the source fps capped at the profile's fps cap.
+        """
+        effective = min(source_fps, float(fps_cap)) if source_fps else 30.0
+        return max(int(round(2 * effective)), 1)
+
+    def _encoder_video_args(
+        self,
+        encoder: str,
+        config: EncodingConfig,
+        gop: int,
+        sw_preset: str = "slow",
+    ) -> list[str]:
+        """Video codec args for the chosen encoder.
+
+        libx264: CRF quality mode with the profile's maxrate/bufsize ceiling.
+        Hardware: CRF does not apply — bitrate-capped mode at the profile's
+        maxrate with an equivalent bufsize.
+        """
+        profile = config.profile or "high"
+        maxrate = config.maxrate or "10M"
+        bufsize = config.bufsize or double_rate(maxrate)
+        if encoder == "libx264":
+            crf = config.crf if config.crf is not None else 20
+            level = config.level or "4.0"
+            return [
+                "-c:v", "libx264",
+                "-preset", sw_preset,
+                "-profile:v", profile,
+                "-level:v", level,
+                "-x264-params", f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
+                "-crf", str(crf),
+                "-maxrate", maxrate,
+                "-bufsize", bufsize,
+            ]
+        return [
+            "-c:v", encoder,
+            "-b:v", maxrate,
+            "-maxrate", maxrate,
+            "-bufsize", bufsize,
+            "-profile:v", profile,
+            "-g", str(gop),
+            "-keyint_min", str(gop),
         ]
 
     def _build_x_cmd(

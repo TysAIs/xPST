@@ -615,8 +615,12 @@ class UploadService:
             config = self.config.video.encoding_instagram
         elif platform == "x":
             config = self.config.video.encoding_x
-        elif platform in ("tiktok", "threads"):
-            # Use Instagram profile for these platforms (high-quality, compatible)
+        elif platform == "tiktok":
+            # TikTok has a dedicated profile (GOP=2*fps, bufsize 20M,
+            # AAC 128k) — it no longer borrows Instagram's.
+            config = self.config.video.encoding_tiktok
+        elif platform == "threads":
+            # Threads: high-quality profile shared with Instagram
             config = self.config.video.encoding_instagram
         else:
             raise ValueError(f"Unknown platform: {platform}")
