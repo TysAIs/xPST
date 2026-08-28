@@ -564,10 +564,9 @@ class XPSTConfig:
                     f"Fix or restore the file, then retry."
                 ) from e
             from xpst.config_migration import _BoundedSafeLoader
-            import yaml as _yaml
             try:
-                file_config = _yaml.load(text, Loader=_BoundedSafeLoader)
-            except _yaml.YAMLError as e:
+                file_config = yaml.load(text, Loader=_BoundedSafeLoader)
+            except yaml.YAMLError as e:
                 backup = _backup_corrupt_config_file(cfg_path)
                 raise ValueError(
                     f"XPST config file could not be parsed: {cfg_path} ({e}). "
