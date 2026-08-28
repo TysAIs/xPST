@@ -21,7 +21,6 @@ Each entry:
 """
 
 import calendar
-import fcntl
 import json
 import os
 import threading
@@ -30,6 +29,15 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+try:
+    import fcntl  # POSIX advisory locking
+except ImportError:  # Windows
+    fcntl = None  # type: ignore[assignment]
+try:
+    import msvcrt  # Windows file locking
+except ImportError:
+    msvcrt = None
 
 from xpst.utils.logger import get_logger
 
@@ -84,14 +92,31 @@ class ScheduleManager:
     @contextmanager
     def _process_lock(self):
         """Acquire an exclusive advisory file lock shared by all processes
-        (cron + daemon may run concurrently). No-op fallback on platforms
-        without fcntl."""
+        (cron + daemon may run concurrently). fcntl on POSIX, msvcrt on
+        Windows; degrades to in-process locking only if neither exists."""
         with open(self._lockfile, "a+") as f:
+            locked = False
             try:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            except (AttributeError, OSError):  # pragma: no cover - non-POSIX
+                if fcntl is not None:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                    locked = True
+                elif msvcrt is not None:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+                    locked = True
+            except (AttributeError, OSError):  # pragma: no cover
                 pass
-            yield
+            try:
+                yield
+            finally:
+                if locked:
+                    try:
+                        if fcntl is not None:
+                            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                        else:
+                            f.seek(0)
+                            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                    except (AttributeError, OSError):  # pragma: no cover
+                        pass
 
     @staticmethod
     def _normalize_to_naive_local(dt: datetime) -> datetime:
