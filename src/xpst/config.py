@@ -115,6 +115,17 @@ DEFAULT_CONFIG = {
                 "color": "bt709",
                 "pix_fmt": "yuv420p",
             },
+            "tiktok": {
+                "resolution": 1920,
+                "crf": 20,
+                "maxrate": "10M",
+                "bufsize": "20M",
+                "profile": "high",
+                "level": "4.0",
+                "fps": 60,
+                "color": "bt709",
+                "pix_fmt": "yuv420p",
+            },
         },
     },
     "reliability": {
@@ -310,6 +321,10 @@ class EncodingConfig:
     color: str = "bt709"
     pix_fmt: str = "yuv420p"
     passthrough: bool = False
+    # Hardware encoder override ("h264_videotoolbox", "h264_nvenc",
+    # "h264_qsv", "h264_vaapi", or "libx264" to force software). None =
+    # auto-detect. The XPST_HW_ENCODER env var wins over this field.
+    hw_encoder: str | None = None
 
 
 @dataclass
@@ -325,6 +340,12 @@ class VideoConfig:
     ))
     encoding_x: EncodingConfig = field(default_factory=lambda: EncodingConfig(
         resolution=1920, bitrate="10M", maxrate="12M", profile="high", level="4.0", gop=90, fps=60
+    ))
+    # TikTok: dedicated profile (no longer shares Instagram's). GOP is None =
+    # computed per-encode as 2*source fps (30fps→60, 60fps→120), capped at
+    # 2*fps_cap.
+    encoding_tiktok: EncodingConfig = field(default_factory=lambda: EncodingConfig(
+        resolution=1920, crf=20, maxrate="10M", bufsize="20M", profile="high", level="4.0", fps=60
     ))
 
 
@@ -661,6 +682,8 @@ class XPSTConfig:
                             config.video.encoding_instagram = EncodingConfig(**{k: v for k, v in enc["instagram"].items() if k in EncodingConfig.__dataclass_fields__})
                         if "x" in enc and enc["x"] and isinstance(enc["x"], dict):
                             config.video.encoding_x = EncodingConfig(**{k: v for k, v in enc["x"].items() if k in EncodingConfig.__dataclass_fields__})
+                        if "tiktok" in enc and enc["tiktok"] and isinstance(enc["tiktok"], dict):
+                            config.video.encoding_tiktok = EncodingConfig(**{k: v for k, v in enc["tiktok"].items() if k in EncodingConfig.__dataclass_fields__})
 
         # Reliability
         if "reliability" in file_config:
@@ -962,7 +985,7 @@ class XPSTConfig:
             errors.append("Catchup window must be at least 1 hour")
 
         # Validate encoding configs
-        for name, enc in [("youtube", self.video.encoding_youtube), ("instagram", self.video.encoding_instagram), ("x", self.video.encoding_x)]:
+        for name, enc in [("youtube", self.video.encoding_youtube), ("instagram", self.video.encoding_instagram), ("x", self.video.encoding_x), ("tiktok", self.video.encoding_tiktok)]:
             if enc.resolution and enc.resolution not in (360, 480, 720, 1080, 1440, 1920, 2160):
                 errors.append(f"Invalid resolution for {name}: {enc.resolution}")
             if enc.crf is not None and not (0 <= enc.crf <= 51):
@@ -1115,6 +1138,18 @@ class XPSTConfig:
                         "fps": self.video.encoding_x.fps,
                         "color": self.video.encoding_x.color,
                         "pix_fmt": self.video.encoding_x.pix_fmt,
+                    },
+                    "tiktok": {
+                        "resolution": self.video.encoding_tiktok.resolution,
+                        "crf": self.video.encoding_tiktok.crf,
+                        "maxrate": self.video.encoding_tiktok.maxrate,
+                        "bufsize": self.video.encoding_tiktok.bufsize,
+                        "profile": self.video.encoding_tiktok.profile,
+                        "level": self.video.encoding_tiktok.level,
+                        "fps": self.video.encoding_tiktok.fps,
+                        "color": self.video.encoding_tiktok.color,
+                        "pix_fmt": self.video.encoding_tiktok.pix_fmt,
+                        "hw_encoder": self.video.encoding_tiktok.hw_encoder,
                     },
                 },
             },
