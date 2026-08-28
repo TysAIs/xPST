@@ -1075,7 +1075,7 @@ def connect(ctx: click.Context, platform: str | None, guide: bool, test_only: bo
         from xpst.wizard import PLATFORM_GUIDES
 
         targets = [platform] if platform else ["tiktok", "youtube", "instagram", "x", "threads", "messenger"]
-        plan = {
+        plan: dict[str, Any] = {
             "dry_run": True,
             "platforms": targets,
             "steps": {
