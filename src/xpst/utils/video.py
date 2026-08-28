@@ -444,8 +444,21 @@ class VideoProcessor:
         # bt.709 color flags (no tone-map) ships washed-out colors. Inject
         # the linearize→tonemap→bt.709 chain when the source is HDR and the
         # ffmpeg build has zscale.
-        if self._source_is_hdr(input_path) and self._has_filter("zscale"):
-            cmd = self._inject_hdr_tonemap(cmd)
+        if self._source_is_hdr(input_path):
+            if self._has_filter("zscale"):
+                cmd = self._inject_hdr_tonemap(cmd)
+            else:
+                # Fidelity guard: without a tone-mapping filter we would ship
+                # PQ/HLG pixels half-converted (8-bit container, HDR transfer
+                # left intact) — i.e. silently degraded colors. Refuse loudly
+                # instead of uploading known-degraded output.
+                raise RuntimeError(
+                    f"HDR source {input_path.name} cannot be converted safely: "
+                    f"ffmpeg at '{self.ffmpeg_path}' lacks the zscale filter. "
+                    "Install an ffmpeg built with libzimg, or tone-map the "
+                    "source to SDR (bt.709) before uploading. "
+                    "(HDR_TONEMAP_UNAVAILABLE)"
+                )
 
         # Atomic encode: write to a unique temp sibling and rename into
         # place. Two concurrent encodes of the same source then never write

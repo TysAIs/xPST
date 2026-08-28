@@ -115,13 +115,22 @@ def make_service(tmp_path: Path, vp: VideoProcessor, vcfg: VideoConfig) -> Uploa
 
 
 def encode_to_tmp(tmp_path: Path, name: str, clips, vp, vcfg, platform: str) -> tuple[Path, Path, Path]:
-    """Copy the clip into an isolated dir and run service-level encode."""
+    """Copy the clip into an isolated dir and run service-level encode.
+
+    Skips (never fails) when the local ffmpeg cannot tone-map an HDR source —
+    the engine then refuses to encode by design (HDR_TONEMAP_UNAVAILABLE).
+    """
     work = tmp_path / f"{name}_{platform}"
     work.mkdir()
     src = work / clips[name].name
     src.write_bytes(clips[name].read_bytes())
     service = make_service(work, vp, vcfg)
-    out = asyncio.run(service._encode_for_platform(src, platform))
+    try:
+        out = asyncio.run(service._encode_for_platform(src, platform))
+    except RuntimeError as e:
+        if "HDR_TONEMAP_UNAVAILABLE" in str(e):
+            pytest.skip(f"runner ffmpeg lacks zscale; engine refuses HDR encode: {e}")
+        raise
     return src, out, work
 
 
@@ -303,16 +312,29 @@ class TestReencodeMinimums:
         if m["vmaf_mean"] is not None:
             request.node.user_properties.append(("vmaf", m["vmaf_mean"]))
 
-    def test_hdr_source_is_tonemapped_not_retagged(self, tmp_path, clips, video_processor, video_config):
-        _, out, _ = encode_to_tmp(tmp_path, "hdr_hevc10", clips, video_processor, video_config, "instagram")
-        stream = qmf.real_video_stream(qmf.probe(out))
-        assert stream.get("color_transfer") != "smpte2084", (
-            "HDR PQ transfer shipped untouched — washed-out colors guaranteed"
-        )
-        assert stream.get("color_transfer") in ("bt709", None, "unknown") or True
-        # tonemap chain produces explicit bt709 when zscale is available
+    def test_hdr_source_is_tonemapped_not_retagged(self, tmp_path, clips, video_processor):
+        work = tmp_path / "hdr_tonemap"
+        work.mkdir()
+        src = work / clips["hdr_hevc10"].name
+        src.write_bytes(clips["hdr_hevc10"].read_bytes())
+        service = make_service(work, video_processor, VideoConfig())
+
         if video_processor._has_filter("zscale"):
+            out = asyncio.run(service._encode_for_platform(src, "instagram"))
+            stream = qmf.real_video_stream(qmf.probe(out))
+            assert stream.get("color_transfer") != "smpte2084", (
+                "HDR PQ transfer shipped untouched — washed-out colors guaranteed"
+            )
+            # tonemap chain produces explicit bt709
             assert stream.get("color_transfer") == "bt709"
+        else:
+            # No tonemap capability: the engine must REFUSE loudly instead of
+            # silently shipping PQ pixels in an 8-bit container.
+            with pytest.raises(RuntimeError, match="HDR_TONEMAP_UNAVAILABLE"):
+                asyncio.run(service._encode_for_platform(src, "instagram"))
+            assert not (work / "hdr_hevc10_instagram.mp4").exists(), (
+                "refused HDR encode must leave no output"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +398,7 @@ class TestConcurrentEncodes:
         work = tmp_path / "conc_distinct"
         work.mkdir()
         sources = {}
-        for name in ("old_720p_mp3", "hevc10_bt709", "hdr_hevc10"):
+        for name in ("old_720p_mp3", "hevc10_bt709", "micro3s"):
             src = work / clips[name].name
             src.write_bytes(clips[name].read_bytes())
             sources[name] = src
