@@ -125,7 +125,7 @@ class LocalOAuthListener:
                 break
             except OSError as err:
                 last_err = err
-                logger.debug("Port in use, trying next", port=candidate)
+                logger.debug("Port %d in use, trying next", candidate)
         if server is None:
             raise OSError(
                 f"No free port found in range "
@@ -137,7 +137,7 @@ class LocalOAuthListener:
         self.redirect_uri = f"http://127.0.0.1:{self.port}{self.path}"
         self._thread = threading.Thread(target=server.serve_forever, name="xpst-oauth-listener", daemon=True)
         self._thread.start()
-        logger.info("OAuth redirect listener started", redirect_uri=self.redirect_uri)
+        logger.info("OAuth redirect listener started: %s", self.redirect_uri)
         return self
 
     def wait(self, timeout: float | None = None) -> AuthCodeResult:
@@ -279,4 +279,4 @@ class _OAuthHandler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature
-        logger.debug("oauth_local http", request=format % args)
+        logger.debug("oauth_local http: %s", format % args)
