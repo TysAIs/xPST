@@ -1088,6 +1088,13 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
     stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (fallback)"
 
+    # Live session validation — same validators `xpst health` uses (engine
+    # check_health / _live_auth pattern, PRs #66/#70). Fails closed per
+    # platform with an `error` detail; never prompts or opens a browser.
+    from xpst.auth_status import collect_live_auth_status
+
+    live = collect_live_auth_status(config)
+
     if as_json:
         data: dict = {
             "credential_storage": storage_type,
@@ -1097,22 +1104,50 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
         yt_creds = cred_store.retrieve("youtube_token")
         x_creds = cred_store.retrieve_json("x_cookies")
         ig_creds = cred_store.retrieve_json("instagram_session")
+        tiktok_creds = cred_store.retrieve_json("tiktok_cookies")
         threads_creds = cred_store.retrieve("threads_access_token")
         messenger_creds = cred_store.retrieve("messenger_page_token")
         for plat, creds in [
             ("youtube", yt_creds),
             ("x", x_creds),
             ("instagram", ig_creds),
+            ("tiktok", tiktok_creds),
             ("threads", threads_creds),
             ("messenger", messenger_creds),
         ]:
             remaining = quota_mgr.get_remaining(plat)
-            data["platforms"][plat] = {
-                "authenticated": bool(creds),
+            stored = bool(creds)
+            entry: dict = {
+                # Back-compat: the old presence-based signal, kept under an
+                # explicit name (`authenticated` below is now LIVE truth).
+                "credentials_stored": stored,
                 "quota_remaining": remaining.get("daily", "N/A"),
             }
+            live_info = live.get(plat)
+            if live_info:
+                # Live validation wins over file presence — an expired
+                # session file must not report authenticated: true.
+                entry.update(live_info)
+            else:
+                # threads/messenger: presence-only (no live validator in
+                # scope for this command).
+                entry["authenticated"] = stored
+                entry["live_checked"] = False
+            data["platforms"][plat] = entry
         json_output(data, True)
         return
+
+    def _live_detail(plat: str, base: str) -> str:
+        """Append the live-check error to a table Details cell (if any)."""
+        info = live.get(plat)
+        if (
+            info
+            and info.get("live_checked")
+            and not info.get("authenticated")
+            and info.get("error")
+        ):
+            return f"{base} — {info['error']}"
+        return base
 
     console.print("[bold blue]xPST Authentication Status[/bold blue]\n")
 
@@ -1135,40 +1170,56 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
     # YouTube
     yt_creds = cred_store.retrieve("youtube_token")
     yt_file = Path(config.youtube.client_secrets).expanduser()
-    yt_auth = "✅" if yt_creds or yt_file.exists() else "❌"
+    yt_live = live.get("youtube", {})
+    yt_auth = "✅" if (yt_live.get("authenticated") if yt_live.get("live_checked") else (yt_creds or yt_file.exists())) else "❌"
     yt_quota = quota_mgr.get_remaining("youtube")
     table.add_row(
         "YouTube",
         yt_auth,
         str(quota_mgr.quotas.get("youtube", {}).daily_limit if hasattr(quota_mgr.quotas.get("youtube", {}), "daily_limit") else "N/A"),
         str(yt_quota.get("daily", "N/A")),
-        "Keyring" if yt_creds else ("File" if yt_file.exists() else "Not configured"),
+        _live_detail("youtube", "Keyring" if yt_creds else ("File" if yt_file.exists() else "Not configured")),
     )
 
     # X/Twitter
     x_creds = cred_store.retrieve_json("x_cookies")
     x_file = Path(config.x.cookies_file).expanduser()
-    x_auth = "✅" if x_creds or x_file.exists() else "❌"
+    x_live = live.get("x", {})
+    x_auth = "✅" if (x_live.get("authenticated") if x_live.get("live_checked") else (x_creds or x_file.exists())) else "❌"
     x_quota = quota_mgr.get_remaining("x")
     table.add_row(
         "X/Twitter",
         x_auth,
         str(quota_mgr.quotas.get("x", {}).daily_limit if hasattr(quota_mgr.quotas.get("x", {}), "daily_limit") else "N/A"),
         str(x_quota.get("daily", "N/A")),
-        "Keyring" if x_creds else ("File" if x_file.exists() else "Not configured"),
+        _live_detail("x", "Keyring" if x_creds else ("File" if x_file.exists() else "Not configured")),
     )
 
     # Instagram
     ig_creds = cred_store.retrieve_json("instagram_session")
     ig_file = Path(config.instagram.session_file).expanduser()
-    ig_auth = "✅" if ig_creds or ig_file.exists() else "❌"
+    ig_live = live.get("instagram", {})
+    ig_auth = "✅" if (ig_live.get("authenticated") if ig_live.get("live_checked") else (ig_creds or ig_file.exists())) else "❌"
     ig_quota = quota_mgr.get_remaining("instagram")
     table.add_row(
         "Instagram",
         ig_auth,
         str(quota_mgr.quotas.get("instagram", {}).daily_limit if hasattr(quota_mgr.quotas.get("instagram", {}), "daily_limit") else "N/A"),
         str(ig_quota.get("daily", "N/A")),
-        "Keyring" if ig_creds else ("File" if ig_file.exists() else "Not configured"),
+        _live_detail("instagram", "Keyring" if ig_creds else ("File" if ig_file.exists() else "Not configured")),
+    )
+
+    # TikTok
+    tt_creds = cred_store.retrieve_json("tiktok_cookies")
+    tt_live = live.get("tiktok", {})
+    tt_auth = "✅" if (tt_live.get("authenticated") if tt_live.get("live_checked") else bool(tt_creds)) else "❌"
+    tt_quota = quota_mgr.get_remaining("tiktok")
+    table.add_row(
+        "TikTok",
+        tt_auth,
+        str(quota_mgr.quotas.get("tiktok", {}).daily_limit if hasattr(quota_mgr.quotas.get("tiktok", {}), "daily_limit") else "N/A"),
+        str(tt_quota.get("daily", "N/A")),
+        _live_detail("tiktok", str(tt_live.get("auth_mode", "source_only"))),
     )
 
     # Threads
