@@ -1,0 +1,22 @@
+version: 3
+accounts:
+  youtube:
+    api_key: YTKEY123
+    channel_id: UC_cust
+  instagram:
+    sessionid: IGSESS456
+  x:
+    auth_token: XTOK789
+  tiktok:
+    sessionid: TTSESS000
+monitoring:
+  dashboard_password_hash: $2b$12$existing
+  log_level: DEBUG
+notifications:
+  enabled: true
+  discord_webhook_url: https://discord/hook
+video_processing:
+  max_file_size_mb: 100
+schedule:
+  check_interval: 600
+custom_flag: keep-me

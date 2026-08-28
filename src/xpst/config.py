@@ -26,6 +26,29 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+
+def _backup_corrupt_config_file(cfg_path: Path) -> Path | None:
+    """Back up a config file that cannot be parsed, leaving the original untouched.
+
+    Returns the backup path (or None if the backup itself failed).
+    """
+    import shutil
+    import time as _time
+
+    try:
+        backup_dir = Path(cfg_path).parent / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        dest = backup_dir / f"config.yaml.corrupt_{int(_time.time())}"
+        shutil.copy2(cfg_path, dest)
+        logger.error(
+            "XPST config file at %s is corrupted; a copy was saved to %s",
+            cfg_path, dest,
+        )
+        return dest
+    except Exception:
+        logger.exception("Failed to back up corrupted config file %s", cfg_path)
+        return None
+
 # Default configuration values
 DEFAULT_CONFIG = {
     "accounts": {
@@ -528,8 +551,31 @@ class XPSTConfig:
                     f"XPST config file not found: {cfg_path} "
                     f"(expected ~/.xpst/config.yaml or a path passed via --config)"
                 )
-        with open(cfg_path, encoding="utf-8-sig") as f:
-            file_config = yaml.safe_load(f) or {}
+        try:
+            with open(cfg_path, "rb") as f:
+                raw = f.read()
+            try:
+                text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError as e:
+                backup = _backup_corrupt_config_file(cfg_path)
+                raise ValueError(
+                    f"XPST config file is not valid UTF-8 (binary or corrupted?): "
+                    f"{cfg_path}. The original file was backed up to: {backup}. "
+                    f"Fix or restore the file, then retry."
+                ) from e
+            from xpst.config_migration import _BoundedSafeLoader
+            import yaml as _yaml
+            try:
+                file_config = _yaml.load(text, Loader=_BoundedSafeLoader)
+            except _yaml.YAMLError as e:
+                backup = _backup_corrupt_config_file(cfg_path)
+                raise ValueError(
+                    f"XPST config file could not be parsed: {cfg_path} ({e}). "
+                    f"The original file was backed up to: {backup}. Fix or "
+                    f"restore the file, then retry."
+                ) from e
+        except OSError as e:
+            raise ValueError(f"XPST config file could not be read: {cfg_path} ({e})") from e
         if file_config is None:
             raise ValueError(
                 f"XPST config file is empty or invalid: {cfg_path}"
