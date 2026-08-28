@@ -23,6 +23,13 @@ SKIPPED_MARKDOWN_DIRS = {
     ".venv",
     "build",
     "dist",
+    # Tauri build outputs (gitignored): the PyInstaller onedir engine ships
+    # third-party dist-info license markdown (NOTICES_QT_LGPL.md) whose
+    # relative links are unresolvable inside _internal/. Those files are
+    # artifacts, never reviewed content — checking them makes this test
+    # pass on a clean checkout but fail after `scripts/build-engine.sh`.
+    "target",
+    "binaries",
 }
 
 
