@@ -510,10 +510,24 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         // Single-instance MUST be registered first (plugin docs requirement).
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // Second launch: focus the existing window; this process then
             // exits and LaunchServices never shows a second window.
             focus_existing(app);
+            // Deep-link forwarding (macOS): when LaunchServices starts a
+            // second instance with the URL as argv instead of Apple-eventing
+            // the running one, the URL arrives HERE via the single-instance
+            // socket. tauri-plugin-deep-link's own handle_cli_arguments()
+            // only parses argv on Windows/Linux, so macOS must do it here.
+            // Note: we must NOT call focus + return — parse args even when
+            // the window already exists.
+            for arg in args.iter() {
+                if let Ok(url) = arg.parse::<Url>() {
+                    if url.scheme() == "xpst" {
+                        handle_deep_link(app, &url);
+                    }
+                }
+            }
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
