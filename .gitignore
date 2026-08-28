@@ -122,3 +122,7 @@ src-tauri/target/
 src-tauri/binaries/engine/
 src-tauri/binaries/xpst-engine-*
 !src-tauri/binaries/README.md
+
+# Tauri shell generated ACL schemas + E2E throwaway signing key dir
+src-tauri/gen/schemas/
+.tauri/
