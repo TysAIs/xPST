@@ -81,6 +81,21 @@ video:
       color: bt709
       pix_fmt: yuv420p # CRITICAL: X rejects other formats!
 
+    # TikTok: dedicated profile (1080x1920 portrait, CRF 20, GOP=2*fps)
+    # GOP omitted = computed per-encode as 2x the source frame rate
+    # (30fps→60, 60fps→120). Hardware encoder override:
+    #   hw_encoder: h264_videotoolbox   # or XPST_HW_ENCODER env var
+    tiktok:
+      resolution: 1920
+      crf: 20
+      maxrate: "10M"
+      bufsize: "20M"
+      profile: high
+      level: "4.0"
+      fps: 60
+      color: bt709
+      pix_fmt: yuv420p
+
 # Reliability settings
 reliability:
   # Maximum retry attempts per platform
