@@ -1,10 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for the xPST engine sidecar (Tauri 2 shell).
 
-Builds a *one-file* macOS executable named ``xpst-engine`` that runs the
-FastAPI dashboard entrypoint (``scripts/engine_entry.py``).  Tauri's
-``bundle.externalBin`` requires a single executable file, so onedir is not an
-option here — see the Tauri 2 externalBin docs.
+Builds a **onedir** macOS bundle named ``xpst-engine`` that runs the
+FastAPI dashboard entrypoint (``scripts/engine_entry.py``).  The whole
+directory is shipped as a Tauri bundle *resource*
+(``bundle.resources: ["binaries/engine/"]``) and the shell spawns the
+executable from ``resource_dir()/binaries/engine/xpst-engine``.
+
+Why onedir and not onefile: Tauri's ``externalBin`` requires a single
+executable file, but onefile self-extracts ~45MB to a temp dir on EVERY
+launch (~1.3s), blowing the boot-to-ready <= 1s gate.  Onedir has no
+extraction step — uvicorn cold start is a few hundred ms.  The tradeoff
+(resource dir instead of externalBin, manual process management) is
+documented in the shell code and the PR.
 
 Size strategy (target: shell .app total <= 120 MB):
     - Dashboard-only entrypoint: bypasses the CLI and the PySide6 desktop app.
@@ -18,9 +26,10 @@ Size strategy (target: shell .app total <= 120 MB):
       youtubeAnalytics.v2 (same approach as build_macos.spec).
 
 Build:
+    scripts/build-engine.sh
+    # (equivalent to:)
     pyinstaller build_engine.spec --noconfirm --distpath dist/engine
-    cp dist/engine/xpst-engine \
-       src-tauri/binaries/xpst-engine-$(rustc -vV -v 2>/dev/null | grep host | cut -d' ' -f2)
+    cp -R dist/engine/xpst-engine src-tauri/binaries/engine
 """
 
 from pathlib import Path
@@ -102,9 +111,8 @@ pyz = PYZ(a.pure, a.zipped_data)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="xpst-engine",
     debug=False,
     bootloader_ignore_signals=False,
@@ -114,4 +122,14 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="xpst-engine",
 )
