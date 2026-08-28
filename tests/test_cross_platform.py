@@ -463,22 +463,23 @@ class TestConfigLoading:
         assert loaded.monitoring.log_file == "/var/log/xpst.log"
 
     def test_empty_config_loads_with_defaults(self, tmp_path):
-        """An empty YAML file loads with all defaults."""
+        """An empty YAML file must NOT silently load as defaults — it may be
+        the result of a disk-full crash that destroyed the user's config.
+        Clear error + backup (data-loss prevention contract)."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("")
 
-        loaded = XPSTConfig.load(str(config_file))
-        assert loaded.reliability.max_retries == 3
-        assert loaded.schedule.check_interval == 900
-        assert loaded.tiktok.username == ""
+        with pytest.raises(ValueError, match="empty or invalid"):
+            XPSTConfig.load(str(config_file))
 
     def test_config_with_only_whitespace_yaml(self, tmp_path):
-        """A YAML file with only whitespace loads without error."""
+        """A YAML file with only whitespace parses to None -> clear error
+        + backup (same rationale as the empty file)."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("   \n\n   ")
 
-        loaded = XPSTConfig.load(str(config_file))
-        assert loaded.reliability.max_retries == 3
+        with pytest.raises(ValueError, match="empty or invalid"):
+            XPSTConfig.load(str(config_file))
 
 
 # ---------------------------------------------------------------------------

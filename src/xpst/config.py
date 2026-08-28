@@ -577,8 +577,11 @@ class XPSTConfig:
         except OSError as e:
             raise ValueError(f"XPST config file could not be read: {cfg_path} ({e})") from e
         if file_config is None:
+            backup = _backup_corrupt_config_file(cfg_path)
             raise ValueError(
-                f"XPST config file is empty or invalid: {cfg_path}"
+                f"XPST config file is empty or invalid: {cfg_path}. It may "
+                f"have been truncated by a crash or a full disk — the "
+                f"original file was backed up to: {backup}."
             )
         if not isinstance(file_config, dict):
             raise ValueError(

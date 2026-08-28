@@ -45,7 +45,16 @@ for it in range(50):
         sf = cd / "state.json"
         v = valid_state(sf)
         results["iters"] += 1
-        if isinstance(v, str) and v.startswith("CORRUPT") or v == "NOT_DICT":
+        if isinstance(v, str) and v.startswith("CORRUPT"):
+            if "No such file" in v:
+                # Killed during interpreter startup, before the first write
+                # ever completed — file legitimately absent, NOT corruption.
+                results.setdefault("absent_pre_first_write", 0)
+                results["absent_pre_first_write"] += 1
+            else:
+                results["corrupt"] += 1
+                results.setdefault("corrupt_detail", []).append({"iter": it, "v": v})
+        elif v == "NOT_DICT":
             results["corrupt"] += 1
             results.setdefault("corrupt_detail", []).append({"iter": it, "v": v})
         else:
