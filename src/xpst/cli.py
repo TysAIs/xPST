@@ -985,21 +985,64 @@ def health(ctx: click.Context, as_json: bool):
 
 @main.command()
 @click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
+@click.option("--guide", is_flag=True, help="Print the step-by-step setup guide for the platform (YouTube: Google Cloud OAuth) and exit")
 @click.option("--test", "test_only", is_flag=True, help="Test existing connections only")
+@json_option
 @click.pass_context
-def connect(ctx: click.Context, platform: str | None, test_only: bool):
+def connect(ctx: click.Context, platform: str | None, guide: bool, test_only: bool, as_json: bool):
     """Connect social media accounts (one platform at a time)
 
     Use when you need to link or re-link a SPECIFIC account, e.g.
     `xpst connect instagram` after a session expires. For first-time
     setup of everything at once, use `xpst wizard` instead.
+
+    Preview the setup steps without connecting anything:
+
+        xpst connect youtube --guide       # human-readable GCP checklist
+        xpst connect youtube --guide --json  # machine-readable
     """
+    if guide:
+        _connect_guide(platform, as_json)
+        return
+
     from xpst.connect import run_connect
 
     platforms = [platform] if platform else None
     success = run_connect(platforms=platforms, test_only=test_only)
     if not success:
         sys.exit(EXIT_AUTH_FAILURE)
+
+
+def _connect_guide(platform: str | None, as_json: bool) -> None:
+    """Print the platform setup guide and exit (no config, no prompts).
+
+    Renders the same auto-generated guide the wizard uses
+    (:data:`xpst.wizard.PLATFORM_GUIDES`) so the two never drift. JSON
+    output is also enabled automatically on non-TTY stdout (group-level
+    auto-JSON), matching every other xPST command.
+    """
+    if platform not in (None, "youtube"):
+        console.print(
+            f"[red]--guide is only available for youtube (got '{platform}').[/red]"
+        )
+        sys.exit(EXIT_CONFIG_ERROR)
+
+    from xpst.wizard import PLATFORM_GUIDES, youtube_guide_payload
+
+    payload = youtube_guide_payload()
+    if as_json:
+        json_output(payload, True)
+        return
+
+    guide = PLATFORM_GUIDES["youtube"]
+    console.print(f"[bold]{guide.title} — Google Cloud setup guide[/bold]")
+    console.print(guide.why)
+    console.print()
+    for i, step in enumerate(guide.steps, 1):
+        console.print(f"  {i}. {step.text}")
+    console.print()
+    console.print(f"[dim]More details: {guide.docs_url}[/dim]")
+    console.print("[dim]When done, run [cyan]xpst connect youtube[/cyan] to link the account.[/dim]")
 
 
 @main.command()
