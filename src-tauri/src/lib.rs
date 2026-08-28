@@ -55,7 +55,25 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(2);
 /// Process-start timestamp (set once, used for the boot-time probes).
 static BOOT_START: OnceLock<Instant> = OnceLock::new();
 /// Port the shell spawned the engine on (set once the engine is up).
-static ENGINE_PORT: OnceLock<u16> = OnceLock::new();
+/// Atomic (not OnceLock): the engine may be respawned on a NEW port after
+/// an unexpected mid-session death, and deep-link forwarding must follow.
+static ENGINE_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
+/// Set while the shell is deliberately shutting down so the engine-death
+/// watcher does NOT respawn the sidecar we are killing on purpose.
+static SHUTTING_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Consecutive unexpected engine deaths handled (bounded to avoid a
+/// crash-respawn crash-respawn spin loop on a permanently broken engine).
+static RESPAWNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// Max consecutive engine respawns before giving up and showing the error page.
+const MAX_ENGINE_RESPAWNS: usize = 3;
+
+fn mark_shutting_down() {
+    SHUTTING_DOWN.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn is_shutting_down() -> bool {
+    SHUTTING_DOWN.load(std::sync::atomic::Ordering::SeqCst)
+}
 
 fn marker_path() -> std::path::PathBuf {
     std::env::var("XPST_DEEPLINK_MARKER")
@@ -79,8 +97,9 @@ fn engine_port() -> u16 {
             return p;
         }
     }
-    if let Some(p) = ENGINE_PORT.get() {
-        return *p;
+    let p = ENGINE_PORT.load(std::sync::atomic::Ordering::SeqCst);
+    if p != 0 {
+        return p;
     }
     8080
 }
@@ -197,6 +216,7 @@ extern "C" fn handle_exit_signal(_sig: libc::c_int) {
     // SIGTERM/SIGINT do NOT produce a Tauri RunEvent::ExitRequested, so
     // without this the engine sidecar would be orphaned when the shell is
     // terminated externally. Kill the child, then exit with 128+signal.
+    mark_shutting_down();
     if let Some(engine) = GLOBAL_ENGINE.get() {
         engine.kill();
     }
@@ -286,7 +306,9 @@ fn show_engine_error(window: &WebviewWindow) {
 /// Boot the engine sidecar, wait for health, then navigate the main
 /// window onto the engine URL. Runs on a background thread from `setup`.
 fn boot_engine(app: tauri::AppHandle) {
-    let started = BOOT_START.get().copied().unwrap_or_else(Instant::now);
+    // Local (not BOOT_START-relative): on a mid-session respawn this must
+    // report the actual engine bring-up time, not time since app launch.
+    let started = Instant::now();
 
     let port = match pick_free_port() {
         Ok(p) => p,
@@ -352,10 +374,16 @@ fn boot_engine(app: tauri::AppHandle) {
     let _ = GLOBAL_ENGINE.set(Arc::clone(
         &app.state::<Arc<EngineHandle>>().inner().clone(),
     ));
-    let _ = ENGINE_PORT.set(port);
+    let _ = ENGINE_PORT.store(port, std::sync::atomic::Ordering::SeqCst);
 
-    // Drain sidecar output so pipes never fill; surface stderr in debug.
-    let drain = tauri::async_runtime::spawn(async move {
+    // Drain sidecar output for the WHOLE session so pipes never fill, and
+    // detect unexpected engine death. (QA adversarial 2026-08: the drain
+    // task used to be aborted once boot completed, so (a) a chatty engine
+    // could block on a full stdout pipe and hang, and (b) a crashed engine
+    // was never noticed — the webview sat on a dead page until the user
+    // restarted the app manually.)
+    let app_for_drain = app.clone();
+    let _drain = tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
@@ -366,6 +394,30 @@ fn boot_engine(app: tauri::AppHandle) {
                 }
                 CommandEvent::Terminated(status) => {
                     log(&format!("engine terminated: {status:?}"));
+                    if is_shutting_down() {
+                        log("engine terminated during shutdown — not respawning");
+                        continue;
+                    }
+                    let n = RESPAWNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if n >= MAX_ENGINE_RESPAWNS {
+                        log(&format!(
+                            "ENGINE_RESPAWN_GIVE_UP attempts={}",
+                            n + 1
+                        ));
+                        if let Some(w) = app_for_drain.get_webview_window("main") {
+                            show_engine_error(&w);
+                        }
+                        continue;
+                    }
+                    log(&format!(
+                        "ENGINE_RESPAWNING attempt={}/{}",
+                        n + 1,
+                        MAX_ENGINE_RESPAWNS
+                    ));
+                    // Give the OS a beat to release ports / clean up.
+                    std::thread::sleep(Duration::from_millis(500));
+                    let handle = app_for_drain.clone();
+                    std::thread::spawn(move || boot_engine(handle));
                 }
                 CommandEvent::Error(err) => {
                     log(&format!("engine error: {err}"));
@@ -377,6 +429,9 @@ fn boot_engine(app: tauri::AppHandle) {
 
     match wait_for_engine_health(port, ENGINE_HEALTH_TIMEOUT) {
         Some(_since_boot) => {
+            // Healthy boot: reset the consecutive-respawn budget so a
+            // one-off crash does not permanently consume the retries.
+            RESPAWNS.store(0, std::sync::atomic::Ordering::SeqCst);
             let health_wait = started.elapsed();
             log(&format!("ENGINE_HEALTH_WAIT_SECS={:.3}", health_wait.as_secs_f64()));
 
@@ -410,7 +465,9 @@ fn boot_engine(app: tauri::AppHandle) {
             }
         }
     }
-    drain.abort();
+    // NOTE: the drain task is intentionally left running for the whole
+    // session — aborting it here (the old behavior) disabled engine-death
+    // detection and let engine stdout/stderr pipes fill up.
 }
 
 // ---------------------------------------------------------------------------
@@ -498,12 +555,45 @@ pub fn run() {
     BOOT_START.get_or_init(Instant::now);
     install_signal_handlers();
 
+    // Single-instance race guard (QA adversarial 2026-08): two launches in
+    // the same second both passed tauri-plugin-single-instance (neither had
+    // bound its socket yet) and each spawned an engine sidecar. An flock on
+    // a stable lockfile closes that window: the loser waits briefly (so the
+    // winner's single-instance socket is definitely up) and exits before
+    // spawning anything.
+    if std::env::var("XPST_ALLOW_SECOND_INSTANCE").ok().as_deref() != Some("1") {
+        let lock_path = std::env::temp_dir().join("xpst-shell-single-instance.lock");
+        match std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+        {
+            Ok(file) => {
+                let fd = std::os::unix::io::AsRawFd::as_raw_fd(&file);
+                let rc = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+                if rc != 0 {
+                    // Another instance is booting/booted. Give it a moment
+                    // to register its single-instance socket, then exit —
+                    // never spawn a second engine.
+                    log("SINGLE_INSTANCE_RACE_LOSER exiting");
+                    std::thread::sleep(Duration::from_millis(1500));
+                    std::process::exit(0);
+                }
+                // Leak the file handle so the lock is held for process life.
+                std::mem::forget(file);
+            }
+            Err(e) => log(&format!("SINGLE_INSTANCE_LOCK_ERROR error={e}")),
+        }
+    }
+
     let engine = Arc::new(EngineHandle::default());
 
     // Kill the engine child if the shell panics.
     let panic_engine = Arc::clone(&engine);
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        mark_shutting_down();
         panic_engine.kill();
         default_hook(info);
     }));
@@ -532,6 +622,21 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
+        .on_window_event(|window, event| {
+            // macOS convention: closing the window must NOT strand the user.
+            // (QA adversarial 2026-08: closing the window left the app
+            // running with no window and no way back — clicking the dock
+            // icon did nothing and quitting via the window was impossible
+            // without orphaning the engine.) Hide instead; the dock icon /
+            // Reopen event brings it back, Cmd+Q quits and reaps the engine.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if cfg!(target_os = "macos") {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    log("WINDOW_CLOSE_REQUESTED hidden=true (macOS keep-alive)");
+                }
+            }
+        })
         .setup(move |app| {
             app.manage(Arc::clone(&engine));
 
@@ -575,7 +680,16 @@ pub fn run() {
     // well would deliver every URL twice (verified in e2e before dedup).
     app.run(|app, event| match event {
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {
+            mark_shutting_down();
             app.state::<Arc<EngineHandle>>().kill();
+        }
+        // macOS dock-icon click while the window is hidden (close-to-dock):
+        // bring the window back instead of ignoring the user.
+        RunEvent::Reopen { has_visible_windows, .. } if cfg!(target_os = "macos") => {
+            log(&format!("APP_REOPEN has_visible_windows={has_visible_windows}"));
+            if !has_visible_windows {
+                focus_existing(app);
+            }
         }
         _ => {}
     });

@@ -126,6 +126,7 @@ def _load_dashboard_auth(config_dir: str) -> tuple[str, str]:
     """
     try:
         from xpst.config import XPSTConfig
+
         config_path = str(Path(config_dir).expanduser() / "config.yaml")
         config = XPSTConfig.load(config_path)
         return config.monitoring.dashboard_username, config.monitoring.dashboard_password_hash
@@ -154,13 +155,12 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
         """Return aggregated platform health status."""
         try:
             from xpst.dashboard.analytics import load_state
+
             state = load_state(config_dir)
             health = state.get("health", {})
             platforms = health.get("platforms", {})
 
-            status = "healthy" if all(
-                p.get("status") == "ok" for p in platforms.values()
-            ) else "degraded"
+            status = "healthy" if all(p.get("status") == "ok" for p in platforms.values()) else "degraded"
 
             return {
                 "status": status,
@@ -213,9 +213,7 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
         if code or error:
             from xpst.utils.oauth_local import receive_external_code
 
-            receive_external_code(
-                code=code, state=state, error=error, error_description=error_description
-            )
+            receive_external_code(code=code, state=state, error=error, error_description=error_description)
         logger.info(
             "OAUTH_CALLBACK_RECEIVED source=%s code_present=%s state=%s error=%s",
             source,
@@ -231,6 +229,7 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
         """Return Prometheus text-format metrics."""
         try:
             from xpst.utils.metrics import metrics_text
+
             return PlainTextResponse(
                 metrics_text(),
                 media_type="text/plain; version=0.0.4; charset=utf-8",
@@ -241,14 +240,14 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
                 media_type="text/plain; version=0.0.4; charset=utf-8",
             )
 
-    # ── State endpoint ──────────────────────────────────────────────────
+    # ── State endpoint ────────────────────────────────────────────────
     @app.get("/state")
     def state():
         """Return current xPST state summary."""
         try:
-            from xpst.dashboard.analytics import AnalyticsCollector
-            collector = AnalyticsCollector(config_dir)
-            stats = collector.get_summary_stats()
+            from xpst.dashboard.analytics import cached_summary_stats
+
+            stats = cached_summary_stats(config_dir)
             return stats
         except Exception as exc:
             logger.warning("State query failed: %s", exc)
@@ -267,7 +266,30 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
         """
         return HTMLResponse(_DASHBOARD_INDEX_HTML)
 
-    # ── Auth middleware ─────────────────────────────────────────────────
+    # ── CSP header middleware ───────────────────────────────────────────
+    # The Tauri CSP in tauri.conf.json only applies to tauri://-served
+    # content. The webview navigates to http://127.0.0.1:<port> (an
+    # http:// origin), so THIS server must ship its own CSP or the
+    # webview's engine pages run with no script restrictions at all
+    # (QA adversarial 2026-08). The dashboard uses inline <style> and no
+    # client scripts, so 'unsafe-inline' for styles is sufficient and
+    # script execution (e.g. a caption payload that ever reaches HTML
+    # unescaped) is blocked at the browser level.
+    from starlette.middleware.base import BaseHTTPMiddleware as _CSPBase
+
+    class CSPHeaderMiddleware(_CSPBase):
+        async def dispatch(self, request: Request, call_next):
+            response = await call_next(request)
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' data:; script-src 'none'; connect-src 'self'",
+            )
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            return response
+
+    app.add_middleware(CSPHeaderMiddleware)
+
     username, password_hash = _load_dashboard_auth(config_dir)
     if username and password_hash:
         from starlette.middleware.base import BaseHTTPMiddleware
@@ -289,9 +311,7 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
                     )
 
                 try:
-                    decoded = base64.b64decode(
-                        auth_header.split(" ", 1)[1]
-                    ).decode("utf-8")
+                    decoded = base64.b64decode(auth_header.split(" ", 1)[1]).decode("utf-8")
                     user, pwd = decoded.split(":", 1)
                 except Exception:
                     return JSONResponse(
@@ -302,6 +322,7 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
 
                 # Verify password using bcrypt
                 import bcrypt
+
                 password_ok = False
                 try:
                     if password_hash and password_hash.startswith("$2b$"):
@@ -344,8 +365,10 @@ def _setup_bio_routes(app: FastAPI, config_dir: str) -> None:
     - GET  /bio/edit  → admin form (protected by the dashboard Basic auth)
     - POST /bio/edit  → persist handle + custom links to config.yaml
     """
+
     def _load_config():
         from xpst.config import XPSTConfig
+
         return XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
 
     @app.get("/bio", name="bio_page", include_in_schema=False, response_model=None)
@@ -353,6 +376,7 @@ def _setup_bio_routes(app: FastAPI, config_dir: str) -> None:
         """Serve the public link-in-bio page."""
         try:
             from xpst.dashboard.bio import render_bio_page
+
             config = _load_config()
             return HTMLResponse(render_bio_page(config))
         except Exception as exc:
@@ -367,6 +391,7 @@ def _setup_bio_routes(app: FastAPI, config_dir: str) -> None:
         """Serve the auth-protected link-in-bio editor form."""
         try:
             from xpst.dashboard.bio import render_bio_edit_page
+
             config = _load_config()
             return HTMLResponse(render_bio_edit_page(config))
         except Exception as exc:
@@ -419,6 +444,7 @@ def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
     path = "/webhook/messenger"
     try:
         from xpst.config import XPSTConfig
+
         config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
         path = config.messenger.webhook_path or path
     except Exception:
@@ -427,6 +453,7 @@ def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
     def _verify_token() -> str:
         try:
             from xpst.config import XPSTConfig
+
             config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
             return config.messenger.verify_token or ""
         except Exception:
@@ -437,6 +464,7 @@ def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
         secrets: list[str] = []
         try:
             from xpst.config import XPSTConfig
+
             config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
             if config.messenger.app_secret:
                 secrets.append(config.messenger.app_secret)
@@ -444,6 +472,7 @@ def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
             pass
         try:
             from xpst.utils.sessions import SessionManager
+
             session_manager = SessionManager(config_dir)
             stored = session_manager.credentials.retrieve("messenger_app_secret")
             if stored:
@@ -473,9 +502,7 @@ def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
         if signature:
             matched = False
             for secret in secrets:
-                expected = "sha256=" + hmac.new(
-                    secret.encode("utf-8"), raw or b"", hashlib.sha256
-                ).hexdigest()
+                expected = "sha256=" + hmac.new(secret.encode("utf-8"), raw or b"", hashlib.sha256).hexdigest()
                 if hmac.compare_digest(expected, signature):
                     matched = True
                     break
@@ -604,6 +631,7 @@ def serve_ui(
     url = f"http://{host}:{port}"
 
     if open_browser:
+
         def _open_browser() -> None:
             try:
                 webbrowser.open(url)
