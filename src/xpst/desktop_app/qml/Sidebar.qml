@@ -6,6 +6,12 @@ import xpst.desktop_app.qml 1.0
 
 Rectangle {
     id: sidebar
+    // macOS unified titlebar: the native traffic lights occupy the top-left
+    // window area; QML content that would collide with them must pad for it.
+    // Default false so every other platform renders identically as before.
+    property bool macosTrafficLightZone: typeof macUnifiedTitlebar !== "undefined"
+                                         ? macUnifiedTitlebar
+                                         : false
     width: expanded ? 240 : 64
     Layout.fillHeight: true
     color: theme.surface
@@ -37,7 +43,10 @@ Rectangle {
         // Logo — big mark, top-left (image carries the brand; no text beside it)
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 72
+            // macOS (unified hidden titlebar) reserves the top window area for
+            // the OS traffic lights — give the logo a taller hit zone so the
+            // brand mark stays centered between them and the content edge.
+            Layout.preferredHeight: sidebar.macosTrafficLightZone ? 76 : 72
             color: "transparent"
 
             Image {
