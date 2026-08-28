@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"POC capability: core + updater + deep-link permissions","local":true,"windows":["main"],"permissions":["core:default","core:window:default","updater:default","deep-link:default"]}}
