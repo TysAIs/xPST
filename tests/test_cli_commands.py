@@ -487,3 +487,43 @@ class TestMcpCommand:
 
         assert result.exit_code == 0
         assert called["ok"] is True
+
+
+class TestConnectGuide:
+    """`xpst connect youtube --guide` — GCP checklist without connecting."""
+
+    def test_guide_json_explicit(self, runner):
+        result = runner.invoke(main, ["connect", "youtube", "--guide", "--json"])
+        assert result.exit_code == 0
+        data = extract_json(result.output)
+        assert data["platform"] == "youtube"
+        assert data["app_status"] == "in_production"
+        assert data["docs_url"].endswith("docs/youtube-oauth-production.md")
+        assert data["client_secrets_path"] == (
+            "~/.xpst/credentials/youtube_client_secrets.json"
+        )
+        assert any(
+            "console.cloud.google.com/projectcreate" in step
+            for step in data["steps"]
+        )
+
+    def test_guide_auto_json_on_non_tty(self, runner):
+        """Piped stdout auto-enables JSON (xPST CLI convention) — no flag."""
+        result = runner.invoke(main, ["connect", "youtube", "--guide"])
+        assert result.exit_code == 0
+        data = extract_json(result.output)
+        assert data["platform"] == "youtube"
+
+    def test_guide_human_output_lists_steps(self, runner, capsys):
+        from xpst import cli as cli_mod
+
+        cli_mod._connect_guide("youtube", as_json=False)
+        out = capsys.readouterr().out.replace("\n", "")
+        assert "YouTube Shorts" in out
+        assert "console.cloud.google.com/projectcreate" in out
+        assert "youtube-oauth-production.md" in out
+        assert "xpst connect youtube" in out
+
+    def test_guide_rejects_non_youtube_platform(self, runner):
+        result = runner.invoke(main, ["connect", "x", "--guide"])
+        assert result.exit_code == 2

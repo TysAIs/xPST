@@ -83,38 +83,107 @@ class PlatformGuide:
 
 
 # ──────────────────────────────────────────────
+# YouTube GCP setup guide (auto-generated, current)
+# ──────────────────────────────────────────────
+
+YOUTUBE_GCP_DOCS_URL = (
+    "https://github.com/TysAIs/xPST/blob/main/docs/youtube-oauth-production.md"
+)
+YOUTUBE_SECRETS_PATH = "~/.xpst/credentials/youtube_client_secrets.json"
+
+
+def youtube_gcp_steps() -> list[WizardStep]:
+    """Build the current, click-by-click Google Cloud checklist for YouTube.
+
+    A function (not a literal) so ``xpst connect youtube --guide``,
+    ``xpst wizard`` and ``xpst wizard --export-md`` all render the exact
+    same, up-to-date steps instead of copies that drift apart.
+    """
+    return [
+        WizardStep(
+            "Create (or select) a Google Cloud project: "
+            "https://console.cloud.google.com/projectcreate "
+            "(pick an existing project: "
+            "https://console.cloud.google.com/projectselector2/home/dashboard)"
+        ),
+        WizardStep(
+            "Open the OAuth consent screen (Google Auth Platform → "
+            "Audience): https://console.cloud.google.com/auth/audience"
+        ),
+        WizardStep(
+            "IMPORTANT — click 'Publish App' to move the app to 'In "
+            "production'. Apps left in 'Testing' issue refresh tokens that "
+            "EXPIRE AFTER 7 DAYS, so you would have to re-authorize xPST "
+            "every week. Note: the xPST project's own Google Cloud app is "
+            "already published to production, so its tokens are long-lived — "
+            "if you create your own project, publish it to production too "
+            "(see docs/youtube-oauth-production.md)."
+        ),
+        WizardStep(
+            "Create the OAuth client (Google Auth Platform → Clients → "
+            "'Create Client'): https://console.cloud.google.com/auth/clients "
+            "(legacy UI: https://console.cloud.google.com/apis/credentials → "
+            "'Create Credentials' → 'OAuth client ID')"
+        ),
+        WizardStep(
+            "Application type: 'Desktop app'. Name it e.g. 'xPST Desktop'. "
+            "YouTube scopes are sensitive, so Google may show an "
+            "'unverified app' warning during consent — choose 'Advanced' → "
+            "'Continue' (fine for personal, single-user use)."
+        ),
+        WizardStep(
+            "Download the client JSON and save it as "
+            + YOUTUBE_SECRETS_PATH
+        ),
+        WizardStep(
+            "Back in xPST, re-run `xpst connect youtube` — your browser "
+            "opens for the one-time Google approval. Sign in and click "
+            "'Allow'."
+        ),
+    ]
+
+
+def youtube_gcp_guide() -> PlatformGuide:
+    """The YouTube platform guide, built from :func:`youtube_gcp_steps`."""
+
+    return PlatformGuide(
+        key="youtube",
+        title="YouTube Shorts",
+        why="Publishes your videos as YouTube Shorts.",
+        docs_url=YOUTUBE_GCP_DOCS_URL,
+        steps=youtube_gcp_steps(),
+    )
+
+
+def youtube_guide_payload() -> dict:
+    """Machine-readable YouTube setup guide (for ``--json`` / agent mode)."""
+
+    guide = youtube_gcp_guide()
+    return {
+        "platform": guide.key,
+        "title": guide.title,
+        "why": guide.why,
+        "steps": [s.text for s in guide.steps],
+        "docs_url": guide.docs_url,
+        "docs_file": "docs/youtube-oauth-production.md",
+        "client_secrets_path": YOUTUBE_SECRETS_PATH,
+        "app_status": "in_production",
+        "next_action": "xpst connect youtube",
+    }
+
+
+def render_youtube_guide_markdown() -> str:
+    """Render the YouTube GCP guide as markdown via the shared renderer."""
+
+    return render_platform_markdown(youtube_gcp_guide())
+
+
+# ──────────────────────────────────────────────
 # Per-platform click-by-click guides
 # ──────────────────────────────────────────────
 
 PLATFORM_GUIDES: dict[str, PlatformGuide] = {
-    "youtube": PlatformGuide(
-        key="youtube",
-        title="YouTube Shorts",
-        why="Publishes your videos as YouTube Shorts.",
-        docs_url="https://github.com/TysAIs/xPST/blob/main/docs/youtube-oauth-production.md",
-        steps=[
-            WizardStep("Open https://console.cloud.google.com/apis/credentials"),
-            WizardStep("Create (or select) a project."),
-            WizardStep("Click 'Create Credentials' → 'OAuth 2.0 Client ID'."),
-            WizardStep(
-                "Application type: 'Desktop app'. Name it e.g. 'xPST Desktop'."
-            ),
-            WizardStep(
-                "Download the JSON and save it as "
-                "~/.xpst/credentials/youtube_client_secrets.json"
-            ),
-            WizardStep(
-                "If your Google Cloud OAuth consent screen is still in "
-                "'Testing' mode, either add your own account as a Test user, "
-                "or click 'Publish App' to move it to production so tokens "
-                "do not expire after 7 days."
-            ),
-            WizardStep(
-                "Back in this wizard, press Enter — your browser opens for "
-                "the one-time Google approval. Sign in and click 'Allow'."
-            ),
-        ],
-    ),
+    "youtube": youtube_gcp_guide(),
     "instagram": PlatformGuide(
         key="instagram",
         title="Instagram Reels",
