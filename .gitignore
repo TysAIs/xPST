@@ -115,3 +115,6 @@ docs/superpowers/
 
 # Temp QA files
 tmp-manual-qa*
+
+# Tauri shell build artifacts
+src-tauri/target/
