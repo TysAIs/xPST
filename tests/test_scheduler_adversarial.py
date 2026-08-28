@@ -9,6 +9,7 @@ scenario for the $10/mo scheduling product.
 import json
 import os
 import subprocess
+import sys
 import threading
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -276,7 +277,7 @@ class TestDoubleFireRace:
         env = dict(os.environ)
         procs = [
             subprocess.Popen(
-                ["/Users/itxji/XPST/.venv/bin/python", str(script)],
+                [sys.executable, str(script)],
                 stdout=subprocess.PIPE,
                 text=True,
                 env=env,
@@ -469,7 +470,7 @@ class TestInputFuzz:
 # ──────────────────────────────────────────────────────────────────────
 # 7. LaunchAgent install (live, macOS)
 # ──────────────────────────────────────────────────────────────────────
-@pytest.mark.skipif(os.uname().sysname != "Darwin", reason="macOS only")
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 class TestLaunchAgentLive:
     PLIST = Path.home() / "Library" / "LaunchAgents" / "com.xpst.schedule.plist"
     LABEL = "com.xpst.schedule"
@@ -495,7 +496,7 @@ class TestLaunchAgentLive:
 
         from xpst.cli import _install_os_scheduler, _uninstall_os_scheduler
 
-        xpst_bin = "/Users/itxji/XPST/.venv/bin/xpst"
+        xpst_bin = str(Path(sys.executable).with_name("xpst"))
         try:
             ok = _install_os_scheduler("Darwin", xpst_bin, 15, as_json=True)
             assert ok, "install failed"
