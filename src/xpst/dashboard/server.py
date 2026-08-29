@@ -11,10 +11,16 @@ Endpoints:
     GET /health   — aggregated platform health check
     GET /metrics  — Prometheus text-format metrics
     GET /state    — current xPST state summary
+    GET /api/*    — web-UI JSON API (see xpst.dashboard.api; Basic-auth
+                    protected like /state — never added to the exempt set)
     GET /bio      — public, mobile-first link-in-bio page
     GET/POST /bio/edit — auth-protected link-in-bio editor
     POST /oauth/callback — xpst:// deep-link OAuth redirect intake (Tauri
         shell forwarding; auth-exempt like /health)
+
+When ``ui/dist`` (the built Vite+Svelte web UI) exists it is served as
+static files at ``/``; otherwise the server falls back to the built-in
+string index below so the Tauri shell still boots without a UI build.
 """
 
 from __future__ import annotations
@@ -132,6 +138,29 @@ def _load_dashboard_auth(config_dir: str) -> tuple[str, str]:
         return config.monitoring.dashboard_username, config.monitoring.dashboard_password_hash
     except Exception:
         return "", ""
+
+
+def _ui_dist_dir() -> Path | None:
+    """Locate the built web UI (``ui/dist``), if it has been built.
+
+    Looks relative to this module (repo checkout: ``<repo>/ui/dist``) and
+    honours the ``XPST_UI_DIST`` override for packaged installs. Returns
+    ``None`` when no build exists — callers must fall back to the string
+    index so the Tauri shell still boots.
+    """
+    import os
+
+    override = os.environ.get("XPST_UI_DIST")
+    if override:
+        candidate = Path(override).expanduser()
+        if (candidate / "index.html").is_file():
+            return candidate
+        return None
+    repo_root = Path(__file__).resolve().parents[3]
+    candidate = repo_root / "ui" / "dist"
+    if (candidate / "index.html").is_file():
+        return candidate
+    return None
 
 
 def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
@@ -256,15 +285,21 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
                 status_code=500,
             )
 
-    # ── Dashboard index ─────────────────────────────────────────────────
-    @app.get("/", name="dashboard_index", include_in_schema=False, response_model=None)
-    def dashboard_index() -> HTMLResponse:
-        """Serve the auth-protected dashboard landing page.
+    # ── Web UI JSON API (Basic-auth protected like /state) ─────────────
+    from xpst.dashboard.api import create_api_router
 
-        Lists the dashboard endpoints and links to the public link-in-bio
-        page. Protected by the same Basic auth as /state and /bio/edit.
-        """
-        return HTMLResponse(_DASHBOARD_INDEX_HTML)
+    app.include_router(create_api_router(config_dir))
+
+    # ── Dashboard index ─────────────────────────────────────────────────
+    ui_dist = _ui_dist_dir()
+
+    if ui_dist is None:
+        # No UI build → the string page IS the index (graceful fallback
+        # that keeps the Tauri shell booting without ui/dist).
+        @app.get("/", name="dashboard_index", include_in_schema=False, response_model=None)
+        def dashboard_index() -> HTMLResponse:
+            """Serve the fallback dashboard landing page."""
+            return HTMLResponse(_DASHBOARD_INDEX_HTML)
 
     # ── CSP header middleware ───────────────────────────────────────────
     # The Tauri CSP in tauri.conf.json only applies to tauri://-served
@@ -280,11 +315,20 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
     class CSPHeaderMiddleware(_CSPBase):
         async def dispatch(self, request: Request, call_next):
             response = await call_next(request)
-            response.headers.setdefault(
-                "Content-Security-Policy",
-                "default-src 'self'; style-src 'self' 'unsafe-inline'; "
-                "img-src 'self' data:; script-src 'none'; connect-src 'self'",
-            )
+            if ui_dist is not None:
+                # Built web UI: external hashed JS bundles, no inline scripts.
+                response.headers.setdefault(
+                    "Content-Security-Policy",
+                    "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                    "img-src 'self' data:; script-src 'self'; "
+                    "connect-src 'self'; font-src 'self' data:",
+                )
+            else:
+                response.headers.setdefault(
+                    "Content-Security-Policy",
+                    "default-src 'self'; style-src 'self' 'unsafe-inline'; "
+                    "img-src 'self' data:; script-src 'none'; connect-src 'self'",
+                )
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
             return response
 
@@ -349,6 +393,17 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
 
     _setup_messenger_webhook(app, config_dir)
     _setup_bio_routes(app, config_dir)
+
+    # ── Built web UI (mount LAST so JSON/HTML routes above win) ────────
+    # Serves ui/dist at "/" when a build exists; registered after every
+    # other route, so /health, /state, /api/*, /bio, /metrics keep
+    # precedence. Without ui/dist nothing is mounted and the string
+    # index registered above remains the graceful fallback.
+    if ui_dist is not None:
+        from fastapi.staticfiles import StaticFiles
+
+        app.mount("/", StaticFiles(directory=str(ui_dist), html=True), name="ui")
+        logger.info("Serving web UI from %s", ui_dist)
 
     return app
 
