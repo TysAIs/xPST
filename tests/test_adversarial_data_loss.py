@@ -35,6 +35,57 @@ REPO_SRC = str(Path(__file__).resolve().parent.parent / "src")
 # ── Scenario: cross-process lost updates ─────────────────────────────────────
 
 
+# ── Scenario: Windows transient rename lock (WinError 5 deflake) ─────────────
+
+
+def test_atomic_write_retries_transient_permission_error(tmp_path, monkeypatch):
+    """A transient PermissionError from os.replace (Windows file-lock race,
+    WinError 5) is retried with backoff and succeeds on a later attempt."""
+    import xpst.state_store as state_store_mod
+
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def flaky_replace(src, dst, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise PermissionError(5, "Access is denied")  # WinError 5
+        return real_replace(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr("os.replace", flaky_replace)
+    monkeypatch.setattr(state_store_mod.time, "sleep", lambda _s: None)
+
+    store = StateStore(tmp_path)
+    store.update(lambda s: {**s, "key": "value"})
+    assert calls["n"] >= 2, "os.replace must be retried after PermissionError"
+    assert StateStore(tmp_path).get()["key"] == "value"
+
+
+def test_atomic_write_reraises_permission_error_after_bounded_retries(tmp_path, monkeypatch):
+    """A persistent PermissionError is re-raised after the bounded retry
+    budget (4 attempts, 50/100/200ms backoff) — never swallowed, never an
+    infinite retry loop."""
+    import xpst.state_store as state_store_mod
+
+    sleeps: list[float] = []
+
+    def always_locked(src, dst, *args, **kwargs):
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr("os.replace", always_locked)
+    monkeypatch.setattr(state_store_mod.time, "sleep", sleeps.append)
+
+    store = StateStore(tmp_path)
+    with pytest.raises(PermissionError):
+        store.update(lambda s: {**s, "key": "value"})
+
+    assert len(sleeps) == 3, f"expected 3 backoffs, got {sleeps}"
+    assert sleeps == [0.05, 0.1, 0.2]
+
+
+# ── Scenario: cross-process lost updates ─────────────────────────────────────
+
+
 def test_update_applies_to_freshest_disk_state(tmp_path):
     """Two processes load state at T0; both update. The second update must
     build on the first writer's data, not overwrite it (was: 67% loss rate)."""

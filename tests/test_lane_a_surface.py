@@ -111,9 +111,14 @@ class TestMcpSurface:
     @pytest.mark.asyncio
     async def test_mcp_analytics_returns_persisted_metrics(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HOME", str(tmp_path))
+        from xpst.config import XPSTConfig
         from xpst.mcp.server import _handle_analytics
 
-        result = await _handle_analytics({})
+        # QA-wave: the handler resolves its store from config.config_dir.
+        config = XPSTConfig()
+        config.config_dir = str(tmp_path)
+
+        result = await _handle_analytics(config, {})
         payload = json.loads(result.content[0].text)
         assert set(payload) == {"live", "snapshot_count", "platforms", "posts"}
         assert payload["live"] is False

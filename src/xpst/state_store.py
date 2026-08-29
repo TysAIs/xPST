@@ -366,8 +366,26 @@ class StateStore:
                 # fsync so the payload survives a crash/power loss after rename
                 os.fsync(tmp.fileno())
 
-            # Atomic rename (POSIX)
-            os.replace(tmp_path, self.path)
+            # Atomic rename (POSIX). On Windows the destination can be briefly
+            # locked by a concurrent reader (antivirus, another process holding
+            # the file open), surfacing as PermissionError (WinError 5). Retry
+            # a bounded number of times with a small backoff before giving up
+            # — see HANDOFF-2026-08-29
+            # (test_concurrent_processes_zero_lost_updates hit this once
+            # under Windows stress).
+            replace_backoff_s = (0.05, 0.1, 0.2)
+            _last_replace_error: PermissionError | None = None
+            for _attempt in range(len(replace_backoff_s) + 1):
+                try:
+                    os.replace(tmp_path, self.path)
+                    _last_replace_error = None
+                    break
+                except PermissionError as exc:
+                    _last_replace_error = exc
+                    if _attempt < len(replace_backoff_s):
+                        time.sleep(replace_backoff_s[_attempt])
+            if _last_replace_error is not None:
+                raise _last_replace_error
             # Best-effort directory fsync so the rename itself is durable
             try:
                 dir_fd = os.open(self.path.parent, os.O_RDONLY)
