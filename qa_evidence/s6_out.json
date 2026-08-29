@@ -1,0 +1,42 @@
+hdiutil: WARNING: 'hdiutil create -size -volname ...' is deprecated. Please use 'diskutil image create from/blank -size --volumeName ...' instead.
+hdiutil: WARNING: 'hdiutil attach -mountpoint ...' is deprecated. Please use 'diskutil image attach --mountPoint ...' instead.
+MNT=/var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmp.dcsxko5CFT/mnt
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+OSError: [Errno 28] No space left on device
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<stdin>", line 9, in <module>
+OSError: [Errno 28] No space left on device
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+OSError: [Errno 28] No space left on device
+/dev/disk5s1        3032 1564      1120    59%       3 11200    0%   /private/var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmp.dcsxko5CFT/mnt
+{
+  "state_write": "OSError: [Errno 28] No space left on device",
+  "state_after": {
+    "on_disk_marker": "old",
+    "zero_byte_state": false,
+    "tmp_left": 1
+  },
+  "cred_second_store": "OSError: [Errno 28] No space left on device",
+  "cred_after": {
+    "file_survived": true,
+    "size_before": 100,
+    "size_after": 0,
+    "truncated_or_destroyed": true,
+    "tmp_left": 0
+  },
+  "migrate": "ok=True Migrated from v2 to v4",
+  "config_after": {
+    "original_survived": true,
+    "size_after": 824,
+    "still_valid_yaml_or_original": true,
+    "zero_byte_config": false
+  }
+}

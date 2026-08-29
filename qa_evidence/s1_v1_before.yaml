@@ -1,0 +1,16 @@
+version: 1
+youtube:
+  api_key: YTKEY123
+  channel_id: UC_cust
+instagram:
+  sessionid: IGSESS456
+x:
+  auth_token: XTOK789
+tiktok:
+  sessionid: TTSESS000
+check_interval: 600
+downloads_dir: ~/Downloads/xpst
+custom_flag: keep-me
+dashboard_password: hunter2
+monitoring:
+  dashboard_password: hunter2

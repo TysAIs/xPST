@@ -489,11 +489,12 @@ accounts:
             XPSTConfig.load(str(symlink))
 
     def test_empty_config_file(self, tmp_path):
-        """Empty config file should use defaults."""
+        """Empty config file -> clear error + backup, NOT silent defaults
+        (an empty file may be a disk-full crash artifact; data-loss prevention)."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("")
-        config = XPSTConfig.load(str(config_file))
-        assert config.youtube.enabled is True
+        with pytest.raises(ValueError, match="empty or invalid"):
+            XPSTConfig.load(str(config_file))
 
     def test_config_with_none_account_section(self, tmp_path):
         """Config where an account section is null/None should not crash."""

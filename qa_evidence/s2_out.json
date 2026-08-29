@@ -1,0 +1,98 @@
+{
+  "truncated_yaml": {
+    "result": [
+      "True",
+      "No migration needed"
+    ],
+    "original_preserved": true,
+    "file_size_after": 40,
+    "backups_created": [],
+    "app_load": "OK (loaded)"
+  },
+  "binary_garbage": {
+    "result": [
+      "True",
+      "No migration needed"
+    ],
+    "original_preserved": true,
+    "file_size_after": 1024,
+    "backups_created": [],
+    "app_load": "UnicodeDecodeError: 'utf-8' codec can't decode byte 0x80 in position 128: invalid start byte"
+  },
+  "empty_file": {
+    "result": [
+      "True",
+      "Migrated from v1 to v4"
+    ],
+    "original_preserved": false,
+    "file_size_after": 879,
+    "backups_created": [
+      "config.yaml.backup_20260828_155525"
+    ],
+    "app_load": "OK (loaded)"
+  },
+  "billion_laughs": {
+    "result": [
+      "True",
+      "Migrated from v1 to v4"
+    ],
+    "original_preserved": false,
+    "file_size_after": 1471,
+    "backups_created": [
+      "config.yaml.backup_20260828_155525"
+    ],
+    "app_load": "OK (loaded)"
+  },
+  "list_root": {
+    "result": [
+      "True",
+      "No migration needed"
+    ],
+    "original_preserved": true,
+    "file_size_after": 18,
+    "backups_created": [],
+    "app_load": "ValueError: XPST config must be a mapping, got list: /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmphoeu1p26/config.yaml"
+  },
+  "string_root": {
+    "result": [
+      "True",
+      "No migration needed"
+    ],
+    "original_preserved": true,
+    "file_size_after": 14,
+    "backups_created": [],
+    "app_load": "ValueError: XPST config must be a mapping, got str: /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmp7kdaft_5/config.yaml"
+  },
+  "null_root": {
+    "result": [
+      "True",
+      "Migrated from v1 to v4"
+    ],
+    "original_preserved": false,
+    "file_size_after": 879,
+    "backups_created": [
+      "config.yaml.backup_20260828_155525"
+    ],
+    "app_load": "OK (loaded)"
+  },
+  "wrong_type_accounts": {
+    "result": [
+      "True",
+      "No migration needed"
+    ],
+    "original_preserved": true,
+    "file_size_after": 32,
+    "backups_created": [],
+    "app_load": "OK (loaded)"
+  },
+  "version_string": {
+    "result": [
+      "True",
+      "No migration needed"
+    ],
+    "original_preserved": true,
+    "file_size_after": 41,
+    "backups_created": [],
+    "app_load": "OK (loaded)"
+  }
+}
