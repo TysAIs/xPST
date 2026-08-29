@@ -1,0 +1,103 @@
+XPST config file at /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmp8zdgegb7/config.yaml is corrupted; a copy was saved to /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmp8zdgegb7/backups/config.yaml.corrupt_1787954559
+{
+  "truncated_yaml": {
+    "result": [
+      "True",
+      "No migration needed"
+    ],
+    "original_preserved": true,
+    "file_size_after": 40,
+    "backups_created": [],
+    "app_load": "OK (loaded)"
+  },
+  "binary_garbage": {
+    "result": [
+      "True",
+      "No migration needed"
+    ],
+    "original_preserved": true,
+    "file_size_after": 1024,
+    "backups_created": [],
+    "app_load": "ValueError: XPST config file is not valid UTF-8 (binary or corrupted?): /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmp8zdgegb7/config.yaml. The or"
+  },
+  "empty_file": {
+    "result": [
+      "False",
+      "Cannot migrate config: /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmpasqldtf4/config.yaml does not contain a recog"
+    ],
+    "original_preserved": true,
+    "file_size_after": 0,
+    "backups_created": [
+      "config.yaml.corrupt_1787954559"
+    ],
+    "app_load": "ValueError: XPST config file is empty or invalid: /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmpasqldtf4/config.yaml"
+  },
+  "billion_laughs": {
+    "result": [
+      "False",
+      "Cannot migrate config: /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmp1b_hqc7h/config.yaml does not contain a recog"
+    ],
+    "original_preserved": true,
+    "file_size_after": 318,
+    "backups_created": [
+      "config.yaml.corrupt_1787954559"
+    ],
+    "app_load": "OK (loaded)"
+  },
+  "list_root": {
+    "result": [
+      "False",
+      "Cannot migrate config: /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmpk2vu0qxu/config.yaml does not contain a recog"
+    ],
+    "original_preserved": true,
+    "file_size_after": 18,
+    "backups_created": [
+      "config.yaml.corrupt_1787954559"
+    ],
+    "app_load": "ValueError: XPST config must be a mapping, got list: /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmpk2vu0qxu/config.yaml"
+  },
+  "string_root": {
+    "result": [
+      "False",
+      "Cannot migrate config: /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmpbg7lyf7f/config.yaml does not contain a recog"
+    ],
+    "original_preserved": true,
+    "file_size_after": 14,
+    "backups_created": [
+      "config.yaml.corrupt_1787954559"
+    ],
+    "app_load": "ValueError: XPST config must be a mapping, got str: /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmpbg7lyf7f/config.yaml"
+  },
+  "null_root": {
+    "result": [
+      "False",
+      "Cannot migrate config: /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmp39ur3ovr/config.yaml does not contain a recog"
+    ],
+    "original_preserved": true,
+    "file_size_after": 5,
+    "backups_created": [
+      "config.yaml.corrupt_1787954559"
+    ],
+    "app_load": "ValueError: XPST config file is empty or invalid: /var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmp39ur3ovr/config.yaml"
+  },
+  "wrong_type_accounts": {
+    "result": [
+      "True",
+      "No migration needed"
+    ],
+    "original_preserved": true,
+    "file_size_after": 32,
+    "backups_created": [],
+    "app_load": "OK (loaded)"
+  },
+  "version_string": {
+    "result": [
+      "True",
+      "No migration needed"
+    ],
+    "original_preserved": true,
+    "file_size_after": 41,
+    "backups_created": [],
+    "app_load": "OK (loaded)"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "v1": {
+    "migrate1": [
+      true,
+      "Migrated from v1 to v4"
+    ],
+    "migrate2_idempotent": [
+      true,
+      "Config already at version 4"
+    ],
+    "second_run_diff": [],
+    "backups": 1,
+    "sentinels": {
+      "youtube_api_key": true,
+      "ig_sessionid": true,
+      "x_token": true,
+      "tiktok_sess": true,
+      "plaintext_pwd_gone": false,
+      "unknown_key_kept": true,
+      "check_interval_kept": true
+    }
+  },
+  "v2": {
+    "migrate1": [
+      true,
+      "Migrated from v2 to v4"
+    ],
+    "migrate2_idempotent": [
+      true,
+      "Config already at version 4"
+    ],
+    "second_run_diff": [],
+    "backups": 1,
+    "sentinels": {
+      "youtube_api_key": true,
+      "ig_sessionid": true,
+      "x_token": true,
+      "tiktok_sess": true,
+      "plaintext_pwd_gone": true,
+      "unknown_key_kept": true,
+      "check_interval_kept": true
+    }
+  },
+  "v3": {
+    "migrate1": [
+      true,
+      "Migrated from v3 to v4"
+    ],
+    "migrate2_idempotent": [
+      true,
+      "Config already at version 4"
+    ],
+    "second_run_diff": [],
+    "backups": 1,
+    "sentinels": {
+      "youtube_api_key": true,
+      "ig_sessionid": true,
+      "x_token": true,
+      "tiktok_sess": true,
+      "plaintext_pwd_gone": true,
+      "unknown_key_kept": true,
+      "check_interval_kept": true
+    }
+  }
+}

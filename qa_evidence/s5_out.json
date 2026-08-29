@@ -1,0 +1,25 @@
+{
+  "at_rest": {
+    "plaintext_on_disk": false,
+    "looks_fernet": true,
+    "perms": "0o600",
+    "secret_file_perms": "0o600"
+  },
+  "roundtrip": true,
+  "wrong_key": {
+    "returns": null,
+    "no_crash": true,
+    "logs": ""
+  },
+  "truncated": {
+    "returns": null,
+    "no_crash": true
+  },
+  "rotation": {
+    "returns": null,
+    "no_crash": true
+  },
+  "log_leak": {
+    "secret_in_logs": false
+  }
+}

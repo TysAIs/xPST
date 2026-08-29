@@ -1,0 +1,31 @@
+{
+  "spaces": {
+    "state": true,
+    "creds": true
+  },
+  "unicode": {
+    "state": true,
+    "creds": true
+  },
+  "symlink": {
+    "state": true,
+    "creds": true
+  },
+  "readonly_state": {
+    "error": "PermissionError: [Errno 13] Permission denied: '/var/folders/36/ty2f9xmj2p10x2k6hc2743800000gn/T/tmpseb25fuo/readonly"
+  },
+  "readonly_state_after": 1,
+  "readonly_creds": {
+    "no_error": true
+  },
+  "migrate_dir_with_spaces": {
+    "ok": true,
+    "custom_kept": true,
+    "version": 4
+  },
+  "migrate_dïr-✓": {
+    "ok": true,
+    "custom_kept": true,
+    "version": 4
+  }
+}
