@@ -491,7 +491,7 @@ def test_schedule_manager_rejects_oversized_caption(tmp_path):
     from xpst.schedule_manager import MAX_CAPTION_LENGTH, ScheduleManager
 
     mgr = ScheduleManager(str(tmp_path / "xpst"))
-    with _pytest.raises(ValueError, match="limit"):
+    with _pytest.raises(ValueError, match="maximum"):
         mgr.add(
             video_path="v.mp4", caption="x" * (MAX_CAPTION_LENGTH + 1),
             scheduled_time=datetime(2026, 9, 1, 10, 0),

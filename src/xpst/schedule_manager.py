@@ -28,7 +28,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 try:
     import fcntl  # POSIX advisory locking
@@ -40,14 +40,6 @@ except ImportError:
     msvcrt = None
 
 from xpst.utils.logger import get_logger
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
-
-try:
-    import fcntl  # type: ignore[import-not-found]
-except ImportError:  # pragma: no cover - non-POSIX fallback
-    fcntl = None  # type: ignore[assignment]
 
 logger = get_logger(__name__)
 
