@@ -1045,17 +1045,55 @@ def _connect_tiktok_upload_destination(config: XPSTConfig) -> bool:
     console.print("\n[bold]Authorize in your browser:[/bold]")
     console.print(f"[link={authorize_url}]{authorize_url}[/link]\n")
 
-    if _confirm("Open the authorization page in your browser now?", default=True):
-        import webbrowser
+    code: str | None = None
 
-        webbrowser.open(authorize_url)
+    # Preferred path: capture the redirect automatically on a local listener
+    # (same pattern as the YouTube flow) so the user never pastes codes.
+    from xpst.utils.oauth_local import LocalOAuthListener
 
-    console.print(
-        "[dim]After authorizing, you'll be redirected. Paste the full redirect "
-        "URL or just the ?code= value below.[/dim]"
-    )
-    pasted = console.input("[cyan]Redirect URL or code: [/cyan]").strip()
-    code = _extract_tiktok_code(pasted)
+    listener: LocalOAuthListener | None = None
+    if redirect_uri.startswith("http://127.0.0.1") or redirect_uri.startswith("http://localhost"):
+        try:
+            listener = LocalOAuthListener(port=8085, path="/callback")
+            listener.start()
+            console.print(f"[dim]Listening for the redirect on {listener.redirect_uri} …[/dim]")
+        except OSError as e:
+            logger.debug("Local OAuth listener unavailable (%s) — falling back to paste", e)
+            listener = None
+
+    if listener is not None:
+        try:
+            import webbrowser
+
+            webbrowser.open(authorize_url)
+        except Exception as e:  # noqa: BLE001 — headless boxes have no browser
+            logger.debug("Could not open browser: %s", e)
+
+        try:
+            result = listener.wait(timeout=300)
+            if result.success and result.code:
+                code = result.code
+            else:
+                console.print(f"[red]❌ Authorization failed: {result.error or 'unknown error'}[/red]")
+        except TimeoutError:
+            console.print(
+                "[yellow]⚠ Did not catch the redirect in time — you can paste the "
+                "redirect URL below instead.[/yellow]"
+            )
+        finally:
+            listener.close()
+
+    if code is None:
+        if listener is not None:
+            console.print("[dim]Paste the full redirect URL or just the ?code= value below.[/dim]")
+        else:
+            console.print(
+                "[dim]After authorizing, you'll be redirected. Paste the full redirect "
+                "URL or just the ?code= value below.[/dim]"
+            )
+        pasted = console.input("[cyan]Redirect URL or code: [/cyan]").strip()
+        code = _extract_tiktok_code(pasted)
+
     if not code:
         console.print("[red]❌ Authorization code required.[/red]")
         return False
