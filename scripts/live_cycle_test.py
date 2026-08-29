@@ -26,12 +26,16 @@ Exit code 0 = all steps passed, 1 = at least one step failed.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # Allow running from a source checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -166,7 +170,13 @@ def run_all(base_dir: Path | None = None) -> dict[str, Any]:
         _step("disconnect", check_disconnect, base_dir),
     ]
     if temp_dir is not None:
-        temp_dir.cleanup()
+        # Drop lingering sqlite handles before removing the tree — on Windows
+        # an open analytics.db raises WinError 32 during cleanup.
+        gc.collect()
+        try:
+            temp_dir.cleanup()
+        except OSError:
+            pass  # best-effort: the OS temp cleaner will reap it eventually
 
     report = {
         "harness": "live_cycle_test",
