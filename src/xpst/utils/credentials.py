@@ -130,9 +130,11 @@ class CredentialStore:
     def _write_secret_file(path: Path, data: bytes) -> None:
         """Write secret material to ``path`` with restrictive 0600 permissions.
 
-        The file is created with owner read/write only. On platforms where
-        ``os.open`` honours the mode (POSIX) the permissions are correct from
-        creation; ``chmod`` is also applied for defence in depth and to fix any
+        The write is ATOMIC (temp file + rename): a failure partway through
+        (e.g. disk-full) leaves the previous file intact instead of truncating
+        an existing credential to zero bytes. On platforms where ``os.open``
+        honours the mode (POSIX) the permissions are correct from creation;
+        ``chmod`` is also applied for defence in depth and to fix any
         pre-existing file that may have looser permissions.
         """
         # O_BINARY is required on Windows: without it the CRT translates
@@ -140,12 +142,37 @@ class CredentialStore:
         # secret differs from the in-memory one used to derive the first
         # Fernet key — every later decrypt fails and credentials silently
         # return None. No-op on POSIX.
-        flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
-        fd = os.open(path, flags, 0o600)
+        tmp_path = path.parent / f".{path.name}.tmp.{os.getpid()}.{secrets.token_hex(4)}"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+        fd = os.open(tmp_path, flags, 0o600)
         try:
-            os.write(fd, data)
-        finally:
+            view = memoryview(data)
+            while view:
+                written = os.write(fd, view)
+                view = view[written:]
+            os.fsync(fd)
+        except Exception:
+            # Remove the partial temp file; the original stays untouched.
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
+        else:
             os.close(fd)
+
+        try:
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
         try:
             os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
         except OSError:
@@ -267,7 +294,18 @@ class CredentialStore:
             try:
                 data = cred_file.read_bytes()
                 return self._fernet_decrypt(data)
-            except Exception:
+            except Exception as e:
+                # Do not crash and do not leak the value — tell the user their
+                # stored credential is unreadable and re-auth is needed.
+                logger.warning(
+                    "Stored credential '%s' could not be decrypted (%s). The "
+                    "encryption key may have changed (e.g. the fallback secret "
+                    "was regenerated), the file may be corrupted, or it was "
+                    "written by a different install. Re-authentication "
+                    "required for this platform.",
+                    key,
+                    type(e).__name__,
+                )
                 return None
 
         return None
