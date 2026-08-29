@@ -132,7 +132,11 @@ def _tiktok_source_check(config: XPSTConfig) -> tuple[bool, str | None, dict[str
     """
     import shutil
 
-    yt_dlp_path = shutil.which("yt-dlp") or shutil.which(str(Path.home() / "bin" / "yt-dlp"))
+    from xpst.utils.platform import resolve_ytdlp_path
+
+    yt_dlp_path = str(resolve_ytdlp_path() or "")
+    if not yt_dlp_path:
+        yt_dlp_path = shutil.which(str(Path.home() / "bin" / "yt-dlp")) or ""
     cookies_available = False
     if config.tiktok.cookies_from_browser:
         cookies_available = True  # assume the browser session exists
