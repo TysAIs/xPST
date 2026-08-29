@@ -21,6 +21,7 @@ Page {
     property var sourceProviders: fallbackSources()
     property var readinessData: ({ ready: true, summary: "", blocking: [], warnings: [] })
     property var connectingPlatforms: ({})
+    property var connectingStates: ({})   // platform -> "connecting" | "waiting_for_browser"
     property string onboardingLocalPath: ""
     property string onboardingTikTokUsername: ""
     property string igUsername: ""
@@ -228,7 +229,9 @@ Page {
     function connectPlatform(platformName) {
         if (typeof controller === "undefined") return
         connectPage.connectingPlatforms[platformName.toLowerCase()] = true
+        connectPage.connectingStates[platformName.toLowerCase()] = "connecting"
         connectPage.connectingPlatformsChanged()
+        connectPage.connectingStatesChanged()
         controller.connectPlatformAsync(platformName.toLowerCase())
     }
 
@@ -271,10 +274,40 @@ Page {
                 var result = JSON.parse(jsonStr)
                 var key = result.platform || ""
                 connectPage.connectingPlatforms[key] = false
+                connectPage.connectingStates[key] = ""
                 connectPage.connectingPlatformsChanged()
+                connectPage.connectingStatesChanged()
+                if (result.ok === false && typeof showToast !== "undefined") {
+                    showToast(result.error || ("Could not connect " + key), true)
+                } else if (result.ok === true && typeof showToast !== "undefined") {
+                    showToast(result.message || ("Connected to " + key), false)
+                }
+                controller.refreshData()
             } catch(e) {
                 console.warn("ConnectPage: failed to parse connectResult, resetting connection state", e)
                 connectPage.connectingPlatforms = ({})
+                connectPage.connectingStates = ({})
+            }
+        }
+    }
+
+    Connections {
+        target: typeof controller !== "undefined" ? controller : null
+        function onConnectStateChanged(jsonStr) {
+            try {
+                var s = JSON.parse(jsonStr)
+                var key = s.platform || ""
+                if (s.state === "waiting_for_browser") {
+                    connectPage.connectingStates[key] = "waiting_for_browser"
+                    connectPage.connectingStatesChanged()
+                } else if (s.state === "success" || s.state === "error") {
+                    connectPage.connectingPlatforms[key] = false
+                    connectPage.connectingStates[key] = ""
+                    connectPage.connectingPlatformsChanged()
+                    connectPage.connectingStatesChanged()
+                }
+            } catch(e) {
+                console.warn("ConnectPage: failed to parse connectStateChanged", e)
             }
         }
     }
@@ -908,8 +941,11 @@ Page {
                                     }
 
                                     Text {
-                                        text: isConnecting ? "Connecting..."
-                                             : platformStatus.connected ? "Disconnect" : "Connect"
+                                        text: {
+                                            if (!isConnecting) return platformStatus.connected ? "Disconnect" : "Connect"
+                                            var st = connectPage.connectingStates[providerKey]
+                                            return st === "waiting_for_browser" ? "Waiting for browser…" : "Connecting..."
+                                        }
                                         font.pixelSize: 13
                                         font.weight: Font.DemiBold
                                         color: platformStatus.connected ? theme.textSecondary : "#ffffff"
@@ -1030,7 +1066,10 @@ Page {
                                 Text {
                                     id: ytConnectBtn
                                     anchors.centerIn: parent
-                                    text: connectPage.connectingPlatforms.youtube ? "Connecting..." : "Connect YouTube"
+                                    text: {
+                                        if (!connectPage.connectingPlatforms.youtube) return "Connect YouTube"
+                                        return connectPage.connectingStates.youtube === "waiting_for_browser" ? "Waiting for browser…" : "Connecting..."
+                                    }
                                     font.pixelSize: 12
                                     font.weight: Font.DemiBold
                                     color: connectPage.connectingPlatforms.youtube ? theme.textSecondary : "#ffffff"
@@ -1236,7 +1275,10 @@ Page {
                                 Text {
                                     id: igConnectBtn
                                     anchors.centerIn: parent
-                                    text: connectPage.connectingPlatforms.instagram ? "Connecting..." : "Connect Instagram"
+                                    text: {
+                                        if (!connectPage.connectingPlatforms.instagram) return "Connect Instagram"
+                                        return connectPage.connectingStates.instagram === "waiting_for_browser" ? "Waiting for browser…" : "Connecting..."
+                                    }
                                     font.pixelSize: 12
                                     font.weight: Font.DemiBold
                                     color: connectPage.connectingPlatforms.instagram ? theme.textSecondary : "#ffffff"
