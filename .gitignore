@@ -121,6 +121,10 @@ src-tauri/target/
 # Tauri shell: built engine sidecar bundle (see src-tauri/binaries/README.md)
 src-tauri/binaries/engine/
 src-tauri/binaries/xpst-engine-*
+# Bundled media binaries (ffmpeg/ffprobe/yt-dlp) are fetched by
+# scripts/fetch-media-binaries.sh — never commit multi-MB binaries.
+src-tauri/binaries/ffmpeg/
+src-tauri/binaries/ytdlp/
 !src-tauri/binaries/README.md
 
 # Tauri shell generated ACL schemas + E2E throwaway signing key dir
