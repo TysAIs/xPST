@@ -832,6 +832,27 @@ class CrossPostEngine:
                 message=f"No post data found for {video_id} on {platform}",
             )
 
+        # Idempotency (QA wave): if state already carries a delete tombstone
+        # for this (video_id, platform), short-circuit — do not call the
+        # platform API again. Repeated delete calls converge to the same
+        # explicit outcome instead of erroring or double-deleting.
+        if post_data.get("deleted"):
+            deleted_at = str(post_data.get("deleted_at") or "unknown time")
+            logger.info(
+                "delete_post(%s, %s): already deleted at %s — short-circuiting",
+                video_id,
+                platform,
+                deleted_at,
+            )
+            already_post_id = str(post_data.get("post_id") or post_data.get("id") or "")
+            return DeleteResult(
+                outcome=DeleteOutcome.DELETED,
+                platform=platform,
+                post_id=already_post_id,
+                message=f"Already deleted from {platform} ({deleted_at})",
+                detail="already deleted",
+            )
+
         # State schema stores the platform post id under "id" (see state.py
         # mark_video_posted / state_manager.py record_posted). Accept "post_id"
         # too for robustness against older or external state shapes.
