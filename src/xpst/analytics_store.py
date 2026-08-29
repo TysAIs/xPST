@@ -207,6 +207,17 @@ class AnalyticsStore:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM metric_snapshots").fetchone()[0])
 
+    def last_captured_at(self) -> str | None:
+        """ISO timestamp of the most recent metric snapshot, or None.
+
+        The freshness surface for the dashboard/desktop UI: ``None`` means
+        nothing has ever been captured (never fake a staleness value).
+        """
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(captured_at) FROM metric_snapshots").fetchone()
+        value = row[0] if row else None
+        return str(value) if value else None
+
     def delete_youtube_snapshots_not_in(self, owned_ids: set[str]) -> int:
         """Purge stale ``metric_snapshots`` rows whose id is not owned.
 

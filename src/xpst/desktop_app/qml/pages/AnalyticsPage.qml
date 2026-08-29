@@ -113,6 +113,31 @@ Page {
                     font.pixelSize: 13
                     color: theme.textSecondary
                 }
+                // Snapshot freshness: "as of 2h ago" from the payload's
+                // last_captured / last_captured_relative fields (server-side
+                // relative-time computation, shared with the dashboard).
+                Text {
+                    visible: {
+                        var last = analyticsPage.analyticsJson.last_captured
+                        return !!last
+                    }
+                    text: {
+                        var rel = analyticsPage.analyticsJson.last_captured_relative
+                        var hours = analyticsPage.analyticsJson.staleness_hours
+                        var label = (rel && rel !== "—") ? rel
+                                  : (hours !== undefined && hours !== null ? Math.round(hours) + "h ago" : "")
+                        return label ? ("as of " + label) : ""
+                    }
+                    font.pixelSize: 12
+                    color: {
+                        // Amber once stale (>24h) so unbounded staleness is
+                        // visible instead of silently misleading.
+                        var hours = analyticsPage.analyticsJson.staleness_hours
+                        return (hours !== undefined && hours !== null && hours > 24)
+                               ? "#d97706" : theme.textMuted
+                    }
+                    Accessible.name: "Analytics data last captured " + text
+                }
             }
 
             // Date range picker (Item 11)

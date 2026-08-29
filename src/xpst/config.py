@@ -194,6 +194,8 @@ DEFAULT_CONFIG = {
         "check_interval": 900,  # 15 minutes
         "catchup_window": 172800,  # 48 hours
         "catchup_times_per_day": 3,
+        "analytics_snapshot_enabled": False,
+        "analytics_snapshot_interval": 3600,
     },
     "shortcuts": {
         "dashboard": "Ctrl+1",
@@ -412,6 +414,12 @@ class ScheduleConfig:
     check_interval: int = 900
     catchup_window: int = 172800
     catchup_times_per_day: int = 3
+    # Optional scheduled analytics snapshot capture (default OFF). When
+    # enabled, the watch-mode scheduler captures metric_snapshots for all
+    # live platforms every ``analytics_snapshot_interval`` seconds via
+    # AnalyticsCollector.collect_all (ownership-gated persistence).
+    analytics_snapshot_enabled: bool = False
+    analytics_snapshot_interval: int = 3600
 
 
 @dataclass
@@ -1033,6 +1041,9 @@ class XPSTConfig:
         if self.schedule.catchup_window < 3600:
             errors.append("Catchup window must be at least 1 hour")
 
+        if self.schedule.analytics_snapshot_interval < 300:
+            errors.append("Analytics snapshot interval must be at least 300 seconds")
+
         # Validate encoding configs
         for name, enc in [("youtube", self.video.encoding_youtube), ("instagram", self.video.encoding_instagram), ("x", self.video.encoding_x), ("tiktok", self.video.encoding_tiktok)]:
             if enc.resolution and enc.resolution not in (360, 480, 720, 1080, 1440, 1920, 2160):
@@ -1222,6 +1233,8 @@ class XPSTConfig:
                 "check_interval": self.schedule.check_interval,
                 "catchup_window": self.schedule.catchup_window,
                 "catchup_times_per_day": self.schedule.catchup_times_per_day,
+                "analytics_snapshot_enabled": self.schedule.analytics_snapshot_enabled,
+                "analytics_snapshot_interval": self.schedule.analytics_snapshot_interval,
             },
             "notifications": {
                 "enabled": self.notifications.enabled,
