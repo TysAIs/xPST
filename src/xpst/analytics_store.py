@@ -198,6 +198,8 @@ class AnalyticsStore:
         if not ids:
             return []
         placeholders = ",".join("?" * len(ids))
+        # nosec B608 - the f-string interpolates '?' placeholders only; every
+        # post id is passed as a bound parameter via `params` below.
         query = f"""
             SELECT s.* FROM metric_snapshots s
             JOIN (
