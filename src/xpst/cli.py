@@ -2816,7 +2816,12 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
         console.print("[dim]Use: 'YYYY-MM-DD HH:MM' or ISO format[/dim]")
         sys.exit(EXIT_CONFIG_ERROR)
 
-    platform_list = [p.strip() for p in platforms.split(",")] if platforms else None
+    platform_list = (
+        [p.strip() for p in platforms.split(",") if p.strip()] if platforms else None
+    )
+    if platforms and not platform_list:
+        console.print(f"[red]Invalid platforms:[/red] no usable platform names in {platforms!r}")
+        sys.exit(EXIT_CONFIG_ERROR)
 
     manager = ScheduleManager()
     effective_repeat = repeat_rule if repeat_rule and repeat_rule != "none" else None
@@ -2952,6 +2957,17 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
                 console.print(f"  Would post: {entry['id']} — {Path(entry['video_path']).name} → {', '.join(entry.get('platforms', ['all']))}")
             return
 
+    # Claim the due entries atomically (pending -> processing, under a
+    # cross-process file lock) so concurrent invocations — e.g. cron and
+    # the serve daemon — cannot double-post the same entry.
+    due = manager.claim_due()
+    if not due:
+        if as_json:
+            json_output({"status": "nothing_due", "processed": 0, "note": "claimed by another worker"}, True)
+        else:
+            console.print("[dim]Due posts were claimed by another worker.[/dim]")
+        return
+
     engine = CrossPostEngine(config_obj)
 
     for entry in due:
@@ -3017,15 +3033,12 @@ def schedule_install(ctx: click.Context, interval: int, uninstall: bool, as_json
         sys.exit(EXIT_GENERAL)
 
 
-def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bool) -> bool:
-    """Install OS-specific scheduler entry. Returns True on success."""
-    import os
-
-    if system == "Darwin":
-        plist_dir = Path(os.path.expanduser("~/Library/LaunchAgents"))
-        plist_dir.mkdir(parents=True, exist_ok=True)
-        plist_path = plist_dir / "com.xpst.schedule.plist"
-        plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+def _write_launchd_plist(plist_dir: Path, xpst_bin: str) -> Path:
+    """Write the com.xpst.schedule LaunchAgent plist. Returns its path."""
+    plist_dir = Path(plist_dir)
+    plist_dir.mkdir(parents=True, exist_ok=True)
+    plist_path = plist_dir / "com.xpst.schedule.plist"
+    plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -3047,8 +3060,18 @@ def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bo
     <string>{get_config_dir() / "logs" / "launchagent.err"}</string>
 </dict>
 </plist>"""
-        with open(plist_path, "w") as f:
-            f.write(plist_content)
+    with open(plist_path, "w") as f:
+        f.write(plist_content)
+    return plist_path
+
+
+def _install_os_scheduler(system: str, xpst_bin: str, interval: int, as_json: bool) -> bool:
+    """Install OS-specific scheduler entry. Returns True on success."""
+    import os
+
+    if system == "Darwin":
+        plist_dir = Path(os.path.expanduser("~/Library/LaunchAgents"))
+        plist_path = _write_launchd_plist(plist_dir, xpst_bin)
 
         # Load the agent (use modern launchctl bootstrap to avoid password prompts)
         import subprocess
