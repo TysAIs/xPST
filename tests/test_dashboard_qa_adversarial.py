@@ -269,3 +269,19 @@ def test_engine_responses_carry_csp(tmp_path, path):
     assert "default-src 'self'" in csp, f"no CSP on {path}: {dict(resp.headers)}"
     assert "script-src 'none'" in csp
     assert resp.headers.get("x-content-type-options") == "nosniff"
+
+
+def test_relative_time_uses_utc_not_local():
+    """A timestamp exactly 2h before NOW (UTC) must read '2h ago' regardless
+    of the machine's local timezone — the old local-naive now() skewed every
+    label by the UTC offset (audit analytics-accuracy-2026-08-28)."""
+    from datetime import datetime, timedelta, timezone
+
+    from xpst.dashboard.analytics import _relative_time
+
+    two_hours_ago_utc = datetime.now(timezone.utc) - timedelta(hours=2)
+    assert _relative_time(two_hours_ago_utc.isoformat()) == "2h ago"
+
+    # Naive stamps are interpreted as UTC by _parse_ts.
+    naive = datetime.utcnow() - timedelta(minutes=30)
+    assert _relative_time(naive.isoformat()) == "30m ago"

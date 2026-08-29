@@ -195,10 +195,13 @@ def _relative_time(ts_str: str | None) -> str:
     if not ts_str:
         return "—"
     try:
-        dt = _parse_ts(ts_str)  # always naive, aware-safe
+        dt = _parse_ts(ts_str)  # always naive, aware-safe (naive UTC)
         if dt is None:
             return ts_str[:10] if ts_str else "—"
-        delta = datetime.now() - dt
+        # _parse_ts normalizes to naive UTC, so "now" must be naive UTC
+        # too — local now() skews every relative label by the UTC offset
+        # (audit analytics-accuracy-2026-08-28).
+        delta = datetime.utcnow() - dt
         secs = delta.total_seconds()
         if secs < 60:
             return "just now"
@@ -948,8 +951,11 @@ class AnalyticsCollector:
                     platform_counts[platform] += 1
                     total_platform_posts += 1
 
-        # Posts this week
-        now = datetime.now()
+        # Posts this week — compare in UTC: _parse_ts normalizes
+        # tz-aware stamps to naive UTC, so "now" must be naive UTC too.
+        # Local-naive now() mis-windows posts by the UTC offset (audit
+        # analytics-accuracy-2026-08-28).
+        now = datetime.utcnow()
         week_ago = now - timedelta(days=7)
         posts_this_week = 0
         for video_data in posted.values():
