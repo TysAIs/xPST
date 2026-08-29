@@ -186,7 +186,7 @@ Testing TikTok...  ✅ OK
 All platforms connected and responding.
 ```
 
-If any connection fails, the command exits with code 2 (authentication failure).
+If any connection fails, the command exits with code 3 (authentication failure).
 
 ---
 
@@ -825,7 +825,7 @@ xpst config validate
 xpst config validate --json
 ```
 
-Exit code `0` if valid, `4` if invalid.
+Exit code `0` if valid, `2` if invalid (config error).
 
 **Example:**
 
@@ -1192,9 +1192,9 @@ xPST uses meaningful exit codes for scripting and agent integration:
 |------|----------|---------|
 | `0` | `EXIT_SUCCESS` | Success |
 | `1` | `EXIT_GENERAL` | General error |
-| `2` | `EXIT_AUTH_FAILURE` | Authentication failure |
-| `3` | `EXIT_RATE_LIMIT` | Rate limit exceeded |
-| `4` | `EXIT_CONFIG_ERROR` | Configuration error |
+| `2` | `EXIT_CONFIG_ERROR` | Configuration error (also Click usage errors) |
+| `3` | `EXIT_AUTH_FAILURE` | Authentication failure |
+| `4` | `EXIT_RATE_LIMIT` | Rate limit exceeded |
 | `10` | `EXIT_PLATFORM_UNAVAILABLE` | Platform unavailable |
 
 Use these in shell scripts:
@@ -1202,9 +1202,9 @@ Use these in shell scripts:
 ```bash
 if xpst run --quiet; then
     echo "Posted successfully"
-elif [ $? -eq 2 ]; then
-    echo "Auth failure — run xpst auth"
 elif [ $? -eq 3 ]; then
+    echo "Auth failure — run xpst auth"
+elif [ $? -eq 4 ]; then
     echo "Rate limited — wait or increase rate_limits"
 fi
 ```

@@ -70,9 +70,11 @@ def _confirm(message: str, default: bool = True) -> bool:
     try:
         response = console.input(f"[cyan]{message}{suffix}[/cyan]").strip().lower()
     except EOFError:
-        # Piped/closed stdin (agent automation) — fall back to the default
-        # instead of crashing onboarding with a traceback.
-        return default
+        # Piped/closed stdin (agent automation): the safe default is False —
+        # treating EOF as "yes" caused side effects such as webbrowser.open()
+        # firing during scripted runs. Interactive callers see the prompt as
+        # usual; automated callers get a deterministic "no".
+        return False
     if not response:
         return default
     return response in ("y", "yes")

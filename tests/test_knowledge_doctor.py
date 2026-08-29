@@ -6,6 +6,8 @@ items), plus the CLI surface.
 """
 from __future__ import annotations
 
+import json
+
 from click.testing import CliRunner
 
 from xpst.cli import main
@@ -141,7 +143,9 @@ def test_cli_doctor_happy_path_exit_zero(tmp_path, monkeypatch):
 
     out = CliRunner().invoke(main, ["kb", "doctor"])
     assert out.exit_code == 0, out.output
-    assert "OK" in out.output
+    # Piped (auto-JSON): doctor emits a machine-readable report.
+    data = json.loads(out.output)
+    assert data["ok"] is True
 
 
 def test_cli_doctor_degraded_exit_one(tmp_path, monkeypatch):
@@ -153,4 +157,6 @@ def test_cli_doctor_degraded_exit_one(tmp_path, monkeypatch):
 
     out = CliRunner().invoke(main, ["kb", "doctor"])
     assert out.exit_code == 1, out.output
-    assert "PROBLEMS FOUND" in out.output
+    data = json.loads(out.output)
+    assert data["ok"] is False
+    assert data["error_count"] >= 1
