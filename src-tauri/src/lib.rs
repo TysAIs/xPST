@@ -355,6 +355,30 @@ fn boot_engine(app: tauri::AppHandle) {
     let mut command = app.shell().command(&engine_exe);
     command = command.env("XPST_DASHBOARD_PORT", port.to_string());
     command = command.env("XPST_ENGINE_MODE", "tauri");
+    // Bundle-resolution: point the engine at the ffmpeg/ffprobe/yt-dlp
+    // binaries shipped as bundle resources (see tauri.conf.json
+    // bundle.resources). The engine honors XPST_FFMPEG_PATH
+    // (xpst.utils.platform.resolve_ffmpeg_path) and XPST_YTDLP_PATH
+    // (xpst.utils.platform.get_ytdlp_fallback_path / setup wizard), so the
+    // app works with zero user-installed dependencies.
+    let resource_dir = app.path().resource_dir().ok();
+    if let Some(res) = resource_dir {
+        let ff_dir = res.join("binaries/ffmpeg");
+        let ff = ff_dir.join(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" });
+        let fp = ff_dir.join(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" });
+        if ff.exists() {
+            command = command.env("XPST_FFMPEG_PATH", ff);
+        }
+        if fp.exists() {
+            command = command.env("XPST_FFPROBE_PATH", fp);
+        }
+        let ytdlp = res
+            .join("binaries/ytdlp")
+            .join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" });
+        if ytdlp.exists() {
+            command = command.env("XPST_YTDLP_PATH", ytdlp);
+        }
+    }
 
     let (mut rx, child) = match command.spawn() {
         Ok(pair) => pair,
