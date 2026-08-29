@@ -18,9 +18,12 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from xpst.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = get_logger(__name__)
 
@@ -178,6 +181,52 @@ class AnalyticsStore:
                 (platform, post_id, limit),
             )
             return [self._row_to_dict(r) for r in rows]
+
+    def get_video_metrics(
+        self,
+        post_ids: Sequence[str],
+        platform: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Latest metric snapshot per (platform, post_id) for the given post ids.
+
+        Drill-down primitive (QA wave): one video posted to N platforms has N
+        platform post ids (resolved by the caller from state ``posted_to``).
+        Returns the newest snapshot row for each in the same shape as
+        :meth:`latest`, filtered to ``platform`` when given.
+        """
+        ids = [str(p) for p in post_ids if p]
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        query = f"""
+            SELECT s.* FROM metric_snapshots s
+            JOIN (
+                SELECT platform, post_id, MAX(captured_at) AS captured_at
+                FROM metric_snapshots WHERE post_id IN ({placeholders})
+                GROUP BY platform, post_id
+            ) m ON s.platform = m.platform AND s.post_id = m.post_id
+               AND s.captured_at = m.captured_at
+        """
+        params: list[Any] = list(ids)
+        if platform:
+            query += " WHERE s.platform = ?"
+            params.append(platform)
+        with self._connect() as conn:
+            return [self._row_to_dict(r) for r in conn.execute(query, params)]
+
+    def get_video_metrics_map(
+        self,
+        post_ids: Sequence[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Map post_id → latest snapshot rows across platforms (drill-down).
+
+        Companion to :meth:`get_video_metrics` for UIs that key metrics by
+        the platform post id (e.g. per-video detail panels).
+        """
+        result: dict[str, list[dict[str, Any]]] = {}
+        for row in self.get_video_metrics(post_ids):
+            result.setdefault(str(row.get("post_id") or ""), []).append(row)
+        return result
 
     def totals_before(self, cutoff_iso: str) -> dict[str, int] | None:
         """Sum of each core metric over the latest snapshot per post captured
