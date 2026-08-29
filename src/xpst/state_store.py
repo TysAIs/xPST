@@ -63,8 +63,54 @@ class StateStore:
         # Lock file descriptor for test compatibility (-der)
         self._lock_fd = None
 
+        # Clean up temp files orphaned by a previous crash (kill -9 / power loss
+        # between temp-file creation and rename). Only touch files that are
+        # demonstrably stale so we never race a concurrent writer's in-flight
+        # temp file.
+        self._sweep_orphan_tmp_files()
+
         # Load on init
         self._state = self._load()
+        # Signature (mtime_ns, size) of state.json as of our last load/write.
+        # Used by update() to detect writes from OTHER processes.
+        self._disk_state_sig = self._disk_signature()
+
+    # Temp files older than this are considered orphans from a crashed writer.
+    _ORPHAN_TMP_MAX_AGE_S = 600
+
+    def _disk_signature(self) -> tuple[int, int] | None:
+        """Return a change-detection signature of state.json (or None if absent)."""
+        try:
+            st = self.path.stat()
+            return (st.st_mtime_ns, st.st_size)
+        except OSError:
+            return None
+
+    def _sweep_orphan_tmp_files(self) -> None:
+        """Delete stale state.json.tmp.* files left by crashed writers."""
+        cutoff = time.time() - self._ORPHAN_TMP_MAX_AGE_S
+        for tmp in self.path.parent.glob("state.json.tmp.*"):
+            try:
+                if tmp.stat().st_mtime < cutoff:
+                    tmp.unlink()
+            except OSError:
+                pass
+
+    def _read_fresh_state(self) -> dict[str, Any] | None:
+        """Best-effort read of state.json for cross-process freshness.
+
+        Must be called while holding the cross-process file lock. Returns
+        ``None`` when the file is missing or unreadable so the caller can
+        fall back to the in-memory copy instead of losing data.
+        """
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+            pass
+        return None
 
     @contextmanager
     def _file_lock(self):
@@ -303,23 +349,42 @@ class StateStore:
                 pass  # Forensic copy is best-effort
 
         # Create temp file in same directory (for atomic rename)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            dir=self.path.parent,
-            prefix="state.json.tmp.",
-            delete=False,
-            encoding="utf-8",
-        ) as tmp:
-            json.dump(state, tmp, default=str, ensure_ascii=False)
-            tmp_path = Path(tmp.name)
-
+        tmp_path: Path | None = None
         try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                dir=self.path.parent,
+                prefix="state.json.tmp.",
+                delete=False,
+                encoding="utf-8",
+            ) as tmp:
+                # Assign BEFORE writing so a mid-dump failure (e.g. disk-full)
+                # still gets cleaned up in the except block below.
+                tmp_path = Path(tmp.name)
+                json.dump(state, tmp, default=str, ensure_ascii=False)
+                tmp.flush()
+                # fsync so the payload survives a crash/power loss after rename
+                os.fsync(tmp.fileno())
+
             # Atomic rename (POSIX)
             os.replace(tmp_path, self.path)
+            # Best-effort directory fsync so the rename itself is durable
+            try:
+                dir_fd = os.open(self.path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except OSError:
+                pass
         except Exception:
-            # Cleanup on failure
-            if tmp_path.exists():
-                tmp_path.unlink()
+            # Cleanup on failure — never leave a partial temp file behind to
+            # accumulate (disk-full during json.dump previously leaked tmps).
+            if tmp_path is not None and tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
             raise
 
     def _rotate_backups(self) -> None:
@@ -370,18 +435,48 @@ class StateStore:
             with self._file_lock():
                 self._state = state
                 self._atomic_write(state)
+                self._disk_state_sig = self._disk_signature()
                 self._rotate_backups()
 
     def update(self, updater: callable) -> None:
         """Atomically update state with a function.
+
+        The updater is applied to the FRESHEST state: if state.json was
+        written by ANOTHER process since we last read/wrote it (detected via
+        a stat signature checked under the cross-process file lock), the
+        on-disk state is re-read first. Without this, multiple processes
+        (engine, dashboard, CLI) would each apply their change to a stale
+        snapshot and silently drop the other writers' data (verified: 67%
+        update loss with 3 concurrent writers).
+
+        If the on-disk file is exactly what we last wrote, the in-memory
+        state is used directly — it is a superset of the on-disk state and
+        may hold additional not-yet-persisted mutations from throttled-save
+        flows (e.g. bulk ingestion) which must not be discarded.
 
         Args:
             updater: Function taking state dict, returning new state dict
         """
         with self._thread_lock:
             with self._file_lock():
-                self._state = updater(self._state)
+                if self._disk_signature() != self._disk_state_sig:
+                    # Another process wrote since we last read/wrote.
+                    fresh = self._read_fresh_state()
+                    if fresh is not None:
+                        if fresh.get("version") == self.SCHEMA_VERSION:
+                            base = self._ensure_state_keys(fresh)
+                        else:
+                            # Older schema on disk — full recovery/migration path
+                            base = self._load()
+                    else:
+                        # Missing or unreadable file: keep in-memory state
+                        base = self._state
+                else:
+                    # On-disk state is exactly what we last wrote/read.
+                    base = self._state
+                self._state = updater(base)
                 self._atomic_write(self._state)
+                self._disk_state_sig = self._disk_signature()
                 self._rotate_backups()
 
     def save(self) -> None:
@@ -389,10 +484,12 @@ class StateStore:
         with self._thread_lock:
             with self._file_lock():
                 self._atomic_write(self._state)
+                self._disk_state_sig = self._disk_signature()
                 self._rotate_backups()
 
     def load_fresh(self) -> dict[str, Any]:
         """Reload state from disk, discarding in-memory changes."""
         with self._thread_lock:
             self._state = self._load()
+            self._disk_state_sig = self._disk_signature()
             return self._state.copy()

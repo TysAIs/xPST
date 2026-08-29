@@ -51,39 +51,47 @@ class TestInvalidInputs:
     """Test config loading with malformed/invalid data."""
 
     def test_malformed_yaml_syntax_error(self, tmp_path):
-        """Malformed YAML with broken syntax should raise an error."""
+        """Malformed YAML with broken syntax should raise a clear error and
+        back up the original file (data-loss prevention contract)."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("accounts:\n  tiktok:\n    username: [broken\n  missing_bracket")
 
-        # yaml.safe_load should raise on malformed YAML
-        with pytest.raises(yaml.YAMLError):
+        # Raised as ValueError (with the original backed up) instead of a raw
+        # yaml.YAMLError so callers/UX get an actionable message.
+        with pytest.raises(ValueError, match="could not be parsed"):
             XPSTConfig.load(str(config_file))
+        assert config_file.exists()  # original untouched
+        assert list((tmp_path / "backups").glob("config.yaml.corrupt_*"))
 
     def test_yaml_with_tabs(self, tmp_path):
         """YAML with tabs instead of spaces."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("accounts:\n\ttiktok:\n\t\tusername: test")
 
-        # Tab indentation is invalid in YAML - should raise
-        with pytest.raises(yaml.YAMLError):
+        # Tab indentation is invalid in YAML - clear error + backup
+        with pytest.raises(ValueError, match="could not be parsed"):
             XPSTConfig.load(str(config_file))
 
     def test_empty_yaml_file(self, tmp_path):
-        """Empty YAML file should load with defaults."""
+        """An empty config file must NOT be silently treated as defaults:
+        it may be the result of a disk-full crash that destroyed the user's
+        config. Clear error + backup instead (data-loss prevention)."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("")
 
-        config = XPSTConfig.load(str(config_file))
-        assert config.tiktok.username == ""
-        assert config.youtube.enabled is True
+        with pytest.raises(ValueError, match="empty or invalid"):
+            XPSTConfig.load(str(config_file))
+        assert config_file.exists()
+        assert list((tmp_path / "backups").glob("config.yaml.corrupt_*"))
 
     def test_yaml_with_only_comments(self, tmp_path):
-        """YAML with only comments should load with defaults."""
+        """YAML with only comments parses to None -> clear error + backup
+        (same rationale as the empty file)."""
         config_file = tmp_path / "config.yaml"
         config_file.write_text("# This is a comment\n# Another comment\n")
 
-        config = XPSTConfig.load(str(config_file))
-        assert config.tiktok.username == ""
+        with pytest.raises(ValueError, match="empty or invalid"):
+            XPSTConfig.load(str(config_file))
 
     def test_yaml_null_values(self, tmp_path):
         """YAML with null values should be handled gracefully."""
@@ -148,9 +156,11 @@ class TestInvalidInputs:
         config_file = tmp_path / "config.yaml"
         config_file.write_bytes(b"\x00\x01\x02\xff\xfe\xfd\x89PNG\r\n\x1a\n")
 
-        # Should raise when trying to parse binary as YAML
-        with pytest.raises((yaml.YAMLError, UnicodeDecodeError)):
+        # Clear ValueError (original backed up) instead of a raw
+        # UnicodeDecodeError crash — data-loss prevention contract.
+        with pytest.raises(ValueError, match="not valid UTF-8"):
             XPSTConfig.load(str(config_file))
+        assert config_file.exists()
 
     def test_huge_yaml_value(self, tmp_path):
         """YAML with extremely long string value."""
