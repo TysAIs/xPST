@@ -1288,6 +1288,83 @@ class AppController(QObject):
                 "error": str(exc),
             })
 
+    @Slot(str, result=str)
+    def getVideoMetrics(self, video_id: str) -> str:
+        """Drill-down metrics for one video across every platform it hit.
+
+        QA-wave drill-down: resolves the video's per-platform post ids from
+        state, then reads the latest persisted snapshot per post from the
+        AnalyticsStore under config_dir. Pure local reads — no network and
+        no API quota.
+
+        Returns:
+            JSON string:
+            {"available": bool, "video_id": str,
+             "platforms": {platform: {post_id, url, views, likes, comments,
+                                      shares, captured_at, deleted}},
+             "totals": {views, likes, comments, shares},
+             "error": str  (only when available is false)}
+        """
+        try:
+            if self._state is None:
+                return json.dumps({
+                    "available": False,
+                    "error": "StateManager not available",
+                })
+            video = self._state.get_video(video_id)
+            if not video:
+                return json.dumps({
+                    "available": False,
+                    "error": f"Unknown video: {video_id}",
+                })
+
+            posted_to = video.get("posted_to", {}) or {}
+            post_ids = [
+                str((entry or {}).get("id") or "")
+                for entry in posted_to.values()
+                if (entry or {}).get("id")
+            ]
+
+            from xpst.analytics_store import AnalyticsStore
+
+            config_dir = getattr(self._config, "config_dir", None) or get_config_dir()
+            store = AnalyticsStore(Path(config_dir).expanduser() / "analytics.db")
+            rows = store.get_video_metrics(post_ids)
+            by_post = store.get_video_metrics_map(post_ids)
+
+            platforms: dict[str, Any] = {}
+            totals = {"views": 0, "likes": 0, "comments": 0, "shares": 0}
+            for platform_name, entry in posted_to.items():
+                post_id = str((entry or {}).get("id") or "")
+                rows_for_post = by_post.get(post_id) or []
+                metrics = rows_for_post[0] if rows_for_post else {}
+                platforms[platform_name] = {
+                    "post_id": post_id,
+                    "url": (entry or {}).get("url", ""),
+                    "deleted": bool((entry or {}).get("deleted", False)),
+                    "views": metrics.get("views") or 0,
+                    "likes": metrics.get("likes") or 0,
+                    "comments": metrics.get("comments") or 0,
+                    "shares": metrics.get("shares") or 0,
+                    "captured_at": metrics.get("captured_at"),
+                }
+                for key in totals:
+                    totals[key] += platforms[platform_name][key]
+
+            return json.dumps({
+                "available": True,
+                "video_id": video_id,
+                "snapshot_post_ids": len(rows),
+                "platforms": platforms,
+                "totals": totals,
+            }, default=str)
+        except Exception as exc:
+            logger.error("getVideoMetrics error: %s", exc)
+            return json.dumps({
+                "available": False,
+                "error": str(exc),
+            })
+
     @Slot()
     def runPost(self) -> None:
         """Trigger a cross-post cycle via CrossPostEngine.

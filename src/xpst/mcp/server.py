@@ -544,6 +544,28 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="xpst_disconnect",
+        description=(
+            "Disconnect a platform: remove its stored account credentials "
+            "(tokens, cookies, session files) and set "
+            "accounts.<platform>.enabled=false. Never touches posted content "
+            "or local state."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
+                "platform": {
+                    "type": "string",
+                    "description": "Platform to disconnect",
+                    "enum": ["tiktok", "youtube", "x", "instagram", "threads", "messenger"],
+                },
+            },
+            "required": ["platform"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_delete",
         description="Delete a post record from state",
         inputSchema={
@@ -720,7 +742,7 @@ TOOLS: list[Tool] = [
 # surface that any connected agent can drive.
 _MUTATING_TOOLS = {
     "xpst_run", "xpst_post", "xpst_backfill", "xpst_delete",
-    "xpst_schedule_add",
+    "xpst_schedule_add", "xpst_disconnect",
     "messenger_send", "messenger_set_rules", "xpst_messenger_check_comments",
     "kb_add", "kb_organize",
 }
@@ -806,11 +828,11 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             engine = server.get_engine()
             result = await _handle_backfill(engine, arguments)
         elif name == "xpst_analytics":
-            result = await _handle_analytics(arguments)
+            result = await _handle_analytics(server.config, arguments)
         elif name == "xpst_cross_post_analytics":
-            result = await _handle_cross_post_analytics()
+            result = await _handle_cross_post_analytics(server.config)
         elif name == "xpst_followers":
-            result = await _handle_followers()
+            result = await _handle_followers(server.config)
         elif name == "xpst_best_time":
             result = await _handle_best_time(arguments)
         elif name == "xpst_security_audit":
@@ -834,6 +856,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         elif name == "xpst_delete":
             engine = server.get_engine()
             result = await _handle_delete(engine, arguments)
+        elif name == "xpst_disconnect":
+            result = await _handle_disconnect(server.config, arguments)
         elif name == "messenger_send":
             result = await _handle_messenger_send(server.config, arguments)
         elif name == "messenger_set_rules":
@@ -1071,18 +1095,24 @@ async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) ->
     )
 
 
-async def _handle_analytics(arguments: dict[str, Any]) -> CallToolResult:
+async def _handle_analytics(
+    config: XPSTConfig,
+    arguments: dict[str, Any],
+) -> CallToolResult:
     """Handle xpst_analytics (G27): expose the same numbers the UI shows.
 
     Reads the persisted snapshot store by default; live=true runs a real
     collection first (network, may take seconds and consume API quota).
+    The snapshot store is resolved from ``config.config_dir`` (QA-wave fix:
+    handlers must never read from a hardcoded home path when the config
+    points elsewhere).
     """
     from xpst.analytics import AnalyticsCollector
 
     platform = arguments.get("platform")
     live = bool(arguments.get("live", False))
 
-    collector = AnalyticsCollector()
+    collector = AnalyticsCollector(config_dir=config.config_dir)
     if live:
         await collector.collect_all()
 
@@ -1108,17 +1138,17 @@ async def _handle_analytics(arguments: dict[str, Any]) -> CallToolResult:
     )
 
 
-async def _handle_cross_post_analytics() -> CallToolResult:
+async def _handle_cross_post_analytics(config: XPSTConfig) -> CallToolResult:
     """Handle xpst_cross_post_analytics (B1).
 
     Returns cross-post group correlation data: one video posted to multiple
     platforms aggregated into a single entry with per-platform breakdown,
     totals, engagement rate, and tier. Reads the local snapshot store only
-    (offline, fast).
+    (offline, fast), resolved from ``config.config_dir`` (QA-wave fix).
     """
     from xpst.dashboard.analytics import AnalyticsCollector
 
-    collector = AnalyticsCollector()
+    collector = AnalyticsCollector(config.config_dir)
     groups = collector.get_cross_post_analytics()
     payload = {
         "cross_post_groups": groups,
@@ -1129,15 +1159,18 @@ async def _handle_cross_post_analytics() -> CallToolResult:
     )
 
 
-async def _handle_followers() -> CallToolResult:
+async def _handle_followers(config: XPSTConfig) -> CallToolResult:
     """Handle xpst_followers (B2).
 
     Returns follower counts per platform from stored snapshots, with
-    growth history (last 7 snapshots per platform).
+    growth history (last 7 snapshots per platform). The store lives under
+    ``config.config_dir`` (QA-wave fix: never a hardcoded home path).
     """
+    from pathlib import Path
+
     from xpst.analytics_store import AnalyticsStore
 
-    store = AnalyticsStore()
+    store = AnalyticsStore(Path(config.config_dir).expanduser() / "analytics.db")
     latest = store.latest_followers()
 
     platforms_data = []
@@ -1552,8 +1585,22 @@ async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallT
     platform = args.get("platform", "all")
 
     video = engine.state.get_video(video_id)
+    if video is None:
+        # QA-wave fix: an unknown video is a caller error, not a success.
+        # Return an explicit failure payload so agents can distinguish
+        # "record removed" from "record never existed".
+        result = {
+            "video_id": video_id,
+            "platform": platform,
+            "removed": [],
+            "success": False,
+            "error": f"Unknown video: {video_id} (not found in state)",
+        }
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+        )
     platforms = (
-        list((video or {}).get("posted_to", {}).keys())
+        list(video.get("posted_to", {}).keys())
         if platform == "all"
         else [platform]
     )
@@ -1569,6 +1616,22 @@ async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallT
         "success": True,
     }
 
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+    )
+
+
+async def _handle_disconnect(config: XPSTConfig, args: dict[str, Any]) -> CallToolResult:
+    """Handle xpst_disconnect tool.
+
+    Removes the platform's stored account credentials and disables it in
+    config (delegates to :func:`xpst.connect.disconnect_platform`). A
+    state-only/local operation — posted content is never touched.
+    """
+    from xpst.connect import disconnect_platform
+
+    platform = args["platform"]
+    result = disconnect_platform(platform, config)
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
     )
