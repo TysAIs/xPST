@@ -67,17 +67,21 @@ def check_yt_dlp() -> str | None:
     yt-dlp is detected even when xPST is launched without the venv's
     ``bin/`` on PATH (e.g. from the Finder/desktop app).
     """
-    from .utils.platform import get_ytdlp_fallback_path
 
-    candidates = ["yt-dlp"]  # ambient PATH lookup
+    candidates: list[str] = []
+    env_override = os.environ.get("XPST_YTDLP_PATH")
+    if env_override:
+        candidates.append(env_override)  # Tauri-bundled resource, try first
+    candidates.append("yt-dlp")  # ambient PATH lookup
     venv_bin = os.environ.get("VIRTUAL_ENV")
     if venv_bin:
         candidates.append(str(Path(venv_bin) / "bin" / "yt-dlp"))
         if sys.platform == "win32":
             candidates.append(str(Path(venv_bin) / "Scripts" / "yt-dlp.exe"))
+    from .utils.platform import get_ytdlp_fallback_path
+
     fallback = get_ytdlp_fallback_path()
     candidates.append(str(fallback))
-
     for binary in dict.fromkeys(candidates):  # dedupe, keep order
         try:
             result = subprocess.run(
