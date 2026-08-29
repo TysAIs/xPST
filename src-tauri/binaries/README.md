@@ -18,3 +18,18 @@ requires a single executable file, and PyInstaller onefile self-extracts
 ~45 MB on **every** launch (~1.3 s), blowing the boot-to-ready ≤ 1 s gate.
 Onedir has no extraction step; the tradeoff is manual process management,
 which the shell owns (env, health poll, kill on exit/panic/signal).
+
+## Media binaries: `ffmpeg/` and `ytdlp/`
+
+Static `ffmpeg` + `ffprobe` and the `yt-dlp` zipapp are also shipped here
+as bundle resources so users never install anything. Like `engine/`, these
+are build artifacts and NOT committed — fetch them before building:
+
+```bash
+scripts/fetch-media-binaries.sh            # auto-detects the host platform
+```
+
+The Tauri shell sets `XPST_FFMPEG_PATH`, `XPST_FFPROBE_PATH`, and
+`XPST_YTDLP_PATH` on the spawned engine process, pointing at the resource
+binaries (honored by `xpst.utils.platform.resolve_ffmpeg_path`,
+`resolve_ffprobe_path`, and `resolve_ytdlp_path`).
