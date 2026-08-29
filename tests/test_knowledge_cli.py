@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -111,7 +112,10 @@ def test_kb_organize_then_areas(tmp_path, monkeypatch):
 
     org = runner.invoke(main, ["kb", "organize"])
     assert org.exit_code == 0, org.output
-    assert "Organized" in org.output
+    # kb commands now honor the CLI-wide auto-JSON contract on pipes:
+    # piped output is parseable JSON.
+    org_data = json.loads(org.output)
+    assert org_data["nuggets"] == 1
 
     areas = runner.invoke(main, ["kb", "areas"])
     assert areas.exit_code == 0, areas.output
@@ -123,7 +127,8 @@ def test_kb_areas_empty_is_friendly(tmp_path, monkeypatch):
     runner = CliRunner()
     out = runner.invoke(main, ["kb", "areas"])
     assert out.exit_code == 0, out.output
-    assert "No areas" in out.output
+    # Piped (auto-JSON): empty state is machine-readable, not prose.
+    assert json.loads(out.output)["areas"] == []
 
 
 def test_kb_course_emits_ordered_cited_outline(tmp_path, monkeypatch):
@@ -142,13 +147,16 @@ def test_kb_course_emits_ordered_cited_outline(tmp_path, monkeypatch):
 
     course = runner.invoke(main, ["kb", "course"])
     assert course.exit_code == 0, course.output
-    assert "cli idea" in course.output
-    # citation rendered alongside the point
-    assert "@" in course.output
+    course_data = json.loads(course.output)
+    nuggets = [n for a in course_data["areas"] for n in a["nuggets"]]
+    assert any("cli idea" in n["point"] for n in nuggets)
+    # citation data carried alongside the point
+    assert any(n["citation"] and n["timestamp_end"] > n["timestamp_start"] for n in nuggets)
 
 
 def test_kb_course_empty_is_friendly(tmp_path, monkeypatch):
     monkeypatch.setenv("XPST_HOME", str(tmp_path))
     out = CliRunner().invoke(main, ["kb", "course"])
     assert out.exit_code == 0, out.output
-    assert "Nothing to assemble" in out.output
+    # Piped (auto-JSON): empty course state is machine-readable, not prose.
+    assert json.loads(out.output)["areas"] == []

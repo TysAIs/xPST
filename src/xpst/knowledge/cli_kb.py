@@ -3,10 +3,21 @@ core CLI can attach this group without loading faster-whisper / fastembed /
 lancedb."""
 from __future__ import annotations
 
+import json as _json
+
 import click
 from rich.console import Console
 
 console = Console()
+
+
+def _json_flag(ctx: click.Context, value: bool) -> bool:
+    """Honor the explicit flag plus the group-level auto-JSON (piped stdout)."""
+    return value or bool(ctx.obj and ctx.obj.get("json", False))
+
+
+def _emit_json(data: object) -> None:
+    click.echo(_json.dumps(data, default=str, ensure_ascii=False))
 
 
 def _missing_extra(exc: Exception) -> click.ClickException:
@@ -46,7 +57,9 @@ def kb() -> None:
 @kb.command("add")
 @click.argument("source")
 @click.option("--workspace", "-w", default="default", help="Workspace name")
-def kb_add(source: str, workspace: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@click.pass_context
+def kb_add(ctx: click.Context, source: str, workspace: str, as_json: bool) -> None:
     """Ingest a local file or URL into the knowledge base."""
     from xpst.knowledge.config import KnowledgeConfig
     from xpst.knowledge.ingest.pipeline import ingest
@@ -67,7 +80,15 @@ def kb_add(source: str, workspace: str) -> None:
         llm_client=_build_llm_client(config),
         workspace=ws,
     )
-    if result.skipped:
+    if as_json:
+        _emit_json({
+            "ok": not result.reason and not result.skipped,
+            "skipped": bool(result.skipped),
+            "reason": result.reason or None,
+            "nuggets": len(result.nuggets),
+            "source": source,
+        })
+    elif result.skipped:
         console.print(f"[yellow]Skipped[/yellow] {source} ({result.reason})")
     elif result.reason:
         console.print(f"[red]Failed[/red] {source}: {result.reason}")
@@ -77,6 +98,8 @@ def kb_add(source: str, workspace: str) -> None:
             f"[green]Ingested[/green] {len(result.nuggets)} nuggets "
             f"from {source}"
         )
+    if result.reason and not result.skipped:
+        raise SystemExit(1)
 
 
 @kb.command("query")
@@ -84,15 +107,14 @@ def kb_add(source: str, workspace: str) -> None:
 @click.option("--workspace", "-w", default="default", help="Workspace name")
 @click.option("--limit", "-k", "limit", default=8, help="Max results")
 @click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
-def kb_query(text: str, workspace: str, limit: int, as_json: bool) -> None:
+@click.pass_context
+def kb_query(ctx: click.Context, text: str, workspace: str, limit: int, as_json: bool) -> None:
     """Semantic search over your content (substring fallback, cited)."""
-    import json as _json
-
     from xpst.knowledge.query import query_nuggets
 
     result = query_nuggets(text, workspace=workspace, k=limit)
-    if as_json:
-        console.print_json(_json.dumps(result))
+    if _json_flag(ctx, as_json):
+        _emit_json(result)
         return
     if not result["nuggets"]:
         console.print("[yellow]No matching nuggets.[/yellow]")
@@ -109,7 +131,9 @@ def kb_query(text: str, workspace: str, limit: int, as_json: bool) -> None:
 @kb.command("reembed")
 @click.option("--workspace", "-w", default="default", help="Workspace name")
 @click.option("--force", is_flag=True, help="Re-embed even if the model matches")
-def kb_reembed(workspace: str, force: bool) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@click.pass_context
+def kb_reembed(ctx: click.Context, workspace: str, force: bool, as_json: bool) -> None:
     """Re-embed all nuggets with the configured embedding model (G34).
 
     Use after changing XPST_KB_EMBED_MODEL; the manifest records which
@@ -125,6 +149,9 @@ def kb_reembed(workspace: str, force: bool) -> None:
     store = open_default_store(ws)
     nuggets = list(store.all_nuggets())
     if not nuggets:
+        if _json_flag(ctx, as_json):
+            _emit_json({"ok": True, "reembedded": 0, "model": None})
+            return
         console.print("[yellow]No nuggets to re-embed.[/yellow]")
         return
     config = KnowledgeConfig.from_env()
@@ -141,12 +168,18 @@ def kb_reembed(workspace: str, force: bool) -> None:
     manifest = Manifest(ws.manifest_path)
     manifest.record("reembed:latest", source=None,
                     embed_model=config.embed_model, embed_dim=embedder.dim)
+    if _json_flag(ctx, as_json):
+        _emit_json({"ok": True, "reembedded": len(nuggets),
+                    "model": config.embed_model, "dim": embedder.dim})
+        return
     console.print(f"[green]Re-embedded[/green] {len(nuggets)} nuggets with {config.embed_model}")
 
 
 @kb.command("migrate-store")
 @click.option("--workspace", "-w", default="default", help="Workspace name")
-def kb_migrate_store(workspace: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@click.pass_context
+def kb_migrate_store(ctx: click.Context, workspace: str, as_json: bool) -> None:
     """Copy the JSON store into LanceDB (requires the knowledge extra).
 
     JSON files are left in place as a backup; queries prefer LanceDB once
@@ -157,12 +190,19 @@ def kb_migrate_store(workspace: str) -> None:
 
     ws = Workspace.resolve(workspace, create=False)
     if not ws.nuggets_path.exists():
+        if _json_flag(ctx, as_json):
+            _emit_json({"ok": True, "migrated": 0, "reason": "no JSON store found"})
+            return
         console.print("[yellow]No JSON store to migrate.[/yellow]")
         return
     try:
         from xpst.knowledge.store.vector_lancedb import LanceDBStore
         lance = LanceDBStore(ws.lancedb_path)
     except ImportError:
+        if _json_flag(ctx, as_json):
+            _emit_json({"ok": False, "error": "lancedb is not installed",
+                        "hint": "uv sync --extra knowledge"})
+            raise SystemExit(1) from None
         console.print("[red]lancedb is not installed[/red] — `uv sync --extra knowledge`")
         raise SystemExit(1) from None
     source = JsonKnowledgeStore(ws.nuggets_path)
@@ -171,6 +211,10 @@ def kb_migrate_store(workspace: str) -> None:
         lance.add_nugget(nugget)
     for area in source.areas():
         lance.upsert_area(area)
+    if _json_flag(ctx, as_json):
+        _emit_json({"ok": True, "migrated": len(nuggets),
+                    "areas": len(source.areas())})
+        return
     console.print(
         f"[green]Migrated[/green] {len(nuggets)} nuggets + {len(source.areas())} areas to LanceDB "
         f"(JSON left as backup at {ws.nuggets_path.name})"
@@ -181,7 +225,9 @@ def kb_migrate_store(workspace: str) -> None:
 @click.option("--workspace", "-w", default="default", help="Workspace name")
 @click.option("--threshold", "-t", default=None, type=float,
               help="Cosine similarity threshold for clustering/routing")
-def kb_organize(workspace: str, threshold: float | None) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@click.pass_context
+def kb_organize(ctx: click.Context, workspace: str, threshold: float | None, as_json: bool) -> None:
     """Discover areas, tag difficulty, and assign nuggets (Phase 3)."""
     from xpst.knowledge.config import KnowledgeConfig
     from xpst.knowledge.organize.cluster import DEFAULT_CLUSTER_THRESHOLD
@@ -194,6 +240,10 @@ def kb_organize(workspace: str, threshold: float | None) -> None:
     store = JsonKnowledgeStore(ws.nuggets_path)
     thr = threshold if threshold is not None else DEFAULT_CLUSTER_THRESHOLD
     result = organize_store(store, _build_llm_client(config), threshold=thr)
+    if _json_flag(ctx, as_json):
+        _emit_json({"ok": True, "nuggets": result.nugget_count,
+                    "areas": result.area_count, "assigned": result.assigned})
+        return
     console.print(
         f"[green]Organized[/green] {result.nugget_count} nuggets into "
         f"{result.area_count} areas ({result.assigned} assigned)"
@@ -202,7 +252,9 @@ def kb_organize(workspace: str, threshold: float | None) -> None:
 
 @kb.command("areas")
 @click.option("--workspace", "-w", default="default", help="Workspace name")
-def kb_areas(workspace: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@click.pass_context
+def kb_areas(ctx: click.Context, workspace: str, as_json: bool) -> None:
     """List discovered areas in course order (beginner -> advanced)."""
     from xpst.knowledge.organize.difficulty import order_areas
     from xpst.knowledge.store.json_store import JsonKnowledgeStore
@@ -211,6 +263,16 @@ def kb_areas(workspace: str) -> None:
     ws = Workspace.resolve(workspace)
     store = JsonKnowledgeStore(ws.nuggets_path)
     areas = order_areas(store.areas())
+    if _json_flag(ctx, as_json):
+        _emit_json({"areas": [
+            {
+                "label": a.label,
+                "order_index": a.order_index,
+                "nuggets": len(a.nugget_ids),
+                "difficulty": getattr(a, "difficulty", None),
+            } for a in areas
+        ]})
+        return
     if not areas:
         console.print("[yellow]No areas yet. Run 'xpst kb organize'.[/yellow]")
         return
@@ -225,7 +287,9 @@ def kb_areas(workspace: str) -> None:
 @click.option("--workspace", "-w", default="default", help="Workspace name")
 @click.option("--area", "-a", "area_id", default=None,
               help="Assemble only this area (by id)")
-def kb_course(workspace: str, area_id: str | None) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@click.pass_context
+def kb_course(ctx: click.Context, workspace: str, area_id: str | None, as_json: bool) -> None:
     """Emit the organized outline (areas -> ordered, cited nuggets) for an AI to
     write a course from. Pre-ordered beginner -> advanced."""
     from xpst.knowledge.course.assemble import assemble_course
@@ -235,6 +299,23 @@ def kb_course(workspace: str, area_id: str | None) -> None:
     ws = Workspace.resolve(workspace)
     store = JsonKnowledgeStore(ws.nuggets_path)
     course = assemble_course(store, workspace=ws.name, area_id=area_id)
+    if _json_flag(ctx, as_json):
+        _emit_json({"workspace": ws.name, "areas": [
+            {
+                "label": a.label,
+                "order": a.order,
+                "nuggets": [
+                    {
+                        "point": n.point,
+                        "difficulty": n.difficulty,
+                        "citation": n.citation,
+                        "timestamp_start": n.timestamp_start,
+                        "timestamp_end": n.timestamp_end,
+                    } for n in a.nuggets
+                ],
+            } for a in course.areas
+        ]})
+        return
     if not course.areas:
         console.print(
             "[yellow]Nothing to assemble. Ingest with 'xpst kb add' and "
@@ -256,7 +337,9 @@ def kb_course(workspace: str, area_id: str | None) -> None:
 
 @kb.command("doctor")
 @click.option("--workspace", "-w", default="default", help="Workspace name")
-def kb_doctor(workspace: str) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Machine-readable output")
+@click.pass_context
+def kb_doctor(ctx: click.Context, workspace: str, as_json: bool) -> None:
     """Health-check the knowledge base (read-only): deps, store integrity,
     queue state, embedding consistency, orphaned areas/nuggets."""
     from xpst.knowledge.doctor import (
@@ -269,6 +352,19 @@ def kb_doctor(workspace: str) -> None:
 
     ws = Workspace.resolve(workspace)
     report = diagnose(ws)
+    if _json_flag(ctx, as_json):
+        _emit_json({
+            "ok": report.ok,
+            "error_count": report.error_count,
+            "warning_count": report.warning_count,
+            "findings": [
+                {"severity": f.severity, "check": f.check, "message": f.message}
+                for f in report.findings
+            ],
+        })
+        if not report.ok:
+            raise SystemExit(1)
+        return
     style = {
         SEVERITY_OK: "green",
         SEVERITY_WARNING: "yellow",

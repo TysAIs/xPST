@@ -60,6 +60,37 @@ def get_ffmpeg_name() -> str:
     return "ffmpeg"
 
 
+def stdin_is_interactive() -> bool:
+    """True only when stdin is a real interactive console.
+
+    ``sys.stdin.isatty()`` alone is not sufficient on Windows: NUL and
+    DEVNULL report ``isatty() == True`` there (``GetFileType`` returns
+    ``FILE_TYPE_CHAR``), so agent automation with closed stdin would slip
+    past interactive gates and crash on the first prompt (EOFError churn).
+    ``GetConsoleMode`` succeeds only for a real console handle, which
+    cleanly separates a terminal from NUL/pipes on win32. On POSIX,
+    ``isatty()`` is already authoritative.
+    """
+    try:
+        if not sys.stdin or sys.stdin.closed or not sys.stdin.isatty():
+            return False
+    except (OSError, ValueError, AttributeError):
+        return False
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            import msvcrt
+            from ctypes import wintypes
+
+            handle = msvcrt.get_osfhandle(0)
+            mode = wintypes.DWORD()
+            return bool(ctypes.windll.kernel32.GetConsoleMode(handle, ctypes.byref(mode)))
+        except Exception:
+            # Anything odd (closed fd, exotic stdin) → treat as non-interactive
+            return False
+    return True
+
+
 def get_ffprobe_name() -> str:
     """Get the platform-specific ffprobe binary name."""
     if sys.platform == "win32":
