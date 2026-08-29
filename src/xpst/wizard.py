@@ -407,10 +407,16 @@ def build_checklist(config: XPSTConfig) -> list[dict]:
     results = {}
     try:
         import asyncio
+        import sys as _sys
+        from contextlib import redirect_stdout
 
         from xpst.connect import test_connections
 
-        results = asyncio.run(test_connections(config))
+        # test_connections prints human-facing Rich progress to stdout.
+        # Agent mode consumes this function's return value as pure data, so
+        # keep stdout parseable: route library chatter to stderr.
+        with redirect_stdout(_sys.stderr):
+            results = asyncio.run(test_connections(config))
     except Exception as e:  # pragma: no cover - defensive
         logger.debug("test_connections failed: %s", e)
 
@@ -448,7 +454,11 @@ class WizardNonInteractiveError(Exception):
 
 
 def _interactive() -> bool:
-    return sys.stdin.isatty()
+    # stdin_is_interactive() (not bare isatty): NUL/DEVNULL reports
+    # isatty() == True on Windows and would bypass the non-interactive guard.
+    from xpst.utils.platform import stdin_is_interactive
+
+    return stdin_is_interactive()
 
 
 def _safe_input(prompt: str) -> str:
