@@ -186,7 +186,7 @@ def test_api_settings_masks_secrets(tmp_path):
 
 def test_string_index_fallback_without_ui_dist(tmp_path, monkeypatch):
     """Without ui/dist the server falls back to the string index HTML."""
-    monkeypatch.delenv("XPST_UI_DIST", raising=False)
+    monkeypatch.setenv("XPST_UI_DIST", str(tmp_path / "no-ui-build"))
     client = _client_from_dir(_make_config(tmp_path))
     resp = client.get("/")
     assert resp.status_code == 200
