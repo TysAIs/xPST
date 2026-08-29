@@ -131,7 +131,9 @@ class ServeSupervisor:
         counts = {"due": 0, "posted": 0, "failed": 0}
         manager = ScheduleManager(self.config.config_dir)
 
-        due = manager.get_due()
+        # Claim due entries atomically so a concurrent `xpst schedule run`
+        # (cron) cannot double-post the same entry.
+        due = manager.claim_due()
         if not due:
             return counts
         counts["due"] = len(due)

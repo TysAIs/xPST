@@ -12,7 +12,7 @@ Handles:
 """
 
 import asyncio
-import time
+import threading
 from datetime import datetime
 
 from xpst.config import XPSTConfig
@@ -44,6 +44,7 @@ class Scheduler:
         self.engine = engine
         self.config = config
         self._running = False
+        self._stop_event = threading.Event()
         self._last_wake_check: datetime | None = None
         self._last_results: list = []
 
@@ -79,20 +80,26 @@ class Scheduler:
                 self.engine.state.update_last_wake_check()
                 self.engine.state.save()
 
-                # Wait for next check
+                # Wait for next check. Event.wait (not time.sleep) so that
+                # stop() interrupts the wait immediately instead of after a
+                # full interval.
                 logger.debug(f"Next check in {check_interval}s")
-                time.sleep(check_interval)
+                if self._stop_event.wait(check_interval):
+                    logger.info("Scheduler stop requested during wait")
+                    break
 
             except KeyboardInterrupt:
                 logger.info("Scheduler stopped by user")
                 break
             except Exception as e:
                 logger.error(f"Error in scheduler loop: {e}")
-                time.sleep(60)  # Wait before retry
+                if self._stop_event.wait(60):  # Wait before retry
+                    break
 
     def stop(self) -> None:
-        """Stop the scheduler"""
+        """Stop the scheduler (interrupts a pending wait immediately)."""
         self._running = False
+        self._stop_event.set()
 
     def _needs_catch_up(self) -> bool:
         """Check if a catch-up run is needed due to sleep/wake.
