@@ -29,7 +29,9 @@
     "category": "DeveloperTool",
     "shortDescription": "Cross-posting suite for short-form video",
     "resources": [
-      "binaries/engine/"
+      "binaries/engine/",
+      "binaries/ffmpeg/",
+      "binaries/ytdlp/"
     ],
     "createUpdaterArtifacts": false,
     "icon": [
