@@ -22,6 +22,7 @@ import json
 import stat
 import time
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlencode
 
 import httpx
@@ -1560,3 +1561,115 @@ def run_connect(platforms: list[str] | None = None, test_only: bool = False) -> 
         console.print()
 
     return len(failed) == 0
+
+
+# ── Disconnect ────────────────────────────────────────────────────────────────
+
+# CredentialStore keys per platform (see connect_* writers above). Only the
+# ACCOUNT credentials are removed — app-level artifacts such as
+# youtube_client_secrets.json are kept so reconnecting doesn't require
+# re-downloading them.
+_PLATFORM_CRED_KEYS: dict[str, tuple[str, ...]] = {
+    "youtube": ("youtube_token",),
+    "instagram": ("instagram_graph_token", "instagram_graph_user_id"),
+    "x": ("x_cookies",),
+    "tiktok": ("tiktok_client_secret", "tiktok_access_token", "tiktok_refresh_token"),
+    "threads": ("threads_access_token", "threads_user_id"),
+    "messenger": ("messenger_page_token", "messenger_app_secret"),
+}
+
+# Raw credential FILES per platform (written alongside the CredentialStore).
+_PLATFORM_CRED_FILES: dict[str, tuple[str, ...]] = {
+    "youtube": ("youtube_token.json",),
+    "instagram": ("instagram_session.json",),
+    "x": ("x_cookies.json",),
+}
+
+
+def disconnect_platform(
+    platform: str,
+    config: XPSTConfig | None = None,
+) -> dict[str, Any]:
+    """Disconnect a platform: remove stored credentials and disable it.
+
+    QA-wave contract: disconnect is the inverse of connect. It removes the
+    platform's stored account credentials (CredentialStore keys + raw
+    session/token files + ``sessions/`` artifacts), flips
+    ``accounts.<platform>.enabled`` to False, and persists the config. It
+    never touches posted content or local state.
+
+    Args:
+        platform: One of tiktok, youtube, x, instagram, threads, messenger.
+        config: Optional pre-loaded config (loaded from disk when omitted).
+
+    Returns:
+        dict with ``success``, ``platform``, ``removed`` (list of removed
+        artifact names), and ``disabled`` (config flag flipped).
+    """
+    if platform not in _PLATFORM_CRED_KEYS:
+        return {
+            "success": False,
+            "platform": platform,
+            "removed": [],
+            "disabled": False,
+            "error": f"Unknown platform: {platform}",
+        }
+
+    if config is None:
+        config = XPSTConfig.load()
+    if config is None:  # pragma: no cover - defensive: load() contract
+        raise RuntimeError("XPSTConfig.load() returned None")
+
+    removed: list[str] = []
+
+    cred_store = CredentialStore(config.config_dir)
+    for key in _PLATFORM_CRED_KEYS[platform]:
+        if cred_store.retrieve(key) is not None:
+            if cred_store.delete(key):
+                removed.append(key)
+
+    creds_dir = Path(config.config_dir).expanduser() / CREDS_DIR_NAME
+    for name in _PLATFORM_CRED_FILES.get(platform, ()):
+        path = creds_dir / name
+        if path.exists():
+            try:
+                path.unlink()
+                removed.append(name)
+            except OSError as exc:
+                logger.warning("disconnect: could not remove %s: %s", path, exc)
+
+    # Session artifacts written by SessionManager (cookie jars, token
+    # refresh caches) under <config_dir>/sessions/.
+    sessions_dir = Path(config.config_dir).expanduser() / "sessions"
+    if sessions_dir.is_dir():
+        for path in sessions_dir.glob(f"*{platform}*"):
+            try:
+                path.unlink()
+                removed.append(f"sessions/{path.name}")
+            except OSError as exc:
+                logger.warning("disconnect: could not remove %s: %s", path, exc)
+
+    # Disable the platform in config and persist.
+    disabled = False
+    accounts = getattr(config, "accounts", None)
+    account = getattr(accounts, platform, None) if accounts is not None else None
+    if account is not None and getattr(account, "enabled", False):
+        account.enabled = False
+        disabled = True
+    elif account is None:
+        # Fall back to the flat attribute (config.youtube.enabled etc.).
+        section = getattr(config, platform, None)
+        if section is not None and getattr(section, "enabled", False):
+            section.enabled = False
+            disabled = True
+    try:
+        config.save()
+    except Exception as exc:  # pragma: no cover - disk-failure path
+        logger.error("disconnect: config.save() failed: %s", exc)
+
+    return {
+        "success": True,
+        "platform": platform,
+        "removed": removed,
+        "disabled": disabled,
+    }
