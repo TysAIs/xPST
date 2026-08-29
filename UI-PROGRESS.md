@@ -17,9 +17,18 @@ tests, PR + green CI. Basis: ~/xPST-work/ui-assess/ASSESSMENT.md (decision (b)).
       - **AnalyticsStore.get_video_metrics_map / get_video_metrics DO NOT exist on this branch** (grep-verified)
         → /api/videos uses lineup + platform_totals rollup; /api/videos/{id} uses lineup filter +
           AnalyticsStore.latest_for_post + history.
-- [ ] src/xpst/dashboard/api.py (APIRouter at /api: summary, videos, videos/{video_id}, health-status, settings)
-- [ ] server.py: router included; ui/dist mounted at / when present, string-index fallback; CSP allows script-src 'self' only when UI mounted
-- [ ] tests/test_web_ui_qa.py (401/200/shape per endpoint) + full suite + ruff check src tests
-- [ ] ui/ scaffold (Vite+Svelte+Tailwind, sidebar shell, tokens.css from QML theme, Inter)
-- [ ] npm run build green; ui/README.md build docs; ui/dist NOT committed
+- [x] src/xpst/dashboard/api.py (APIRouter at /api: summary, videos, videos/{video_id}, health-status, settings)
+- [x] server.py: router included; ui/dist mounted at / when present (XPST_UI_DIST override), string-index fallback; CSP script-src 'self' only when UI mounted
+- [x] tests/test_web_ui_qa.py — 26 tests, all passing (401 anonymous, 401 bad creds, 200+shape, masking, mount/fallback)
+- [x] Existing dashboard tests pinned to no-UI fallback mode (XPST_UI_DIST) so local ui/dist doesn't flip them
+- [x] ui/ scaffold (Vite 7 + Svelte 5 + Tailwind 4, sidebar shell, tokens.css from QML theme, Inter self-hosted)
+- [x] npm run build green (270ms, 47.5KB JS gzip 17.2KB); ui/README.md build docs; ui/dist gitignored + NOT committed
+- [ ] Isolated full-suite + ruff verification (worktree — main clone has concurrent sibling edits)
+- [x] Committed 3ba1565 (only my 21 files; concurrent agents' engine/mcp/state_store edits left uncommitted & untouched)
 - [ ] PR + ci.yml run green
+
+## Concurrency note
+While working, a sibling agent modified engine.py / mcp/server.py / state_store.py /
+test_adversarial_data_loss.py in the SAME clone (mid-write state_store broke one ruff
+scan; compiles fine now). Mitigation: committed only my files, full-suite verified in an
+isolated git worktree at HEAD 3ba1565.
