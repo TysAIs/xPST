@@ -107,9 +107,14 @@ def resolve_ffmpeg_path() -> str | None:
 def resolve_ffprobe_path() -> str | None:
     """Resolve the ffprobe binary path.
 
-    Honors PATH first; when that fails (GUI-launched apps with a minimal
-    PATH) probes the same well-known locations as :func:`resolve_ffmpeg_path`.
+    Honors the ``XPST_FFPROBE_PATH`` override (set by the Tauri shell to the
+    bundled resource binary) first, then PATH; when that fails (GUI-launched
+    apps with a minimal PATH) probes the same well-known locations as
+    :func:`resolve_ffmpeg_path`.
     """
+    env_path = os.environ.get("XPST_FFPROBE_PATH")
+    if env_path and os.path.exists(env_path):
+        return env_path
     found = shutil.which(get_ffprobe_name())
     if found:
         return found
@@ -122,6 +127,30 @@ def resolve_ffprobe_path() -> str | None:
                 return str(cand)
         except OSError:
             continue
+    return None
+
+
+def resolve_ytdlp_path() -> Path | None:
+    """
+    Resolve the yt-dlp CLI binary path.
+
+    Order: ``XPST_YTDLP_PATH`` override (set by the Tauri shell to the
+    bundled resource zipapp), then ``shutil.which``, then the
+    platform-specific fallback probed by :func:`get_ytdlp_fallback_path`.
+    Returns None when no yt-dlp binary can be found.
+    """
+    env_path = os.environ.get("XPST_YTDLP_PATH")
+    if env_path and os.path.exists(env_path):
+        return Path(env_path)
+    found = shutil.which("yt-dlp")
+    if found:
+        return Path(found)
+    fallback = get_ytdlp_fallback_path()
+    try:
+        if fallback.is_file():
+            return fallback
+    except OSError:
+        pass
     return None
 
 

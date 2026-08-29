@@ -62,6 +62,11 @@ jobs:
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
 
+      - name: Fetch media binaries (ffmpeg/ffprobe/yt-dlp)
+        run: |
+          chmod +x scripts/fetch-media-binaries.sh
+          scripts/fetch-media-binaries.sh
+
       - name: Import Apple signing cert (if secrets present)
         if: env.APPLE_CERTIFICATE != null && env.APPLE_CERTIFICATE != ''
         id: cert
@@ -90,13 +95,13 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Verify bundle size gate (≤120MB)
+      - name: Verify bundle size gate (≤200MB)
         run: |
           APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" | head -1)
           SIZE_MB=$(du -sm "$APP_PATH" | cut -f1)
           echo "xPST.app size: ${SIZE_MB}MB"
-          if [ "$SIZE_MB" -gt 120 ]; then
-            echo "::error::Bundle ${SIZE_MB}MB exceeds 120MB gate"
+          if [ "$SIZE_MB" -gt 200 ]; then
+            echo "::error::Bundle ${SIZE_MB}MB exceeds 200MB gate"
             exit 1
           fi
 
