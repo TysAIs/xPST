@@ -16,6 +16,7 @@ Page {
     property string caption: ""
     property string sourcePlatform: ""
     property var postData: ({})
+    property var videoMetrics: ({})  // QA-wave drill-down: per-platform persisted metrics
     property string activeTab: "youtube"
     property bool loading: false
     property bool deleting: false
@@ -42,7 +43,24 @@ Page {
         } catch(e) {
             console.error("DetailPanel loadPostData failed", e)
         }
+        loadVideoMetrics()
         loading = false
+    }
+
+    // ── QA-wave drill-down: per-platform persisted metrics ──────
+    function loadVideoMetrics() {
+        videoMetrics = ({})
+        if (!postId) return
+        try {
+            if (typeof controller !== "undefined" && controller.getVideoMetrics) {
+                var raw = controller.getVideoMetrics(postId)
+                var parsed = JSON.parse(raw)
+                if (parsed && parsed.available === true)
+                    videoMetrics = parsed
+            }
+        } catch(e) {
+            console.error("DetailPanel getVideoMetrics failed", e)
+        }
     }
 
     // ── Platform tabs ────────────────────────────────────────────
@@ -66,6 +84,11 @@ Page {
         if (name === "tiktok") return Icons.play
         if (name === "threads") return "T"
         return Icons.content
+    }
+
+    // QA-wave drill-down: muted styling for posts removed from a platform.
+    function videoMetricsDeleted(deleted) {
+        return deleted === true
     }
 
     function platformDisplayName(name) {
@@ -291,6 +314,90 @@ Page {
                         }
                     }
                     Item { Layout.fillWidth: true }
+                }
+            }
+
+            // ── Performance drill-down (QA wave) ───────────────────
+            // Per-platform persisted metrics for this video, read from the
+            // local AnalyticsStore via controller.getVideoMetrics().
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.leftMargin: theme.pageMargin
+                Layout.rightMargin: theme.pageMargin
+                Layout.preferredHeight: videoMetricsCol.implicitHeight + 32
+                visible: detailPage.videoMetrics.available === true
+                color: theme.surface
+                radius: theme.radiusMd
+                border.color: theme.textMuted
+                border.width: 1
+
+                ColumnLayout {
+                    id: videoMetricsCol
+                    anchors.fill: parent
+                    anchors.margins: theme.spacingLg
+                    spacing: theme.spacingSm
+
+                    Text {
+                        text: "Performance"
+                        font.pixelSize: 15
+                        font.weight: Font.DemiBold
+                        color: theme.textPrimary
+                    }
+
+                    Repeater {
+                        model: {
+                            var out = []
+                            var platforms = detailPage.videoMetrics.platforms || {}
+                            for (var p in platforms) {
+                                var m = platforms[p]
+                                out.push({
+                                    platform: p,
+                                    views: m.views || 0,
+                                    likes: m.likes || 0,
+                                    comments: m.comments || 0,
+                                    shares: m.shares || 0,
+                                    capturedAt: m.captured_at || "",
+                                    deleted: m.deleted === true
+                                })
+                            }
+                            return out
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: theme.spacingMd
+
+                            Text {
+                                text: detailPage.platformDisplayName(modelData.platform)
+                                font.pixelSize: 13
+                                font.weight: Font.DemiBold
+                                color: detailPage.videoMetricsDeleted(modelData.deleted)
+                                       ? theme.textMuted : theme.textPrimary
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: (modelData.views || 0).toLocaleString() + " views  ·  " +
+                                      (modelData.likes || 0).toLocaleString() + " likes  ·  " +
+                                      (modelData.comments || 0).toLocaleString() + " comments  ·  " +
+                                      (modelData.shares || 0).toLocaleString() + " shares" +
+                                      (modelData.deleted ? "  ·  removed" : "")
+                                font.pixelSize: 12
+                                color: theme.textMuted
+                            }
+                        }
+                    }
+
+                    Text {
+                        visible: detailPage.videoMetrics.totals !== undefined
+                        text: {
+                            var t = detailPage.videoMetrics.totals || {}
+                            return "Total: " + (t.views || 0).toLocaleString() + " views  ·  " +
+                                   (t.likes || 0).toLocaleString() + " likes"
+                        }
+                        font.pixelSize: 12
+                        font.weight: Font.DemiBold
+                        color: theme.textSecondary
+                    }
                 }
             }
 
