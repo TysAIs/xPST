@@ -33,7 +33,7 @@ from xpst.utils.progress import create_upload_tracker
 from xpst.utils.quota import QuotaExhaustedError, QuotaManager
 from xpst.utils.retry import STANDARD_RETRY, retry_operation
 from xpst.utils.shutdown import ShutdownHandler
-from xpst.utils.video import VideoProcessor
+from xpst.utils.video import VideoProcessor, _pick_video_stream
 
 logger = get_logger(__name__)
 
@@ -410,6 +410,16 @@ class UploadService:
             logger.error("Upload failed for %s: %s", platform_name, e)
             self.circuit_breakers.record_failure(platform_name, str(e))
             self.state.update_platform_health(platform_name, False)
+            # Record the failure in state — otherwise the video silently
+            # stays "pending" forever (no DLQ entry, no retry visibility).
+            try:
+                self.state.mark_video_failed(
+                    video_id,
+                    platform_name,
+                    str(e)[:500],
+                )
+            except Exception:  # noqa: BLE001 - state write must not mask the upload error
+                logger.debug("Could not record failure state for %s", video_id)
             return UploadResult(
                 success=False,
                 error=f"Upload failed: {str(e)[:200]}",
@@ -644,8 +654,17 @@ class UploadService:
         output_path = video_path.with_stem(f"{video_path.stem}_{platform}")
 
         if output_path.exists() and output_path.stat().st_size > 1000:
-            logger.info("Using cached encoding for %s", platform)
-            return output_path
+            if self._cached_encode_is_valid(output_path, video_path):
+                logger.info("Using cached encoding for %s", platform)
+                return output_path
+            logger.warning(
+                "Discarding stale or corrupt cached encode for %s: %s",
+                platform, output_path,
+            )
+            try:
+                output_path.unlink()
+            except OSError:
+                pass
 
         try:
             return self.video_processor.encode_for_platform(
@@ -661,6 +680,27 @@ class UploadService:
                 except OSError:
                     pass
             raise
+
+    def _cached_encode_is_valid(self, cached_path: Path, source_path: Path) -> bool:
+        """Whether a cached encode may be uploaded as-is.
+
+        Guards against two silent-corruption paths:
+        - a truncated/partial file left by a killed or disk-full encode
+          (was previously accepted on size alone: >1000 bytes);
+        - a stale encode of an older, same-named source (the cache key is
+          the file stem only, so re-exported content would silently get the
+          old video's bytes).
+        """
+        try:
+            info = self.video_processor.get_video_info(cached_path)
+        except Exception:  # noqa: BLE001 - unprobeable cache is a corrupt cache
+            return False
+        if _pick_video_stream(info.get("streams", [])) is None:
+            return False
+        try:
+            return cached_path.stat().st_mtime >= source_path.stat().st_mtime
+        except OSError:
+            return False
 
     @staticmethod
     def _duration_limit(uploader: PlatformUploader) -> int | None:

@@ -29,6 +29,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 from xpst.config import EncodingConfig
@@ -189,6 +190,68 @@ def _rate_to_bps(rate: str) -> int | None:
     return int(float(m.group(1)) * multiplier)
 
 
+# HDR transfer characteristics that must be tone-mapped before an SDR
+# (bt.709 / yuv420p) upload encode. Without this, re-tagging HDR pixel
+# data with SDR color flags silently ships washed-out / crushed colors —
+# the single worst fidelity failure mode for the platforms.
+_HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67"})
+
+# SDR conversion chain applied AFTER the platform scale filter and BEFORE
+# the terminal ``format={pix_fmt}``: linearize → tone-map → bt.709 matrix.
+# Verified working with libzimg (zscale) + tonemap; gated on availability.
+_HDR_TONEMAP_CHAIN = (
+    "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable:desat=0,"
+    "zscale=p=bt709:t=bt709:m=bt709:r=tv"
+)
+
+
+def _pick_video_stream(streams: list[dict]) -> dict | None:
+    """Return the REAL video stream, ignoring cover-art / thumbnail streams.
+
+    Audio files routinely carry an mjpeg/png ``attached_pic`` stream (album
+    art, podcast cover). Treating that as "the video" makes the encoder
+    fabricate a 1-frame video and silently upload a still image.
+    """
+    for stream in streams:
+        if stream.get("codec_type") != "video":
+            continue
+        disposition = stream.get("disposition") or {}
+        if disposition.get("attached_pic"):
+            continue
+        if stream.get("codec_name") in ("mjpeg", "png", "bmp", "gif") and not disposition:
+            # Untagged still-image codecs in a media container are cover art
+            # in practice; real video tracks use h264/hevc/av1/mpeg4/vp9...
+            continue
+        return stream
+    return None
+
+
+def _has_real_video_stream(video_path: Path) -> bool:
+    """Whether the file carries an actual video track (not just cover art)."""
+    try:
+        info = get_video_info_standalone(video_path)
+    except Exception:  # noqa: BLE001 - probe failure → let ffmpeg decide downstream
+        return True
+    return _pick_video_stream(info.get("streams", [])) is not None
+
+
+def get_video_info_standalone(video_path: Path) -> dict:
+    """ffprobe a file without a VideoProcessor instance (shared helper)."""
+    cmd = [
+        resolve_ffprobe_path() or get_ffprobe_name(),
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_format",
+        "-show_streams",
+        str(video_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0:
+        raise RuntimeError(f"ffprobe failed: {result.stderr}")
+    import json
+    return json.loads(result.stdout)
+
+
 def ffmpeg_install_hint() -> str:
     """Return a platform-specific, actionable FFmpeg install instruction."""
     if sys.platform == "darwin":
@@ -299,10 +362,10 @@ class VideoProcessor:
         check_platform = platform if platform in ("youtube", "instagram", "x", "tiktok") else "instagram"
         info = self.get_video_info(video_path)
         streams = info.get("streams", [])
-        video = next((s for s in streams if s.get("codec_type") == "video"), None)
+        video = _pick_video_stream(streams)
         audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
         if video is None:
-            return False, "no video stream"
+            return False, "no real video stream (cover art or audio only)"
 
         if video.get("codec_name") != "h264":
             return False, f"codec {video.get('codec_name')} != h264"
@@ -356,6 +419,15 @@ class VideoProcessor:
         """
         logger.info(f"Encoding for {platform}: {input_path.name}")
 
+        # Fidelity guard: refuse to fabricate video from cover art. Audio
+        # files with an attached_pic thumbnail would otherwise be encoded
+        # into a 1-frame "video" and silently uploaded as a still.
+        if not _has_real_video_stream(input_path):
+            raise ValueError(
+                f"No real video stream in {input_path.name} "
+                "(cover art / audio only) — refusing to fabricate video"
+            )
+
         # Build FFmpeg command based on platform
         if platform == "youtube":
             cmd = self._build_youtube_cmd(input_path, output_path, config)
@@ -368,7 +440,71 @@ class VideoProcessor:
         else:
             raise ValueError(f"Unknown platform: {platform}")
 
-        # Run FFmpeg
+        # HDR fidelity guard: an HDR10/HLG source re-encoded with plain SDR
+        # bt.709 color flags (no tone-map) ships washed-out colors. Inject
+        # the linearize→tonemap→bt.709 chain when the source is HDR and the
+        # ffmpeg build has zscale.
+        if self._source_is_hdr(input_path):
+            if self._has_filter("zscale"):
+                cmd = self._inject_hdr_tonemap(cmd)
+            else:
+                # Fidelity guard: without a tone-mapping filter we would ship
+                # PQ/HLG pixels half-converted (8-bit container, HDR transfer
+                # left intact) — i.e. silently degraded colors. Refuse loudly
+                # instead of uploading known-degraded output.
+                raise RuntimeError(
+                    f"HDR source {input_path.name} cannot be converted safely: "
+                    f"ffmpeg at '{self.ffmpeg_path}' lacks the zscale filter. "
+                    "Install an ffmpeg built with libzimg, or tone-map the "
+                    "source to SDR (bt.709) before uploading. "
+                    "(HDR_TONEMAP_UNAVAILABLE)"
+                )
+
+        # Atomic encode: write to a unique temp sibling and rename into
+        # place. Two concurrent encodes of the same source then never write
+        # the same output path, and a killed/disk-full encode can never
+        # leave a corrupt file at the final (cacheable) path.
+        tmp_output = output_path.with_name(
+            f"{output_path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp{output_path.suffix}"
+        )
+        cmd = [arg if arg != str(output_path) else str(tmp_output) for arg in cmd]
+
+        try:
+            result = self._run_encode_with_fallback(cmd, tmp_output, platform, config, input_path, sw_preset="slow")
+        except Exception:
+            self._safe_unlink(tmp_output)
+            raise
+
+        if result.returncode != 0:
+            logger.error(f"FFmpeg failed for {platform}: {result.stderr[:500]}")
+            self._safe_unlink(tmp_output)
+            raise RuntimeError(f"FFmpeg encoding failed: {result.stderr[:200]}")
+
+        if not tmp_output.exists() or tmp_output.stat().st_size < 1000:
+            self._safe_unlink(tmp_output)
+            raise RuntimeError(f"Encoded video is empty or too small: {tmp_output}")
+
+        os.replace(tmp_output, output_path)
+
+        size_mb = output_path.stat().st_size / 1024 / 1024
+        logger.info(f"Encoded for {platform}: {output_path.name} ({size_mb:.1f} MB)")
+
+        return output_path
+
+    def _run_encode_with_fallback(
+        self,
+        cmd: list[str],
+        output_path: Path,
+        platform: str,
+        config: EncodingConfig,
+        input_path: Path,
+        sw_preset: str = "slow",
+    ) -> subprocess.CompletedProcess:
+        """Run ffmpeg, falling back to libx264 when a hardware encoder fails.
+
+        Quality guard: if a hardware encoder failed at runtime, fall back
+        to libx264 (preset slow, then medium) so the upload still ships.
+        """
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -376,8 +512,6 @@ class VideoProcessor:
             timeout=300,  # 5 minute timeout
         )
 
-        # Quality guard: if a hardware encoder failed at runtime, fall back
-        # to libx264 (preset slow, then medium) so the upload still ships.
         if result.returncode != 0 and _uses_hw_encoder(cmd):
             logger.warning(
                 "Hardware encoder failed for %s (%s); falling back to libx264: %s",
@@ -385,28 +519,66 @@ class VideoProcessor:
                 next(n for n in HW_ENCODER_CANDIDATES if n in cmd),
                 result.stderr[-200:] if result.stderr else "no stderr",
             )
-            if output_path.exists():
-                output_path.unlink()
+            self._safe_unlink(output_path)
             for preset in ("slow", "medium"):
-                cmd = self._build_tiktok_cmd(input_path, output_path, config, encoder="libx264", sw_preset=preset)
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                fallback_cmd = self._build_tiktok_cmd(
+                    input_path, output_path, config, encoder="libx264", sw_preset=preset
+                )
+                result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=300)
                 if result.returncode == 0:
                     break
+        return result
 
-        if result.returncode != 0:
-            logger.error(f"FFmpeg failed for {platform}: {result.stderr[:500]}")
-            # Clean up failed output
-            if output_path.exists():
-                output_path.unlink()
-            raise RuntimeError(f"FFmpeg encoding failed: {result.stderr[:200]}")
+    @staticmethod
+    def _safe_unlink(path: Path) -> None:
+        """Delete a file, ignoring missing/unremovable targets."""
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            pass
 
-        if not output_path.exists() or output_path.stat().st_size < 1000:
-            raise RuntimeError(f"Encoded video is empty or too small: {output_path}")
+    def _has_filter(self, name: str) -> bool:
+        """Whether the ffmpeg build exposes ``name`` among its filters."""
+        cached = getattr(self, "_filter_cache", None)
+        if cached is None:
+            try:
+                result = subprocess.run(
+                    [self.ffmpeg_path, "-hide_banner", "-filters"],
+                    capture_output=True, text=True, timeout=15,
+                )
+                cached = set(re.findall(r"\s[a-zA-Z.]+\s+(\w+)\s+", result.stdout))
+            except (OSError, subprocess.TimeoutExpired):
+                cached = set()
+            self._filter_cache = cached
+        return name in cached
 
-        size_mb = output_path.stat().st_size / 1024 / 1024
-        logger.info(f"Encoded for {platform}: {output_path.name} ({size_mb:.1f} MB)")
+    def _source_is_hdr(self, video_path: Path) -> bool:
+        """True when the source uses an HDR transfer (HDR10 / HLG)."""
+        try:
+            info = self.get_video_info(video_path)
+        except Exception:  # noqa: BLE001 - probe failure → assume SDR
+            return False
+        video = _pick_video_stream(info.get("streams", []))
+        if video is None:
+            return False
+        transfer = (video.get("color_transfer") or "").lower()
+        return transfer in _HDR_TRANSFERS
 
-        return output_path
+    @staticmethod
+    def _inject_hdr_tonemap(cmd: list[str]) -> list[str]:
+        """Insert the HDR→SDR tone-map chain into a command's -vf filter."""
+        try:
+            idx = cmd.index("-vf")
+        except ValueError:
+            return cmd
+        vf = cmd[idx + 1]
+        cmd = list(cmd)
+        cmd[idx + 1] = vf.replace(
+            ",setsar=1,", f",setsar=1,{_HDR_TONEMAP_CHAIN},", 1
+        )
+        logger.info("HDR source detected: injecting tone-map chain")
+        return cmd
 
     def _build_instagram_cmd(
         self,
@@ -521,7 +693,7 @@ class VideoProcessor:
         except Exception as e:  # noqa: BLE001 - probe failure must not break encoding
             logger.debug("Source fps probe failed: %s", e)
             return None
-        video = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), None)
+        video = _pick_video_stream(info.get("streams", []))
         if video is None:
             return None
         return _parse_frame_rate(video.get("avg_frame_rate") or video.get("r_frame_rate") or "")
