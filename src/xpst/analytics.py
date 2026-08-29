@@ -650,15 +650,22 @@ class AnalyticsCollector:
                         )
                         continue
                     stats = item.get("statistics", {})
-                    results.append({
+                    # Honesty contract: YouTube OMITS likeCount/commentCount
+                    # when the creator hides them — absent ≠ zero. Store the
+                    # metric as MISSING (key absent) instead of a fabricated 0
+                    # so aggregates don't undercount and the UI can render
+                    # "unavailable" instead of a fake zero.
+                    row: dict[str, Any] = {
                         "platform": "youtube",
                         "post_id": video_id,
                         "views": int(stats.get("viewCount", 0)),
-                        "likes": int(stats.get("likeCount", 0)),
-                        "comments": int(stats.get("commentCount", 0)),
-                        "shares": 0,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
+                    }
+                    if "likeCount" in stats:
+                        row["likes"] = int(stats["likeCount"])
+                    if "commentCount" in stats:
+                        row["comments"] = int(stats["commentCount"])
+                    results.append(row)
             return results
 
         except Exception as e:
@@ -737,7 +744,12 @@ class AnalyticsCollector:
 
                     info = client.media_info(str(media_pk))
                     play_count = getattr(info, "play_count", 0) or 0
-                    results.append({
+                    # Honesty contract: insights-gated metrics (reach/shares/
+                    # saves) must be OMITTED — not zeroed — when unavailable
+                    # (no Business/Creator account, insights API failure).
+                    # A fabricated 0 makes the dashboard undercount real
+                    # engagement; an absent key renders as "unavailable".
+                    row: dict[str, Any] = {
                         "platform": "instagram",
                         "post_id": str(media_id),
                         "views": (
@@ -747,10 +759,15 @@ class AnalyticsCollector:
                         ),
                         "likes": getattr(info, "like_count", 0) or 0,
                         "comments": getattr(info, "comment_count", 0) or 0,
-                        "shares": metric_map.get("shares") or metric_map.get("share_count") or 0,
-                        "saves": metric_map.get("saved") or metric_map.get("save_count") or 0,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
+                    }
+                    shares = metric_map.get("shares") or metric_map.get("share_count")
+                    if shares:
+                        row["shares"] = int(shares)
+                    saves = metric_map.get("saved") or metric_map.get("save_count")
+                    if saves:
+                        row["saves"] = int(saves)
+                    results.append(row)
                 except Exception as e:
                     logger.warning(f"Instagram insights failed for {media_id}: {e}")
 
