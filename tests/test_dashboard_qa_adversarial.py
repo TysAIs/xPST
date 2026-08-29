@@ -254,13 +254,18 @@ def test_exempt_routes_are_exactly_the_documented_set(tmp_path):
 
 
 @pytest.mark.parametrize("path", ["/", "/bio", "/health", "/state"])
-def test_engine_responses_carry_csp(tmp_path, path):
+def test_engine_responses_carry_csp(tmp_path, path, monkeypatch):
     """Every engine response must carry Content-Security-Policy.
 
     The webview navigates to http://127.0.0.1:<port> — the Tauri CSP in
     tauri.conf.json does NOT apply to that origin, so without a server-side
     header the dashboard ran with no script restrictions at all.
+
+    Pinned to the no-UI-build fallback (script-src 'none'): with a built
+    ui/dist the engine serves the Svelte bundle and legitimately relaxes to
+    script-src 'self' (covered in test_web_ui_qa.py).
     """
+    monkeypatch.setenv("XPST_UI_DIST", str(tmp_path / "no-ui-build"))
     cfg_dir = _make_config(tmp_path)
     client = _bio_app_from_dir(cfg_dir)
     headers = _auth_headers() if path in ("/", "/state") else {}

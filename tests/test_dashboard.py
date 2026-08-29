@@ -386,8 +386,13 @@ def test_state_endpoint_returns_summary(tmp_path):
     assert "platform_counts" in data
 
 
-def test_dashboard_index_page_is_auth_protected(tmp_path):
-    """GET / serves an auth-protected landing page, not a 404."""
+def test_dashboard_index_page_is_auth_protected(tmp_path, monkeypatch):
+    """GET / serves an auth-protected landing page, not a 404.
+
+    Pinned to the no-UI-build fallback: with ui/dist present the index is
+    the built SPA (still auth-protected — see test_web_ui_qa.py).
+    """
+    monkeypatch.setenv("XPST_UI_DIST", str(tmp_path / "no-ui-build"))
     pwd_hash = bcrypt.hashpw(b"secret", bcrypt.gensalt()).decode()
     client = _bio_app(tmp_path, auth=("admin", pwd_hash))
     assert client.get("/").status_code == 401
@@ -397,8 +402,9 @@ def test_dashboard_index_page_is_auth_protected(tmp_path):
     assert "xPST Dashboard" in resp.text
 
 
-def test_dashboard_index_links_to_features_not_linkedin(tmp_path):
+def test_dashboard_index_links_to_features_not_linkedin(tmp_path, monkeypatch):
     """The dashboard index links to /health, /bio, /bio/edit — never linkedin."""
+    monkeypatch.setenv("XPST_UI_DIST", str(tmp_path / "no-ui-build"))
     client = _bio_app(tmp_path)
     html = client.get("/").text
     for href in ("/health", "/state", "/metrics", "/bio", "/bio/edit"):
