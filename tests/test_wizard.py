@@ -71,15 +71,18 @@ def test_agent_mode_never_prompts(monkeypatch):
 
 
 def test_run_wizard_non_tty_emits_json(monkeypatch, capsys):
-    """Simulated piped stdin: run_wizard auto-switches to agent mode."""
+    """Simulated piped stdin: run_wizard auto-switches to agent mode.
+
+    Since the JSON-purity fix, stdout carries ONLY the JSON payload —
+    human-facing health-check chatter is routed to stderr.
+    """
 
     import sys
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     ok = wiz.run_wizard(platforms=["messenger"], json_mode=False)
     out = capsys.readouterr().out
-    start = out.rindex("\n{") + 1
-    data = json.loads(out[start:])
+    data = json.loads(out)  # whole stdout must be pure JSON
     assert data["mode"] == "agent"
     assert ok == data["all_pass"]
 
