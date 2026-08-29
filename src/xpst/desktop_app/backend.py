@@ -1336,7 +1336,8 @@ class AppController(QObject):
             totals = {"views": 0, "likes": 0, "comments": 0, "shares": 0}
             for platform_name, entry in posted_to.items():
                 post_id = str((entry or {}).get("id") or "")
-                metrics = (by_post.get(post_id) or [None])[0] or {}
+                rows_for_post = by_post.get(post_id) or []
+                metrics = rows_for_post[0] if rows_for_post else {}
                 platforms[platform_name] = {
                     "post_id": post_id,
                     "url": (entry or {}).get("url", ""),
