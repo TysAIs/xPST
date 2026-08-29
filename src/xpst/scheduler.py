@@ -13,6 +13,7 @@ Handles:
 
 import asyncio
 import threading
+import time
 from datetime import datetime
 
 from xpst.config import XPSTConfig
@@ -47,11 +48,45 @@ class Scheduler:
         self._stop_event = threading.Event()
         self._last_wake_check: datetime | None = None
         self._last_results: list = []
+        # Scheduled analytics snapshot capture (optional, default OFF).
+        # Tracks the wall-clock time of the last capture so the interval is
+        # independent of the (usually shorter) check_interval loop.
+        self._last_snapshot_capture: float | None = None
 
     @property
     def last_results(self) -> list:
         """Get results from the most recent check cycle."""
         return self._last_results
+
+    def _maybe_capture_analytics(self) -> None:
+        """Capture analytics snapshots when the configured interval has elapsed.
+
+        Runs inside the watch loop only when
+        ``schedule.analytics_snapshot_enabled`` is True. Uses
+        ``AnalyticsCollector.collect_all()`` — which persists metric_snapshots
+        through the ownership-gated record path — for every platform with
+        discovered post ids. Failures are logged and never break the watch
+        loop; a failed capture simply retries on the next interval.
+        """
+        schedule = self.config.schedule
+        if not schedule.analytics_snapshot_enabled:
+            return
+
+        now = time.monotonic()
+        last = self._last_snapshot_capture
+        if last is not None and (now - last) < schedule.analytics_snapshot_interval:
+            return
+        self._last_snapshot_capture = now
+
+        try:
+            from xpst.analytics import AnalyticsCollector
+
+            collector = AnalyticsCollector(config_dir=self.config.config_dir)
+            data = asyncio.run(collector.collect_all())
+            captured = sum(len(posts) for posts in data.values())
+            logger.info("Scheduled analytics snapshot captured (%d posts)", captured)
+        except Exception as e:
+            logger.warning("Scheduled analytics capture failed: %s", e)
 
     def run(self, interval: int | None = None) -> None:
         """
@@ -95,6 +130,14 @@ class Scheduler:
                 logger.error(f"Error in scheduler loop: {e}")
                 if self._stop_event.wait(60):  # Wait before retry
                     break
+
+            # Optional scheduled snapshot capture (default OFF; config
+            # schedule.analytics_snapshot_enabled). Runs after each check
+            # cycle, gated by its own independent interval.
+            try:
+                self._maybe_capture_analytics()
+            except Exception as e:  # defensive — never break the watch loop
+                logger.warning(f"Analytics snapshot capture error: {e}")
 
     def stop(self) -> None:
         """Stop the scheduler (interrupts a pending wait immediately)."""

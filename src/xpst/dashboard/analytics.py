@@ -664,10 +664,14 @@ class AnalyticsCollector:
                     "status": "posted",
                     "captured_at": ts,
                     "downloaded_at": ts,
-                    "views": 0,
-                    "likes": 0,
-                    "comments": 0,
-                    "shares": 0,
+                    # Honesty contract: no snapshots exist for a state-only
+                    # entry, so its metrics are MISSING (None), not zero.
+                    # A fabricated 0 reads as "measured zero views"; None
+                    # renders as "not yet measured" in the UI.
+                    "views": None,
+                    "likes": None,
+                    "comments": None,
+                    "shares": None,
                     "reposts": None,
                     "saves": None,
                 }
@@ -859,6 +863,11 @@ class AnalyticsCollector:
             },
             "platforms": platforms,
             "top_posts": top_posts,
+            # Freshness of the underlying snapshot data ("as of Xh ago" in
+            # the UI). _freshness is included in summary too via
+            # get_summary_stats, but these top-level keys are the contract
+            # AnalyticsPage reads.
+            **self._freshness(),
         }
 
     def get_cross_post_analytics(self) -> list[dict[str, Any]]:
@@ -986,6 +995,27 @@ class AnalyticsCollector:
             "best_platform": best_platform or "—",
             "total_platform_posts": total_platform_posts,
             "engagement_by_platform": engagement,
+            **self._freshness(),
+        }
+
+    def _freshness(self) -> dict[str, Any]:
+        """Snapshot freshness for the dashboard: ``last_captured`` (ISO, or
+        None when nothing has ever been captured) plus ``staleness_hours``
+        (float, or None) and ``last_captured_relative`` ("2h ago" style via
+        the shared relative-time helper). """
+        try:
+            last = self._store().last_captured_at()
+        except Exception as exc:
+            logger.debug("Freshness read failed: %s", exc)
+            last = None
+        if not last:
+            return {"last_captured": None, "staleness_hours": None, "last_captured_relative": "—"}
+        dt = _parse_ts(last)
+        hours = (datetime.now() - dt).total_seconds() / 3600 if dt else None
+        return {
+            "last_captured": last,
+            "staleness_hours": round(hours, 2) if hours is not None else None,
+            "last_captured_relative": _relative_time(last),
         }
 
     def get_posts_over_time(self, days: int = 30) -> dict[str, int]:
