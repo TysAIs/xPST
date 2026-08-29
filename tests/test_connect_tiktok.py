@@ -14,6 +14,7 @@ from unittest.mock import patch
 import pytest
 
 from xpst.config import XPSTConfig
+from xpst.utils.oauth_local import AuthCodeResult
 
 
 def _make_config(tmp_path: Path) -> XPSTConfig:
@@ -129,25 +130,32 @@ class TestConnectTikTokDestinationFlow:
     """End-to-end ``connect_tiktok`` with the destination flow opted in."""
 
     def test_full_flow_saves_config_and_credentials(self, tmp_path: Path, monkeypatch) -> None:
+        from tests.test_connect_tiktok_oauth_listener import _FakeListener
         from xpst import connect
 
         config = _make_config(tmp_path)
 
-        # Inputs in call order: source username, client key, pasted redirect URL
+        # Inputs in call order: source username, client key.
+        # (The redirect code is captured by the stubbed local listener — no paste.)
         inputs = iter(
             [
                 "watch_user",  # TikTok username to watch (source path)
                 "ck123",  # client key
-                "http://localhost:8085/callback?code=secretcode&scope=video.publish",
             ]
         )
         monkeypatch.setattr(connect.console, "input", lambda prompt="": next(inputs))
         monkeypatch.setattr(connect, "_input_secret", lambda prompt: "cs_secret")
 
         # Confirms in call order: cookies (skip), upload destination (yes),
-        # default redirect (yes), open browser (yes)
-        confirms = iter([False, True, True, True])
+        # default redirect (yes). Browser auto-opens, no confirm.
+        confirms = iter([False, True, True])
         monkeypatch.setattr(connect, "_confirm", lambda *a, **k: next(confirms))
+
+        listener = _FakeListener()
+        listener.wait_result = AuthCodeResult(success=True, code="secretcode", port=8085)
+        monkeypatch.setattr(
+            "xpst.utils.oauth_local.LocalOAuthListener", lambda **kw: listener
+        )
 
         opened: list[str] = []
         def _fake_open(url: str) -> bool:

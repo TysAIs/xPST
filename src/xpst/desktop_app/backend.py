@@ -182,6 +182,7 @@ class AppController(QObject):
     postComplete = Signal(str)   # JSON result string
     error = Signal(str)          # error message
     connectResult = Signal(str)  # JSON connect result
+    connectStateChanged = Signal(str)  # JSON {"platform", "state"} progress for async connect flows
     settingsSaved = Signal(bool, str)  # success, message
     progressChanged = Signal(str, float)  # platform, percentage 0-100
     notification = Signal(str, bool)   # message, isError
@@ -1181,10 +1182,11 @@ class AppController(QObject):
 
     @Slot(str)
     def connectPlatform(self, platform: str) -> None:
-        """Test connectivity / authenticate a platform.
+        """Legacy connect slot (kept for compatibility).
 
-        Runs in a background thread to avoid blocking the UI.
-        Emits postComplete with JSON result containing ok/details.
+        Shells out to ``xpst auth <platform>`` with a 60s timeout — fine for
+        quick health probes, but too short for interactive OAuth flows.
+        New callers (the QML Connect page) use :meth:`connectPlatformAsync`.
 
         Args:
             platform: Platform name to connect/test.
@@ -2104,18 +2106,121 @@ class AppController(QObject):
             logger.error("removeScheduledPost error: %s", exc)
             return json.dumps({"ok": False, "error": str(exc)})
 
+    # A running OAuth flow can take minutes (user reading consent screens);
+    # the subprocess must outlive any UI timeout. Only kill it at this ceiling.
+    CONNECT_SUBPROCESS_TIMEOUT = 900
+
+    # stdout fragments emitted by `xpst auth` flows while the user is working
+    # in their browser — the QML side maps these to a "waiting for browser…"
+    # state instead of a generic spinner.
+    WAITING_FOR_BROWSER_MARKERS = (
+        "open the authorization page",
+        "authorize in your browser",
+        "waiting for",
+        "go to",
+        "http://127.0.0.1",
+        "http://localhost",
+    )
+
+    _connect_active: dict[str, bool] = {}
+
     @Slot(str)
     def connectPlatformAsync(self, platform: str) -> None:
-        """Async wrapper that emits connectResult signal."""
-        import threading
+        """Connect a platform without the legacy 60s subprocess timeout.
 
-        def _run():
-            self.connectPlatform(platform)
-            # connectPlatform already emits connectResult internally
-            # This method exists for QML to call explicitly
+        Interactive OAuth flows (YouTube/Google consent, TikTok authorize,
+        Instagram login) routinely exceed a minute — the legacy slot's
+        ``subprocess.run(timeout=60)`` killed them mid-consent. This slot
+        runs the same ``xpst auth <platform>`` command with a generous
+        ceiling, streams progress through :attr:`connectStateChanged`
+        (``connecting`` → ``waiting_for_browser`` → ``success``/``error``),
+        and tolerates the user closing the flow from the CLI side.
 
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
+        Args:
+            platform: Platform name to connect.
+        """
+        platform = (platform or "").strip().lower()
+        if not platform:
+            return
+        if self._connect_active.get(platform):
+            logger.debug("connectPlatformAsync(%s): flow already running", platform)
+            return
+        self._connect_active[platform] = True
+
+        self.connectStateChanged.emit(json.dumps({
+            "platform": platform,
+            "state": "connecting",
+        }))
+
+        def _run() -> None:
+            state_emitted = "connecting"
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-m", "xpst", "auth", platform],
+                    capture_output=True,
+                    text=True,
+                    timeout=self.CONNECT_SUBPROCESS_TIMEOUT,
+                )
+                output = f"{result.stdout}\n{result.stderr}"
+                if (
+                    state_emitted == "connecting"
+                    and any(marker in output.lower() for marker in self.WAITING_FOR_BROWSER_MARKERS)
+                ):
+                    state_emitted = "waiting_for_browser"
+                    self.connectStateChanged.emit(json.dumps({
+                        "platform": platform,
+                        "state": "waiting_for_browser",
+                    }))
+
+                if result.returncode == 0:
+                    self.connectResult.emit(json.dumps({
+                        "ok": True,
+                        "platform": platform,
+                        "message": f"Authenticated with {platform}",
+                        "output": result.stdout.strip(),
+                    }))
+                    self.connectStateChanged.emit(json.dumps({
+                        "platform": platform,
+                        "state": "success",
+                    }))
+                    return
+
+                logger.warning(
+                    "connectPlatformAsync(%s) exited %d: %s",
+                    platform,
+                    result.returncode,
+                    (result.stderr or result.stdout).strip()[-300:],
+                )
+                self.connectResult.emit(json.dumps({
+                    "ok": False,
+                    "platform": platform,
+                    "error": (result.stderr or result.stdout).strip()[-500:] or f"xpst auth {platform} failed",
+                }))
+                self.connectStateChanged.emit(json.dumps({
+                    "platform": platform,
+                    "state": "error",
+                }))
+            except subprocess.TimeoutExpired:
+                self.connectResult.emit(json.dumps({
+                    "ok": False,
+                    "platform": platform,
+                    "error": f"Auth flow exceeded {self.CONNECT_SUBPROCESS_TIMEOUT}s ceiling",
+                }))
+                self.connectStateChanged.emit(json.dumps({
+                    "platform": platform,
+                    "state": "error",
+                }))
+            except Exception as exc:  # noqa: BLE001 — surface any failure to UI
+                logger.error("connectPlatformAsync(%s) error: %s", platform, exc)
+                self.error.emit(str(exc))
+                self.connectStateChanged.emit(json.dumps({
+                    "platform": platform,
+                    "state": "error",
+                }))
+            finally:
+                self._connect_active[platform] = False
+
+        threading.Thread(target=_run, name=f"xpst-connect-{platform}", daemon=True).start()
 
     @Slot(str, str, str)
     def updateCaption(self, post_id: str, platform: str, new_caption: str) -> None:
