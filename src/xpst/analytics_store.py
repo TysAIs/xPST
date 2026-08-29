@@ -96,11 +96,7 @@ class AnalyticsStore:
                 post_id = row.get("post_id")
                 if not platform or not post_id:
                     continue
-                extra = {
-                    k: v
-                    for k, v in row.items()
-                    if k not in (*_CORE_FIELDS, "platform", "post_id", "timestamp")
-                }
+                extra = {k: v for k, v in row.items() if k not in (*_CORE_FIELDS, "platform", "post_id", "timestamp")}
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO metric_snapshots
@@ -138,9 +134,39 @@ class AnalyticsStore:
         with self._connect() as conn:
             return [self._row_to_dict(r) for r in conn.execute(query, params)]
 
-    def history(
-        self, platform: str, post_id: str, limit: int = 100
-    ) -> list[dict[str, Any]]:
+    def platform_totals(self) -> dict[str, dict[str, int]]:
+        """Sum core metrics over the LATEST snapshot per post, by platform.
+
+        Same semantics as summing ``latest()`` rows in Python, but the
+        aggregation runs inside SQLite (C, GIL-releasing) and returns one
+        row per platform. With a 10k-post library the Python-side
+        materialization of every snapshot row cost ~100ms of bytecode per
+        /state request and collapsed under concurrent load (GIL starvation);
+        this keeps the dashboard O(platforms) instead of O(snapshots).
+
+        Returns:
+            {platform: {views, likes, comments, shares, reposts, saves}}
+        """
+        query = """
+            SELECT s.platform AS platform,
+                   COALESCE(SUM(s.views), 0)    AS views,
+                   COALESCE(SUM(s.likes), 0)    AS likes,
+                   COALESCE(SUM(s.comments), 0) AS comments,
+                   COALESCE(SUM(s.shares), 0)   AS shares,
+                   COALESCE(SUM(s.reposts), 0)  AS reposts,
+                   COALESCE(SUM(s.saves), 0)    AS saves
+            FROM metric_snapshots s
+            JOIN (
+                SELECT platform, post_id, MAX(captured_at) AS captured_at
+                FROM metric_snapshots GROUP BY platform, post_id
+            ) m ON s.platform = m.platform AND s.post_id = m.post_id
+               AND s.captured_at = m.captured_at
+            GROUP BY s.platform
+        """
+        with self._connect() as conn:
+            return {row["platform"]: dict(row) for row in conn.execute(query)}
+
+    def history(self, platform: str, post_id: str, limit: int = 100) -> list[dict[str, Any]]:
         """Snapshot history for one post, newest first."""
         with self._connect() as conn:
             rows = conn.execute(
@@ -228,9 +254,7 @@ class AnalyticsStore:
             finally:
                 conn.execute("DROP TABLE _owned_snap")
         if deleted:
-            logger.info(
-                "Purged %d stale youtube snapshot(s) not owned by the channel", deleted
-            )
+            logger.info("Purged %d stale youtube snapshot(s) not owned by the channel", deleted)
         return deleted
 
     @staticmethod
@@ -269,10 +293,7 @@ class AnalyticsStore:
         """
         with self._connect() as conn:
             rows = conn.execute(query).fetchall()
-        return {
-            row["platform"]: {"count": row["count"], "captured_at": row["captured_at"]}
-            for row in rows
-        }
+        return {row["platform"]: {"count": row["count"], "captured_at": row["captured_at"]} for row in rows}
 
     def follower_history(self, platform: str, limit: int = 30) -> list[dict[str, Any]]:
         """Return follower count history for a platform, oldest first."""
@@ -281,10 +302,7 @@ class AnalyticsStore:
                 "SELECT * FROM follower_snapshots WHERE platform = ? ORDER BY captured_at DESC LIMIT ?",
                 (platform, limit),
             ).fetchall()
-        return [
-            {"count": row["count"], "captured_at": row["captured_at"]}
-            for row in reversed(rows)
-        ]
+        return [{"count": row["count"], "captured_at": row["captured_at"]} for row in reversed(rows)]
 
     # ── Cross-post groups (B1) ──────────────────────────────────────────
 
@@ -321,9 +339,7 @@ class AnalyticsStore:
                 ),
             )
 
-    def get_cross_post_groups(
-        self, limit: int = 50, offset: int = 0
-    ) -> list[dict[str, Any]]:
+    def get_cross_post_groups(self, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         """Return cross-post groups newest-first with parsed platforms_json."""
         with self._connect() as conn:
             rows = conn.execute(
@@ -344,9 +360,7 @@ class AnalyticsStore:
             ).fetchone()
         return self._group_row_to_dict(row) if row else None
 
-    def latest_for_post(
-        self, platform: str, post_id: str
-    ) -> list[dict[str, Any]]:
+    def latest_for_post(self, platform: str, post_id: str) -> list[dict[str, Any]]:
         """Return all snapshots for a single post, oldest-first.
 
         Ordered by ``captured_at`` ascending so the last element is the most
