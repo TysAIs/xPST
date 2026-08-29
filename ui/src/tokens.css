@@ -1,0 +1,91 @@
+/*
+ * xPST web UI design tokens — ported from the QML desktop theme.
+ *
+ * Source of the canonical palette: the recurring colors in
+ * src/xpst/desktop_app/qml/** and the desktop_app backend (Apple-style
+ * light/dark ramp) plus platform brand colors from
+ * src/xpst/dashboard/analytics.py PLATFORM_COLORS.
+ *
+ * Light/dark follows the OS via prefers-color-scheme (same behavior as
+ * the QML Material.theme darkMode switch). Pages consume ONLY these
+ * variables — no new hardcoded hex in components.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  /* Brand / accent — Apple system blue family (#0a84ff dark, #007aff light) */
+  --xpst-accent: #007aff;
+  --xpst-accent-hover: #0a84ff;
+
+  /* Surfaces (light) */
+  --xpst-bg: #f5f5f7;
+  --xpst-bg-elevated: #fbfbfd;
+  --xpst-surface: #ffffff;
+  --xpst-surface-raised: #f0f0f5;
+
+  /* Text (light) */
+  --xpst-text: #1d1d1f;
+  --xpst-text-secondary: #6e6e73;
+  --xpst-text-muted: #86868b;
+
+  /* Borders */
+  --xpst-border: #e5e7eb;
+  --xpst-border-strong: #c7c7cc;
+
+  /* Status */
+  --xpst-success: #30d158;
+  --xpst-success-text: #248a3d;
+  --xpst-warning: #ffd60a;
+  --xpst-warning-text: #b26a00;
+  --xpst-danger: #ff453a;
+  --xpst-danger-text: #d70015;
+  --xpst-danger-bg: #fce8e6;
+  --xpst-indigo: #6366f1;
+
+  /* Platform brand colors (PLATFORM_COLORS, analytics.py:37) */
+  --xpst-platform-youtube: #ff0000;
+  --xpst-platform-instagram: #e1306c;
+  --xpst-platform-x: #1d9bf0;
+  --xpst-platform-tiktok: #00f2ea;
+  --xpst-platform-threads: #000000;
+
+  /* Shape + depth */
+  --xpst-radius-sm: 8px;
+  --xpst-radius-md: 12px;
+  --xpst-radius-lg: 16px;
+  --xpst-radius-xl: 24px;
+  --xpst-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Surfaces (dark) — #1d1d1f / #2c2c2e ramp from the QML theme */
+    --xpst-bg: #161617;
+    --xpst-bg-elevated: #1d1d1f;
+    --xpst-surface: #242426;
+    --xpst-surface-raised: #2c2c2e;
+
+    /* Text (dark) */
+    --xpst-text: #f5f5f7;
+    --xpst-text-secondary: #a1a1a6;
+    --xpst-text-muted: #86868b;
+
+    /* Borders */
+    --xpst-border: #3a3a3c;
+    --xpst-border-strong: #48484a;
+
+    /* Status */
+    --xpst-success-text: #30d158;
+    --xpst-warning-text: #ffd60a;
+    --xpst-danger-text: #ff453a;
+    --xpst-danger-bg: #3a1d1d;
+
+    /* Accent flips to the dark-mode system blue */
+    --xpst-accent: #0a84ff;
+    --xpst-accent-hover: #409cff;
+
+    --xpst-platform-threads: #8e8e93;
+    --xpst-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  }
+}
