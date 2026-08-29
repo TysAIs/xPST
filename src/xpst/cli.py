@@ -37,7 +37,7 @@ from xpst.engine import CrossPostEngine, CrossPostResult
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger, setup_logging
-from xpst.utils.platform import get_config_dir
+from xpst.utils.platform import get_config_dir, stdin_is_interactive
 from xpst.utils.quota import QuotaManager
 
 console = Console()
@@ -196,6 +196,18 @@ def main(ctx: click.Context, config: str | None, verbose: bool, quiet: bool, jso
     ctx.obj["config_path"] = config
     ctx.obj["verbose"] = verbose
     ctx.obj["quiet"] = quiet
+
+    # Windows console hardening: Rich decorates output with Unicode symbols
+    # (✓, ❌, →) that cp1252 (the default pipe/legacy-console codec) cannot
+    # encode — the encode error then escaped as a traceback and turned a
+    # clean refusal into exit code 1. Replacement chars keep the CLI alive;
+    # encoding is left untouched so pipes stay byte-compatible.
+    if sys.platform == "win32":
+        for _stream in (sys.stdout, sys.stderr):
+            try:
+                _stream.reconfigure(errors="replace")
+            except (AttributeError, ValueError, OSError):
+                pass
 
     # Auto-enable JSON mode when stdout is not a TTY (piped)
     ctx.obj["json"] = json_output or not sys.stdout.isatty()
@@ -1100,7 +1112,9 @@ def connect(ctx: click.Context, platform: str | None, guide: bool, test_only: bo
     # wizard. On closed/piped stdin it must not prompt (EOFError churn),
     # fall back to "yes" defaults (which would open browsers), or emit
     # non-JSON output. Refuse cleanly instead — agents get data, not windows.
-    interactive = sys.stdin.isatty()
+    # stdin_is_interactive() (not bare isatty) because NUL/DEVNULL reports
+    # isatty() == True on Windows and would bypass this gate.
+    interactive = stdin_is_interactive()
     if not interactive and not test_only:
         message = (
             "connect requires an interactive terminal. "

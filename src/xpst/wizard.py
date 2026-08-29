@@ -454,7 +454,11 @@ class WizardNonInteractiveError(Exception):
 
 
 def _interactive() -> bool:
-    return sys.stdin.isatty()
+    # stdin_is_interactive() (not bare isatty): NUL/DEVNULL reports
+    # isatty() == True on Windows and would bypass the non-interactive guard.
+    from xpst.utils.platform import stdin_is_interactive
+
+    return stdin_is_interactive()
 
 
 def _safe_input(prompt: str) -> str:
