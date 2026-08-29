@@ -197,23 +197,30 @@ class AnalyticsStore:
         ids = [str(p) for p in post_ids if p]
         if not ids:
             return []
-        placeholders = ",".join("?" * len(ids))
-        # nosec B608 - the f-string interpolates '?' placeholders only; every
-        # post id is passed as a bound parameter via `params` below.
-        query = f"""
-            SELECT s.* FROM metric_snapshots s
-            JOIN (
-                SELECT platform, post_id, MAX(captured_at) AS captured_at
-                FROM metric_snapshots WHERE post_id IN ({placeholders})
-                GROUP BY platform, post_id
-            ) m ON s.platform = m.platform AND s.post_id = m.post_id
-               AND s.captured_at = m.captured_at
-        """
-        params: list[Any] = list(ids)
-        if platform:
-            query += " WHERE s.platform = ?"
-            params.append(platform)
+        # Static query joined with a TEMP TABLE (repo pattern, see
+        # delete_youtube_snapshots_not_in): avoids B608 string-built SQL
+        # entirely — no f-string interpolation into the query text.
         with self._connect() as conn:
+            conn.execute("CREATE TEMP TABLE IF NOT EXISTS _post_ids (id TEXT PRIMARY KEY)")
+            conn.execute("DELETE FROM _post_ids")
+            conn.executemany(
+                "INSERT OR IGNORE INTO _post_ids (id) VALUES (?)",
+                ((i,) for i in ids),
+            )
+            query = """
+                SELECT s.* FROM metric_snapshots s
+                JOIN (
+                    SELECT platform, post_id, MAX(captured_at) AS captured_at
+                    FROM metric_snapshots
+                    WHERE post_id IN (SELECT id FROM _post_ids)
+                    GROUP BY platform, post_id
+                ) m ON s.platform = m.platform AND s.post_id = m.post_id
+                   AND s.captured_at = m.captured_at
+            """
+            params: list[Any] = []
+            if platform:
+                query += " WHERE s.platform = ?"
+                params.append(platform)
             return [self._row_to_dict(r) for r in conn.execute(query, params)]
 
     def get_video_metrics_map(
