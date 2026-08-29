@@ -1143,3 +1143,109 @@ class TestOwnershipFiltering:
 
         persisted = {str(p["post_id"]) for p in collector.store.latest("youtube")}
         assert persisted == {"mystery1"}
+
+
+class TestTikTokThreadsOwnership:
+    """tiktok/threads join the state.json identity gate (audit 2026-08-28):
+    TikTok's official API only returns own videos, but the persistence
+    invariant is enforced anyway so a bypassed/mocked collector cannot
+    smuggle foreign ids into metric_snapshots."""
+
+    @staticmethod
+    def _row(pid: str, platform: str = "tiktok", views: int = 1) -> dict:
+        return {
+            "platform": platform, "post_id": pid, "views": views,
+            "likes": 0, "comments": 0, "shares": 0,
+            "timestamp": "2026-08-27T00:00:00+00:00",
+        }
+
+    @pytest.mark.asyncio
+    async def test_tiktok_foreign_row_dropped_when_state_known(self, tmp_path):
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        (tmp_path / "state.json").write_text(json.dumps({
+            "posted_videos": {"v1": {"posted_to": {"tiktok": {"id": "own_tt"}}}},
+        }))
+        with patch.object(
+            collector,
+            "_collect_tiktok",
+            return_value=[self._row("own_tt", views=5), self._row("foreign_tt", views=999)],
+        ):
+            await collector.collect_all({"tiktok": ["own_tt", "foreign_tt"]})
+
+        persisted = {str(p["post_id"]) for p in collector.store.latest("tiktok")}
+        assert persisted == {"own_tt"}
+        assert "tiktok:foreign_tt" in collector._warned_foreign
+
+    @pytest.mark.asyncio
+    async def test_tiktok_tolerated_when_state_empty(self, tmp_path):
+        """Fresh install with no tiktok post history: no judgement."""
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        with patch.object(collector, "_collect_tiktok", return_value=[self._row("any")]):
+            await collector.collect_all({"tiktok": ["any"]})
+        assert {str(p["post_id"]) for p in collector.store.latest("tiktok")} == {"any"}
+
+    @pytest.mark.asyncio
+    async def test_threads_foreign_row_dropped_when_state_known(self, tmp_path):
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        (tmp_path / "state.json").write_text(json.dumps({
+            "posted_videos": {"v1": {"posted_to": {"threads": {"id": "own_th"}}}},
+        }))
+        with patch.object(
+            collector,
+            "_collect_threads",
+            return_value=[self._row("own_th", platform="threads"), self._row("ghost", platform="threads")],
+        ):
+            await collector.collect_all({"threads": ["own_th", "ghost"]})
+
+        persisted = {str(p["post_id"]) for p in collector.store.latest("threads")}
+        assert persisted == {"own_th"}
+
+    @pytest.mark.asyncio
+    async def test_tiktok_purge_parity_with_youtube(self, tmp_path):
+        """Purge parity: a pre-existing foreign tiktok row (persisted before
+        the gate existed) is removed on the next verified collection, while
+        owned rows survive."""
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        (tmp_path / "state.json").write_text(json.dumps({
+            "posted_videos": {"v1": {"posted_to": {"tiktok": {"id": "own_tt"}}}},
+        }))
+        collector.store.record_snapshots([
+            self._row("own_tt", views=5),
+            self._row("stale_test_video", views=9000),
+            self._row("keep_x", platform="x", views=1),
+        ])
+        with patch.object(collector, "_collect_tiktok", return_value=[self._row("own_tt", views=6)]):
+            await collector.collect_all({"tiktok": ["own_tt"]})
+
+        assert {str(p["post_id"]) for p in collector.store.latest("tiktok")} == {"own_tt"}
+        assert collector.store.history("tiktok", "stale_test_video") == []
+        # Other platforms are untouched by the tiktok purge.
+        assert {str(p["post_id"]) for p in collector.store.latest("x")} == {"keep_x"}
+
+    @pytest.mark.asyncio
+    async def test_x_purge_parity(self, tmp_path):
+        """Purge parity for x: stale foreign rows predate the gate are purged."""
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        (tmp_path / "state.json").write_text(json.dumps({
+            "posted_videos": {"v1": {"posted_to": {"x": {"id": "own_x"}}}},
+        }))
+        collector.store.record_snapshots([
+            self._row("own_x", platform="x", views=5),
+            self._row("old_foreign_tweet", platform="x", views=999),
+        ])
+        with patch.object(collector, "_collect_x", return_value=[self._row("own_x", platform="x", views=6)]):
+            await collector.collect_all({"x": ["own_x"]})
+
+        assert {str(p["post_id"]) for p in collector.store.latest("x")} == {"own_x"}
+        assert collector.store.history("x", "old_foreign_tweet") == []
+
+    @pytest.mark.asyncio
+    async def test_purge_skipped_when_state_has_no_ids_for_platform(self, tmp_path):
+        """Fail-safe purge: a fresh install (no state evidence for a platform)
+        never wipes that platform's snapshot history."""
+        collector = AnalyticsCollector(config_dir=str(tmp_path))
+        collector.store.record_snapshots([self._row("legacy_row", platform="instagram", views=2)])
+        with patch.object(collector, "_collect_instagram", return_value=[]):
+            await collector.collect_all({"instagram": []})
+
+        assert {str(p["post_id"]) for p in collector.store.latest("instagram")} == {"legacy_row"}
