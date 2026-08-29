@@ -1187,6 +1187,64 @@ def _connect_guide(platform: str | None, as_json: bool) -> None:
 
 
 @main.command()
+@click.argument("platform", required=True, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt (required in non-interactive/JSON mode)")
+@json_option
+@click.pass_context
+def disconnect(ctx: click.Context, platform: str, yes: bool, as_json: bool):
+    """Disconnect a platform: remove stored credentials and disable it.
+
+    The inverse of `xpst connect <platform>`: deletes the platform's stored
+    account credentials (tokens, cookies, session files) and sets
+    accounts.<platform>.enabled=false. Posted content and local state are
+    never touched.
+
+        xpst disconnect x           # remove X cookies + disable
+        xpst disconnect youtube --json
+    """
+    from xpst.connect import disconnect_platform
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    # Destructive-action guard (mirrors `xpst delete`): non-interactive or
+    # JSON invocations must pass --yes explicitly.
+    if not yes and (as_json or not sys.stdin.isatty()):
+        message = (
+            "Refusing to disconnect without confirmation. Re-run with --yes "
+            "to confirm credential removal for this platform."
+        )
+        if as_json:
+            json_output(_error_payload(
+                "CONFIRMATION_REQUIRED", message,
+                platform=platform, hint="--yes"), True)
+        else:
+            console.print("[red]Refusing to disconnect without confirmation.[/red]")
+            console.print(f"[dim]Re-run with --yes to disconnect {platform}.[/dim]")
+        sys.exit(EXIT_GENERAL)
+    if not yes:
+        click.confirm(f"Disconnect {platform} (remove stored credentials)?", abort=True)
+
+    result = disconnect_platform(platform, config)
+
+    if as_json:
+        json_output(result, True)
+        return
+
+    if not ctx.obj.get("quiet", False):
+        if result.get("success"):
+            removed = result.get("removed") or []
+            if removed:
+                console.print(f"[green]✅ {platform.title()} disconnected.[/green] Removed: {', '.join(removed)}")
+            else:
+                console.print(f"[green]✅ {platform.title()} disconnected.[/green] No stored credentials found.")
+            if result.get("disabled"):
+                console.print(f"[dim]accounts.{platform}.enabled → false[/dim]")
+        else:
+            console.print(f"[red]❌ Disconnect failed: {result.get('error', 'unknown error')}[/red]")
+            sys.exit(EXIT_GENERAL)
+
+
+@main.command()
 @click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
 @click.option("--export-md", "export_md", type=click.Path(), default=None, help="Export the step-by-step guide as markdown and exit")
 @json_option

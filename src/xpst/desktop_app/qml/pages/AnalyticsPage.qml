@@ -12,6 +12,9 @@ Page {
     property string dateRange: "all"  // "week", "month", "all"
     property bool compareMode: false
     property var previousPeriodData: ({})  // Real previous-period data for comparison (no fabricated data)
+    // QA-wave drill-down: per-video metrics fetched on demand.
+    property string drillDownVideoId: ""
+    property var drillDownMetrics: ({})
     property var analyticsJson: {
         try {
             if (typeof controller !== "undefined" && controller.analyticsData)
@@ -54,6 +57,45 @@ Page {
         if (p === "tiktok") return theme.tiktok
         if (p === "threads") return "#000000"
         return theme.accent
+    }
+
+    // ── QA-wave drill-down: fetch one video's per-platform metrics ──
+    function openVideoDrillDown(videoId) {
+        drillDownVideoId = videoId || ""
+        drillDownMetrics = ({})
+        if (!drillDownVideoId) return
+        try {
+            if (typeof controller !== "undefined" && controller.getVideoMetrics) {
+                var parsed = JSON.parse(controller.getVideoMetrics(drillDownVideoId))
+                if (parsed && parsed.available === true)
+                    drillDownMetrics = parsed
+            }
+        } catch(e) {
+            console.error("AnalyticsPage getVideoMetrics failed", e)
+        }
+    }
+
+    function closeVideoDrillDown() {
+        drillDownVideoId = ""
+        drillDownMetrics = ({})
+    }
+
+    function drillDownRows() {
+        var out = []
+        var platforms = drillDownMetrics.platforms || {}
+        for (var p in platforms) {
+            var m = platforms[p]
+            out.push({
+                platform: p,
+                views: m.views || 0,
+                likes: m.likes || 0,
+                comments: m.comments || 0,
+                shares: m.shares || 0,
+                capturedAt: m.captured_at || "",
+                deleted: m.deleted === true
+            })
+        }
+        return out
     }
 
     // Bar chart data: per-platform metrics for Canvas rendering
@@ -810,6 +852,7 @@ Page {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             propagateComposedEvents: true
+                            onClicked: analyticsPage.openVideoDrillDown(modelData.video_id || "")
                         }
 
                         RowLayout {
@@ -841,6 +884,90 @@ Page {
                                     color: theme.textMuted
                                 }
                             }
+                        }
+                    }
+                }
+
+                // ── QA-wave drill-down: per-video metrics card ─────
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: drillDownCol.implicitHeight + 32
+                    visible: analyticsPage.drillDownVideoId !== ""
+                    color: theme.surfaceCard
+                    radius: theme.radiusMd
+                    border.color: theme.textMuted
+                    border.width: 1
+
+                    ColumnLayout {
+                        id: drillDownCol
+                        anchors.fill: parent
+                        anchors.margins: theme.spacingLg
+                        spacing: theme.spacingSm
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            Text {
+                                text: "Drill-down — " + analyticsPage.drillDownVideoId
+                                font.pixelSize: 15
+                                font.weight: Font.DemiBold
+                                color: theme.textPrimary
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+
+                            Button {
+                                text: "Close"
+                                flat: true
+                                onClicked: analyticsPage.closeVideoDrillDown()
+                            }
+                        }
+
+                        Text {
+                            visible: analyticsPage.drillDownMetrics.available !== true
+                            text: "No persisted metrics for this video yet."
+                            font.pixelSize: 12
+                            color: theme.textMuted
+                        }
+
+                        Repeater {
+                            model: analyticsPage.drillDownRows()
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: theme.spacingMd
+
+                                Text {
+                                    text: modelData.platform
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                    color: analyticsPage.platformColor(modelData.platform)
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    text: (modelData.views || 0).toLocaleString() + " views  ·  " +
+                                          (modelData.likes || 0).toLocaleString() + " likes  ·  " +
+                                          (modelData.comments || 0).toLocaleString() + " comments  ·  " +
+                                          (modelData.shares || 0).toLocaleString() + " shares" +
+                                          (modelData.deleted ? "  ·  removed" : "")
+                                    font.pixelSize: 12
+                                    color: theme.textMuted
+                                }
+                            }
+                        }
+
+                        Text {
+                            visible: analyticsPage.drillDownMetrics.available === true
+                            text: {
+                                var t = analyticsPage.drillDownMetrics.totals || {}
+                                return "Total: " + (t.views || 0).toLocaleString() + " views  ·  " +
+                                       (t.likes || 0).toLocaleString() + " likes  ·  " +
+                                       (t.comments || 0).toLocaleString() + " comments  ·  " +
+                                       (t.shares || 0).toLocaleString() + " shares"
+                            }
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                            color: theme.textSecondary
                         }
                     }
                 }
