@@ -13,7 +13,8 @@ Failures for individual posts are logged and skipped (graceful degradation).
 
 import json
 import logging
-from datetime import datetime, timedelta
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Try to import CredentialStore
 try:
     from xpst.utils.credentials import CredentialStore
+
     HAS_CREDENTIAL_STORE = True
 except ImportError:
     CredentialStore = None
@@ -87,22 +89,82 @@ def load_state(config_dir: str = "~/.xpst") -> dict[str, Any]:
         return {"posted_videos": {}, "health": {"platforms": {}, "total_processed": 0}}
 
 
+# ── /state summary cache (QA adversarial 2026-08) ───────────────────────
+#
+# The old /state route rebuilt an AnalyticsCollector + AnalyticsStore and
+# re-scanned every posted entry + every metric snapshot ON EVERY REQUEST.
+# With a realistic library (10k posts, 20k snapshots) a single request
+# costs ~0.25s of pure-Python bytecode; under concurrent dashboard +
+# CLI load, GIL contention made that ~20x worse (~20s, far beyond the 2s
+# page-load gate). The summary only changes when state.json or
+# analytics.db change, so memoize on their (mtime_ns, size) fingerprints.
+_SUMMARY_CACHE: dict[tuple, dict[str, Any]] = {}
+_SUMMARY_CACHE_LOCK = threading.Lock()
+_SUMMARY_CACHE_MAX = 8
+
+
+def _data_fingerprint(config_dir: str) -> tuple:
+    """Cheap change detector for state.json + analytics.db (or ('missing',...))."""
+    base = Path(config_dir).expanduser()
+    parts = []
+    for name in ("state.json", "analytics.db"):
+        try:
+            st = (base / name).stat()
+            parts.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            parts.append(None)
+    return tuple(parts)
+
+
+def cached_summary_stats(config_dir: str) -> dict[str, Any]:
+    """get_summary_stats, memoized per config_dir on data-file fingerprints.
+
+    Thread-safe: concurrent requests share one computation instead of
+    stampeding the O(n) scan. Cached results are keyed by the mtimes of
+    state.json / analytics.db, so any write invalidates immediately —
+    staleness is bounded by one stat() call, not by a TTL.
+    """
+    key = (str(config_dir), _data_fingerprint(config_dir))
+    with _SUMMARY_CACHE_LOCK:
+        hit = _SUMMARY_CACHE.get(key)
+        if hit is not None:
+            return hit
+        # Compute under the lock: one cold request builds the summary while
+        # its concurrent twins wait, then everyone reuses the cached dict.
+        collector = AnalyticsCollector(config_dir)
+        stats = collector.get_summary_stats()
+        if len(_SUMMARY_CACHE) >= _SUMMARY_CACHE_MAX:
+            _SUMMARY_CACHE.clear()
+        _SUMMARY_CACHE[key] = stats
+    return stats
+
+
 def _parse_ts(ts_str: str | None) -> datetime | None:
     """Parse an ISO 8601 timestamp string, returning None on failure.
+
+    The result is always timezone-NAIVE (aware values are converted to UTC
+    then stripped) so callers can compare against ``datetime.now()``
+    without raising ``TypeError: can't compare offset-naive and
+    offset-aware datetimes``. Real-world state files can contain aware
+    timestamps (imports, hand edits, third-party tools); one such entry
+    must not turn the whole ``/state`` summary into a 500.
 
     Args:
         ts_str: ISO format timestamp string or None.
 
     Returns:
-        Parsed datetime or None if parsing fails.
+        Parsed naive datetime or None if parsing fails.
     """
 
     if not ts_str:
         return None
     try:
-        return datetime.fromisoformat(ts_str)
+        dt = datetime.fromisoformat(ts_str)
     except (ValueError, TypeError):
         return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def _fmt_num(n: int | float | None) -> str:
@@ -133,7 +195,9 @@ def _relative_time(ts_str: str | None) -> str:
     if not ts_str:
         return "—"
     try:
-        dt = datetime.fromisoformat(ts_str)
+        dt = _parse_ts(ts_str)  # always naive, aware-safe
+        if dt is None:
+            return ts_str[:10] if ts_str else "—"
         delta = datetime.now() - dt
         secs = delta.total_seconds()
         if secs < 60:
@@ -165,6 +229,7 @@ class AnalyticsCollector:
         self._ig_client = None  # Cached instagrapi Client
         self._x_client = None  # Cached twikit Client
         self._cred_store = None
+        self._store_cache: dict[Path, Any] = {}  # db path -> AnalyticsStore
         if HAS_CREDENTIAL_STORE:
             try:
                 self._cred_store = CredentialStore(config_dir)
@@ -183,6 +248,7 @@ class AnalyticsCollector:
         self.config_exists = config_path.exists()
         if self.config_exists:
             import yaml
+
             with open(config_path) as f:
                 self.config = yaml.safe_load(f) or {}
         else:
@@ -300,7 +366,8 @@ class AnalyticsCollector:
             if cookies_data is not None:
                 # Write to temp file for twikit
                 import tempfile
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+
+                with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
                     json.dump(cookies_data, f)
                     cookies_path = f.name
             else:
@@ -337,11 +404,7 @@ class AnalyticsCollector:
         try:
             for i in range(0, len(video_ids), 50):
                 batch = video_ids[i : i + 50]
-                resp = (
-                    service.videos()
-                    .list(part="statistics,contentDetails", id=",".join(batch))
-                    .execute()
-                )
+                resp = service.videos().list(part="statistics,contentDetails", id=",".join(batch)).execute()
                 for item in resp.get("items", []):
                     stats = item.get("statistics", {})
                     results.append(
@@ -614,9 +677,7 @@ class AnalyticsCollector:
         lineup.sort(key=lambda e: str(e.get("captured_at") or ""), reverse=True)
         return lineup
 
-    def _match_state_video(
-        self, platform: str, post_id: str
-    ) -> dict[str, Any] | None:
+    def _match_state_video(self, platform: str, post_id: str) -> dict[str, Any] | None:
         """Find the local state record owning ``(platform, post_id)``.
 
         Walks state.json ``posted_videos`` looking for a ``posted_to``
@@ -647,9 +708,7 @@ class AnalyticsCollector:
                         "video_path": video_path,
                         "thumbnail": data.get("thumbnail") or "",
                         "status": "posted" if posted_to else "pending",
-                        "downloaded_at": data.get("downloaded_at")
-                        or pinfo.get("timestamp")
-                        or "",
+                        "downloaded_at": data.get("downloaded_at") or pinfo.get("timestamp") or "",
                     }
         return None
 
@@ -672,7 +731,19 @@ class AnalyticsCollector:
 
     def _store(self):
         from xpst.analytics_store import AnalyticsStore
-        return AnalyticsStore(Path(self.config_dir).expanduser() / "analytics.db")
+
+        path = Path(self.config_dir).expanduser() / "analytics.db"
+        # Cache per (instance, path): AnalyticsStore.__init__ runs CREATE
+        # TABLE DDL (a SQLite write lock) on every construction, and each
+        # /state request called this several times. Under concurrent
+        # dashboard + CLI traffic the repeated DDL serialized requests and
+        # blew the 2s page-load gate. DDL is idempotent — run it once per
+        # process per db path.
+        cached = self._store_cache.get(path)
+        if cached is None:
+            cached = AnalyticsStore(path)
+            self._store_cache[path] = cached
+        return cached
 
     def get_engagement_from_snapshots(self) -> dict[str, dict]:
         """Engagement aggregated from PERSISTED snapshots only — no network,
@@ -688,12 +759,17 @@ class AnalyticsCollector:
                 if platform in engagement:
                     engagement[platform]["posts"] += 1
         try:
-            for row in self._store().latest():
-                agg = engagement.get(row["platform"])
-                if agg is None:
+            # SQL-side aggregation (platform_totals) instead of materializing
+            # every latest snapshot row in Python: with large libraries the
+            # per-request Python scan dominated /state latency and starved
+            # under concurrent dashboard + CLI load (QA adversarial 2026-08).
+            totals = self._store().platform_totals()
+            for platform, agg in totals.items():
+                target = engagement.get(platform)
+                if target is None:
                     continue
                 for key in ("views", "likes", "comments", "shares"):
-                    agg[key] += row.get(key) or 0
+                    target[key] += agg.get(key) or 0
         except Exception as exc:
             logger.debug("Snapshot read failed: %s", exc)
         return engagement
@@ -714,10 +790,7 @@ class AnalyticsCollector:
         actually provide."""
         from xpst.analytics import PLATFORM_METRIC_CAPABILITIES, platform_metric_capability
 
-        return {
-            platform: platform_metric_capability(platform)
-            for platform in PLATFORM_METRIC_CAPABILITIES
-        }
+        return {platform: platform_metric_capability(platform) for platform in PLATFORM_METRIC_CAPABILITIES}
 
     def get_analytics_payload(self, live: bool = False) -> dict[str, Any]:
         """QML-ready analytics payload (G19) matching AnalyticsPage's
@@ -730,24 +803,24 @@ class AnalyticsCollector:
         """
         from datetime import timezone as _tz
 
-        engagement = (
-            self.get_engagement_data() if live else self.get_engagement_from_snapshots()
-        )
+        engagement = self.get_engagement_data() if live else self.get_engagement_from_snapshots()
         summary = self.get_summary_stats(engagement=engagement)
         totals = {"views": 0, "likes": 0, "comments": 0, "shares": 0}
         platforms = []
         for platform, metrics in engagement.items():
             for key in totals:
                 totals[key] += metrics.get(key, 0)
-            platforms.append({
-                "platform": platform,
-                "posts": metrics.get("posts", 0),
-                "total_views": metrics.get("views", 0),
-                "total_likes": metrics.get("likes", 0),
-                "total_comments": metrics.get("comments", 0),
-                "total_shares": metrics.get("shares", 0),
-                "available_metrics": self.get_available_metrics(platform),
-            })
+            platforms.append(
+                {
+                    "platform": platform,
+                    "posts": metrics.get("posts", 0),
+                    "total_views": metrics.get("views", 0),
+                    "total_likes": metrics.get("likes", 0),
+                    "total_comments": metrics.get("comments", 0),
+                    "total_shares": metrics.get("shares", 0),
+                    "available_metrics": self.get_available_metrics(platform),
+                }
+            )
 
         prev_totals = None
         try:
@@ -829,24 +902,24 @@ class AnalyticsCollector:
                     "engagement_tier": _engagement_tier(er),
                 }
             total_er = (
-                round((total_likes + total_comments + total_shares) / total_views * 100, 1)
-                if total_views > 0
-                else 0
+                round((total_likes + total_comments + total_shares) / total_views * 100, 1) if total_views > 0 else 0
             )
-            result.append({
-                "content_hash": group["content_hash"],
-                "video_id": group["video_id"],
-                "caption": group["caption"],
-                "source_url": group["source_url"],
-                "created_at": group["created_at"],
-                "platforms": platform_metrics,
-                "total_views": total_views,
-                "total_likes": total_likes,
-                "total_comments": total_comments,
-                "total_shares": total_shares,
-                "total_engagement_rate": total_er,
-                "engagement_tier": _engagement_tier(total_er),
-            })
+            result.append(
+                {
+                    "content_hash": group["content_hash"],
+                    "video_id": group["video_id"],
+                    "caption": group["caption"],
+                    "source_url": group["source_url"],
+                    "created_at": group["created_at"],
+                    "platforms": platform_metrics,
+                    "total_views": total_views,
+                    "total_likes": total_likes,
+                    "total_comments": total_comments,
+                    "total_shares": total_shares,
+                    "total_engagement_rate": total_er,
+                    "engagement_tier": _engagement_tier(total_er),
+                }
+            )
         return result
 
     def get_summary_stats(self, engagement: dict[str, dict] | None = None) -> dict[str, Any]:
@@ -855,15 +928,18 @@ class AnalyticsCollector:
         Returns:
             Dict with keys: total_posts, total_processed, platform_counts,
             platform_health, last_check, posts_this_week, best_platform,
-            total_platform_posts.
+            total_platform_posts, engagement_by_platform.
         """
-
         state = load_state(self.config_dir)
         posted = state.get("posted_videos", {})
         health = state.get("health", {})
 
         platform_counts: dict[str, int] = {
-            "youtube": 0, "instagram": 0, "x": 0, "tiktok": 0, "threads": 0,
+            "youtube": 0,
+            "instagram": 0,
+            "x": 0,
+            "tiktok": 0,
+            "threads": 0,
         }
         total_platform_posts = 0
         for video_data in posted.values():
@@ -957,14 +1033,14 @@ class AnalyticsCollector:
             elif name == "x":
                 configured = Path(self.config_dir).expanduser().joinpath("credentials", "x_cookies.json").exists()
             elif name == "instagram":
-                configured = Path(self.config_dir).expanduser().joinpath("credentials", "instagram_session.json").exists()
+                configured = (
+                    Path(self.config_dir).expanduser().joinpath("credentials", "instagram_session.json").exists()
+                )
             elif name == "tiktok":
                 # TikTok is source-only, check config
                 configured = bool(self.config.get("accounts", {}).get("tiktok", {}).get("username"))
             elif name == "threads":
-                configured = bool(
-                    self.config.get("accounts", {}).get("threads", {}).get("graph_access_token")
-                )
+                configured = bool(self.config.get("accounts", {}).get("threads", {}).get("graph_access_token"))
 
             platforms.append(
                 {
