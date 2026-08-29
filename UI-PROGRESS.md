@@ -23,9 +23,14 @@ tests, PR + green CI. Basis: ~/xPST-work/ui-assess/ASSESSMENT.md (decision (b)).
 - [x] Existing dashboard tests pinned to no-UI fallback mode (XPST_UI_DIST) so local ui/dist doesn't flip them
 - [x] ui/ scaffold (Vite 7 + Svelte 5 + Tailwind 4, sidebar shell, tokens.css from QML theme, Inter self-hosted)
 - [x] npm run build green (270ms, 47.5KB JS gzip 17.2KB); ui/README.md build docs; ui/dist gitignored + NOT committed
-- [ ] Isolated full-suite + ruff verification (worktree — main clone has concurrent sibling edits)
+- [x] Isolated full-suite + ruff verification (worktree — main clone has concurrent sibling edits):
+      2089 passed, 2 skipped (3m50s); `ruff check src tests` → "All checks passed!"
 - [x] Committed 3ba1565 (only my 21 files; concurrent agents' engine/mcp/state_store edits left uncommitted & untouched)
-- [ ] PR + ci.yml run green
+- [x] PR #96 opened: https://github.com/TysAIs/xPST/pull/96 (NOT merged)
+- [x] CI green on branch tip:
+      - dispatch run 33236943664 → completed/success
+      - PR run 33236968958 → completed/success
+      (at commit 1bb0e80; final evidence commit re-dispatched)
 
 ## Concurrency note
 While working, a sibling agent modified engine.py / mcp/server.py / state_store.py /
