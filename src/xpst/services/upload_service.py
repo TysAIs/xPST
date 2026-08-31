@@ -23,6 +23,14 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from xpst.media.loudness import (
+    build_loudnorm_filter,
+    has_loudnorm,
+    loudness_target,
+    measure_loudness,
+)
+from xpst.media.pipeline import plan_transform
+from xpst.media.specs import verify_media
 from xpst.platforms.base import PlatformUploader, UploadResult
 from xpst.utils.circuit_breaker import CircuitBreakerManager, CircuitBreakerOpenError
 from xpst.utils.content_hash import compute_content_hash
@@ -39,6 +47,11 @@ logger = get_logger(__name__)
 
 # Platforms that use unofficial APIs and may violate ToS
 _TOS_UNOFFICIAL_PLATFORMS = {"instagram", "x"}
+
+
+def _as_str(value: Any) -> str | None:
+    """Return value when it is a real string, else None (mock-safe)."""
+    return value if isinstance(value, str) and value else None
 
 
 class AuthExpiredError(Exception):
@@ -149,6 +162,7 @@ class UploadService:
         # ── Rate limit pause/resume ──
         if platform_name in self._rate_limit_paused:
             import time
+
             paused_until = self._rate_limit_paused[platform_name]
             now = time.time()
             if now < paused_until:
@@ -217,7 +231,9 @@ class UploadService:
         if existing_id and self.state.is_video_posted(existing_id, platform_name):
             logger.info(
                 "Skipping %s upload — identical content already posted as %s (hash %s)",
-                platform_name, existing_id, content_hash,
+                platform_name,
+                existing_id,
+                content_hash,
             )
             return UploadResult(
                 success=True,
@@ -254,9 +270,7 @@ class UploadService:
         try:
             self.shutdown_handler.update_phase("encoding")
             logger.info("Encoding for %s...", platform_name)
-            encoded_path = await self._encode_for_platform(
-                video_path, platform_name
-            )
+            encoded_path = await self._encode_for_platform(video_path, platform_name)
             if encoded_path != video_path:
                 self.shutdown_handler.add_temp_file(encoded_path)
         except Exception as e:
@@ -282,24 +296,46 @@ class UploadService:
                 (s for s in info.get("streams", []) if s.get("codec_type") == "video"),
                 {},
             )
-            quality_report.update({
-                "width": stream.get("width"),
-                "height": stream.get("height"),
-                "bit_rate": int(
-                    stream.get("bit_rate")
-                    or info.get("format", {}).get("bit_rate")
-                    or 0
-                ),
-            })
+            quality_report.update(
+                {
+                    "width": stream.get("width"),
+                    "height": stream.get("height"),
+                    "bit_rate": int(stream.get("bit_rate") or info.get("format", {}).get("bit_rate") or 0),
+                }
+            )
             logger.info(
                 "Sending to %s: %sx%s @ %.1f Mbps (transcoded=%s)",
-                platform_name, quality_report.get("width"),
+                platform_name,
+                quality_report.get("width"),
                 quality_report.get("height"),
                 (quality_report.get("bit_rate") or 0) / 1_000_000,
                 quality_report["transcoded"],
             )
         except Exception as e:
             logger.debug("Quality probe skipped: %s", e)
+
+        # ── Pre-upload media verification (max-fidelity pipeline) ──
+        # Check the EXACT file being sent against the platform's ingest spec.
+        # Warnings are logged and recorded; hard errors (wrong container, no
+        # video stream, over the size cap) block the upload — the platform
+        # would reject or irrecoverably mangle the file.
+        preflight = verify_media(
+            encoded_path,
+            platform_name,
+            ffmpeg_path=_as_str(getattr(self.video_processor, "ffmpeg_path", None)),
+        )
+        quality_report["preflight"] = preflight.to_dict()
+        for w in preflight.warnings:
+            logger.warning("Media pre-flight [%s]: %s", w.name, w.detail)
+        if not preflight.ok:
+            errors = "; ".join(f"{c.name}: {c.detail}" for c in preflight.errors)
+            logger.error("Blocking upload to %s — pre-flight failed: %s", platform_name, errors)
+            return UploadResult(
+                success=False,
+                error=f"Media pre-flight verification failed: {errors[:200]}",
+                platform=platform_name,
+                metadata={"preflight": preflight.to_dict()},
+            )
 
         # Upload with retry and progress tracking
         self.shutdown_handler.update_phase("uploading")
@@ -358,10 +394,9 @@ class UploadService:
                 # Check for rate limit and schedule pause
                 if self._is_rate_limit(upload_result.error):
                     import time
+
                     pause_duration = self._calculate_rate_limit_pause(platform_name)
-                    self._rate_limit_paused[platform_name] = (
-                        time.time() + pause_duration
-                    )
+                    self._rate_limit_paused[platform_name] = time.time() + pause_duration
                     logger.warning(
                         "Rate limit hit for %s, pausing for %.0fs",
                         platform_name,
@@ -374,7 +409,8 @@ class UploadService:
                     # health and masked real problems.
                     logger.info(
                         "Deferred %s upload for %s (not recorded as failure)",
-                        platform_name, video_id,
+                        platform_name,
+                        video_id,
                     )
                 else:
                     self.state.mark_video_failed(
@@ -489,7 +525,7 @@ class UploadService:
         self._rate_limit_count[platform_name] = count + 1
 
         # Exponential backoff: 60, 120, 240, ... max 3600
-        pause = min(60 * (2 ** count), 3600)
+        pause = min(60 * (2**count), 3600)
         return pause
 
     async def upload_carousel_to_platform(
@@ -546,7 +582,8 @@ class UploadService:
         if existing_id and self.state.is_video_posted(existing_id, platform_name):
             logger.info(
                 "Skipping %s carousel — identical media set already posted as %s",
-                platform_name, existing_id,
+                platform_name,
+                existing_id,
             )
             return UploadResult(
                 success=True,
@@ -617,40 +654,47 @@ class UploadService:
     ) -> Path:
         """Encode a video file for a specific platform's requirements.
 
+        Runs the max-fidelity decision tree (xpst.media.pipeline):
+        passthrough when the source already fits, zero-loss stream-copy
+        remux when only the container is foreign, platform-profile transcode
+        (with EBU R128 loudness normalization) otherwise.
+
         Handles ffmpeg temp file cleanup on failure.
         """
-        if platform == "youtube":
-            config = self.config.video.encoding_youtube
-        elif platform == "instagram":
-            config = self.config.video.encoding_instagram
-        elif platform == "x":
-            config = self.config.video.encoding_x
-        elif platform == "tiktok":
-            # TikTok has a dedicated profile (GOP=2*fps, bufsize 20M,
-            # AAC 128k) — it no longer borrows Instagram's.
-            config = self.config.video.encoding_tiktok
-        elif platform == "threads":
-            # Threads: high-quality profile shared with Instagram
-            config = self.config.video.encoding_instagram
-        else:
-            raise ValueError(f"Unknown platform: {platform}")
+        config = self._encoding_config(platform)
 
         if config.passthrough:
             return video_path
 
-        # Fidelity invariant: skip the re-encode entirely when the source
-        # already satisfies the platform profile (probe via get_video_info).
-        try:
-            compliant, reason = self.video_processor.is_platform_compliant(
-                video_path, platform, config
-            )
-        except Exception as e:
-            logger.debug("Compliance probe failed, will encode: %s", e)
-            compliant, reason = False, "probe failed"
-        if compliant:
-            logger.info("Passthrough for %s — source already compliant (%s)", platform, reason)
+        plan = plan_transform(video_path, platform, config, self.video_processor)
+
+        if plan.action == "passthrough":
+            logger.info("Passthrough for %s — %s", platform, "; ".join(plan.reasons))
             return video_path
 
+        if plan.action == "remux":
+            output_path = video_path.with_name(f"{video_path.stem}_mp4.mp4")
+            if output_path.exists() and output_path.stat().st_size > 1000:
+                if self._cached_encode_is_valid(output_path, video_path):
+                    logger.info("Using cached remux for %s", platform)
+                    return output_path
+                logger.warning("Discarding stale or corrupt cached remux: %s", output_path)
+                try:
+                    output_path.unlink()
+                except OSError:
+                    pass
+            try:
+                return self.video_processor.remux_for_platform(video_path, output_path)
+            except Exception as e:
+                logger.error("Remux failed for %s: %s", platform, e)
+                if output_path.exists():
+                    try:
+                        output_path.unlink()
+                    except OSError:
+                        pass
+                raise
+
+        # transcode
         output_path = video_path.with_stem(f"{video_path.stem}_{platform}")
 
         if output_path.exists() and output_path.stat().st_size > 1000:
@@ -659,17 +703,21 @@ class UploadService:
                 return output_path
             logger.warning(
                 "Discarding stale or corrupt cached encode for %s: %s",
-                platform, output_path,
+                platform,
+                output_path,
             )
             try:
                 output_path.unlink()
             except OSError:
                 pass
 
+        loudnorm_filter = self._loudness_filter_for(video_path, platform)
+
         try:
-            return self.video_processor.encode_for_platform(
-                video_path, output_path, platform, config
-            )
+            kwargs: dict[str, Any] = {}
+            if loudnorm_filter:
+                kwargs["loudnorm_filter"] = loudnorm_filter
+            return self.video_processor.encode_for_platform(video_path, output_path, platform, config, **kwargs)
         except Exception as e:
             logger.debug("Encode failed, cleaning up: %s", e)
             # Clean up partial output on ffmpeg failure
@@ -680,6 +728,64 @@ class UploadService:
                 except OSError:
                     pass
             raise
+
+    def _encoding_config(self, platform: str) -> Any:
+        """Resolve the platform's EncodingConfig from the video config."""
+        if platform == "youtube":
+            return self.config.video.encoding_youtube
+        if platform == "instagram":
+            return self.config.video.encoding_instagram
+        if platform == "x":
+            return self.config.video.encoding_x
+        if platform == "tiktok":
+            # TikTok has a dedicated profile (GOP=2*fps, bufsize 20M,
+            # AAC 128k) — it no longer borrows Instagram's.
+            return self.config.video.encoding_tiktok
+        if platform == "threads":
+            # Threads: high-quality profile shared with Instagram
+            return self.config.video.encoding_instagram
+        raise ValueError(f"Unknown platform: {platform}")
+
+    def _loudness_filter_for(self, video_path: Path, platform: str) -> str | None:
+        """Build a linear-mode EBU R128 loudnorm filter for this platform.
+
+        Two-pass: measure the source, then normalize to the platform's LUFS
+        target in linear mode (no dynamics distortion). Returns None (skip
+        normalization) whenever anything is unavailable — a loudness hiccup
+        must never block an upload, and files without audio need nothing.
+        """
+        ffmpeg = getattr(self.video_processor, "ffmpeg_path", None)
+        ffmpeg = ffmpeg if isinstance(ffmpeg, str) else None
+        if not has_loudnorm(ffmpeg):
+            logger.debug("ffmpeg lacks loudnorm — skipping loudness normalization")
+            return None
+
+        try:
+            info = self.video_processor.get_video_info(video_path)
+            has_audio = any(s.get("codec_type") == "audio" for s in info.get("streams", []))
+        except Exception:  # noqa: BLE001 - unprobeable file → no normalization
+            return None
+        if not has_audio:
+            return None
+
+        target = loudness_target(platform)
+        ffmpeg = self.video_processor.ffmpeg_path
+        ffmpeg = ffmpeg if isinstance(ffmpeg, str) else None
+        measured = measure_loudness(ffmpeg, video_path, target_i=target)
+        if measured is None:
+            # One-pass dynamic mode as a last resort still lands the target
+            # loudness (at some dynamics cost) — better than shipping off-target.
+            return f"loudnorm=I={target}:TP=-1.5:LRA=11"
+        f = build_loudnorm_filter(measured, target_i=target)
+        if f is None:
+            return None
+        logger.info(
+            "Loudness: source %.1f LUFS → target %.1f LUFS for %s (two-pass linear)",
+            measured["input_i"],
+            target,
+            platform,
+        )
+        return f
 
     def _cached_encode_is_valid(self, cached_path: Path, source_path: Path) -> bool:
         """Whether a cached encode may be uploaded as-is.
