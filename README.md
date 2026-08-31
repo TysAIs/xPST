@@ -118,7 +118,7 @@ git clone https://github.com/TysAIs/xPST.git && cd xPST
 uv venv && uv pip install -e ".[full]"
 
 # 2. Setup (interactive wizard connects your platforms)
-xpst setup
+xpst onboard
 
 # 3. Run (check for new videos and cross-post them)
 xpst run
@@ -134,6 +134,32 @@ xpst app          # native desktop app (PySide6/QML)
 xpst mcp          # MCP server for AI agents (stdio)
 xpst auth status  # check which platforms are connected
 ```
+
+### The onboarding flow
+
+`xpst onboard` is the effortless first-run path: it checks which platforms
+are already connected, then walks you through the rest one at a time —
+clear copy about what will happen, browser opens for the OAuth approval
+(2–3 clicks), the connection is verified immediately, and progress is
+remembered so you can stop and resume anytime.
+
+```bash
+xpst onboard             # guided first-run: connect every platform
+xpst onboard --dry-run   # preview the plan, no side effects
+xpst connect youtube     # re-link one platform later (e.g. after token expiry)
+xpst doctor              # something not posting? auth health + quota + fix-it checklist
+```
+
+When a platform upload fails, the CLI now prints a copy-pasteable fix
+(expired token → re-auth command, missing scope → which scope, quota
+exceeded → `xpst quota`) instead of just the raw error.
+
+Client secrets: xPST never ships platform client secrets. YouTube, X,
+Instagram and Threads use your own developer app/keys with a guided
+copy-paste setup wizard (BYO app) — sharing a secret in an open-source
+repo would let anyone burn your API quota. TikTok uses xPST's public
+client key (no secret); until TikTok's app audit completes, API posts
+are restricted to private visibility.
 
 ---
 
@@ -222,6 +248,8 @@ xPST provides 38 top-level commands. Run `xpst --help` for the full list. Most c
 | Command | Description |
 |---------|-------------|
 | `xpst setup` | Interactive first-time setup wizard (connects platforms, writes config) |
+| `xpst onboard` | Guided first-run onboarding: connect every platform in one pass (`--dry-run` previews) |
+| `xpst doctor` | Diagnose auth health, quotas and environment; prints a prioritized fix-it checklist |
 | `xpst connect [PLATFORM]` | Streamlined account connection wizard; use `--test` to test existing |
 | `xpst auth [PLATFORM]` | Authenticate with a specific platform (youtube/x/instagram/tiktok/threads) |
 | `xpst auth status` | Show authentication and quota status for all platforms |

@@ -30,6 +30,7 @@ from typing import Any
 
 import click
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 from xpst.config import XPSTConfig
@@ -1273,6 +1274,312 @@ def wizard(platform: str | None, export_md: str | None, as_json: bool):
 
 
 # ──────────────────────────────────────────────
+# Onboarding & Doctor Commands
+# ──────────────────────────────────────────────
+
+_ONBOARD_PLATFORMS = ["youtube", "tiktok", "x", "instagram", "threads", "messenger"]
+
+
+@main.command()
+@click.option("--dry-run", "dry_run", is_flag=True,
+              help="Show the onboarding plan (order, steps, connected state) without connecting or writing anything")
+@click.option("--force", "force", is_flag=True,
+              help="Re-run connect even for platforms whose health check already passes")
+@json_option
+@click.pass_context
+def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
+    """Guided first-run onboarding: connect every platform in one pass.
+
+    The effortless entry point after installing xPST. For each platform
+    that is not yet connected it shows what will happen, asks for a
+    confirmation, opens the browser / collects credentials (delegating to
+    `xpst connect <platform>`), verifies the connection, and remembers
+    progress so re-running resumes where you left off.
+
+        xpst onboard             # interactive first-run flow
+        xpst onboard --dry-run   # plan only, no side effects
+        xpst onboard --json      # machine-readable plan/results
+    """
+    from xpst.connect import test_connections
+    from xpst.wizard import PLATFORM_GUIDES, load_wizard_state, save_wizard_state
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    # Snapshot current health (redirect test_connections chatter to stderr
+    # so --json stdout stays parseable — same trick as xpst.wizard).
+    results: dict[str, bool] = {}
+    with redirect_stdout(sys.stderr):
+        results = asyncio.run(test_connections(config))
+
+    connected = {p: bool(results.get(p)) for p in _ONBOARD_PLATFORMS}
+    targets = [p for p in _ONBOARD_PLATFORMS if force or not connected[p]]
+
+    if dry_run:
+        plan: dict[str, Any] = {
+            "dry_run": True,
+            "order": _ONBOARD_PLATFORMS,
+            "platforms": {
+                p: {
+                    "connected": connected[p],
+                    "title": PLATFORM_GUIDES[p].title,
+                    "steps": [s.text for s in PLATFORM_GUIDES[p].steps],
+                    "next": None if connected[p] else f"xpst connect {p}",
+                }
+                for p in _ONBOARD_PLATFORMS
+            },
+            "would_connect": targets,
+            "config_impact": "accounts.<platform>.enabled=true + platform credentials (encrypted)",
+        }
+        if as_json:
+            json_output(plan, True)
+            return
+        if not ctx.obj.get("quiet", False):
+            console.print("[bold blue]Dry run — onboarding plan (nothing connected):[/bold blue]")
+        for p in _ONBOARD_PLATFORMS:
+            state_str = "[green]connected[/green]" if connected[p] else "[yellow]not connected[/yellow]"
+            console.print(f"  [bold]{p}[/bold] ({state_str})")
+            for i, step in enumerate(plan["platforms"][p]["steps"], 1):
+                console.print(f"    {i}. {step}")
+        return
+
+    # All connected? Report and exit before any interactive gate — no
+    # prompting would happen anyway, so agent mode must succeed here.
+    if not targets:
+        if as_json:
+            json_output({"mode": "onboard", "connected": connected, "connected_count": sum(connected.values()),
+                         "total": len(_ONBOARD_PLATFORMS), "actions": []}, True)
+        else:
+            console.print("[green]✅ All platforms are already connected — nothing to do.[/green]")
+            console.print("[dim]Run `xpst doctor` for a full health report.[/dim]")
+        return
+
+    # Interactive gate (same agent-safety contract as `xpst connect`):
+    # never prompt, never open browsers on a pipe.
+    if not stdin_is_interactive():
+        message = (
+            "onboard requires an interactive terminal. "
+            "Use `xpst onboard --dry-run --json` for the plan, "
+            "`xpst wizard --json` for the agent-mode checklist, or "
+            "`xpst connect <platform> --guide` for setup steps."
+        )
+        if as_json:
+            json_output(_error_payload("INTERACTIVE_REQUIRED", message, hint="xpst onboard --dry-run --json"), True)
+        else:
+            console.print("[red]onboard requires an interactive terminal.[/red]")
+            console.print("[dim]Try:[/dim] xpst onboard --dry-run  ·  xpst wizard --json")
+        sys.exit(EXIT_AUTH_FAILURE)
+        return
+
+    from xpst.connect import run_connect
+
+    state = load_wizard_state(config)
+    outcomes: dict[str, dict[str, Any]] = {}
+    for p in targets:
+        guide = PLATFORM_GUIDES[p]
+        if not as_json:
+            console.print(Panel(
+                f"[bold]{guide.title}[/bold]\n{guide.why}",
+                title=f"Connect {p}", border_style="blue",
+            ))
+        ok = run_connect(platforms=[p])
+        # Verify right after connecting (fresh health check, this platform only)
+        try:
+            with redirect_stdout(sys.stderr):
+                verify = asyncio.run(test_connections(config))
+            verified = bool(verify.get(p))
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("onboard verification failed for %s: %s", p, e)
+            verified = False
+        outcomes[p] = {"connect_ok": bool(ok), "verified": verified}
+        state.setdefault("platforms", {})[p] = {
+            "status": "ok" if verified else "failed",
+            "detail": f"onboard {p}",
+        }
+        save_wizard_state(config, state)
+
+    succeeded = [p for p, o in outcomes.items() if o["verified"]]
+    failed = [p for p in outcomes if p not in succeeded]
+
+    if as_json:
+        json_output({
+            "mode": "onboard",
+            "connected": connected,
+            "outcomes": outcomes,
+            "connected_count": sum(1 for v in connected.values() if v),
+            "total": len(_ONBOARD_PLATFORMS),
+            "succeeded": succeeded,
+            "failed": failed,
+        }, True)
+    else:
+        console.print(Panel("[bold]Onboarding Summary[/bold]", style="blue"))
+        for p, o in outcomes.items():
+            mark = "✅" if o["verified"] else "❌"
+            console.print(f"  {mark} {p}")
+        if failed:
+            console.print(f"\n[yellow]Fix the failures with:[/yellow] xpst connect {failed[0]}")
+        console.print("[dim]Run `xpst doctor` anytime for a full health report.[/dim]")
+
+    if failed:
+        sys.exit(EXIT_AUTH_FAILURE)
+
+
+@main.command()
+@click.argument("platform", required=False,
+                type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
+@json_option
+@click.pass_context
+def doctor(ctx: click.Context, platform: str | None, as_json: bool):
+    """Diagnose auth health, quotas and environment; print a fix-it checklist.
+
+    The one command to run when "something doesn't post". Checks each
+    platform's live connection, remaining API quota, and local
+    prerequisites (ffmpeg, yt-dlp, config dir), then prints a prioritized
+    fix-it checklist with copy-pasteable commands.
+
+        xpst doctor              # everything
+        xpst doctor youtube      # one platform
+        xpst doctor --json       # machine-readable report
+    """
+    from xpst.connect import test_connections
+    from xpst.utils.errors import describe_remediation
+
+    config = load_config(ctx.obj.get("config_path"))
+
+    # 1. Live auth health (chatter → stderr; keep --json stdout parseable).
+    results: dict[str, bool] = {}
+    with redirect_stdout(sys.stderr):
+        results = asyncio.run(test_connections(config))
+    if platform:
+        results = {p: ok for p, ok in results.items() if p == platform}
+
+    sessions = _session_health(config)
+    quota_mgr = QuotaManager(config.config_dir, config=config)
+    quota_status = quota_mgr.get_detailed_status()
+
+    # 2. Per-platform findings.
+    platforms_report: dict[str, dict[str, Any]] = {}
+    issues: list[dict[str, Any]] = []
+    for p, ok in results.items():
+        session = sessions.get(p, {})
+        creds_present = bool(session.get("present"))
+        if ok:
+            problem = None
+            fix = None
+        elif creds_present:
+            problem = "Credentials found but the health check failed — token may be expired or revoked."
+            fix = describe_remediation(p, "token expired") or f"xpst connect {p}"
+        else:
+            problem = "Not connected."
+            fix = f"xpst connect {p}"
+
+        qinfo = quota_status.get(p, {})
+        platforms_report[p] = {
+            "connected": ok,
+            "auth_mode": getattr(getattr(config, p, None), "auth_mode", None),
+            "session_age_days": session.get("age_days"),
+            "problem": problem,
+            "fix": fix,
+            "quota": {
+                "used_today": qinfo.get("used_today"),
+                "daily_limit": qinfo.get("daily_limit"),
+                "remaining": qinfo.get("remaining"),
+            },
+        }
+        if not ok:
+            issues.append({
+                "severity": "error",
+                "platform": p,
+                "problem": problem,
+                "fix": fix,
+            })
+        elif (qinfo.get("remaining") is not None and qinfo["remaining"] <= 2):
+            issues.append({
+                "severity": "warning",
+                "platform": p,
+                "problem": f"Quota nearly exhausted ({qinfo['remaining']} uploads left today).",
+                "fix": "xpst quota",
+            })
+
+    # 3. Environment prerequisites.
+    ffmpeg_path = os.environ.get("XPST_FFMPEG_PATH") or shutil.which("ffmpeg")
+    environment: list[dict[str, Any]] = [
+        {
+            "name": "ffmpeg",
+            "ok": bool(ffmpeg_path),
+            "detail": ffmpeg_path or "not found on PATH (set XPST_FFMPEG_PATH)",
+            "fix": None if ffmpeg_path else "Install ffmpeg (e.g. `brew install ffmpeg`) or set XPST_FFMPEG_PATH.",
+        },
+        {
+            "name": "yt-dlp",
+            "ok": bool(shutil.which("yt-dlp")),
+            "detail": shutil.which("yt-dlp") or "not found on PATH",
+            "fix": None if shutil.which("yt-dlp") else "Install yt-dlp (e.g. `brew install yt-dlp` or `pipx install yt-dlp`).",
+        },
+    ]
+    try:
+        Path(config.config_dir).expanduser().mkdir(parents=True, exist_ok=True)
+        env_ok = True
+    except OSError as e:
+        env_ok = False
+        logger.debug("config dir not writable: %s", e)
+    environment.append({
+        "name": "config dir",
+        "ok": env_ok,
+        "detail": str(config.config_dir),
+        "fix": None if env_ok else f"Ensure {config.config_dir} is writable.",
+    })
+    for entry in environment:
+        if not entry["ok"]:
+            issues.append({
+                "severity": "error" if entry["name"] != "yt-dlp" else "warning",
+                "platform": None,
+                "problem": f"{entry['name']}: {entry['detail']}",
+                "fix": entry["fix"],
+            })
+
+    report: dict[str, Any] = {
+        "doctor": True,
+        "platforms": platforms_report,
+        "environment": environment,
+        "issues": issues,
+        "all_clear": not issues,
+    }
+    if as_json:
+        json_output(report, True)
+        if issues:
+            sys.exit(EXIT_AUTH_FAILURE)
+        return
+
+    # Rich report.
+    table = Table(show_header=True, header_style="bold", title="🩺 xPST Doctor")
+    table.add_column("Platform")
+    table.add_column("Auth")
+    table.add_column("Health")
+    table.add_column("Quota left")
+    for p, info in platforms_report.items():
+        health = "[green]✅ pass[/green]" if info["connected"] else "[red]❌ fail[/red]"
+        remaining = info["quota"]["remaining"]
+        rem_str = "[dim]—[/dim]" if remaining is None else str(remaining)
+        table.add_row(p, info["auth_mode"] or "—", health, rem_str)
+    console.print(table)
+
+    console.print("\n[bold]Environment:[/bold]")
+    for entry in environment:
+        mark = "✅" if entry["ok"] else "❌"
+        console.print(f"  {mark} {entry['name']}: {entry['detail']}")
+
+    if issues:
+        console.print("\n[bold yellow]Fix-it checklist:[/bold yellow]")
+        for i, issue in enumerate(issues, 1):
+            console.print(f"  {i}. [{issue['severity']}] {issue['problem']}")
+            if issue["fix"]:
+                console.print(f"     [dim]→[/dim] {issue['fix']}")
+        sys.exit(EXIT_AUTH_FAILURE)
+    else:
+        console.print("\n[green]✅ Everything looks healthy. Happy posting![/green]")
+
+
+# ──────────────────────────────────────────────
 # Auth Commands
 # ──────────────────────────────────────────────
 
@@ -2119,6 +2426,8 @@ def _display_result(result: CrossPostResult) -> None:
         result: CrossPostResult to display.
     """
 
+    from xpst.utils.errors import describe_remediation
+
     status = "[green]✅ Success[/green]" if result.all_success else "[yellow]⚠️  Partial[/yellow]" if result.partial_success else "[red]❌ Failed[/red]"
 
     console.print(f"\n[bold]{result.video_id}[/bold] - {status}")
@@ -2145,18 +2454,35 @@ def _display_result(result: CrossPostResult) -> None:
 
     console.print(table)
 
+    # Actionable remediation for the common failure modes (expired token,
+    # missing scope, quota exceeded) — a copy-pasteable fix, not just the
+    # raw error.
+    for platform, upload_result in result.results.items():
+        if upload_result.success or not upload_result.error:
+            continue
+        hint = describe_remediation(platform, upload_result.error)
+        if hint:
+            console.print(f"[yellow]💡 Fix ({platform}):[/yellow] {hint}")
+
 
 def _result_to_dict(result: CrossPostResult) -> dict:
     """Convert a CrossPostResult to a plain dict for JSON output."""
+    from xpst.utils.errors import describe_remediation
+
     platforms = {}
     for platform, ur in result.results.items():
-        platforms[platform] = {
+        entry = {
             "success": ur.success,
             "post_url": ur.post_url,
             "post_id": ur.post_id,
             "error": ur.error,
             "platform": ur.platform,
         }
+        if not ur.success and ur.error:
+            hint = describe_remediation(platform, ur.error)
+            if hint:
+                entry["hint"] = hint
+        platforms[platform] = entry
     return {
         "video_id": result.video_id,
         "caption": result.caption[:80],

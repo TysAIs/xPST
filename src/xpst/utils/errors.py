@@ -345,3 +345,92 @@ def is_fatal(error: Exception, platform: str | None = None) -> bool:
         True if the error should NOT be retried
     """
     return categorize_error(error, platform).is_fatal
+
+
+# ──────────────────────────────────────────────
+# User-facing remediation hints
+# ──────────────────────────────────────────────
+
+_SCOPE_HINTS: dict[str, str] = {
+    "youtube": (
+        "Your Google Cloud OAuth app is missing a scope or you are not a test "
+        "user. In Google Cloud Console → APIs & Credentials, make sure the app "
+        "is in Testing mode with your Google account added as a test user, "
+        "then re-run: xpst connect youtube"
+    ),
+    "tiktok": (
+        "Your TikTok app needs the `video.publish` scope approved. "
+        "Run: xpst connect tiktok --guide — note that until TikTok's audit "
+        "completes, API posts are restricted to private visibility."
+    ),
+    "instagram": (
+        "The Instagram access token needs `instagram_business_content_publish` "
+        "on a Business/Professional account. Generate a new token with those "
+        "scopes, then run: xpst connect instagram"
+    ),
+    "x": (
+        "Recreate your X API v2 app keys with the scopes `tweet.read`, "
+        "`tweet.write`, `users.read` and `offline.access`, then run: xpst connect x"
+    ),
+}
+
+_DEFAULT_SCOPE_HINT = (
+    "The access token is missing a required permission/scope. "
+    "Re-authorize the platform with: xpst connect <platform>"
+)
+
+_QUOTA_HINT = (
+    "Daily API quota is used up. Run `xpst quota` to see usage — YouTube's "
+    "default is 10,000 units/day (~6 uploads at 1,600 units each). xPST will "
+    "not retry today; a higher quota requires Google's quota-increase form."
+)
+
+_REAUTH_HINT = (
+    "Re-authorize the platform (takes under a minute; the new token is "
+    "stored encrypted): xpst connect {platform}"
+)
+
+
+def describe_remediation(platform: str | None, message: str) -> str | None:
+    """Map a common failure to a concrete user action.
+
+    Recognizes the failure modes users actually hit — expired/revoked
+    tokens, missing OAuth scopes/permissions, and exhausted daily quota —
+    and returns a short, copy-pasteable fix. Returns ``None`` when the
+    message matches no known pattern (callers should fall back to the raw
+    error rather than invent advice).
+
+    Args:
+        platform: Platform name (youtube, x, instagram, tiktok, ...) or None.
+        message: The error text to inspect.
+
+    Returns:
+        A remediation string, or None if no known fix applies.
+    """
+
+    if not message:
+        return None
+
+    text = message.lower()
+
+    # Quota: check before auth — "quota exceeded" never means re-auth.
+    if re.search(r"quota\s*(exceeded|reached|limit)|daily\s*(quota|limit)", text):
+        return _QUOTA_HINT
+
+    # Missing scope / permission.
+    if re.search(r"scope|permission|access\s*denied|unauthorized\s*client|forbidden", text):
+        if platform in _SCOPE_HINTS:
+            return _SCOPE_HINTS[platform]
+        return _DEFAULT_SCOPE_HINT
+
+    # Expired / revoked credentials.
+    if re.search(
+        r"token\s*(expired|invalid|revoked)|invalid_grant|session\s*expired"
+        r"|login\s*required|unauthorized|401|credentials?\s*expired",
+        text,
+    ):
+        if platform:
+            return _REAUTH_HINT.format(platform=platform)
+        return _REAUTH_HINT.format(platform="<platform>")
+
+    return None
