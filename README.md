@@ -29,6 +29,7 @@
 - [Dashboard Guide](#dashboard-guide)
 - [MCP Integration Guide](#mcp-integration-guide)
 - [Platform Setup Guides](#platform-setup-guides)
+- [Video Quality Pipeline](#video-quality-pipeline)
 - [Configuration Reference](#configuration-reference)
 - [Architecture Overview](#architecture-overview)
 - [Development Guide](#development-guide)
@@ -773,6 +774,54 @@ xpst config fix
 ```
 
 Every config key can be overridden by a flat environment variable with the `XPST_` prefix. For example: `XPST_THREADS_GRAPH_ACCESS_TOKEN`, `XPST_INSTAGRAM_AUTH_MODE`, `XPST_YOUTUBE_ENABLED`. Rate limits are set via the config file only (no env override).
+
+---
+
+## Video Quality Pipeline
+
+xPST ships every cross-posted video at the highest fidelity the target platform
+accepts. Before any upload, the media pipeline decides — per platform — what
+happens to your file, always preferring the path that spends the fewest quality
+generations:
+
+1. **Passthrough** — source streams already match the platform profile
+   (H.264/yuv420p, within the long-edge and fps caps, AAC audio) in a native
+   container: the source bytes are uploaded untouched.
+2. **Remux** — streams are perfect but the container is foreign (MKV, WebM,
+   AVI): a zero-loss stream copy (`-c copy`) into MP4 with `+faststart`.
+   Never a re-encode when a remux will do.
+3. **Transcode** — otherwise the platform's encoder profile runs, with
+   orientation-aware scaling (the LONG edge, portrait never crushed),
+   frame rate as a cap (`-fpsmax`, never a force), HDR→SDR tone-mapping
+   (or a loud refusal instead of washed-out colors), closed GOPs, and
+   EBU R128 loudness normalization.
+
+Per-platform profiles (defaults, overridable in `video.encoding_*` config):
+
+| | YouTube | TikTok | Instagram Reels | X |
+|---|---|---|---|---|
+| Rate control | 8 Mbps **two-pass** | CRF 20 (10M cap) | CRF 20 (10M cap) | 10 Mbps **two-pass** |
+| Audio | AAC 256k @ 48 kHz | AAC 128k @ 44.1 kHz | AAC 256k @ 44.1 kHz | AAC 256k @ 44.1 kHz |
+| Loudness target | −14 LUFS | −14 LUFS | −14 LUFS | −16 LUFS |
+| Max duration | — (Shorts 60 s) | 10 min | 15 min | 140 s |
+
+**Loudness normalization** is two-pass EBU R128 (`loudnorm` measurement pass,
+then linear-mode correction) so every platform receives audio already at its
+preferred level — no per-platform gain surprises, no true-peak limiter pumping.
+
+**Pre-flight verification**: every upload is checked against the platform's
+ingest spec right before it ships — container, codec, pix_fmt, geometry, fps,
+bitrate, audio, duration, file size, faststart, and measured loudness. Hard
+errors (e.g. a container the platform rejects, no real video track) block the
+upload with an actionable message; warnings are logged and attached to the
+upload result's `quality` metadata.
+
+Check any file yourself, with a dry-run transformation plan:
+
+```bash
+xpst verify-media ./my-video.mp4                    # verify against all platforms
+xpst verify-media ./my-video.mp4 -p x --plan        # X spec + what the pipeline would do
+```
 
 ---
 
