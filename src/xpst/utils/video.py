@@ -200,8 +200,7 @@ _HDR_TRANSFERS = frozenset({"smpte2084", "arib-std-b67"})
 # the terminal ``format={pix_fmt}``: linearize → tone-map → bt.709 matrix.
 # Verified working with libzimg (zscale) + tonemap; gated on availability.
 _HDR_TONEMAP_CHAIN = (
-    "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable:desat=0,"
-    "zscale=p=bt709:t=bt709:m=bt709:r=tv"
+    "zscale=t=linear:npl=100,format=gbrpf32le,tonemap=hable:desat=0,zscale=p=bt709:t=bt709:m=bt709:r=tv"
 )
 
 
@@ -239,8 +238,10 @@ def get_video_info_standalone(video_path: Path) -> dict:
     """ffprobe a file without a VideoProcessor instance (shared helper)."""
     cmd = [
         resolve_ffprobe_path() or get_ffprobe_name(),
-        "-v", "quiet",
-        "-print_format", "json",
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
         "-show_format",
         "-show_streams",
         str(video_path),
@@ -249,6 +250,7 @@ def get_video_info_standalone(video_path: Path) -> dict:
     if result.returncode != 0:
         raise RuntimeError(f"ffprobe failed: {result.stderr}")
     import json
+
     return json.loads(result.stdout)
 
 
@@ -258,7 +260,9 @@ def ffmpeg_install_hint() -> str:
         return "Install it with: brew install ffmpeg (macOS)"
     if sys.platform == "win32":
         return "Download it from https://ffmpeg.org/download.html and add it to PATH (Windows)"
-    return "Install it with your package manager (Linux), e.g. apt install ffmpeg, dnf install ffmpeg, or pacman -S ffmpeg"
+    return (
+        "Install it with your package manager (Linux), e.g. apt install ffmpeg, dnf install ffmpeg, or pacman -S ffmpeg"
+    )
 
 
 class FFmpegNotFoundError(RuntimeError):
@@ -330,8 +334,10 @@ class VideoProcessor:
         """
         cmd = [
             resolve_ffprobe_path() or get_ffprobe_name(),
-            "-v", "quiet",
-            "-print_format", "json",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
             "-show_format",
             "-show_streams",
             str(video_path),
@@ -343,6 +349,7 @@ class VideoProcessor:
             raise RuntimeError(f"ffprobe failed: {result.stderr}")
 
         import json
+
         return json.loads(result.stdout)
 
     def is_platform_compliant(
@@ -401,6 +408,7 @@ class VideoProcessor:
         output_path: Path,
         platform: str,
         config: EncodingConfig,
+        loudnorm_filter: str | None = None,
     ) -> Path:
         """
         Encode video for a specific platform.
@@ -410,6 +418,9 @@ class VideoProcessor:
             output_path: Output video path
             platform: Platform name (youtube, instagram, x)
             config: Encoding configuration
+            loudnorm_filter: Optional audio filter chain (e.g. a linear-mode
+                EBU R128 loudnorm built from a measurement pass). Applied on
+                top of the profile's audio settings.
 
         Returns:
             Path to encoded video
@@ -424,8 +435,7 @@ class VideoProcessor:
         # into a 1-frame "video" and silently uploaded as a still.
         if not _has_real_video_stream(input_path):
             raise ValueError(
-                f"No real video stream in {input_path.name} "
-                "(cover art / audio only) — refusing to fabricate video"
+                f"No real video stream in {input_path.name} (cover art / audio only) — refusing to fabricate video"
             )
 
         # Build FFmpeg command based on platform
@@ -460,6 +470,11 @@ class VideoProcessor:
                     "(HDR_TONEMAP_UNAVAILABLE)"
                 )
 
+        # Loudness normalization: apply the caller-built linear-mode EBU R128
+        # filter on top of the profile's audio settings.
+        if loudnorm_filter:
+            cmd = self._inject_audio_filter(cmd, loudnorm_filter)
+
         # Atomic encode: write to a unique temp sibling and rename into
         # place. Two concurrent encodes of the same source then never write
         # the same output path, and a killed/disk-full encode can never
@@ -470,7 +485,18 @@ class VideoProcessor:
         cmd = [arg if arg != str(output_path) else str(tmp_output) for arg in cmd]
 
         try:
-            result = self._run_encode_with_fallback(cmd, tmp_output, platform, config, input_path, sw_preset="slow")
+            if self._should_two_pass(cmd, config):
+                result = self._run_two_pass(cmd, tmp_output)
+            else:
+                result = self._run_encode_with_fallback(
+                    cmd,
+                    tmp_output,
+                    platform,
+                    config,
+                    input_path,
+                    sw_preset="slow",
+                    audio_filter=loudnorm_filter,
+                )
         except Exception:
             self._safe_unlink(tmp_output)
             raise
@@ -499,6 +525,7 @@ class VideoProcessor:
         config: EncodingConfig,
         input_path: Path,
         sw_preset: str = "slow",
+        audio_filter: str | None = None,
     ) -> subprocess.CompletedProcess:
         """Run ffmpeg, falling back to libx264 when a hardware encoder fails.
 
@@ -524,6 +551,8 @@ class VideoProcessor:
                 fallback_cmd = self._build_tiktok_cmd(
                     input_path, output_path, config, encoder="libx264", sw_preset=preset
                 )
+                if audio_filter:
+                    fallback_cmd = self._inject_audio_filter(fallback_cmd, audio_filter)
                 result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=300)
                 if result.returncode == 0:
                     break
@@ -538,6 +567,99 @@ class VideoProcessor:
         except OSError:
             pass
 
+    @staticmethod
+    def _inject_audio_filter(cmd: list[str], audio_filter: str) -> list[str]:
+        """Insert ``-af`` into an ffmpeg command (before the output path).
+
+        The platform builders never set ``-af`` themselves, so a simple
+        insert before the final (output) argument is safe and keeps the
+        builders free of loudness concerns.
+        """
+        return [*cmd[:-1], "-af", audio_filter, cmd[-1]]
+
+    @staticmethod
+    def _should_two_pass(cmd: list[str], config: EncodingConfig) -> bool:
+        """Two-pass only applies to bitrate-targeted libx264 encodes.
+
+        CRF profiles have no bitrate target to converge on, and hardware
+        encoders do not support x264's stats-file mechanism.
+        """
+        if not getattr(config, "two_pass", False):
+            return False
+        if "-b:v" not in cmd or "-c:v" not in cmd:
+            return False
+        return cmd[cmd.index("-c:v") + 1] == "libx264"
+
+    def _run_two_pass(self, cmd: list[str], tmp_output: Path) -> subprocess.CompletedProcess:
+        """Run a two-pass x264 encode for exact-bitrate outputs.
+
+        Pass 1 analyzes (audio dropped, output discarded); pass 2 reuses the
+        stats file for frame-exact bitrate decisions. Pass-log artifacts are
+        cleaned up in all paths.
+        """
+        passlog_base = tmp_output.parent / f"{tmp_output.stem}_passlog"
+        pass1 = cmd[:-1] + ["-pass", "1", "-passlogfile", str(passlog_base), "-an", "-f", "null", "-"]
+        pass2 = cmd[:-1] + ["-pass", "2", "-passlogfile", str(passlog_base), cmd[-1]]
+        try:
+            result = subprocess.run(pass1, capture_output=True, text=True, timeout=600)
+            if result.returncode != 0:
+                logger.error("Two-pass encode pass 1 failed: %s", result.stderr[-300:])
+                return result
+            result = subprocess.run(pass2, capture_output=True, text=True, timeout=900)
+            if result.returncode != 0:
+                logger.error("Two-pass encode pass 2 failed: %s", result.stderr[-300:])
+            return result
+        finally:
+            for artifact in passlog_base.parent.glob(f"{passlog_base.name}*"):
+                self._safe_unlink(artifact)
+
+    def remux_for_platform(self, input_path: Path, output_path: Path) -> Path:
+        """Stream-copy compatible streams into an MP4 (zero generation loss).
+
+        Used by the decision tree when the source streams already satisfy the
+        platform profile but the container does not (MKV/WebM/AVI/…): remux
+        costs no quality, a re-encode always does. ``-ignore_editlist`` drops
+        edit lists the platforms reject and ``+faststart`` fronts the moov
+        atom for progressive ingest.
+        """
+        logger.info("Remuxing for platform compatibility: %s", input_path.name)
+        tmp_output = output_path.with_name(
+            f"{output_path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp{output_path.suffix}"
+        )
+        cmd = [
+            self.ffmpeg_path,
+            "-y",
+            "-i",
+            str(input_path),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a:0?",
+            "-c",
+            "copy",
+            "-ignore_editlist",
+            "1",
+            "-movflags",
+            "+faststart",
+            "-sn",
+            str(tmp_output),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self._safe_unlink(tmp_output)
+            raise RuntimeError(f"Remux failed to run: {exc}") from exc
+        if result.returncode != 0:
+            self._safe_unlink(tmp_output)
+            raise RuntimeError(f"Remux failed: {result.stderr[-200:]}")
+        if not tmp_output.exists() or tmp_output.stat().st_size < 1000:
+            self._safe_unlink(tmp_output)
+            raise RuntimeError(f"Remuxed video is empty or too small: {tmp_output}")
+        os.replace(tmp_output, output_path)
+        size_mb = output_path.stat().st_size / 1024 / 1024
+        logger.info("Remuxed for %s ingest: %s (%.1f MB)", input_path.suffix, output_path.name, size_mb)
+        return output_path
+
     def _has_filter(self, name: str) -> bool:
         """Whether the ffmpeg build exposes ``name`` among its filters."""
         cached = getattr(self, "_filter_cache", None)
@@ -545,7 +667,9 @@ class VideoProcessor:
             try:
                 result = subprocess.run(
                     [self.ffmpeg_path, "-hide_banner", "-filters"],
-                    capture_output=True, text=True, timeout=15,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
                 )
                 cached = set(re.findall(r"\s[a-zA-Z.]+\s+(\w+)\s+", result.stdout))
             except (OSError, subprocess.TimeoutExpired):
@@ -574,9 +698,7 @@ class VideoProcessor:
             return cmd
         vf = cmd[idx + 1]
         cmd = list(cmd)
-        cmd[idx + 1] = vf.replace(
-            ",setsar=1,", f",setsar=1,{_HDR_TONEMAP_CHAIN},", 1
-        )
+        cmd[idx + 1] = vf.replace(",setsar=1,", f",setsar=1,{_HDR_TONEMAP_CHAIN},", 1)
         logger.info("HDR source detected: injecting tone-map chain")
         return cmd
 
@@ -612,24 +734,42 @@ class VideoProcessor:
         return [
             self.ffmpeg_path,
             "-y",  # Overwrite output
-            "-i", str(input_path),
-            "-vf", f"{build_scale_filter(resolution)},setsar=1,format={pix_fmt}",
-            "-c:v", "libx264",
-            "-preset", "slow",  # Better quality
-            "-profile:v", profile,
-            "-level:v", level,
-            "-x264-params", f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
-            "-crf", str(crf),
-            "-maxrate", maxrate,
-            "-bufsize", double_rate(maxrate),
-            "-color_primaries", color,
-            "-color_trc", color,
-            "-colorspace", color,
-            "-fpsmax", str(fps_cap),
-            "-c:a", "aac",
-            "-b:a", "256k",
-            "-ar", "44100",
-            "-movflags", "+faststart",
+            "-i",
+            str(input_path),
+            "-vf",
+            f"{build_scale_filter(resolution)},setsar=1,format={pix_fmt}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",  # Better quality
+            "-profile:v",
+            profile,
+            "-level:v",
+            level,
+            "-x264-params",
+            f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
+            "-crf",
+            str(crf),
+            "-maxrate",
+            maxrate,
+            "-bufsize",
+            double_rate(maxrate),
+            "-color_primaries",
+            color,
+            "-color_trc",
+            color,
+            "-colorspace",
+            color,
+            "-fpsmax",
+            str(fps_cap),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "256k",
+            "-ar",
+            "44100",
+            "-movflags",
+            "+faststart",
             "-sn",  # No subtitles
             str(output_path),
         ]
@@ -671,17 +811,27 @@ class VideoProcessor:
         return [
             self.ffmpeg_path,
             "-y",  # Overwrite output
-            "-i", str(input_path),
-            "-vf", f"{build_scale_filter(resolution)},setsar=1,format={pix_fmt}",
+            "-i",
+            str(input_path),
+            "-vf",
+            f"{build_scale_filter(resolution)},setsar=1,format={pix_fmt}",
             *self._encoder_video_args(chosen, config, gop, sw_preset=sw_preset),
-            "-color_primaries", color,
-            "-color_trc", color,
-            "-colorspace", color,
-            "-fpsmax", str(fps_cap),
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-ar", "44100",
-            "-movflags", "+faststart",
+            "-color_primaries",
+            color,
+            "-color_trc",
+            color,
+            "-colorspace",
+            color,
+            "-fpsmax",
+            str(fps_cap),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-ar",
+            "44100",
+            "-movflags",
+            "+faststart",
             "-sn",  # No subtitles
             str(output_path),
         ]
@@ -728,23 +878,38 @@ class VideoProcessor:
             crf = config.crf if config.crf is not None else 20
             level = config.level or "4.0"
             return [
-                "-c:v", "libx264",
-                "-preset", sw_preset,
-                "-profile:v", profile,
-                "-level:v", level,
-                "-x264-params", f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
-                "-crf", str(crf),
-                "-maxrate", maxrate,
-                "-bufsize", bufsize,
+                "-c:v",
+                "libx264",
+                "-preset",
+                sw_preset,
+                "-profile:v",
+                profile,
+                "-level:v",
+                level,
+                "-x264-params",
+                f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
+                "-crf",
+                str(crf),
+                "-maxrate",
+                maxrate,
+                "-bufsize",
+                bufsize,
             ]
         return [
-            "-c:v", encoder,
-            "-b:v", maxrate,
-            "-maxrate", maxrate,
-            "-bufsize", bufsize,
-            "-profile:v", profile,
-            "-g", str(gop),
-            "-keyint_min", str(gop),
+            "-c:v",
+            encoder,
+            "-b:v",
+            maxrate,
+            "-maxrate",
+            maxrate,
+            "-bufsize",
+            bufsize,
+            "-profile:v",
+            profile,
+            "-g",
+            str(gop),
+            "-keyint_min",
+            str(gop),
         ]
 
     def _build_x_cmd(
@@ -780,24 +945,42 @@ class VideoProcessor:
         return [
             self.ffmpeg_path,
             "-y",  # Overwrite output
-            "-i", str(input_path),
-            "-vf", f"{build_scale_filter(resolution, flags='lanczos')},setsar=1,format={pix_fmt}",
-            "-c:v", "libx264",
-            "-preset", "slow",  # Better quality
-            "-profile:v", profile,
-            "-level:v", level,
-            "-x264-params", f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
-            "-b:v", bitrate,
-            "-maxrate", maxrate,
-            "-bufsize", double_rate(maxrate),
-            "-color_primaries", color,
-            "-color_trc", color,
-            "-colorspace", color,
-            "-fpsmax", str(fps_cap),
-            "-c:a", "aac",
-            "-b:a", "256k",
-            "-ar", "44100",
-            "-movflags", "+faststart",
+            "-i",
+            str(input_path),
+            "-vf",
+            f"{build_scale_filter(resolution, flags='lanczos')},setsar=1,format={pix_fmt}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",  # Better quality
+            "-profile:v",
+            profile,
+            "-level:v",
+            level,
+            "-x264-params",
+            f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
+            "-b:v",
+            bitrate,
+            "-maxrate",
+            maxrate,
+            "-bufsize",
+            double_rate(maxrate),
+            "-color_primaries",
+            color,
+            "-color_trc",
+            color,
+            "-colorspace",
+            color,
+            "-fpsmax",
+            str(fps_cap),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "256k",
+            "-ar",
+            "44100",
+            "-movflags",
+            "+faststart",
             "-sn",  # No subtitles
             str(output_path),
         ]
@@ -836,23 +1019,40 @@ class VideoProcessor:
         return [
             self.ffmpeg_path,
             "-y",
-            "-i", str(input_path),
-            "-vf", f"{build_scale_filter(resolution, upscale=True, flags='lanczos')},setsar=1,format={pix_fmt}",
-            "-c:v", "libx264",
-            "-preset", "slow",
-            "-profile:v", profile,
-            "-x264-params", f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
-            "-b:v", bitrate,
-            "-maxrate", maxrate,
-            "-bufsize", bufsize,
-            "-color_primaries", color,
-            "-color_trc", color,
-            "-colorspace", color,
-            "-fpsmax", str(fps_cap),
-            "-c:a", "aac",
-            "-b:a", "256k",
-            "-ar", "48000",
-            "-movflags", "+faststart",
+            "-i",
+            str(input_path),
+            "-vf",
+            f"{build_scale_filter(resolution, upscale=True, flags='lanczos')},setsar=1,format={pix_fmt}",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-profile:v",
+            profile,
+            "-x264-params",
+            f"scenecut=0:open_gop=0:min-keyint={gop}:keyint={gop}:ref=4",
+            "-b:v",
+            bitrate,
+            "-maxrate",
+            maxrate,
+            "-bufsize",
+            bufsize,
+            "-color_primaries",
+            color,
+            "-color_trc",
+            color,
+            "-colorspace",
+            color,
+            "-fpsmax",
+            str(fps_cap),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "256k",
+            "-ar",
+            "48000",
+            "-movflags",
+            "+faststart",
             "-sn",
             str(output_path),
         ]
@@ -877,10 +1077,14 @@ class VideoProcessor:
         cmd = [
             self.ffmpeg_path,
             "-y",
-            "-i", str(video_path),
-            "-ss", timestamp,
-            "-vframes", "1",
-            "-q:v", "2",
+            "-i",
+            str(video_path),
+            "-ss",
+            timestamp,
+            "-vframes",
+            "1",
+            "-q:v",
+            "2",
             str(output_path),
         ]
 
@@ -1007,25 +1211,35 @@ class VideoProcessor:
             *inputs,
             "-filter_complex",
             f"{filter_str};anullsrc=r=44100:cl=stereo[a]",
-            "-map", video_map,
-            "-map", "[a]",
-            "-t", str(total_duration),
-            "-c:v", "libx264",
-            "-preset", "slow",
-            "-profile:v", "high",
-            "-crf", "20",
-            "-r", str(fps),
-            "-c:a", "aac",
-            "-b:a", "256k",
-            "-ar", "44100",
-            "-movflags", "+faststart",
+            "-map",
+            video_map,
+            "-map",
+            "[a]",
+            "-t",
+            str(total_duration),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-profile:v",
+            "high",
+            "-crf",
+            "20",
+            "-r",
+            str(fps),
+            "-c:a",
+            "aac",
+            "-b:a",
+            "256k",
+            "-ar",
+            "44100",
+            "-movflags",
+            "+faststart",
             "-shortest",
             str(output_path),
         ]
 
-        logger.info(
-            f"Stitching {len(media_paths)} media files into carousel video ({total_duration:.1f}s)"
-        )
+        logger.info(f"Stitching {len(media_paths)} media files into carousel video ({total_duration:.1f}s)")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
         if result.returncode != 0:
@@ -1038,7 +1252,5 @@ class VideoProcessor:
             raise RuntimeError(f"Stitched video is empty or too small: {output_path}")
 
         size_mb = output_path.stat().st_size / 1024 / 1024
-        logger.info(
-            f"Carousel video created: {output_path.name} ({size_mb:.1f} MB, {total_duration:.1f}s)"
-        )
+        logger.info(f"Carousel video created: {output_path.name} ({size_mb:.1f} MB, {total_duration:.1f}s)")
         return output_path
