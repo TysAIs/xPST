@@ -17,8 +17,11 @@ Usage:
 """
 
 import asyncio
+import base64
 import contextlib
+import hashlib
 import json
+import secrets
 import stat
 import time
 from pathlib import Path
@@ -882,23 +885,56 @@ TIKTOK_OAUTH_SCOPES = "user.info.basic,video.publish,video.upload"
 TIKTOK_DEFAULT_REDIRECT_URI = "http://localhost:8085/callback"
 
 
-def build_tiktok_authorize_url(client_key: str, redirect_uri: str) -> str:
+def generate_pkce_pair() -> tuple[str, str]:
+    """Generate a PKCE code verifier + S256 code challenge pair.
+
+    Per RFC 7636: the verifier is a high-entropy random string, and the
+    challenge is ``BASE64URL-ENCODE(SHA256(ASCII(verifier)))`` with any
+    trailing ``=`` padding stripped.
+
+    Returns:
+        ``(code_verifier, code_challenge)`` — keep the verifier and send it
+        to the token endpoint; send the challenge on the authorize URL.
+    """
+    code_verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(code_verifier.encode("ascii")).digest()
+    code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return code_verifier, code_challenge
+
+
+def build_tiktok_authorize_url(
+    client_key: str,
+    redirect_uri: str,
+    code_challenge: str | None = None,
+    state: str | None = None,
+) -> str:
     """Build the TikTok OAuth authorization URL for a Content Posting API app.
 
     Args:
         client_key: TikTok app client key (developers.tiktok.com).
         redirect_uri: The redirect URI registered on the app.
+        code_challenge: PKCE S256 code challenge (RFC 7636). TikTok requires
+            PKCE for the Content Posting API — omitting it fails with
+            ``errCode 10007`` — so callers should always pass one generated
+            with :func:`generate_pkce_pair`.
+        state: Optional CSRF ``state`` value to include in the URL.
 
     Returns:
-        Full authorization URL with ``response_type=code`` and the
-        ``user.info.basic,video.publish,video.upload`` scopes.
+        Full authorization URL with ``response_type=code``,
+        ``code_challenge``/``code_challenge_method=S256`` when PKCE is used,
+        and the ``user.info.basic,video.publish,video.upload`` scopes.
     """
-    params = {
+    params: dict[str, str] = {
         "client_key": client_key,
         "response_type": "code",
         "scope": TIKTOK_OAUTH_SCOPES,
         "redirect_uri": redirect_uri,
     }
+    if code_challenge:
+        params["code_challenge"] = code_challenge
+        params["code_challenge_method"] = "S256"
+    if state:
+        params["state"] = state
     return f"{TIKTOK_AUTHORIZE_URL}?{urlencode(params, safe=',')}"
 
 
@@ -926,6 +962,7 @@ def exchange_tiktok_code(
     client_secret: str,
     code: str,
     redirect_uri: str,
+    code_verifier: str | None = None,
 ) -> dict:
     """Exchange a TikTok authorization code for access + refresh tokens.
 
@@ -934,6 +971,9 @@ def exchange_tiktok_code(
         client_secret: TikTok app client secret.
         code: Authorization code from the OAuth redirect.
         redirect_uri: Must match the one used in the authorize URL.
+        code_verifier: PKCE code verifier used to build the authorize URL
+            (from :func:`generate_pkce_pair`). Required when the authorize
+            URL carried a ``code_challenge``.
 
     Returns:
         The parsed token response dict (``access_token``, ``refresh_token``...).
@@ -943,15 +983,18 @@ def exchange_tiktok_code(
     """
     import httpx
 
+    data: dict[str, str] = {
+        "client_key": client_key,
+        "client_secret": client_secret,
+        "code": code,
+        "grant_type": "authorization_code",
+        "redirect_uri": redirect_uri,
+    }
+    if code_verifier:
+        data["code_verifier"] = code_verifier
     resp = httpx.post(
         TIKTOK_TOKEN_URL,
-        data={
-            "client_key": client_key,
-            "client_secret": client_secret,
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": redirect_uri,
-        },
+        data=data,
         timeout=30,
     )
     if resp.status_code != 200:
@@ -1044,7 +1087,8 @@ def _connect_tiktok_upload_destination(config: XPSTConfig) -> bool:
             console.print("[red]❌ Redirect URI required.[/red]")
             return False
 
-    authorize_url = build_tiktok_authorize_url(client_key, redirect_uri)
+    code_verifier, code_challenge = generate_pkce_pair()
+    authorize_url = build_tiktok_authorize_url(client_key, redirect_uri, code_challenge)
     console.print("\n[bold]Authorize in your browser:[/bold]")
     console.print(f"[link={authorize_url}]{authorize_url}[/link]\n")
 
@@ -1103,7 +1147,7 @@ def _connect_tiktok_upload_destination(config: XPSTConfig) -> bool:
 
     console.print("\n[bold]Exchanging code for access tokens...[/bold]")
     try:
-        token_data = exchange_tiktok_code(client_key, client_secret, code, redirect_uri)
+        token_data = exchange_tiktok_code(client_key, client_secret, code, redirect_uri, code_verifier)
     except Exception as e:
         console.print(f"[red]❌ Token exchange failed: {e}[/red]")
         return False

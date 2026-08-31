@@ -40,6 +40,38 @@ class _FakeResp:
         return self._payload
 
 
+class TestPkcePair:
+    """PKCE verifier/challenge generation (RFC 7636)."""
+
+    def test_pair_shape(self) -> None:
+        from xpst.connect import generate_pkce_pair
+
+        verifier, challenge = generate_pkce_pair()
+        assert 43 <= len(verifier) <= 128
+        # base64url, unpadded
+        assert "=" not in challenge and "+" not in challenge and "/" not in challenge
+        assert len(challenge) == 43
+
+    def test_challenge_is_s256_of_verifier(self) -> None:
+        import base64
+        import hashlib
+
+        from xpst.connect import generate_pkce_pair
+
+        verifier, challenge = generate_pkce_pair()
+        expected = (
+            base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+            .rstrip(b"=")
+            .decode("ascii")
+        )
+        assert challenge == expected
+
+    def test_pairs_are_unique(self) -> None:
+        from xpst.connect import generate_pkce_pair
+
+        assert generate_pkce_pair() != generate_pkce_pair()
+
+
 class TestBuildAuthorizeUrl:
     """Building the OAuth authorize URL."""
 
@@ -58,6 +90,25 @@ class TestBuildAuthorizeUrl:
 
         url = build_tiktok_authorize_url("k", "https://example.com/cb?x=1")
         assert "redirect_uri=https%3A%2F%2Fexample.com%2Fcb%3Fx%3D1" in url
+
+    def test_pkce_params_included(self) -> None:
+        from xpst.connect import build_tiktok_authorize_url
+
+        url = build_tiktok_authorize_url("k", "http://localhost:8085/callback", "c-challenge")
+        assert "code_challenge=c-challenge" in url
+        assert "code_challenge_method=S256" in url
+
+    def test_pkce_params_omitted_without_challenge(self) -> None:
+        from xpst.connect import build_tiktok_authorize_url
+
+        url = build_tiktok_authorize_url("k", "http://localhost:8085/callback")
+        assert "code_challenge" not in url
+
+    def test_state_included(self) -> None:
+        from xpst.connect import build_tiktok_authorize_url
+
+        url = build_tiktok_authorize_url("k", "http://localhost:8085/callback", state="st123")
+        assert "state=st123" in url
 
 
 class TestExtractCode:
