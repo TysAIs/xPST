@@ -641,6 +641,104 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
         sys.exit(EXIT_RATE_LIMIT)
 
 
+@main.command("verify-media")
+@click.argument("file", type=click.Path(exists=True))
+@click.option(
+    "--platform", "-p", default="all",
+    type=click.Choice(["all", "youtube", "tiktok", "instagram", "x", "threads"]),
+    help="Platform spec to verify against (default: all)",
+)
+@click.option(
+    "--plan", "show_plan", is_flag=True,
+    help="Also show the transformation plan (dry-run): what the pipeline would do to this file per platform",
+)
+@json_option
+@click.pass_context
+def verify_media_cmd(
+    ctx: click.Context,
+    file: str,
+    platform: str,
+    show_plan: bool,
+    as_json: bool,
+):
+    """Pre-flight: verify a media file against platform specs BEFORE upload.
+
+    Reports hard errors (the platform would reject or mangle the file) and
+    warnings (the platform would re-encode / shift loudness). Exit code 1
+    when any error was found for the selected platform(s).
+    """
+    from xpst.media.pipeline import describe_plan, plan_transform
+    from xpst.media.specs import format_report, verify_media
+    from xpst.utils.video import FFmpegNotFoundError, VideoProcessor
+
+    quiet = ctx.obj.get("quiet", False)
+    setup_logging(
+        log_level="WARNING" if quiet else "INFO",
+        log_file=None,
+    )
+
+    media_path = Path(file)
+    platforms = ["youtube", "tiktok", "instagram", "x", "threads"] if platform == "all" else [platform]
+
+    reports = []
+    plans = []
+    for name in platforms:
+        report = verify_media(media_path, name)
+        reports.append(report)
+
+    if show_plan:
+        # Build the transformation plan against the real per-platform
+        # EncodingConfig. The processor is only used for the compliance
+        # probe — a missing ffmpeg degrades to a conservative plan, never
+        # a crash (dry-run must work everywhere).
+        from xpst.media.pipeline import TransformPlan
+
+        config = load_config(ctx.obj.get("config_path"))
+        try:
+            processor = VideoProcessor()
+        except (FFmpegNotFoundError, RuntimeError, OSError):
+            processor = None
+        for name in platforms:
+            enc = getattr(config.video, f"encoding_{name}", None)
+            if enc is None:  # pragma: no cover - defensive
+                continue
+            if processor is not None:
+                plans.append(plan_transform(media_path, name, enc, processor))
+            else:
+                p = TransformPlan(platform=name, action="transcode")
+                p.reasons.append("ffmpeg unavailable — compliance not verified")
+                plans.append(p)
+
+    ok = all(r.ok for r in reports)
+    if as_json:
+        json_output(
+            {
+                "file": str(media_path),
+                "ok": ok,
+                "reports": [r.to_dict() for r in reports],
+                **({"plans": [p.to_dict() for p in plans]} if show_plan else {}),
+            },
+            True,
+        )
+    else:
+        console.print(f"[bold blue]Verifying {media_path}[/bold blue]")
+        for report in reports:
+            console.print(format_report(report))
+        if show_plan:
+            console.print("[bold blue]Transformation plan (dry run):[/bold blue]")
+            for p in plans:
+                console.print(f"  • {describe_plan(p)}")
+        if not ok:
+            console.print("[red]Pre-flight FAILED — fix the [FAIL] items before uploading.[/red]")
+        elif any(r.warnings for r in reports):
+            console.print("[yellow]Uploadable, but warnings above mean the platform will re-encode/adjust.[/yellow]")
+        else:
+            console.print("[green]All checks passed — max fidelity for the selected platform(s).[/green]")
+
+    if not ok:
+        sys.exit(EXIT_GENERAL)
+
+
 @main.command()
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms")
 @click.option("--limit", "-l", default=10, help="Maximum videos to backfill")
