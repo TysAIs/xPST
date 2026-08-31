@@ -862,4 +862,30 @@ ApplicationWindow {
             }
         }
     }
+
+    // macOS unified titlebar: the window has no visible OS chrome, so the top
+    // band must be draggable. A MouseArea spanning the full window width at
+    // the top starts a native window move; presses left of ~80px fall through
+    // to the traffic lights so close/min/zoom stay clickable. It is a direct
+    // child of the window (NOT of the RowLayout) so anchoring is well-defined,
+    // and it is disabled entirely off macOS (macUnifiedTitlebar is false there)
+    // so Linux/Windows rendering and input are unchanged.
+    MouseArea {
+        id: macTitleBarDrag
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        z: 1000
+        height: 56
+        enabled: typeof macUnifiedTitlebar !== "undefined" && macUnifiedTitlebar
+        visible: enabled
+        acceptedButtons: Qt.LeftButton
+        onPressed: function (mouse) {
+            if (mouse.x < 80) {
+                mouse.accepted = false
+                return
+            }
+            root.startSystemMove()
+        }
+    }
 }
