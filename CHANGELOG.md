@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Max-fidelity video pipeline** (`xpst/media`) — per-platform ingest
+  spec matrix + `verify_media` pre-flight; transcode decision tree that
+  prefers passthrough, then ZERO-LOSS stream-copy remux (`-c copy` into
+  MP4 `+faststart` when only the container is foreign), then the
+  platform-profile transcode; two-pass EBU R128 loudness normalization
+  per platform (YouTube/TikTok/Instagram −14 LUFS, X −16 LUFS, TP −1.5)
+  in linear mode; two-pass x264 encoding for bitrate-targeted profiles
+  (YouTube 8 Mbps, X 10 Mbps); pre-upload spec verification wired into
+  every upload (hard errors block, warnings attach to quality metadata).
+- **`xpst verify-media FILE [-p PLATFORM] [--plan] [--json]`** — check a
+  media file against platform specs before upload, with an optional
+  dry-run transformation plan; exit 1 on blocking errors.
 - **`xpst serve` daemon supervisor** — a single supervised long-running
   process that acquires the engine pidfile (safely rejecting a live holder,
   overwriting stale pidfiles left by crashed processes, releasing on
