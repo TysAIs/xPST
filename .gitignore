@@ -130,3 +130,13 @@ src-tauri/binaries/ytdlp/
 # Tauri shell generated ACL schemas + E2E throwaway signing key dir
 src-tauri/gen/schemas/
 .tauri/
+
+# Private/internal — never publish (added 08-31 security sweep)
+audit-map/
+archive-qa/
+qa_evidence/
+missions/
+docs/QA-REPORT-*.md
+GOAL-*.md
+*/**/platform-auth-checklist*.md
+tiktok_dev_account.txt
