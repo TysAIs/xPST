@@ -5,7 +5,7 @@ tests, PR + green CI. Basis: ~/xPST-work/ui-assess/ASSESSMENT.md (decision (b)).
 
 ## Status log
 
-- [x] Repo verified: /Users/itxji/xPST-work/pr92/repo, branch feat/web-ui-foundation cut at
+- [x] Repo verified: /Users/YOU/xPST-work/pr92/repo, branch feat/web-ui-foundation cut at
       github/main = 98abba9 (post-merge). NOTE: remote is named `github` (not `origin`) in
       this clone; fetch refspec limited — fetched main via `git fetch github main`.
 - [x] API surface discovery:
