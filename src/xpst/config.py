@@ -344,6 +344,9 @@ class EncodingConfig:
     color: str = "bt709"
     pix_fmt: str = "yuv420p"
     passthrough: bool = False
+    # Two-pass x264 for exact-bitrate targets (converges on -b:v precisely;
+    # relevant only for bitrate-targeted profiles — CRF profiles ignore it).
+    two_pass: bool = False
     # Hardware encoder override ("h264_videotoolbox", "h264_nvenc",
     # "h264_qsv", "h264_vaapi", or "libx264" to force software). None =
     # auto-detect. The XPST_HW_ENCODER env var wins over this field.
@@ -356,13 +359,15 @@ class VideoConfig:
     download_dir: str = "~/.xpst/downloads"
     cleanup_after_post: bool = False
     encoding_youtube: EncodingConfig = field(default_factory=lambda: EncodingConfig(
-        resolution=1920, bitrate="8M", maxrate="10M", bufsize="12M", profile="high", gop=15, fps=60
+        resolution=1920, bitrate="8M", maxrate="10M", bufsize="12M", profile="high", gop=15, fps=60,
+        two_pass=True,
     ))
     encoding_instagram: EncodingConfig = field(default_factory=lambda: EncodingConfig(
         resolution=1920, crf=20, maxrate="10M", profile="high", level="4.0", gop=72, fps=60
     ))
     encoding_x: EncodingConfig = field(default_factory=lambda: EncodingConfig(
-        resolution=1920, bitrate="10M", maxrate="12M", profile="high", level="4.0", gop=90, fps=60
+        resolution=1920, bitrate="10M", maxrate="12M", profile="high", level="4.0", gop=90, fps=60,
+        two_pass=True,
     ))
     # TikTok: dedicated profile (no longer shares Instagram's). GOP is None =
     # computed per-encode as 2*source fps (30fps→60, 60fps→120), capped at
