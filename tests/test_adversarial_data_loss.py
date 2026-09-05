@@ -131,7 +131,21 @@ def test_concurrent_processes_zero_lost_updates(tmp_path):
     assert not missing, f"LOST UPDATES: {sorted(missing)}"
 
 
-# ── Scenario: crash-orphaned temp files ──────────────────────────────────────
+
+
+def test_disk_signature_detects_same_size_write_with_same_mtime(tmp_path):
+    """Content hash closes the mtime/size collision window."""
+    store = StateStore(tmp_path)
+    store.set({"version": store.SCHEMA_VERSION, "seen": {"aaaa": True}})
+    original_sig = store._disk_state_sig
+    assert original_sig is not None
+    path = tmp_path / "state.json"
+    stat = path.stat()
+    # Keep byte length and timestamps stable while changing content.
+    path.write_text(path.read_text().replace("aaaa", "bbbb"))
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert path.stat().st_size == original_sig[1]
+    assert store._disk_signature() != original_sig
 
 
 def test_stale_orphan_tmp_files_swept_on_init(tmp_path):
