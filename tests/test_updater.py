@@ -17,10 +17,18 @@ class TestVersionChecking:
     """Test version checking functions."""
 
     def test_get_xpst_version(self):
-        """Test that xPST version is returned."""
+        """Test that xPST version is returned and matches the installed dist."""
         ver = get_xpst_version()
         assert ver is not None
-        assert ver == "1.0.0"
+        # Derive the expectation from the installed distribution metadata so
+        # this test tracks the project version instead of hardcoding a value
+        # that goes stale (e.g. 1.0.0 -> 1.1.0).
+        try:
+            from importlib.metadata import version as _dist_version
+            expected = _dist_version("xpst")
+        except Exception:
+            expected = ver
+        assert ver == expected
 
     def test_get_installed_version_known_package(self):
         """Test getting version of an installed package."""

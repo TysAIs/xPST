@@ -70,17 +70,32 @@ def _macos_security_checks(
 
     if codesign:
         result = _run([codesign, "--verify", "--deep", "--strict", str(app_path)])
-        # Unsigned bundles are tolerated unless a Developer ID is required
-        # (local/RC mode ships unsigned by owner decision; public mode gates).
+        display = _run([codesign, "--display", "--verbose=4", str(app_path)])
+        # Only an explicit unsigned diagnosis for the top-level bundle from
+        # BOTH commands is a local-mode exception. Nested unsigned code,
+        # damaged signatures, and tool errors must not become successful checks.
+        unsigned_message = f"{app_path}: code object is not signed at all"
+        unsigned = all(
+            not probe["ok"]
+            and probe.get("returncode") == 1
+            and "\n".join(
+                text for text in (probe.get("stdout", ""), probe.get("stderr", "")) if text
+            ).strip() == unsigned_message
+            for probe in (result, display)
+        )
         checks.append({
             "id": "codesign_verify",
-            "ok": result["ok"] or not require_developer_id,
+            "ok": result["ok"] or (unsigned and not require_developer_id),
             "signed": result["ok"],
-            "message": result["stderr"] or result["stdout"] or "signature verified",
+            "unsigned": unsigned,
+            "message": (
+                "Unsigned bundle allowed in local mode; no signature verified."
+                if unsigned and not require_developer_id
+                else result["stderr"] or result["stdout"] or "signature verified"
+            ),
             "required": require_developer_id,
             "result": result,
         })
-        display = _run([codesign, "--display", "--verbose=4", str(app_path)])
         authority_text = "\n".join([display.get("stdout", ""), display.get("stderr", "")])
         developer_id = "Developer ID Application:" in authority_text
         checks.append(
