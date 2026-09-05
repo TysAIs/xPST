@@ -43,10 +43,11 @@ Rectangle {
         // Logo — big mark, top-left (image carries the brand; no text beside it)
         Rectangle {
             Layout.fillWidth: true
-            // macOS (unified hidden titlebar) reserves the top window area for
-            // the OS traffic lights — give the logo a taller hit zone so the
-            // brand mark stays centered between them and the content edge.
-            Layout.preferredHeight: sidebar.macosTrafficLightZone ? 76 : 72
+            // macOS (unified hidden titlebar): traffic lights occupy roughly the
+            // top 28px of the window, so the logo header is a tighter 56px band
+            // with the 46px mark optically centered on the traffic-light row.
+            // Other platforms keep the original 72px header.
+            Layout.preferredHeight: sidebar.macosTrafficLightZone ? 56 : 72
             color: "transparent"
 
             Image {
@@ -55,10 +56,11 @@ Rectangle {
                 sourceSize: Qt.size(96, 96)
                 fillMode: Image.PreserveAspectFit
                 anchors.left: parent.left
-                anchors.leftMargin: 10
+                // 16px inset matches the nav item text inset below the header.
+                anchors.leftMargin: sidebar.macosTrafficLightZone ? 16 : 10
                 anchors.verticalCenter: parent.verticalCenter
-                Layout.preferredWidth: 52
-                Layout.preferredHeight: 52
+                Layout.preferredWidth: sidebar.macosTrafficLightZone ? 46 : 52
+                Layout.preferredHeight: sidebar.macosTrafficLightZone ? 46 : 52
                 visible: true
             }
         }
