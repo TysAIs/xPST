@@ -8,6 +8,7 @@ data is serialised as JSON strings so QML can parse with JSON.parse().
 import asyncio
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import threading
@@ -2199,7 +2200,30 @@ class AppController(QObject):
         "http://localhost",
     )
 
+    @staticmethod
+    def _auth_command(platform: str) -> tuple[list[str] | None, str | None]:
+        """Return a real CLI command for interactive auth.
+
+        A PyInstaller app's ``sys.executable`` is the GUI binary, not a Python
+        interpreter. Re-launching it with ``-m xpst`` recursively opens the
+        desktop app and can be mistaken for a successful auth flow. Source
+        installs use the current interpreter; frozen builds require an
+        explicitly discoverable external Python and otherwise return a clear,
+        actionable error instead of pretending to authenticate.
+        """
+        if not getattr(sys, "frozen", False):
+            return [sys.executable, "-m", "xpst", "connect", platform], None
+        interpreter = shutil.which("python3") or shutil.which("python")
+        if not interpreter:
+            return None, (
+                "Interactive sign-in needs a Python runtime. This packaged build "
+                "could not find python3; install Python 3.11+ or run `xpst connect "
+                f"{platform}` from the project environment."
+            )
+        return [interpreter, "-m", "xpst", "connect", platform], None
+
     _connect_active: dict[str, bool] = {}
+
 
     @Slot(str)
     def connectPlatformAsync(self, platform: str) -> None:
@@ -2232,8 +2256,18 @@ class AppController(QObject):
         def _run() -> None:
             state_emitted = "connecting"
             try:
+                command, command_error = self._auth_command(platform)
+                if command_error:
+                    self.connectResult.emit(json.dumps({
+                        "ok": False, "platform": platform, "error": command_error,
+                    }))
+                    self.connectStateChanged.emit(json.dumps({
+                        "platform": platform, "state": "error",
+                    }))
+                    return
+                assert command is not None  # narrowed after command_error return
                 result = subprocess.run(
-                    [sys.executable, "-m", "xpst", "auth", platform],
+                    command,
                     capture_output=True,
                     text=True,
                     timeout=self.CONNECT_SUBPROCESS_TIMEOUT,

@@ -27,6 +27,7 @@ def _controller() -> SimpleNamespace:
         _connect_active={},
         CONNECT_SUBPROCESS_TIMEOUT=AppController.CONNECT_SUBPROCESS_TIMEOUT,
         WAITING_FOR_BROWSER_MARKERS=AppController.WAITING_FOR_BROWSER_MARKERS,
+        _auth_command=AppController._auth_command,
         connectStateChanged=None,
         connectResult=None,
         error=None,
@@ -54,6 +55,26 @@ def _wait_for(predicate, timeout: float = 10.0) -> bool:
     return False
 
 
+def test_auth_command_uses_connect_not_auth_in_source_install() -> None:
+    with patch("xpst.desktop_app.backend.sys") as mock_sys:
+        mock_sys.frozen = False
+        mock_sys.executable = "/venv/bin/python"
+        command, error = AppController._auth_command("youtube")
+    assert error is None
+    assert command == ["/venv/bin/python", "-m", "xpst", "connect", "youtube"]
+
+
+def test_auth_command_frozen_without_python_fails_honestly() -> None:
+    with patch("xpst.desktop_app.backend.sys") as mock_sys, patch(
+        "xpst.desktop_app.backend.shutil.which", return_value=None
+    ):
+        mock_sys.frozen = True
+        command, error = AppController._auth_command("instagram")
+    assert command is None
+    assert error is not None
+    assert "could not find python3" in error
+
+
 def test_async_connect_success_emits_states(tmp_path) -> None:
     ctrl = _controller()
     fake = subprocess.CompletedProcess(args=[], returncode=0, stdout="ok", stderr="")
@@ -61,6 +82,7 @@ def test_async_connect_success_emits_states(tmp_path) -> None:
         "xpst.desktop_app.backend.subprocess.run", return_value=fake
     ) as mock_run, patch("xpst.desktop_app.backend.sys") as mock_sys:
         mock_sys.executable = "python"
+        mock_sys.frozen = False
         AppController.connectPlatformAsync(ctrl, "youtube")
         assert _wait_for(lambda: ctrl.connectResult.events, timeout=10)
 
@@ -87,6 +109,7 @@ def test_async_connect_waiting_for_browser_state() -> None:
     with patch("xpst.desktop_app.backend.subprocess.run", return_value=fake), \
          patch("xpst.desktop_app.backend.sys") as mock_sys:
         mock_sys.executable = "python"
+        mock_sys.frozen = False
         AppController.connectPlatformAsync(ctrl, "youtube")
         assert _wait_for(lambda: ctrl.connectResult.events)
 
@@ -101,6 +124,7 @@ def test_async_connect_failure_emits_error_state() -> None:
     with patch("xpst.desktop_app.backend.subprocess.run", return_value=fake), \
          patch("xpst.desktop_app.backend.sys") as mock_sys:
         mock_sys.executable = "python"
+        mock_sys.frozen = False
         AppController.connectPlatformAsync(ctrl, "x")
         assert _wait_for(lambda: ctrl.connectResult.events)
 
@@ -118,6 +142,7 @@ def test_async_connect_timeout_still_reports() -> None:
         "xpst.desktop_app.backend.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd=[], timeout=900)
     ), patch("xpst.desktop_app.backend.sys") as mock_sys:
         mock_sys.executable = "python"
+        mock_sys.frozen = False
         AppController.connectPlatformAsync(ctrl, "instagram")
         assert _wait_for(lambda: ctrl.connectResult.events)
 
@@ -136,6 +161,7 @@ def test_async_connect_ignores_reentrant_click() -> None:
     with patch("xpst.desktop_app.backend.subprocess.run", side_effect=_slow_run), \
          patch("xpst.desktop_app.backend.sys") as mock_sys:
         mock_sys.executable = "python"
+        mock_sys.frozen = False
         AppController.connectPlatformAsync(ctrl, "youtube")
         assert ctrl._connect_active["youtube"] is True
         AppController.connectPlatformAsync(ctrl, "youtube")  # re-entrant click ignored
