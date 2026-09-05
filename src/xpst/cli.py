@@ -1161,12 +1161,14 @@ def health(ctx: click.Context, as_json: bool):
 @main.command()
 @click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
 @click.option("--guide", is_flag=True, help="Print the step-by-step setup guide for the platform (YouTube: Google Cloud OAuth) and exit")
+@click.option("--open-browser/--no-browser", default=None,
+              help="Allow/deny browser launches during account setup (default: TTY only)")
 @click.option("--test", "test_only", is_flag=True, help="Test existing connections only")
 @click.option("--dry-run", "dry_run", is_flag=True,
               help="Show what connect would do (platform, steps, config impact) without connecting or writing config")
 @json_option
 @click.pass_context
-def connect(ctx: click.Context, platform: str | None, guide: bool, test_only: bool, dry_run: bool, as_json: bool):
+def connect(ctx: click.Context, platform: str | None, guide: bool, open_browser: bool | None, test_only: bool, dry_run: bool, as_json: bool):
     """Connect social media accounts (one platform at a time)
 
     Use when you need to link or re-link a SPECIFIC account, e.g.
@@ -1248,7 +1250,7 @@ def connect(ctx: click.Context, platform: str | None, guide: bool, test_only: bo
         return
 
     platforms = [platform] if platform else None
-    success = run_connect(platforms=platforms, test_only=test_only)
+    success = run_connect(platforms=platforms, test_only=test_only, open_browser=open_browser)
     if not success:
         sys.exit(EXIT_AUTH_FAILURE)
 
