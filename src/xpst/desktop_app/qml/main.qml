@@ -66,34 +66,41 @@ ApplicationWindow {
         try {
             var x = windowSettings.savedX
             var y = windowSettings.savedY
-            var w = windowSettings.savedWidth
-            var h = windowSettings.savedHeight
+            var w = Math.max(windowSettings.savedWidth, root.minimumWidth)
+            var h = Math.max(windowSettings.savedHeight, root.minimumHeight)
             var savedScreen = windowSettings.savedScreen
-            {
-                if (x >= 0 && y >= 0) {
-                    // Check if saved screen still exists
-                    var screens = Qt.application.screens || []
-                    var screenFound = false
-                    for (var i = 0; i < screens.length; i++) {
-                        if (screens[i].name === savedScreen) {
-                            root.x = x
-                            root.y = y
-                            screenFound = true
-                            break
-                        }
-                    }
-                    // If screen not found, place on primary screen
-                    if (!screenFound && screens.length > 0) {
-                        var primary = screens[0]
-                        root.x = Math.min(x, primary.virtualX + primary.width - root.minimumWidth)
-                        root.y = Math.min(y, primary.virtualY + primary.height - root.minimumHeight)
-                        if (root.x < primary.virtualX) root.x = primary.virtualX
-                        if (root.y < primary.virtualY) root.y = primary.virtualY
-                    }
+            var screens = Qt.application.screens || []
+            var target = null
+
+            // Prefer the saved screen only if it is still connected. Persisted
+            // coordinates can refer to a removed monitor (often negative on a
+            // left-hand display), which otherwise restores the whole window
+            // outside the interactive desktop and makes QA/user clicks appear
+            // broken.
+            for (var i = 0; i < screens.length; i++) {
+                if (savedScreen && screens[i].name === savedScreen) {
+                    target = screens[i]
+                    break
                 }
-                root.width = Math.max(w, root.minimumWidth)
-                root.height = Math.max(h, root.minimumHeight)
             }
+            if (!target && screens.length > 0)
+                target = screens[0]
+
+            if (target) {
+                var minX = target.virtualX
+                var minY = target.virtualY
+                var maxX = target.virtualX + target.width - w
+                var maxY = target.virtualY + target.height - h
+                root.x = Math.max(minX, Math.min(x, maxX))
+                root.y = Math.max(minY, Math.min(y, maxY))
+            } else if (x >= 0 && y >= 0) {
+                // No screen metadata (headless/offscreen test): retain only
+                // ordinary non-negative coordinates.
+                root.x = x
+                root.y = y
+            }
+            root.width = w
+            root.height = h
         } catch(e) { console.warn('main: restoreWindowGeometry failed (first launch or no settings)', e) }
     }
 
