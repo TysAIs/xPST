@@ -76,7 +76,7 @@ def _check_spec(path: Path) -> dict[str, Any]:
             issues.append("macOS icon asset is missing: docs/assets/xpst-icon.icns")
         if "BUNDLE(" not in text or 'name="xPST.app"' not in text:
             issues.append("macOS spec does not create xPST.app")
-        if "bundle_identifier=\"com.xpst.app\"" not in text:
+        if "bundle_identifier=\"com.tysais.xpst\"" not in text:
             issues.append("macOS bundle identifier is missing")
 
     return {
