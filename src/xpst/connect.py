@@ -20,6 +20,7 @@ import asyncio
 import contextlib
 import json
 import stat
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,28 @@ from xpst.utils.secure_io import write_text_0600
 
 console = Console()
 logger = get_logger(__name__)
+
+# ``None`` means auto: browser launches are allowed only from a real TTY.
+# Desktop auth passes True explicitly; agent/CI/non-TTY flows remain headless.
+_OPEN_BROWSER: bool | None = None
+
+
+def _browser_enabled() -> bool:
+    if _OPEN_BROWSER is not None:
+        return _OPEN_BROWSER
+    try:
+        return bool(sys.stdin.isatty())
+    except (AttributeError, OSError):
+        return False
+
+
+def _open_browser(url: str) -> bool:
+    """Open a URL only when the connect flow explicitly permits it."""
+    if not _browser_enabled():
+        console.print(f"[dim]Browser launch suppressed (headless mode): {url}[/dim]")
+        return False
+    import webbrowser
+    return bool(webbrowser.open(url))
 
 CREDS_DIR_NAME = "credentials"
 
@@ -131,8 +154,7 @@ def connect_youtube(config: XPSTConfig) -> bool:
         console.print(f"  6. Save it as: [bold]{secrets_path}[/bold]\n")
 
         if _confirm("Open Google Cloud Console in browser now?", default=True):
-            import webbrowser
-            webbrowser.open("https://console.cloud.google.com/apis/credentials")
+            _open_browser("https://console.cloud.google.com/apis/credentials")
 
         console.print(f"\n[dim]Waiting for client_secrets.json at:{secrets_path}[/dim]")
         console.print("[dim]Place the file there, then press Enter to continue...[/dim]")
@@ -164,7 +186,7 @@ def connect_youtube(config: XPSTConfig) -> bool:
         creds = flow.run_local_server(
             host="localhost",
             port=8085,
-            open_browser=True,
+            open_browser=_browser_enabled(),
             authorization_prompt_message="[bold]Opening browser for authorization...[/bold]",
             success_message="[green]✅ Authorization successful! You can close this tab.[/green]",
         )
@@ -392,12 +414,10 @@ def _connect_instagram_graph_api(config: XPSTConfig) -> bool:
     console.print("  5. Paste the token below — xPST verifies it and finds your IG user ID automatically\n")
 
     if _confirm("Open Meta Developer console in browser?", default=True):
-        import webbrowser
-        webbrowser.open("https://developers.facebook.com/apps")
+        _open_browser("https://developers.facebook.com/apps")
 
     if _confirm("Generate token in browser (Graph API Explorer)?", default=True):
-        import webbrowser
-        webbrowser.open(GRAPH_EXPLORER_URL)
+        _open_browser(GRAPH_EXPLORER_URL)
 
     access_token = _input_secret("Long-lived access token: ")
     if not access_token:
@@ -802,8 +822,7 @@ def _connect_x_api_v2(config: XPSTConfig) -> bool:
     console.print("  5. (Optional) Copy the Bearer Token for app-only verification\n")
 
     if _confirm("Open X Developer Portal in browser now?", default=True):
-        import webbrowser
-        webbrowser.open(X_DEV_PORTAL_URL)
+        _open_browser(X_DEV_PORTAL_URL)
 
     api_key = _input_secret("API Key (Consumer Key): ")
     if not api_key:
@@ -1066,9 +1085,7 @@ def _connect_tiktok_upload_destination(config: XPSTConfig) -> bool:
 
     if listener is not None:
         try:
-            import webbrowser
-
-            webbrowser.open(authorize_url)
+            _open_browser(authorize_url)
         except Exception as e:  # noqa: BLE001 — headless boxes have no browser
             logger.debug("Could not open browser: %s", e)
 
@@ -1222,8 +1239,7 @@ def connect_threads(config: XPSTConfig) -> bool:
     console.print("  4. Get your Threads user ID from the Graph API Explorer\n")
 
     if _confirm("Open Meta Developer console in browser?", default=True):
-        import webbrowser
-        webbrowser.open("https://developers.facebook.com/apps")
+        _open_browser("https://developers.facebook.com/apps")
 
     threads_user_id = console.input("[cyan]Threads user ID (numbers): [/cyan]").strip()
     if not threads_user_id:
@@ -1274,8 +1290,7 @@ def connect_messenger(config: XPSTConfig) -> bool:
     console.print("  4. Pick a webhook verify token (any string) and set it in the webhook config\n")
 
     if _confirm("Open Meta Developer console in browser?", default=True):
-        import webbrowser
-        webbrowser.open("https://developers.facebook.com/apps")
+        _open_browser("https://developers.facebook.com/apps")
 
     page_token = _input_secret("Page Access Token (starts EAAG...): ")
     if not page_token:
@@ -1452,7 +1467,11 @@ async def test_connections(config: XPSTConfig) -> dict[str, bool]:
 # Main connect wizard
 # ──────────────────────────────────────────────
 
-def run_connect(platforms: list[str] | None = None, test_only: bool = False) -> bool:
+def run_connect(
+    platforms: list[str] | None = None,
+    test_only: bool = False,
+    open_browser: bool | None = None,
+) -> bool:
     """
     Run the connection wizard.
 
@@ -1463,10 +1482,10 @@ def run_connect(platforms: list[str] | None = None, test_only: bool = False) -> 
     Returns:
         True if all selected platforms connected successfully
     """
+    global _OPEN_BROWSER
+    _OPEN_BROWSER = open_browser
     config = XPSTConfig.load()
     _get_creds_dir(config)
-
-    console.print()
     console.print(Panel.fit(
         "[bold blue]xPST Account Connection[/bold blue]\n"
         "Connect your social media accounts in minutes\n\n"
