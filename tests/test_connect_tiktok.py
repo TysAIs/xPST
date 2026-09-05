@@ -162,6 +162,7 @@ class TestConnectTikTokDestinationFlow:
             opened.append(url)
             return True
 
+        monkeypatch.setattr(connect, "_OPEN_BROWSER", True)
         monkeypatch.setattr("webbrowser.open", _fake_open)
 
         token_payload = {"access_token": "act.abc", "refresh_token": "rft.xyz", "expires_in": 86400}
