@@ -477,20 +477,23 @@ class StateStore:
         """
         with self._thread_lock:
             with self._file_lock():
-                if self._disk_signature() != self._disk_state_sig:
-                    # Another process wrote since we last read/wrote.
-                    fresh = self._read_fresh_state()
-                    if fresh is not None:
-                        if fresh.get("version") == self.SCHEMA_VERSION:
-                            base = self._ensure_state_keys(fresh)
-                        else:
-                            # Older schema on disk — full recovery/migration path
-                            base = self._load()
+                # Always read the on-disk state while holding the lock. The
+                # prior mtime/size signature shortcut could collide when two
+                # same-sized writes landed within filesystem timestamp
+                # granularity, causing a stale in-memory snapshot to overwrite
+                # another process's first update (observed in a standalone
+                # 3-process stress harness). A fresh read is cheap compared
+                # with the atomic write already performed below and makes the
+                # cross-process invariant explicit.
+                fresh = self._read_fresh_state()
+                if fresh is not None:
+                    if fresh.get("version") == self.SCHEMA_VERSION:
+                        base = self._ensure_state_keys(fresh)
                     else:
-                        # Missing or unreadable file: keep in-memory state
-                        base = self._state
+                        # Older schema on disk — full recovery/migration path
+                        base = self._load()
                 else:
-                    # On-disk state is exactly what we last wrote/read.
+                    # Missing or unreadable file: keep in-memory state
                     base = self._state
                 self._state = updater(base)
                 self._atomic_write(self._state)
