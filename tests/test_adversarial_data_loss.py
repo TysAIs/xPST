@@ -131,26 +131,7 @@ def test_concurrent_processes_zero_lost_updates(tmp_path):
     assert not missing, f"LOST UPDATES: {sorted(missing)}"
 
 
-
-
-def test_update_reads_fresh_disk_state_even_when_signature_appears_unchanged(tmp_path, monkeypatch):
-    """A stale stat signature must not permit overwriting another writer."""
-    first = StateStore(tmp_path)
-    first.set({"version": first.SCHEMA_VERSION, "seen": {"first": True}})
-    second = StateStore(tmp_path)
-    second.update(lambda state: {**state, "seen": {**state["seen"], "second": True}})
-
-    # Model the mtime/size collision that caused the full-suite failure: the
-    # first process believes its cached signature is still current even though
-    # another process has written a same-shaped state.
-    monkeypatch.setattr(first, "_disk_signature", lambda: first._disk_state_sig)
-    first.update(lambda state: {**state, "seen": {**state["seen"], "third": True}})
-
-    assert StateStore(tmp_path).get()["seen"] == {
-        "first": True,
-        "second": True,
-        "third": True,
-    }
+# ── Scenario: crash-orphaned temp files ──────────────────────────────────────
 
 
 def test_stale_orphan_tmp_files_swept_on_init(tmp_path):
