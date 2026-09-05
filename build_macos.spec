@@ -1,12 +1,18 @@
 ﻿# -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for building xPST macOS .app bundle."""
 
+import re
+import subprocess
 import sys
 from pathlib import Path
 
 block_cipher = None
 
 project_root = Path(SPECPATH)
+project_version = re.search(r'^version = "([^"]+)"', (project_root / "pyproject.toml").read_text(), re.MULTILINE).group(1)
+source_commit = subprocess.check_output(
+    ["git", "rev-parse", "HEAD"], cwd=project_root, text=True,
+).strip()
 src_dir = project_root / "src"
 qml_dir = src_dir / "xpst" / "desktop_app" / "qml"
 assets_dir = project_root / "assets"
@@ -217,12 +223,13 @@ app = BUNDLE(
     coll,
     name="xPST.app",
     icon=str(mac_icon) if mac_icon.exists() else None,
-    bundle_identifier="com.xpst.app",
+    bundle_identifier="com.tysais.xpst",
     info_plist={
         "CFBundleName": "xPST",
         "CFBundleDisplayName": "xPST - Cross-Posting Suite",
-        "CFBundleVersion": "0.1.0",
-        "CFBundleShortVersionString": "0.1.0",
+        "CFBundleVersion": project_version,
+        "CFBundleShortVersionString": project_version,
+        "XPSTSourceCommit": source_commit,
         "NSHighResolutionCapable": True,
         "NSRequiresAquaSystemAppearance": False,
     },
