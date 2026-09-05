@@ -61,7 +61,7 @@ def test_auth_command_uses_connect_not_auth_in_source_install() -> None:
         mock_sys.executable = "/venv/bin/python"
         command, error = AppController._auth_command("youtube")
     assert error is None
-    assert command == ["/venv/bin/python", "-m", "xpst", "connect", "youtube"]
+    assert command == ["/venv/bin/python", "-m", "xpst", "connect", "youtube", "--open-browser"]
 
 
 def test_auth_command_frozen_without_python_fails_honestly() -> None:

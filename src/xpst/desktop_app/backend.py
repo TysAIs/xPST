@@ -2212,7 +2212,7 @@ class AppController(QObject):
         actionable error instead of pretending to authenticate.
         """
         if not getattr(sys, "frozen", False):
-            return [sys.executable, "-m", "xpst", "connect", platform], None
+            return [sys.executable, "-m", "xpst", "connect", platform, "--open-browser"], None
         interpreter = shutil.which("python3") or shutil.which("python")
         if not interpreter:
             return None, (
@@ -2220,7 +2220,7 @@ class AppController(QObject):
                 "could not find python3; install Python 3.11+ or run `xpst connect "
                 f"{platform}` from the project environment."
             )
-        return [interpreter, "-m", "xpst", "connect", platform], None
+        return [interpreter, "-m", "xpst", "connect", platform, "--open-browser"], None
 
     _connect_active: dict[str, bool] = {}
 
