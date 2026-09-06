@@ -33,6 +33,11 @@ def test_qml_window_and_navigation_expose_accessible_controls():
     assert "Accessible.role: Accessible.Button" in sidebar
 
 
+def test_build_script_prefers_checkout_python_sources():
+    build = (REPO / "build.sh").read_text()
+    assert 'export PYTHONPATH="$SCRIPT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"' in build
+
+
 def test_window_visibility_helper_clamps_offscreen_bounds():
     from xpst.desktop_app.main import _window_needs_primary_placement
 
