@@ -39,6 +39,33 @@ fi
 # Clean previous builds
 rm -rf build/ dist/
 
+# Bake the canonical runtime version from pyproject.toml into the package so
+# the frozen bundle's `xpst.__version__` (About page / CLI / diagnostics)
+# EXACTLY matches the Info.plist version that build_macos.spec reads from the
+# same pyproject.toml. Without this, a PyInstaller one-folder app ships no
+# xpst dist-info, importlib.metadata raises PackageNotFoundError, and the
+# runtime falls back to a stale hard-coded literal (v1.0.0 vs Info.plist
+# 1.1.0 mismatch). Generated file is gitignored; never a tracked artifact.
+python3 - <<'PY' 
+import re
+from pathlib import Path
+
+root = Path.cwd()
+src = root / "src" / "xpst"
+ver = re.search(r'^version = "([^"]+)"', (root / "pyproject.toml").read_text(encoding="utf-8"), re.MULTILINE)
+if not ver:
+    raise SystemExit("pyproject.toml has no version = \"...\" line")
+src.mkdir(parents=True, exist_ok=True)
+(src / "_build_version.py").write_text(
+    '"""Generated at build time by build.sh from pyproject.toml — never edit.\n\n'
+    'Single source of truth for the runtime version so it can never drift\n'
+    'from the Info.plist / release metadata. Git-ignored.\n"""\n'
+    '__version__ = "%s"\n' % ver.group(1),
+    encoding="utf-8",
+)
+print("Generated src/xpst/_build_version.py =", ver.group(1))
+PY
+
 case "$PLATFORM" in
     macos)
         echo "Building macOS .app bundle..."
