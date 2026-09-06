@@ -829,6 +829,10 @@ ApplicationWindow {
 
         StackView {
             id: stackView
+            Accessible.id: "xpst-page-stack"
+            Accessible.name: "Current page"
+            Accessible.role: Accessible.Pane
+            Accessible.ignored: false
             Layout.fillWidth: true
             Layout.fillHeight: true
             initialItem: "pages/DashboardPage.qml"
