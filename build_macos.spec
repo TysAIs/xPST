@@ -230,6 +230,7 @@ app = BUNDLE(
         "CFBundleVersion": project_version,
         "CFBundleShortVersionString": project_version,
         "XPSTSourceCommit": source_commit,
+        "NSQuitAlwaysKeepsWindows": False,
         "NSHighResolutionCapable": True,
         "NSRequiresAquaSystemAppearance": False,
     },

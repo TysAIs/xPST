@@ -5,6 +5,7 @@ controllers with QML engine, sets up system tray, and runs the event loop.
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -18,7 +19,17 @@ logger = logging.getLogger("xpst.desktop")
 # ── PySide6 imports ──────────────────────────────────────────────────
 try:
     from PySide6.QtCore import QLockFile, Qt, QTimer, QUrl
-    from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
+    from PySide6.QtGui import (
+        QAccessible,
+        QAccessibleEvent,
+        QColor,
+        QFont,
+        QFontDatabase,
+        QGuiApplication,
+        QIcon,
+        QPainter,
+        QPixmap,
+    )
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtWidgets import QApplication, QMenu, QSplashScreen, QSystemTrayIcon
 
@@ -287,6 +298,69 @@ def _load_icon_font() -> bool:
     return True
 
 
+
+
+def _window_needs_primary_placement(
+    window_bounds: tuple[int, int, int, int],
+    primary_bounds: tuple[int, int, int, int],
+) -> bool:
+    """Return whether a window's center is outside the primary display."""
+    wx, wy, ww, wh = window_bounds
+    px, py, pw, ph = primary_bounds
+    center_x = wx + max(ww, 1) // 2
+    center_y = wy + max(wh, 1) // 2
+    return not (px <= center_x < px + pw and py <= center_y < py + ph)
+
+
+def _ensure_window_visible(root) -> None:
+    """Show and activate the QML window on the primary display.
+
+    QML Settings can contain coordinates from a disconnected monitor. Qt will
+    still report the root object as loaded while the native window is entirely
+    off-screen, so clamp the window before entering the event loop.
+    """
+    screens = QGuiApplication.screens()
+    if not screens:
+        root.show()
+        root.requestActivate()
+        return
+
+    primary = QGuiApplication.primaryScreen() or screens[0]
+    available = primary.availableGeometry()
+    geometry = root.frameGeometry()
+    bounds = (geometry.x(), geometry.y(), geometry.width(), geometry.height())
+    primary_bounds = (available.x(), available.y(), available.width(), available.height())
+    if _window_needs_primary_placement(bounds, primary_bounds):
+        width = min(max(root.width(), 960), available.width())
+        height = min(max(root.height(), 600), available.height())
+        root.setGeometry(
+            available.x() + max(0, (available.width() - width) // 2),
+            available.y() + max(0, (available.height() - height) // 2),
+            width,
+            height,
+        )
+        logger.info("Repositioned off-screen QML window onto primary display")
+
+    root.show()
+    root.raise_()
+    root.requestActivate()
+    if sys.platform == "darwin":
+        # Qt's Cocoa plugin can report a visible QWindow while leaving it
+        # behind another Space. A one-shot always-on-top promotion makes the
+        # initial native activation deterministic; remove the hint shortly
+        # after so normal z-order behavior is restored.
+        root.setFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        root.show()
+        root.requestActivate()
+
+        def _clear_topmost() -> None:
+            root.setFlag(Qt.WindowType.WindowStaysOnTopHint, False)
+            root.show()
+            root.requestActivate()
+
+        QTimer.singleShot(15_000, _clear_topmost)
+
+
 def _make_macos_unified_window(engine) -> None:
     """macOS-only: render the titlebar transparent and let the app fill the
     whole window (traffic lights still controlled natively by the OS/titlebar
@@ -379,6 +453,21 @@ def _make_macos_unified_window(engine) -> None:
         ]
         objc.objc_msgSend(window, sel("setMovableByWindowBackground:"), False)
 
+        # Explicitly make the bundle's native window key/frontmost. QML's
+        # requestActivate() is advisory on macOS and can leave a visible Qt
+        # window behind another Space, which also removes its AXWindow.
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        objc.objc_msgSend(window, sel("makeKeyAndOrderFront:"), ctypes.c_void_p(0))
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        objc.objc_msgSend(window, sel("orderFrontRegardless"))
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        app_class = objc.objc_getClass(b"NSApplication")
+        objc.objc_msgSend.restype = ctypes.c_void_p
+        native_app = objc.objc_msgSend(app_class, sel("sharedApplication"))
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool]
+        objc.objc_msgSend(native_app, sel("activateIgnoringOtherApps:"), True)
+
         logger.info("macOS unified titlebar applied (full-size content view)")
     except Exception as exc:  # noqa: BLE001 - native path never breaks the app
         logger.debug("macOS unified titlebar skipped: %s", exc)
@@ -396,7 +485,12 @@ def main(no_splash: bool = False) -> int:
         return 10  # same exit code family as 'another instance holds lock'
 
     # Must use QApplication (not QGuiApplication) for system tray support
+    os.environ.setdefault("QT_ACCESSIBILITY", "1")
     app = QApplication(sys.argv)
+    # Qt Quick accessibility is opt-in on some PySide6/macOS combinations.
+    # Activate it before the QML tree is constructed so AX clients receive
+    # both the window and its Accessible attached properties.
+    QAccessible.setActive(True)
     app.setApplicationName("xPST")
     app.setOrganizationName("xPST")
     app.setOrganizationDomain("xpst.app")
@@ -406,7 +500,6 @@ def main(no_splash: bool = False) -> int:
     if QQuickStyle is not None:
         QQuickStyle.setStyle("Material")
     else:
-        import os
         os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Material")
 
     # Register the bundled icon font so theme.icon* glyphs render (W4-5).
@@ -555,6 +648,25 @@ def main(no_splash: bool = False) -> int:
     # no-ops safely on every other platform / when the native call fails, so
     # this never breaks a build.
     _make_macos_unified_window(engine)
+    root = engine.rootObjects()[0]
+    # Re-announce the loaded QML tree after all Accessible attached
+    # properties exist. This is required by macOS AX clients that attach
+    # after application startup (and makes the window keyboard-focusable).
+    QAccessible.setActive(True)
+    try:
+        QAccessible.updateAccessibility(
+            QAccessibleEvent(root, QAccessible.Event.ObjectShow)
+        )
+        interface = QAccessible.queryAccessibleInterface(root)
+        logger.info(
+            "Qt accessibility active=%s root_interface=%s child_count=%s",
+            QAccessible.isActive(),
+            interface is not None,
+            interface.childCount() if interface is not None else 0,
+        )
+    except Exception as exc:  # pragma: no cover - platform accessibility path
+        logger.warning("Qt accessibility announcement failed: %s", exc)
+    _ensure_window_visible(root)
 
     # Close splash as soon as the window is up. Use finish() so the splash
     # hides exactly when the root window shows; keep a short fallback timer.

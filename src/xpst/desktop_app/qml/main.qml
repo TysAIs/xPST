@@ -808,6 +808,12 @@ ApplicationWindow {
     }
 
     RowLayout {
+        id: appContent
+        Accessible.id: "xpst-main-content"
+        Accessible.name: "xPST Cross-Posting Suite"
+        Accessible.role: Accessible.Pane
+        Accessible.focusable: true
+        Accessible.ignored: false
         anchors.fill: parent
         spacing: 0
 
@@ -823,6 +829,10 @@ ApplicationWindow {
 
         StackView {
             id: stackView
+            Accessible.id: "xpst-page-stack"
+            Accessible.name: "Current page"
+            Accessible.role: Accessible.Pane
+            Accessible.ignored: false
             Layout.fillWidth: true
             Layout.fillHeight: true
             initialItem: "pages/DashboardPage.qml"
