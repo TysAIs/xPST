@@ -17,9 +17,9 @@ def test_visible_version_has_no_stale_ui_fallbacks():
 
 def test_bundle_metadata_uses_project_version_and_embeds_source_sha():
     spec = (REPO / "build_macos.spec").read_text()
-    assert "CFBundleShortVersionString\": PROJECT_VERSION" in spec
-    assert "CFBundleVersion\": PROJECT_VERSION" in spec
-    assert '"XPSTSourceSHA": SOURCE_SHA' in spec
+    assert "CFBundleShortVersionString\": project_version" in spec
+    assert "CFBundleVersion\": project_version" in spec
+    assert '"XPSTSourceCommit": source_commit' in spec
     assert '"NSQuitAlwaysKeepsWindows": False' in spec
     assert '"CFBundleShortVersionString": "0.1.0"' not in spec
 
