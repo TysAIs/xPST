@@ -13,6 +13,10 @@ Rectangle {
                                          ? macUnifiedTitlebar
                                          : false
     width: expanded ? 240 : 64
+    Accessible.id: "xpst-sidebar"
+    Accessible.name: "Main navigation"
+    Accessible.role: Accessible.Pane
+    Accessible.ignored: false
     Layout.fillHeight: true
     color: theme.surface
     Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.InOutCubic } }
