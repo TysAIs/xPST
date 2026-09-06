@@ -27,9 +27,13 @@ def test_bundle_metadata_uses_project_version_and_embeds_source_sha():
 def test_qml_window_and_navigation_expose_accessible_controls():
     main = (QML / "main.qml").read_text()
     sidebar = (QML / "Sidebar.qml").read_text()
+    launcher = (REPO / "src/xpst/desktop_app/main.py").read_text()
     assert "Accessible.name: \"xPST Cross-Posting Suite\"" in main
-    assert "Accessible.role: Accessible.Pane" in main
-    assert "QAccessible.setActive(True)" in (REPO / "src/xpst/desktop_app/main.py").read_text()
+    assert 'Accessible.id: "xpst-main-content"' in main
+    assert 'Accessible.id: "nav-" + modelData.page' in sidebar
+    assert "QAccessible.setActive(True)" in launcher
+    assert "QAccessible.updateAccessibility" in launcher
+    assert 'QT_ACCESSIBILITY", "1"' in launcher
     assert 'Accessible.name: modelData.label + " navigation"' in sidebar
     assert "Accessible.role: Accessible.Button" in sidebar
 
