@@ -18,7 +18,16 @@ logger = logging.getLogger("xpst.desktop")
 # ── PySide6 imports ──────────────────────────────────────────────────
 try:
     from PySide6.QtCore import QLockFile, Qt, QTimer, QUrl
-    from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
+    from PySide6.QtGui import (
+        QAccessible,
+        QColor,
+        QFont,
+        QFontDatabase,
+        QGuiApplication,
+        QIcon,
+        QPainter,
+        QPixmap,
+    )
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtWidgets import QApplication, QMenu, QSplashScreen, QSystemTrayIcon
 
@@ -287,6 +296,54 @@ def _load_icon_font() -> bool:
     return True
 
 
+
+
+def _window_needs_primary_placement(
+    window_bounds: tuple[int, int, int, int],
+    primary_bounds: tuple[int, int, int, int],
+) -> bool:
+    """Return whether a window's center is outside the primary display."""
+    wx, wy, ww, wh = window_bounds
+    px, py, pw, ph = primary_bounds
+    center_x = wx + max(ww, 1) // 2
+    center_y = wy + max(wh, 1) // 2
+    return not (px <= center_x < px + pw and py <= center_y < py + ph)
+
+
+def _ensure_window_visible(root) -> None:
+    """Show and activate the QML window on the primary display.
+
+    QML Settings can contain coordinates from a disconnected monitor. Qt will
+    still report the root object as loaded while the native window is entirely
+    off-screen, so clamp the window before entering the event loop.
+    """
+    screens = QGuiApplication.screens()
+    if not screens:
+        root.show()
+        root.requestActivate()
+        return
+
+    primary = QGuiApplication.primaryScreen() or screens[0]
+    available = primary.availableGeometry()
+    geometry = root.frameGeometry()
+    bounds = (geometry.x(), geometry.y(), geometry.width(), geometry.height())
+    primary_bounds = (available.x(), available.y(), available.width(), available.height())
+    if _window_needs_primary_placement(bounds, primary_bounds):
+        width = min(max(root.width(), 960), available.width())
+        height = min(max(root.height(), 600), available.height())
+        root.setGeometry(
+            available.x() + max(0, (available.width() - width) // 2),
+            available.y() + max(0, (available.height() - height) // 2),
+            width,
+            height,
+        )
+        logger.info("Repositioned off-screen QML window onto primary display")
+
+    root.show()
+    root.raise_()
+    root.requestActivate()
+
+
 def _make_macos_unified_window(engine) -> None:
     """macOS-only: render the titlebar transparent and let the app fill the
     whole window (traffic lights still controlled natively by the OS/titlebar
@@ -397,6 +454,10 @@ def main(no_splash: bool = False) -> int:
 
     # Must use QApplication (not QGuiApplication) for system tray support
     app = QApplication(sys.argv)
+    # Qt Quick accessibility is opt-in on some PySide6/macOS combinations.
+    # Activate it before the QML tree is constructed so AX clients receive
+    # both the window and its Accessible attached properties.
+    QAccessible.setActive(True)
     app.setApplicationName("xPST")
     app.setOrganizationName("xPST")
     app.setOrganizationDomain("xpst.app")
@@ -555,6 +616,7 @@ def main(no_splash: bool = False) -> int:
     # no-ops safely on every other platform / when the native call fails, so
     # this never breaks a build.
     _make_macos_unified_window(engine)
+    _ensure_window_visible(engine.rootObjects()[0])
 
     # Close splash as soon as the window is up. Use finish() so the splash
     # hides exactly when the root window shows; keep a short fallback timer.
