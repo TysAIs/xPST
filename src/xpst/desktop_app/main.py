@@ -438,6 +438,21 @@ def _make_macos_unified_window(engine) -> None:
         ]
         objc.objc_msgSend(window, sel("setMovableByWindowBackground:"), False)
 
+        # Explicitly make the bundle's native window key/frontmost. QML's
+        # requestActivate() is advisory on macOS and can leave a visible Qt
+        # window behind another Space, which also removes its AXWindow.
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        objc.objc_msgSend(window, sel("makeKeyAndOrderFront:"), ctypes.c_void_p(0))
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        objc.objc_msgSend(window, sel("orderFrontRegardless"))
+        objc.objc_getClass.restype = ctypes.c_void_p
+        objc.objc_getClass.argtypes = [ctypes.c_char_p]
+        app_class = objc.objc_getClass(b"NSApplication")
+        objc.objc_msgSend.restype = ctypes.c_void_p
+        native_app = objc.objc_msgSend(app_class, sel("sharedApplication"))
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool]
+        objc.objc_msgSend(native_app, sel("activateIgnoringOtherApps:"), True)
+
         logger.info("macOS unified titlebar applied (full-size content view)")
     except Exception as exc:  # noqa: BLE001 - native path never breaks the app
         logger.debug("macOS unified titlebar skipped: %s", exc)
