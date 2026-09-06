@@ -20,6 +20,7 @@ def test_bundle_metadata_uses_project_version_and_embeds_source_sha():
     assert "CFBundleShortVersionString\": PROJECT_VERSION" in spec
     assert "CFBundleVersion\": PROJECT_VERSION" in spec
     assert '"XPSTSourceSHA": SOURCE_SHA' in spec
+    assert '"NSQuitAlwaysKeepsWindows": False' in spec
     assert '"CFBundleShortVersionString": "0.1.0"' not in spec
 
 
