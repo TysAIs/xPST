@@ -87,10 +87,19 @@ Page {
 
                     Text {
                         Layout.alignment: Qt.AlignHCenter
-                        text: "v" + (typeof controller !== "undefined" ? controller.appVersion : "1.0.0")
+                        text: "v" + (typeof controller !== "undefined" ? controller.appVersion : "1.1.0")
                         font.pixelSize: 13
                         color: theme.textMuted
-                        Accessible.name: "Version " + (typeof controller !== "undefined" ? controller.appVersion : "1.0.0")
+                        Accessible.name: "Version " + (typeof controller !== "undefined" ? controller.appVersion : "1.1.0")
+                    }
+
+                    Text {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: "Source SHA: " + (typeof controller !== "undefined" ? controller.sourceSha : "unknown")
+                        font.pixelSize: 11
+                        font.family: theme.monoFontFamily
+                        color: theme.textMuted
+                        Accessible.name: "Source commit " + (typeof controller !== "undefined" ? controller.sourceSha : "unknown")
                     }
 
                     Text {
