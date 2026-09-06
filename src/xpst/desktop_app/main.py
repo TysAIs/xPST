@@ -358,7 +358,7 @@ def _ensure_window_visible(root) -> None:
             root.show()
             root.requestActivate()
 
-        QTimer.singleShot(500, _clear_topmost)
+        QTimer.singleShot(15_000, _clear_topmost)
 
 
 def _make_macos_unified_window(engine) -> None:
