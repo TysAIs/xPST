@@ -10,6 +10,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+# Prefer the checkout being built over any stale editable xPST installation
+# already present in the developer's venv. This keeps bundled Python and QML
+# provenance aligned when release builds run from an isolated clone.
+export PYTHONPATH="$SCRIPT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 
 # Detect platform
 PLATFORM="${1:-}"
