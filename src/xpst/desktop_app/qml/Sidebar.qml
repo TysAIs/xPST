@@ -149,8 +149,11 @@ Rectangle {
                     cursorShape: Qt.PointingHandCursor
                     propagateComposedEvents: true
                     onClicked: sidebar.navigate(modelData.page)
+                    Accessible.id: "nav-" + modelData.page
                     Accessible.name: modelData.label + " navigation"
                     Accessible.role: Accessible.Button
+                    Accessible.focusable: true
+                    Accessible.onPressAction: sidebar.navigate(modelData.page)
                 }
             }
         }
