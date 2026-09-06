@@ -5,6 +5,7 @@ controllers with QML engine, sets up system tray, and runs the event loop.
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -18,7 +19,7 @@ logger = logging.getLogger("xpst.desktop")
 # ── PySide6 imports ──────────────────────────────────────────────────
 try:
     from PySide6.QtCore import QLockFile, Qt, QTimer, QUrl
-    from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
+    from PySide6.QtGui import QAccessible, QColor, QFont, QFontDatabase, QIcon, QPainter, QPixmap
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtWidgets import QApplication, QMenu, QSplashScreen, QSystemTrayIcon
 
@@ -384,6 +385,32 @@ def _make_macos_unified_window(engine) -> None:
         logger.debug("macOS unified titlebar skipped: %s", exc)
 
 
+def _enable_macos_accessibility() -> None:
+    """Force Qt's macOS accessibility bridge to be active from first launch.
+
+    Qt only populates the macOS AX (Accessibility) tree when the bridge is
+    activated; by leaving it lazy, automation/assistive clients (VoiceOver,
+    Accessibility Inspector, ``System Events``, AppleScript) can observe an
+    empty tree — "AX returns 0 interactable elements" — and keyboard focus /
+    key delivery can drop. Activating it eagerly makes the window and its
+    controls show up in the macOS accessibility hierarchy and keeps keyboard
+    input routed to the focused widget.
+
+    Safe no-op on non-macOS platforms and when the (optional) Qt accessibility
+    plugin is unavailable.
+    """
+    if sys.platform != "darwin":
+        return
+    try:
+        # Belt-and-braces: some Qt versions gate the bridge on this env var
+        # read at QApplication construction; set it before any GUI is created.
+        os.environ.setdefault("QT_ACCESSIBILITY", "1")
+        QAccessible.setActive(True)
+        logger.info("macOS accessibility bridge activated")
+    except Exception as exc:  # noqa: BLE001 - never break startup
+        logger.debug("macOS accessibility activation skipped: %s", exc)
+
+
 def main(no_splash: bool = False) -> int:
     """Launch the xPST desktop application."""
     # Single-instance guard: a second launch focuses the existing window
@@ -401,6 +428,11 @@ def main(no_splash: bool = False) -> int:
     app.setOrganizationName("xPST")
     app.setOrganizationDomain("xpst.app")
     app.setApplicationDisplayName("xPST — Cross-Posting Tool")
+
+    # Enforce the macOS accessibility bridge so the window/controls appear in
+    # the AX tree (interactable elements + keyboard delivery) for automation
+    # and assistive clients. Safe no-op off-macOS.
+    _enable_macos_accessibility()
 
     # Set Material style before creating the engine
     if QQuickStyle is not None:
