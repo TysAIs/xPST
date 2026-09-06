@@ -809,8 +809,10 @@ ApplicationWindow {
 
     RowLayout {
         id: appContent
+        Accessible.id: "xpst-main-content"
         Accessible.name: "xPST Cross-Posting Suite"
         Accessible.role: Accessible.Pane
+        Accessible.focusable: true
         Accessible.ignored: false
         anchors.fill: parent
         spacing: 0

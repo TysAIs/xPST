@@ -5,6 +5,7 @@ controllers with QML engine, sets up system tray, and runs the event loop.
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -20,6 +21,7 @@ try:
     from PySide6.QtCore import QLockFile, Qt, QTimer, QUrl
     from PySide6.QtGui import (
         QAccessible,
+        QAccessibleEvent,
         QColor,
         QFont,
         QFontDatabase,
@@ -453,6 +455,7 @@ def main(no_splash: bool = False) -> int:
         return 10  # same exit code family as 'another instance holds lock'
 
     # Must use QApplication (not QGuiApplication) for system tray support
+    os.environ.setdefault("QT_ACCESSIBILITY", "1")
     app = QApplication(sys.argv)
     # Qt Quick accessibility is opt-in on some PySide6/macOS combinations.
     # Activate it before the QML tree is constructed so AX clients receive
@@ -467,7 +470,6 @@ def main(no_splash: bool = False) -> int:
     if QQuickStyle is not None:
         QQuickStyle.setStyle("Material")
     else:
-        import os
         os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Material")
 
     # Register the bundled icon font so theme.icon* glyphs render (W4-5).
@@ -616,7 +618,25 @@ def main(no_splash: bool = False) -> int:
     # no-ops safely on every other platform / when the native call fails, so
     # this never breaks a build.
     _make_macos_unified_window(engine)
-    _ensure_window_visible(engine.rootObjects()[0])
+    root = engine.rootObjects()[0]
+    # Re-announce the loaded QML tree after all Accessible attached
+    # properties exist. This is required by macOS AX clients that attach
+    # after application startup (and makes the window keyboard-focusable).
+    QAccessible.setActive(True)
+    try:
+        QAccessible.updateAccessibility(
+            QAccessibleEvent(root, QAccessible.Event.ObjectShow)
+        )
+        interface = QAccessible.queryAccessibleInterface(root)
+        logger.info(
+            "Qt accessibility active=%s root_interface=%s child_count=%s",
+            QAccessible.isActive(),
+            interface is not None,
+            interface.childCount() if interface is not None else 0,
+        )
+    except Exception as exc:  # pragma: no cover - platform accessibility path
+        logger.warning("Qt accessibility announcement failed: %s", exc)
+    _ensure_window_visible(root)
 
     # Close splash as soon as the window is up. Use finish() so the splash
     # hides exactly when the root window shows; keep a short fallback timer.
