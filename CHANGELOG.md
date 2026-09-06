@@ -51,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A one-shot `xpst run` no longer leaves a stale `xpst.pid` behind (the
   pidfile is always released on exit).
 
+## [1.1.0] - 2026-09-06
+
+Desktop reliability and release metadata fixes: the macOS bundle now reports
+its project version, embeds the exact source commit, restores off-screen windows
+onto the primary display, and enables Qt Quick accessibility before QML loads.
+
 ## [1.0.0] - 2026-08-18
 
 First public release. xPST is an open-source, cross-platform suite for posting
