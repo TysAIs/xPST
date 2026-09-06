@@ -8,6 +8,9 @@ data is serialised as JSON strings so QML can parse with JSON.parse().
 import asyncio
 import json
 import logging
+import os
+import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -122,7 +125,46 @@ from xpst.desktop_app import icon_glyphs
 try:
     from xpst import __version__ as xpst_version
 except Exception:  # pragma: no cover
-    xpst_version = "0.0.0"
+    xpst_version = "1.1.0"
+
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _resolve_source_sha() -> str:
+    """Resolve the exact commit represented by this source or frozen bundle."""
+    candidate = os.environ.get("XPST_SOURCE_SHA", "").strip()
+    if _SHA_RE.fullmatch(candidate):
+        return candidate
+
+    if getattr(sys, "frozen", False):
+        info_plist = Path(sys.executable).resolve().parents[1] / "Info.plist"
+        try:
+            with info_plist.open("rb") as handle:
+                candidate = str(plistlib.load(handle).get("XPSTSourceCommit", ""))
+            if _SHA_RE.fullmatch(candidate):
+                return candidate
+        except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
+            pass
+
+    repo_root = Path(__file__).resolve().parents[3]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        candidate = result.stdout.strip()
+        if _SHA_RE.fullmatch(candidate):
+            return candidate
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unknown"
+
+
+source_sha = _resolve_source_sha()
 
 # ── Optional xPST dependencies (graceful fallback) ───────────────────
 try:
@@ -373,7 +415,12 @@ class AppController(QObject):
 
     appVersion = Property(str, _get_app_version, constant=True)
 
-    # ── Data refresh ─────────────────────────────────────────────────
+    def _get_source_sha(self) -> str:
+        return source_sha
+
+    sourceSha = Property(str, _get_source_sha, constant=True)
+
+    # ── Data refresh ──────────────────────────────────────────────────
 
     @Slot(result=str)
     def refreshData(self) -> str:
@@ -2358,7 +2405,7 @@ class AppController(QObject):
         """
         try:
             result = subprocess.run(
-                ["git", "log", "--oneline", "-10"],
+                ["git", "log", "--format=%H %s", "-10"],
                 capture_output=True,
                 text=True,
                 timeout=5,

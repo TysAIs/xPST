@@ -149,6 +149,8 @@ Rectangle {
                     cursorShape: Qt.PointingHandCursor
                     propagateComposedEvents: true
                     onClicked: sidebar.navigate(modelData.page)
+                    Accessible.name: modelData.label + " navigation"
+                    Accessible.role: Accessible.Button
                 }
             }
         }
@@ -496,7 +498,7 @@ Rectangle {
             Layout.preferredHeight: 32
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            text: "v" + (typeof controller !== "undefined" ? controller.appVersion : "1.0.0")
+            text: "v" + (typeof controller !== "undefined" ? controller.appVersion : "1.1.0")
             font.pixelSize: 11
             color: theme.textMuted
             visible: sidebar.expanded
