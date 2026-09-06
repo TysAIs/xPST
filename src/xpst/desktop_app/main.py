@@ -344,6 +344,21 @@ def _ensure_window_visible(root) -> None:
     root.show()
     root.raise_()
     root.requestActivate()
+    if sys.platform == "darwin":
+        # Qt's Cocoa plugin can report a visible QWindow while leaving it
+        # behind another Space. A one-shot always-on-top promotion makes the
+        # initial native activation deterministic; remove the hint shortly
+        # after so normal z-order behavior is restored.
+        root.setFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        root.show()
+        root.requestActivate()
+
+        def _clear_topmost() -> None:
+            root.setFlag(Qt.WindowType.WindowStaysOnTopHint, False)
+            root.show()
+            root.requestActivate()
+
+        QTimer.singleShot(500, _clear_topmost)
 
 
 def _make_macos_unified_window(engine) -> None:
