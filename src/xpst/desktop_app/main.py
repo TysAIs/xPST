@@ -371,6 +371,14 @@ def _make_macos_unified_window(engine) -> None:
         ]
         objc.objc_msgSend(window, sel("setTitleVisibility:"), 1)  # NSWindowTitleHidden
 
+        # Native background dragging must stay disabled: with a full-size
+        # transparent titlebar AppKit can otherwise treat the entire content
+        # view as the window drag surface and swallow QML mouse events.
+        objc.objc_msgSend.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool,
+        ]
+        objc.objc_msgSend(window, sel("setMovableByWindowBackground:"), False)
+
         logger.info("macOS unified titlebar applied (full-size content view)")
     except Exception as exc:  # noqa: BLE001 - native path never breaks the app
         logger.debug("macOS unified titlebar skipped: %s", exc)
