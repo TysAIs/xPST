@@ -13,6 +13,10 @@ Rectangle {
                                          ? macUnifiedTitlebar
                                          : false
     width: expanded ? 240 : 64
+    Accessible.id: "xpst-sidebar"
+    Accessible.name: "Main navigation"
+    Accessible.role: Accessible.Pane
+    Accessible.ignored: false
     Layout.fillHeight: true
     color: theme.surface
     Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.InOutCubic } }
@@ -149,6 +153,11 @@ Rectangle {
                     cursorShape: Qt.PointingHandCursor
                     propagateComposedEvents: true
                     onClicked: sidebar.navigate(modelData.page)
+                    Accessible.id: "nav-" + modelData.page
+                    Accessible.name: modelData.label + " navigation"
+                    Accessible.role: Accessible.Button
+                    Accessible.focusable: true
+                    Accessible.onPressAction: sidebar.navigate(modelData.page)
                 }
             }
         }
@@ -496,7 +505,7 @@ Rectangle {
             Layout.preferredHeight: 32
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            text: "v" + (typeof controller !== "undefined" ? controller.appVersion : "1.0.0")
+            text: "v" + (typeof controller !== "undefined" ? controller.appVersion : "1.1.0")
             font.pixelSize: 11
             color: theme.textMuted
             visible: sidebar.expanded

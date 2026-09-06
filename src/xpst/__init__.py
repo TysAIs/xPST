@@ -1,4 +1,4 @@
-"""xPST v1.0.0 — Free, open-source, local-first cross-posting suite.
+"""xPST v1.1.0 — Free, open-source, local-first cross-posting suite.
 
 Distribute short-form video to YouTube, Instagram, X, TikTok, and Threads —
 all for free via official APIs. Includes cross-post
@@ -26,12 +26,7 @@ Quick Start:
     >>> results = asyncio.run(engine.check_and_post())
 """
 
-import importlib.metadata
-
-try:
-    __version__ = importlib.metadata.version("xpst")
-except importlib.metadata.PackageNotFoundError:
-    __version__ = "1.0.0"
+__version__ = "1.1.0"
 __author__ = "xPST Contributors"
 
 from .config import NotificationConfig, XPSTConfig
