@@ -478,7 +478,15 @@ def main(no_splash: bool = False) -> int:
     # Single-instance guard: a second launch focuses the existing window
     # instead of spawning a competing engine (double-posting risk) — the
     # shared pidfile in ~/.xpst/xpst.pid is what `xpst run/serve` also uses.
-    lock = QLockFile(str(get_config_dir() / "xpst-gui.lock"))
+    config_dir = get_config_dir()
+    # QLockFile cannot create its lock file when the parent directory is
+    # missing (clean-profile smoke launches with a pristine HOME/APPDATA).
+    # Ensure the directory exists before taking the single-instance lock.
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass  # lock creation below surfaces real problems via return code
+    lock = QLockFile(str(config_dir / "xpst-gui.lock"))
     if not lock.tryLock(0):
         logger.warning("xPST desktop already running — activating existing instance.")
         print("xPST is already running.", file=sys.stderr)
