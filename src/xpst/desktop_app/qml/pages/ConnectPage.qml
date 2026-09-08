@@ -1,4 +1,3 @@
-import xpst.desktop_app.qml 1.0
 import QtQuick 2.15
 import xpst.desktop_app.qml 1.0
 import QtQuick.Controls 2.15
@@ -328,15 +327,16 @@ Page {
             spacing: theme.spacingMd
 
             Text {
-                text: "To connect X (Twitter), sign in to X in your browser, then copy your session cookies."
+                text: "Fastest: click <b>Connect</b> on the Accounts card — xPST signs you in with your username and password and saves the session automatically. Use the cookie paste below only if the guided sign-in fails."
                 font.pixelSize: 12
                 color: theme.textSecondary
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
+                textFormat: Text.RichText
             }
 
             Text {
-                text: "1. Open <a href='https://x.com'>x.com</a> and sign in\n2. Use a cookie export extension (e.g. EditThisCookie)\n3. Copy the cookies as JSON\n4. Paste them below and click Save"
+                text: "Manual fallback:\n1. Open <a href='https://x.com'>x.com</a> and sign in\n2. Use a cookie export extension (e.g. EditThisCookie)\n3. Copy the cookies as JSON\n4. Paste them below and click Save"
                 font.pixelSize: 12
                 color: theme.textPrimary
                 wrapMode: Text.WordWrap
@@ -1485,7 +1485,7 @@ Page {
                             onLinkActivated: Qt.openUrlExternally(link)
                         }
                         Text {
-                            text: "2. Export cookies to <code>~/.xpst/credentials/tiktok_cookies.json</code>"
+                            text: "2. Export cookies to <code>~/.xpst/credentials/tiktok_cookies.txt</code> (Netscape format — this is the path xPST reads automatically)"
                             font.pixelSize: 12
                             color: theme.textSecondary
                             Layout.fillWidth: true
