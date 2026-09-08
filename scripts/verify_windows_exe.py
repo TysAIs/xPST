@@ -25,8 +25,11 @@ def _authenticode_status(path: Path) -> dict[str, Any]:
         "-NoProfile",
         "-Command",
         (
-            f"$sig = Get-AuthenticodeSignature -LiteralPath '{escaped_path}'; "
-            "[Console]::Out.Write(($sig.Status.ToString()) + \"`n\" + ($sig.StatusMessage.ToString()))"
+            "Import-Module Microsoft.PowerShell.Security -ErrorAction SilentlyContinue; "
+            f"$sig = Get-AuthenticodeSignature -LiteralPath '{escaped_path}' -ErrorAction SilentlyContinue; "
+            "if ($null -eq $sig) { [Console]::Out.Write('unknown' + [Environment]::NewLine + 'signature check unavailable'); exit 0 } "
+            "$status = [string]$sig.Status; $msg = [string]$sig.StatusMessage; "
+            "[Console]::Out.Write($status + [Environment]::NewLine + $msg)"
         ),
     ]
     try:
