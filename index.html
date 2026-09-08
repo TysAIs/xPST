@@ -1,12 +1,64 @@
 <!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>xPST — Cross-Posting Suite</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:760px;margin:60px auto;padding:0 24px;color:#111;line-height:1.6}
-h1{font-size:1.9rem}a{color:#169b62}pre{background:#f5f5f5;padding:14px;border-radius:8px;overflow:auto}</style></head>
-<body><h1>xPST</h1><p><strong>Cross-post short-form video to YouTube, X, Instagram and TikTok from one command.</strong>
-xPST is an open-source, MIT/Apache-2.0 licensed CLI and desktop app for automated video distribution. Manage captions, captions library, analytics, scheduling and cross-posting from a single tool.</p>
-<h2>Getting started</h2><pre>pip install xpst
-xpst wizard
-xpst connect youtube
-xpst post -v PATH</pre>
-<h2>Links</h2><ul><li><a href="https://github.com/TysAIs/xPST">Source on GitHub</a></li>
-<li><a href="privacy.html">Privacy Policy</a></li><li><a href="terms.html">Terms of Service</a></li></ul>
-<p>Built for creators and AI agents.</p></body></html>
+<title>xPST — Cross-Posting Suite</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:860px;margin:48px auto;padding:0 24px;color:#111;line-height:1.6}
+h1{font-size:1.9rem}h2{font-size:1.3rem;margin-top:2em}h3{font-size:1.05rem;margin-top:1.4em}a{color:#169b62}pre{background:#f5f5f5;padding:14px;border-radius:8px;overflow:auto}
+code{background:#f5f5f5;padding:1px 5px;border-radius:4px}table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #e5e5e5;font-size:.95rem}
+@media (prefers-color-scheme:dark){body{color:#eee;background:#161617}pre,code{background:#2a2a2c}th,td{border-color:#3a3a3c}}</style></head>
+<body><h1>xPST — Cross-Posting Suite</h1><p><strong>Post once, publish everywhere.</strong> Local-first, open-source cross-posting for short-form video: one run publishes to YouTube Shorts, X, Instagram Reels and TikTok at full native quality.</p>
+<p>xPST is dual-licensed MIT OR Apache-2.0. It runs three ways from the same engine: a native desktop app, a command-line interface with JSON output for automation, and an MCP server so AI agents can drive it. All data lives on your machine under <code>~/.xpst/</code> — credentials encrypted at rest, no telemetry, no hosted account.</p>
+
+<h2>Features</h2>
+<ul>
+<li><strong>Multi-source:</strong> watch TikTok, Instagram, YouTube, X or a local folder for new videos and cross-post them automatically.</li>
+<li><strong>Multi-destination:</strong> publish to YouTube Shorts, Instagram Reels, X and TikTok in one run, with per-platform caption templates, hashtags and scheduling.</li>
+<li><strong>Quality pipeline:</strong> FFmpeg transcode with per-platform bitrate/aspect tuning; upload retries with circuit breakers and rate-limit-aware quotas per platform.</li>
+<li><strong>Analytics:</strong> per-post views, likes, comments, shares and follower snapshots in one dashboard, across every connected platform.</li>
+<li><strong>Captions library &amp; ideas:</strong> reusable caption sets, transcript lookup and a personal knowledge base of your published content that connected AI agents can query.</li>
+<li><strong>Agent-friendly CLI:</strong> deterministic JSON on non-TTY shells, structured exit codes, <code>--dry-run</code> everywhere; 28 MCP tools for full automation.</li>
+</ul>
+
+<h2>Getting started</h2>
+<pre>pip install xpst
+xpst wizard            # interactive setup: sources, destinations, captions
+xpst connect youtube   # OAuth in your browser (one click)
+xpst connect x         # guided sign-in
+xpst health            # verify all connections
+xpst run               # check sources and cross-post what's new
+xpst run --dry-run     # preview decisions without posting</pre>
+<p>The desktop app (<code>xpst app</code>) shows the same flow with an onboarding wizard, a Connect page with per-platform setup guides, a compose page, scheduling and analytics.</p>
+
+<h2>Supported platforms</h2>
+<table>
+<tr><th>Platform</th><th>As source</th><th>As destination</th><th>Auth method</th></tr>
+<tr><td>YouTube Shorts</td><td>yes</td><td>yes</td><td>OAuth 2.0 (official API)</td></tr>
+<tr><td>Instagram Reels</td><td>yes</td><td>yes</td><td>Meta Graph API (official) or session</td></tr>
+<tr><td>X / Twitter</td><td>yes</td><td>yes</td><td>guided sign-in or API v2 / OAuth 1.0a</td></tr>
+<tr><td>TikTok</td><td>yes</td><td>yes</td><td>cookies for reading; Content Posting API OAuth for publishing</td></tr>
+<tr><td>Threads</td><td>yes</td><td>yes</td><td>long-lived Meta access token</td></tr>
+<tr><td>Messenger</td><td>—</td><td>auto-reply/DM</td><td>Page Access Token (opt-in)</td></tr>
+<tr><td>Local folder</td><td>yes</td><td>—</td><td>none needed</td></tr>
+</table>
+
+<h2>How a run works</h2>
+<ol>
+<li><strong>Check sources</strong> — new videos since the last checkpoint are fetched with yt-dlp (HD, cookies optional).</li>
+<li><strong>Deduplicate</strong> — state store tracks every cross-post group so nothing posts twice.</li>
+<li><strong>Prepare</strong> — captions, hashtags and per-platform formatting applied from templates.</li>
+<li><strong>Publish</strong> — uploads go out per platform with quota-aware pacing; failures retry and a circuit breaker pauses a degraded platform without blocking the others.</li>
+<li><strong>Collect metrics</strong> — views/likes/comments/shares snapshotted per post into the analytics store.</li>
+</ol>
+
+<h2>Documentation</h2>
+<ul>
+<li><a href="https://github.com/TysAIs/xPST">Source, issues and releases on GitHub</a></li>
+<li><a href="docs/QUICKSTART.md">Quick start</a> · <a href="docs/TUTORIAL_APP.md">Desktop tutorial</a> · <a href="docs/TUTORIAL_CLI.md">CLI tutorial</a> · <a href="docs/MCP_TOOLS.md">MCP tools reference</a></li>
+<li><a href="privacy.html">Privacy Policy</a> · <a href="terms.html">Terms of Service</a></li>
+</ul>
+
+<h2>FAQ</h2>
+<h3>Does it need a subscription or account?</h3>
+<p>No. xPST runs entirely on your machine. There is no vendor account, cloud queue or telemetry.</p>
+<h3>Where are credentials stored?</h3>
+<p>Encrypted files under <code>~/.xpst/credentials/</code> (or the OS keychain if preferred). Nothing is sent anywhere except the platform APIs you configure.</p>
+<h3>Can an AI agent operate it?</h3>
+<p>Yes — every CLI command is agent-safe (auto-JSON when not attached to a terminal, meaningful exit codes), and the built-in MCP server exposes 28 tools covering posting, scheduling, analytics and configuration.</p>
+</body></html>
