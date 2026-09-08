@@ -87,7 +87,7 @@ accounts:
   tiktok:
     username: "somecreator"
     cookies_from_browser: true
-    cookies_file: "~/.xpst/credentials/tiktok_cookies.json"
+    cookies_file: "~/.xpst/credentials/tiktok_cookies.txt"
 ```
 
 ---
