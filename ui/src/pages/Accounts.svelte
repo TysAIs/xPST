@@ -16,6 +16,22 @@
   const auth = $derived(health?.auth ?? {});
   const authKeys = $derived(Object.keys(auth));
 
+  // Human-friendly sign-in labels instead of raw auth_mode plumbing,
+  // mirroring the desktop ConnectPage signInLabel() mapping.
+  const FRIENDLY = {
+    oauth: "Sign in with Google",
+    session: "Session sign-in",
+    cookies: "Cookie sign-in",
+    graph_api: "Sign in with Meta (official)",
+    source_only: "Source only (no login)",
+    local: "Local folder",
+  };
+
+  function authLabel(mode) {
+    if (!mode) return "—";
+    return FRIENDLY[mode] ?? mode;
+  }
+
   function livenessColor(entry) {
     if (entry?.session_valid) return "var(--xpst-success-text)";
     if (entry?.error === "disabled") return "var(--xpst-text-muted)";
@@ -38,7 +54,7 @@
       <thead>
         <tr class="border-b" style="border-color: var(--xpst-border); color: var(--xpst-text-muted)">
           <th class="px-4 py-3 font-medium">Platform</th>
-          <th class="px-4 py-3 font-medium">Auth mode</th>
+          <th class="px-4 py-3 font-medium">Sign-in</th>
           <th class="px-4 py-3 font-medium">Live session</th>
           <th class="px-4 py-3 font-medium">Age (days)</th>
         </tr>
@@ -48,7 +64,7 @@
           {@const entry = auth[name]}
           <tr class="border-b last:border-0" style="border-color: var(--xpst-border)">
             <td class="px-4 py-3 font-medium">{name}</td>
-            <td class="px-4 py-3">{entry.auth_mode ?? "—"}</td>
+            <td class="px-4 py-3">{authLabel(entry.auth_mode)}</td>
             <td class="px-4 py-3" style="color: {livenessColor(entry)}">
               {entry.error === "disabled" ? "disabled" : entry.session_valid ? "valid" : "invalid"}
             </td>

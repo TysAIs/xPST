@@ -88,7 +88,7 @@ accounts:
   tiktok:
     username: "your_username"           # TikTok username to fetch from
     cookies_from_browser: false          # Use browser cookies for auth
-    cookies_file: "~/.xpst/credentials/tiktok_cookies.json"
+    cookies_file: "~/.xpst/credentials/tiktok_cookies.txt"
 
   youtube:
     enabled: true
@@ -197,7 +197,7 @@ Uses yt-dlp with browser cookies:
 xpst auth tiktok
 
 # Option 2: Manual cookies file
-# Export cookies from browser and save to ~/.xpst/credentials/tiktok_cookies.json
+# Export cookies from browser and save to ~/.xpst/credentials/tiktok_cookies.txt
 ```
 
 ### YouTube
