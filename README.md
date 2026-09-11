@@ -48,7 +48,7 @@ xPST works across **six platforms** — YouTube, Instagram, X/Twitter, TikTok, T
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
 - **CLI** — 38 top-level commands covering the entire workflow
-- **MCP server** — 28 tools so AI agents can drive the entire product
+- **MCP server** — 36 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
 
@@ -92,7 +92,7 @@ network traffic is the platform API calls you configure. See
 ### Three Drivable Surfaces
 - **Desktop GUI** — PySide6/QML app with Dashboard, Compose, Content, Analytics, Connect, Schedule, Settings, and About pages + DetailPanel
 - **CLI** — 38 Click-based commands with `--json` output, `--dry-run` mode, and meaningful exit codes
-- **MCP server** — 28 tools (22 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
+- **MCP server** — 36 tools (28 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 ### Enterprise Hardening
 - **Encrypted credentials** — OS keychain storage (macOS Keychain, Linux Secret Service, Windows Credential Manager) with encrypted `.enc` file fallback (Fernet + scrypt)

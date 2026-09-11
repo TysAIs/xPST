@@ -405,7 +405,7 @@ xpst mcp
 
 ### Available Tools
 
-xPST exposes 28 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
+xPST exposes 36 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 
 | Tool | Description |
 |------|-------------|
@@ -417,6 +417,9 @@ xPST exposes 28 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 | `xpst_config_show` | Show configuration |
 | `xpst_auth_status` | Auth status |
 | `xpst_delete` | Delete post from platform |
+| `xpst_capabilities` | Canonical role-aware capability catalog |
+| `xpst_readiness` | Local readiness checks and blockers |
+| `xpst_auth_start` | Browser-free human authentication action plan |
 | `xpst_providers` | List sources and destinations |
 | `xpst_analytics` | Per-post engagement metrics |
 | `xpst_cross_post_analytics` | Cross-post correlation |

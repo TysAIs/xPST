@@ -572,32 +572,19 @@ TOOLS: list[Tool] = [
     Tool(
         name="xpst_capabilities",
         description="Return the canonical role-aware provider and capability contract without network calls",
-        inputSchema={
-            "type": "object",
-            "properties": {},
-            "additionalProperties": False,
-        },
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
     Tool(
         name="xpst_readiness",
         description="Return local setup readiness and actionable blockers without starting the posting engine",
-        inputSchema={
-            "type": "object",
-            "properties": {},
-            "additionalProperties": False,
-        },
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
     Tool(
         name="xpst_auth_start",
         description="Return a human-only authentication action plan; never opens a browser or accepts secrets",
         inputSchema={
             "type": "object",
-            "properties": {
-                "platform": {
-                    "type": "string",
-                    "enum": ["tiktok", "youtube", "x", "instagram", "threads", "messenger"],
-                },
-            },
+            "properties": {"platform": {"type": "string", "enum": ["tiktok", "youtube", "x", "instagram", "threads", "messenger"]}},
             "required": ["platform"],
             "additionalProperties": False,
         },
