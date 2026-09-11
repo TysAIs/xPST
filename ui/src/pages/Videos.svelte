@@ -1,61 +1,78 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../lib/api.js";
+  import EmptyState from "../lib/components/EmptyState.svelte";
+  import ErrorState from "../lib/components/ErrorState.svelte";
+  import LoadingSkeleton from "../lib/components/LoadingSkeleton.svelte";
+  import PlatformBadge from "../lib/components/PlatformBadge.svelte";
+  import Card from "../lib/components/Card.svelte";
 
+  let state = $state("loading");
   let videos = $state(null);
-  let error = $state(null);
+  let error = $state("");
 
-  onMount(async () => {
+  async function load() {
+    state = "loading";
+    error = "";
     try {
       videos = await api.videos();
-    } catch (e) {
-      error = e.message;
+      state = "ready";
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+      state = "error";
     }
+  }
+
+  onMount(() => {
+    load();
   });
+
+  const entries = $derived(videos?.videos ?? []);
 </script>
 
-<h1 class="mb-6 text-2xl font-bold tracking-tight">Videos</h1>
-
-{#if error}
-  <p style="color: var(--xpst-danger-text)">Failed to load: {error}</p>
-{:else if !videos}
-  <p style="color: var(--xpst-text-muted)">Loading…</p>
-{:else}
-  <p class="mb-4 text-sm" style="color: var(--xpst-text-secondary)">
-    {videos.count} tracked posts across platforms
-  </p>
-  <div
-    class="overflow-hidden rounded-2xl"
-    style="background: var(--xpst-surface); box-shadow: var(--xpst-shadow);"
-  >
-    <table class="w-full text-left text-sm">
-      <thead>
-        <tr class="border-b" style="border-color: var(--xpst-border); color: var(--xpst-text-muted)">
-          <th class="px-4 py-3 font-medium">Platform</th>
-          <th class="px-4 py-3 font-medium">Caption</th>
-          <th class="px-4 py-3 font-medium">Views</th>
-          <th class="px-4 py-3 font-medium">Likes</th>
-          <th class="px-4 py-3 font-medium">Comments</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each videos.videos.slice(0, 50) as v, i (i)}
-          <tr class="border-b last:border-0" style="border-color: var(--xpst-border)">
-            <td class="px-4 py-3 font-medium">{v.platform}</td>
-            <td class="max-w-72 truncate px-4 py-3" style="color: var(--xpst-text-secondary)">
-              {v.caption || v.post_id}
-            </td>
-            <td class="px-4 py-3">{v.views ?? 0}</td>
-            <td class="px-4 py-3">{v.likes ?? 0}</td>
-            <td class="px-4 py-3">{v.comments ?? 0}</td>
-          </tr>
-        {/each}
-        {#if videos.count === 0}
-          <tr><td colspan="5" class="px-4 py-6 text-center" style="color: var(--xpst-text-muted)">
-            No tracked posts yet.
-          </td></tr>
-        {/if}
-      </tbody>
-    </table>
+<header class="xpst-page-header">
+  <div>
+    <h1>Videos</h1>
+    <p>{videos?.count ?? 0} tracked post{videos?.count === 1 ? "" : "s"} across the configured platforms.</p>
   </div>
+</header>
+
+{#if state === "loading"}
+  <LoadingSkeleton rows={7} label="Loading videos" />
+{:else if state === "error"}
+  <ErrorState message={error} retry={load} />
+{:else if entries.length === 0}
+  <EmptyState
+    title="No tracked posts yet"
+    description="The local engine will list posts here after it records them."
+    actionLabel="Review accounts"
+    actionHref="#/accounts"
+  />
+{:else}
+  <Card title="Tracked posts" description="Showing the posts returned by the local engine.">
+    <div class="xpst-table-wrap" style="box-shadow: none;">
+      <table class="xpst-table">
+        <thead>
+          <tr>
+            <th scope="col">Platform</th>
+            <th scope="col">Caption or post ID</th>
+            <th scope="col">Views</th>
+            <th scope="col">Likes</th>
+            <th scope="col">Comments</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each entries.slice(0, 50) as video, index (`${video.video_id ?? ""}:${video.post_id ?? ""}:${index}`)}
+            <tr>
+              <td><PlatformBadge platform={video.platform} /></td>
+              <td data-muted="true">{video.caption || video.post_id || "—"}</td>
+              <td>{video.views ?? "—"}</td>
+              <td>{video.likes ?? "—"}</td>
+              <td>{video.comments ?? "—"}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  </Card>
 {/if}

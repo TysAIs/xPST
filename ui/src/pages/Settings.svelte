@@ -1,16 +1,29 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../lib/api.js";
+  import Card from "../lib/components/Card.svelte";
+  import EmptyState from "../lib/components/EmptyState.svelte";
+  import ErrorState from "../lib/components/ErrorState.svelte";
+  import LoadingSkeleton from "../lib/components/LoadingSkeleton.svelte";
 
+  let state = $state("loading");
   let settings = $state(null);
-  let error = $state(null);
+  let error = $state("");
 
-  onMount(async () => {
+  async function load() {
+    state = "loading";
+    error = "";
     try {
       settings = await api.settings();
-    } catch (e) {
-      error = e.message;
+      state = "ready";
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause);
+      state = "error";
     }
+  }
+
+  onMount(() => {
+    load();
   });
 
   const sections = $derived(
@@ -20,25 +33,33 @@
   );
 </script>
 
-<h1 class="mb-6 text-2xl font-bold tracking-tight">Settings</h1>
+<header class="xpst-page-header">
+  <div>
+    <h1>Settings</h1>
+    <p>Review the masked configuration currently visible to the local engine.</p>
+  </div>
+</header>
 
-{#if error}
-  <p style="color: var(--xpst-danger-text)">Failed to load: {error}</p>
-{:else if !settings}
-  <p style="color: var(--xpst-text-muted)">Loading…</p>
+{#if state === "loading"}
+  <LoadingSkeleton rows={8} label="Loading settings" />
+{:else if state === "error"}
+  <ErrorState message={error} retry={load} />
+{:else if sections.length === 0}
+  <EmptyState
+    title="No settings available"
+    description="The local engine returned no configuration sections."
+    actionLabel="Retry"
+    onAction={load}
+  />
 {:else}
-  {#each sections as section (section.name)}
-    <div
-      class="mb-4 rounded-2xl p-5"
-      style="background: var(--xpst-surface); box-shadow: var(--xpst-shadow);"
-    >
-      <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide" style="color: var(--xpst-text-secondary)">
-        {section.name}
-      </h2>
-      <pre class="overflow-x-auto text-xs leading-relaxed" style="color: var(--xpst-text-secondary)">{JSON.stringify(section.value, null, 2)}</pre>
-    </div>
-  {/each}
-  <p class="text-xs" style="color: var(--xpst-text-muted)">
-    Secrets are masked server-side (same masker as xpst_config_show). Editing lands in Phase 2.
+  <div class="xpst-settings-list">
+    {#each sections as section (section.name)}
+      <Card title={section.name}>
+        <pre>{JSON.stringify(section.value, null, 2)}</pre>
+      </Card>
+    {/each}
+  </div>
+  <p class="xpst-page-header" style="display: block; margin-top: var(--xpst-space-4); margin-bottom: 0; font: var(--xpst-type-caption); color: var(--xpst-color-text-muted);">
+    Secrets are masked server-side (the same masker as <code>xpst_config_show</code>). Editing remains outside this foundation.
   </p>
 {/if}
