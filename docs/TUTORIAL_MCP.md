@@ -1,6 +1,6 @@
 # xPST MCP (Model Context Protocol) Tutorial
 
-> **Complete guide** to using xPST's 28 MCP tools with AI agents. Drive the entire cross-posting workflow from Claude Desktop, Cursor, or any MCP-compatible client.
+> **Complete guide** to using xPST's 36 MCP tools with AI agents. Drive the entire cross-posting workflow from Claude Desktop, Cursor, or any MCP-compatible client.
 
 ---
 
@@ -19,7 +19,7 @@
 
 ## What is MCP?
 
-The **Model Context Protocol** (MCP) is an open standard that lets AI assistants interact with external tools and data sources. xPST exposes 23 MCP tools that let any MCP-compatible AI agent:
+The **Model Context Protocol** (MCP) is an open standard that lets AI assistants interact with external tools and data sources. xPST exposes 36 MCP tools that let any MCP-compatible AI agent:
 
 - Fetch and post videos across platforms
 - Check platform health and auth status
@@ -101,7 +101,7 @@ If running from a source checkout:
 
 ## Tool Reference
 
-xPST exposes 23 MCP tools organized into 5 categories: Core Operations (6), Analytics & Insights (5), Content & Knowledge (4), Configuration & Scheduling (4), and Knowledge Base (4). All posting destinations — YouTube, Instagram, X/Twitter, TikTok, and Threads — are valid `platforms` values.
+xPST exposes 36 MCP tools across five groups: core operations, analytics & insights, content & knowledge, configuration & scheduling, and the knowledge base. All posting destinations — YouTube, Instagram, X/Twitter, TikTok, and Threads — are valid `platforms` values.
 
 ### Core Operations (6 tools)
 
