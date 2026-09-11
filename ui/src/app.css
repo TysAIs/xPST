@@ -268,7 +268,7 @@ input,
 }
 
 .xpst-button[data-size="sm"] {
-  min-height: 40px;
+  min-height: 44px;
   padding-inline: var(--xpst-space-3);
   font-size: 0.8125rem;
 }
@@ -401,14 +401,19 @@ input,
 
 .xpst-skeleton__line {
   height: var(--xpst-skeleton-height, 16px);
-  background: linear-gradient(90deg, var(--xpst-color-background), var(--xpst-color-surface-raised), var(--xpst-color-background));
-  background-size: 200% 100%;
+  background: var(--xpst-color-surface-raised);
   border-radius: var(--xpst-radius-sm);
   animation: xpst-shimmer 1.2s var(--xpst-motion-easing) infinite;
 }
 
 @keyframes xpst-shimmer {
-  to { background-position: -200% 0; }
+  from,
+  to {
+    opacity: 0.72;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .xpst-field {
