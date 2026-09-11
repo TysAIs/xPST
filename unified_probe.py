@@ -1,11 +1,18 @@
-import sys, os, time
-sys.path.insert(0, "src")
-from PySide6.QtWidgets import QApplication
+import ctypes
+import ctypes.util
+import sys
+import time
+
 from PySide6.QtQml import QQmlComponent, QQmlEngine
+from PySide6.QtWidgets import QApplication
+
+sys.path.insert(0, "src")
+
 app = QApplication(sys.argv)
 engine = QQmlEngine()
 component = QQmlComponent(engine)
-component.setData(b"""
+component.setData(
+    b"""
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 ApplicationWindow {
@@ -14,12 +21,12 @@ ApplicationWindow {
     title: "unified test"
     color: "#1c1c1e"
 }
-""")
+"""
+)
 win = component.create()
 app.processEvents()
 time.sleep(0.6)
 app.processEvents()
-import ctypes, ctypes.util
 objcruntime = ctypes.util.find_library("objc")
 objc = ctypes.cdll.LoadLibrary(objcruntime)
 objc.objc_msgSend.restype = ctypes.c_void_p
@@ -27,7 +34,12 @@ objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 selr = objc.sel_registerName
 selr.restype = ctypes.c_void_p
 selr.argtypes = [ctypes.c_char_p]
-def sel(n): return selr(n.encode())
+
+
+def sel(name):
+    return selr(name.encode())
+
+
 hw = win.windowHandle()
 print("winId:", hex(hw.winId()))
 view = ctypes.c_void_p(hw.winId())
