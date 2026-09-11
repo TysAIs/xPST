@@ -7,7 +7,7 @@
   "build": {
     "beforeDevCommand": "",
     "devUrl": "http://127.0.0.1:8080",
-    "beforeBuildCommand": "cd ui && npm ci && npm run build",
+    "beforeBuildCommand": "cd ../ui && npm ci && npm run build",
     "frontendDist": "../ui/dist"
   },
   "app": {
