@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -121,6 +122,8 @@ def test_structured_json_methods_expose_actionable_transaction(tmp_path: Path) -
 
 def test_legacy_cli_aliases_share_one_transaction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    # Windows production uses APPDATA; isolate the native root for this test.
+    monkeypatch.setenv("APPDATA", str(tmp_path))
     runner = CliRunner()
 
     outputs = []
@@ -137,6 +140,9 @@ def test_legacy_cli_aliases_share_one_transaction(tmp_path: Path, monkeypatch: p
 
 def test_non_tty_json_never_prompts_or_opens_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    # Windows production appends ``xPST`` below APPDATA; keep the native
+    # contract isolated and assert the canonical path below.
+    monkeypatch.setenv("APPDATA", str(tmp_path))
     monkeypatch.setattr("builtins.input", lambda *args, **kwargs: pytest.fail("input() called"))
     monkeypatch.setattr("webbrowser.open", lambda *args, **kwargs: pytest.fail("browser opened"))
 
@@ -145,7 +151,8 @@ def test_non_tty_json_never_prompts_or_opens_browser(tmp_path: Path, monkeypatch
 
     assert payload["completion"]["complete"] is False
     assert payload["pending_human_actions"]
-    assert (tmp_path / ".xpst" / "setup_transaction.json").exists()
+    expected_root = tmp_path / "xPST" if sys.platform == "win32" else tmp_path / ".xpst"
+    assert (expected_root / "setup_transaction.json").exists()
 
 
 def test_status_reset_and_restart_are_explicit(tmp_path: Path) -> None:
