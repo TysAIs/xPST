@@ -2622,11 +2622,16 @@ def _result_to_dict(result: CrossPostResult) -> dict:
     for platform, ur in result.results.items():
         entry = {
             "success": ur.success,
+            "outcome": ur.status,
+            "status": ur.status,
             "post_url": ur.post_url,
             "post_id": ur.post_id,
             "error": ur.error,
             "platform": ur.platform,
         }
+        if ur.retryable is not None:
+            entry["retryable"] = ur.retryable
+            entry["terminal"] = not ur.retryable
         if not ur.success and ur.error:
             hint = describe_remediation(platform, ur.error)
             if hint:

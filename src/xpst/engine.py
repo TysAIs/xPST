@@ -92,7 +92,7 @@ class CrossPostResult:
         ``all_success`` and ``partial_success`` reflect reality.
         """
 
-        successes = [r.success for r in self.results.values()]
+        successes = [r.is_published for r in self.results.values()]
         self.all_success = all(successes) and len(successes) > 0
         self.partial_success = any(successes)
 
@@ -409,13 +409,13 @@ class CrossPostEngine:
 
                 # Send per-platform notifications
                 for platform_name, upload_result in result.results.items():
-                    if upload_result.success and not upload_result.metadata.get("already_posted"):
+                    if upload_result.is_published and not upload_result.metadata.get("already_posted"):
                         self.notifier.notify_upload_success(
                             platform=platform_name,
                             video_id=video.video_id,
                             post_url=upload_result.post_url or "",
                         )
-                    elif not upload_result.success:
+                    elif not upload_result.is_published:
                         self.notifier.notify_upload_failure(
                             platform=platform_name,
                             video_id=video.video_id,
@@ -437,7 +437,7 @@ class CrossPostEngine:
         if results:
             total = sum(len(r.results) for r in results)
             success = sum(
-                sum(1 for ur in r.results.values() if ur.success)
+                sum(1 for ur in r.results.values() if ur.is_published)
                 for r in results
             )
             failed = total - success
@@ -620,7 +620,7 @@ class CrossPostEngine:
             result.results[platform_name] = upload_result
 
             # Send per-result notification (manual mode)
-            if upload_result.success:
+            if upload_result.is_published:
                 self.notifier.notify_upload_success(
                     platform=platform_name,
                     video_id=video_id,
@@ -637,7 +637,7 @@ class CrossPostEngine:
         # aggregate as a single analytics entry.
         platforms_data = []
         for platform_name, upload_result in result.results.items():
-            if upload_result.success:
+            if upload_result.is_published:
                 platforms_data.append({
                     "platform": platform_name,
                     "post_id": upload_result.post_id,
@@ -1001,7 +1001,7 @@ class CrossPostEngine:
         if results:
             total = sum(len(r.results) for r in results)
             success = sum(
-                sum(1 for ur in r.results.values() if ur.success)
+                sum(1 for ur in r.results.values() if ur.is_published)
                 for r in results
             )
             failed = total - success
@@ -1096,7 +1096,7 @@ class CrossPostEngine:
             result.results[platform_name] = upload_result
 
             # Record in cross-posted state
-            if upload_result.success:
+            if upload_result.is_published:
                 self.state.mark_cross_posted(
                     post.composite_key, platform_name,
                     post_id=upload_result.post_id,
@@ -1125,7 +1125,7 @@ class CrossPostEngine:
         # with aggregated metrics.
         platforms_data = []
         for platform_name, upload_result in result.results.items():
-            if upload_result.success:
+            if upload_result.is_published:
                 platforms_data.append({
                     "platform": platform_name,
                     "post_id": upload_result.post_id,
