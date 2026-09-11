@@ -579,6 +579,26 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="xpst_capabilities",
+        description="Return the canonical role-aware provider and capability contract without network calls",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="xpst_readiness",
+        description="Return local setup readiness and actionable blockers without starting the posting engine",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="xpst_auth_start",
+        description="Return a human-only authentication action plan; never opens a browser or accepts secrets",
+        inputSchema={
+            "type": "object",
+            "properties": {"platform": {"type": "string", "enum": ["tiktok", "youtube", "x", "instagram", "threads", "messenger"]}},
+            "required": ["platform"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_providers",
         description="List supported content sources and posting destinations with capabilities",
         inputSchema={
@@ -991,6 +1011,12 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             result = await _handle_auth_status(server.config)
         elif name == "xpst_providers":
             result = await _handle_providers(server.config)
+        elif name == "xpst_capabilities":
+            result = await _handle_capabilities(server.config)
+        elif name == "xpst_readiness":
+            result = await _handle_readiness(server.config)
+        elif name == "xpst_auth_start":
+            result = await _handle_auth_start(server.config, arguments)
         elif name == "xpst_delete":
             engine = server.get_engine()
             result = await _handle_delete(engine, arguments)
@@ -1649,6 +1675,70 @@ async def _handle_providers(config: XPSTConfig) -> CallToolResult:
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(data, indent=2, default=str))],
     )
+
+
+async def _handle_capabilities(config: XPSTConfig) -> CallToolResult:
+    """Return the canonical role-aware catalog without network access."""
+    from xpst.provider_truth import canonical_provider_catalog
+
+    catalog = canonical_provider_catalog(config)
+    payload = {
+        "ok": True,
+        "contract_version": 1,
+        "roles": catalog["roles"],
+        "providers": [
+            {
+                "name": item["name"],
+                "display_name": item["display_name"],
+                "roles": item["role_names"],
+                "capabilities": item["capabilities"],
+                "state": item["state"],
+                "docs_url": item["docs_url"],
+            }
+            for item in catalog["providers"]
+        ],
+    }
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
+
+
+async def _handle_readiness(config: XPSTConfig) -> CallToolResult:
+    """Return local readiness without initializing the posting engine."""
+    from xpst.readiness import build_readiness_report
+
+    payload = {
+        "ok": True,
+        "contract_version": 1,
+        "readiness": build_readiness_report(config).to_dict(),
+    }
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, default=str))])
+
+
+async def _handle_auth_start(config: XPSTConfig, arguments: dict[str, Any]) -> CallToolResult:
+    """Return a browser-free human action plan; never accept secrets."""
+    from xpst.provider_truth import provider_definition
+
+    platform = arguments.get("platform")
+    try:
+        definition = provider_definition(str(platform))
+    except KeyError:
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "contract_version": 1,
+                "error": {"code": "UNKNOWN_PROVIDER", "message": "Choose a supported provider."},
+            }))],
+        )
+    payload = {
+        "ok": True,
+        "contract_version": 1,
+        "platform": definition.name,
+        "status": "human_action_required",
+        "browser_opened": False,
+        "command": f"xpst connect {definition.name}",
+        "docs_url": definition.docs_url,
+    }
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))])
 
 
 def build_provider_catalog(config: XPSTConfig) -> dict[str, Any]:

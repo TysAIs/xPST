@@ -25,7 +25,7 @@ issue to propose or upvote an item.
 - ✅ **Per-video and cross-post analytics** — per-platform metrics plus combined
   metrics for the same video posted to multiple platforms.
 - ✅ **Follower tracking** and **best-time-to-post** analysis.
-- ✅ **28 MCP tools** for AI-agent control, plus a full CLI surface.
+- ✅ **36 MCP tools** for AI-agent control, plus a full CLI surface.
 - ✅ **Caption suggestions** with per-platform character limits.
 - ✅ **Personal knowledge base** with source provenance and zero-config
   deterministic extraction.
