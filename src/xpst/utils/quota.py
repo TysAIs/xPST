@@ -104,6 +104,32 @@ class PlatformQuota:
         self._check_reset()
         return max(0, self.hourly_limit - self.used_this_hour)
 
+    def peek_remaining(self) -> dict[str, int | None]:
+        """Return capacity without mutating reset timestamps or counters."""
+        now = datetime.now()
+        used_today = self.used_today
+        if self.last_reset:
+            try:
+                if now.date() > datetime.fromisoformat(self.last_reset).date():
+                    used_today = 0
+            except ValueError:
+                pass
+        used_this_hour = self.used_this_hour
+        if self.hourly_limit and self.last_hour_reset:
+            try:
+                if now - datetime.fromisoformat(self.last_hour_reset) > timedelta(hours=1):
+                    used_this_hour = 0
+            except ValueError:
+                pass
+        daily = None if not self.daily_limit or self.daily_limit <= 0 else max(0, self.daily_limit - used_today)
+        hourly = None if not self.hourly_limit else max(0, self.hourly_limit - used_this_hour)
+        return {"daily": daily, "hourly": hourly}
+
+    def peek_can_upload(self) -> bool:
+        """Return capacity without mutating this quota record."""
+        remaining = self.peek_remaining()
+        return all(value is None or value > 0 for value in remaining.values())
+
     def _check_reset(self) -> None:
         """Reset daily and hourly counters if the period has elapsed.
 
@@ -178,17 +204,22 @@ class QuotaManager:
     # X free tier monthly limit
     X_MONTHLY_LIMIT = 1_500
 
-    def __init__(self, state_dir: str = "~/.xpst", config=None):
+    def __init__(self, state_dir: str = "~/.xpst", config=None, *, persist: bool = True):
         """
         Initialize quota manager.
 
         Args:
             state_dir: Directory to persist quota state
             config: Optional XPSTConfig for auth_mode-aware limits
+            persist: Whether mutating quota operations may write the usage ledger.
+                Read-only planning services pass ``False``.
         """
         self.state_dir = Path(state_dir).expanduser()
         self.state_file = self.state_dir / "quotas.json"
         self._config = config
+        # Planning and diagnostics can inspect quota state without creating or
+        # rewriting the usage ledger.
+        self.persist = persist
 
         # Load or create quotas. The on-disk file is the USAGE LEDGER
         # (used/last-reset counts); it is never the authority for limits.
@@ -279,7 +310,8 @@ class QuotaManager:
         quota = self.quotas.get(platform)
         if quota:
             quota.record_upload()
-            self.save()
+            if self.persist:
+                self.save()
 
             remaining = quota.remaining_today()
             if remaining is not None and remaining <= 2:
@@ -303,6 +335,16 @@ class QuotaManager:
             "daily": quota.remaining_today(),
             "hourly": quota.remaining_this_hour(),
         }
+
+    def peek_remaining(self, platform: str) -> dict[str, int | None]:
+        """Read quota capacity without normalizing or persisting state."""
+        quota = self.quotas.get(platform)
+        return quota.peek_remaining() if quota else {"daily": None, "hourly": None}
+
+    def peek_can_upload(self, platform: str) -> bool:
+        """Check quota capacity without mutating or persisting state."""
+        quota = self.quotas.get(platform)
+        return quota.peek_can_upload() if quota else True
 
     def get_status(self) -> dict:
         """
@@ -400,7 +442,7 @@ class QuotaManager:
                 )
                 existing.daily_limit = limit
                 changed = True
-        if changed:
+        if changed and self.persist:
             # Converge the on-disk file to config so it never contradicts it.
             self.save()
 
