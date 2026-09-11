@@ -29,15 +29,17 @@ export const api = {
 // to Dashboard in App.svelte.
 
 export const NAV_ITEMS = [
-  { id: "dashboard", href: "#/", label: "Dashboard", icon: "▦" },
-  { id: "analytics", href: "#/analytics", label: "Analytics", icon: "◔" },
-  { id: "videos", href: "#/videos", label: "Videos", icon: "▶" },
-  { id: "accounts", href: "#/accounts", label: "Accounts", icon: "◉" },
-  { id: "settings", href: "#/settings", label: "Settings", icon: "⚙" },
+  { id: "dashboard", href: "#/", label: "Dashboard", icon: "layout-dashboard" },
+  { id: "analytics", href: "#/analytics", label: "Analytics", icon: "chart-no-axes-combined" },
+  { id: "videos", href: "#/videos", label: "Videos", icon: "video" },
+  { id: "accounts", href: "#/accounts", label: "Accounts", icon: "users" },
+  { id: "settings", href: "#/settings", label: "Settings", icon: "settings" },
 ];
 
-/** Current route id derived from location.hash ("dashboard" by default). */
-export function currentRoute() {
-  const hash = String(location.hash || "").replace(/^#\/?/, "");
+/** Current route id derived from a hash ("dashboard" by default). */
+export function currentRoute(inputHash = undefined) {
+  const hash = String(
+    inputHash ?? (typeof location === "undefined" ? "" : location.hash) ?? ""
+  ).replace(/^#\/?/, "");
   return NAV_ITEMS.some((item) => item.id === hash) ? hash : "dashboard";
 }
