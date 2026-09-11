@@ -72,6 +72,9 @@ def test_tauri_workflow_is_deterministic_and_fails_closed() -> None:
     assert "PyInstaller onefile" not in workflow
     assert "if-no-files-found: error" in workflow
     assert "python scripts/verify_release_version.py" in workflow
+    assert "cargo install tauri-cli --version 2.11.4 --locked" in workflow
+    assert "cargo tauri build" in workflow
+    assert "tauri" in workflow
 
 
 def test_engine_assembly_is_explicitly_onedir() -> None:
