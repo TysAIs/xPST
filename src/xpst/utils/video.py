@@ -29,6 +29,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -510,12 +511,25 @@ class VideoProcessor:
             self._safe_unlink(tmp_output)
             raise RuntimeError(f"Encoded video is empty or too small: {tmp_output}")
 
-        os.replace(tmp_output, output_path)
+        self._replace_encoded_output(tmp_output, output_path)
 
         size_mb = output_path.stat().st_size / 1024 / 1024
         logger.info(f"Encoded for {platform}: {output_path.name} ({size_mb:.1f} MB)")
 
         return output_path
+
+    @staticmethod
+    def _replace_encoded_output(tmp_output: Path, output_path: Path) -> None:
+        """Replace an encoded output, retrying transient Windows file locks."""
+        backoff = (0.05, 0.1, 0.2)
+        for attempt in range(len(backoff) + 1):
+            try:
+                os.replace(tmp_output, output_path)
+                return
+            except PermissionError:
+                if attempt >= len(backoff):
+                    raise
+                time.sleep(backoff[attempt])
 
     def _run_encode_with_fallback(
         self,
