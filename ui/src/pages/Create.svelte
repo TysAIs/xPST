@@ -5,8 +5,17 @@
   import ErrorState from "../lib/components/ErrorState.svelte";
   import FormField from "../lib/components/FormField.svelte";
   import PlatformBadge from "../lib/components/PlatformBadge.svelte";
+  import { api } from "../lib/api.js";
 
   const platformOrder = ["youtube", "x", "instagram", "tiktok", "threads"];
+  const platformLabels = {
+    youtube: "YouTube Shorts",
+    x: "X",
+    instagram: "Instagram Reels",
+    tiktok: "TikTok",
+    threads: "Threads",
+  };
+
   let filePath = $state("");
   let caption = $state("");
   let selected = $state(["youtube", "x", "instagram"]);
@@ -15,14 +24,6 @@
   let error = $state("");
   let state = $state("loading");
   let preview = $state(null);
-
-  const platformLabels = {
-    youtube: "YouTube Shorts",
-    x: "X",
-    instagram: "Instagram Reels",
-    tiktok: "TikTok",
-    threads: "Threads",
-  };
 
   onMount(async () => {
     try {
@@ -60,6 +61,7 @@
       message: "This foundation prepares the exact post request. Upload execution is intentionally gated until the shared post job API is connected.",
     };
   }
+
 </script>
 
 <header class="xpst-page-header">
