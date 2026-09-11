@@ -576,6 +576,27 @@ input,
   gap: var(--xpst-space-2);
 }
 
+.xpst-capability-grid {
+  display: grid;
+  gap: var(--xpst-space-2);
+}
+
+.xpst-capability-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--xpst-space-3);
+  min-height: 40px;
+  padding: var(--xpst-space-2) var(--xpst-space-3);
+  background: var(--xpst-color-background);
+  border-radius: var(--xpst-radius-md);
+}
+
+.xpst-capability-row > span {
+  color: var(--xpst-color-text-secondary);
+  text-transform: capitalize;
+}
+
 @media (max-width: 760px) {
   .xpst-shell__sidebar { display: none; }
   .xpst-shell__mobile-header {
