@@ -460,6 +460,15 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="xpst_activity",
+        description="List recorded platform failures with targeted retry or review actions (read-only)",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_schedule_list",
         description="List scheduled posts (pending, completed, failed) with times and targets",
         inputSchema={
@@ -970,6 +979,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             result = await _handle_transcript(arguments)
         elif name == "xpst_search":
             result = await _handle_search(arguments)
+        elif name == "xpst_activity":
+            result = await _handle_activity(server.config)
         elif name == "xpst_schedule_list":
             result = await _handle_schedule_list(server.config)
         elif name == "xpst_schedule_add":
@@ -1174,6 +1185,37 @@ async def _handle_backfill(engine: CrossPostEngine, args: dict[str, Any]) -> Cal
     }
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
+    )
+
+
+async def _handle_activity(config: XPSTConfig) -> CallToolResult:
+    """Return recorded failures with targeted recovery actions."""
+    from xpst.state_store import StateStore
+
+    state = StateStore(config.config_dir).get()
+    failures: list[dict[str, Any]] = []
+    for video_id, video in (state.get("posted_videos") or {}).items():
+        for platform, result in (video.get("errors") or {}).items():
+            if not isinstance(result, dict):
+                continue
+            retryable = result.get("retryable")
+            failures.append({
+                "video_id": str(video_id),
+                "platform": str(platform),
+                "error": str(result.get("error") or "Unknown error"),
+                "retryable": retryable,
+                "post_id": None,
+                "post_url": None,
+                "source_url": video.get("source_url"),
+                "last_attempt": result.get("timestamp") or video.get("last_attempt"),
+                "action": "retry" if retryable is True else "review",
+            })
+    failures.sort(
+        key=lambda item: (item.get("last_attempt") or "", item["video_id"], item["platform"]),
+        reverse=True,
+    )
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps({"failures": failures, "count": len(failures)}))],
     )
 
 
