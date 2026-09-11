@@ -2656,7 +2656,8 @@ def mcp(ctx):
     """MCP (Model Context Protocol) server commands"""
     if ctx.invoked_subcommand is None:
         from xpst.mcp import cli_main
-        cli_main(ctx.obj.get("config_path") if ctx.obj else None)
+        config_path = ctx.obj.get("config_path") if ctx.obj else None
+        cli_main(config_path) if config_path else cli_main()
 
 
 @mcp.command()
