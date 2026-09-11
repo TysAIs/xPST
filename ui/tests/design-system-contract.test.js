@@ -92,6 +92,7 @@ test("all design-system primitives exist and declare accessible contracts", asyn
 test("navigation uses one local icon family and exposes all foundation routes", () => {
   assert.deepEqual(NAV_ITEMS.map((item) => item.id), [
     "dashboard",
+    "create",
     "analytics",
     "videos",
     "accounts",
