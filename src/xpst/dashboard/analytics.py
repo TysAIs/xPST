@@ -140,31 +140,20 @@ def cached_summary_stats(config_dir: str) -> dict[str, Any]:
 
 
 def _parse_ts(ts_str: str | None) -> datetime | None:
-    """Parse an ISO 8601 timestamp string, returning None on failure.
+    """Parse ISO-8601 into an aware UTC datetime, or return None.
 
-    The result is always timezone-NAIVE (aware values are converted to UTC
-    then stripped) so callers can compare against ``datetime.now()``
-    without raising ``TypeError: can't compare offset-naive and
-    offset-aware datetimes``. Real-world state files can contain aware
-    timestamps (imports, hand edits, third-party tools); one such entry
-    must not turn the whole ``/state`` summary into a 500.
-
-    Args:
-        ts_str: ISO format timestamp string or None.
-
-    Returns:
-        Parsed naive datetime or None if parsing fails.
+    Naive legacy timestamps are interpreted as UTC. Keeping every parsed value
+    aware avoids local-time/UTC comparison errors in summaries and freshness.
     """
-
-    if not ts_str:
+    if not isinstance(ts_str, str) or not ts_str:
         return None
     try:
-        dt = datetime.fromisoformat(ts_str)
+        dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
     except (ValueError, TypeError):
         return None
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def _fmt_num(n: int | float | None) -> str:
@@ -195,10 +184,10 @@ def _relative_time(ts_str: str | None) -> str:
     if not ts_str:
         return "—"
     try:
-        dt = _parse_ts(ts_str)  # always naive, aware-safe
+        dt = _parse_ts(ts_str)  # always aware UTC
         if dt is None:
             return ts_str[:10] if ts_str else "—"
-        delta = datetime.now() - dt
+        delta = datetime.now(timezone.utc) - dt
         secs = delta.total_seconds()
         if secs < 60:
             return "just now"
@@ -209,6 +198,25 @@ def _relative_time(ts_str: str | None) -> str:
         return f"{int(secs / 86400)}d ago"
     except Exception:
         return ts_str[:10] if ts_str else "—"
+
+
+def _freshness_fields(ts_str: str | None) -> dict[str, Any]:
+    """Return last-capture metadata without inventing a timestamp."""
+    parsed = _parse_ts(ts_str)
+    if parsed is None:
+        return {
+            "last_captured": None,
+            "staleness_hours": None,
+            "staleness": "unknown",
+            "freshness": "unknown",
+        }
+    hours = max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds() / 3600)
+    return {
+        "last_captured": ts_str,
+        "staleness_hours": round(hours, 3),
+        "staleness": "fresh" if hours < 24 else "stale",
+        "freshness": "fresh" if hours < 24 else "stale",
+    }
 
 
 class AnalyticsCollector:
@@ -664,10 +672,10 @@ class AnalyticsCollector:
                     "status": "posted",
                     "captured_at": ts,
                     "downloaded_at": ts,
-                    "views": 0,
-                    "likes": 0,
-                    "comments": 0,
-                    "shares": 0,
+                    "views": None,
+                    "likes": None,
+                    "comments": None,
+                    "shares": None,
                     "reposts": None,
                     "saves": None,
                 }
@@ -849,6 +857,11 @@ class AnalyticsCollector:
         return {
             "available": True,
             "live": live,
+            "last_captured": summary["last_captured"],
+            "staleness_hours": summary["staleness_hours"],
+            "staleness": summary["staleness"],
+            "freshness": summary["freshness"],
+            "last_captured_relative": summary["last_captured_relative"],
             "summary": {
                 **summary,
                 "total_views": totals["views"],
@@ -922,6 +935,18 @@ class AnalyticsCollector:
             )
         return result
 
+    def _freshness(self) -> dict[str, Any]:
+        """Return persisted snapshot freshness for dashboard consumers."""
+        try:
+            last_captured = self._store().last_captured_at()
+        except Exception as exc:
+            logger.debug("Snapshot freshness unavailable: %s", exc)
+            last_captured = None
+        return {
+            **_freshness_fields(last_captured),
+            "last_captured_relative": _relative_time(last_captured),
+        }
+
     def get_summary_stats(self, engagement: dict[str, dict] | None = None) -> dict[str, Any]:
         """Compute aggregate summary statistics from state.json.
 
@@ -949,13 +974,15 @@ class AnalyticsCollector:
                     total_platform_posts += 1
 
         # Posts this week
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         week_ago = now - timedelta(days=7)
         posts_this_week = 0
         for video_data in posted.values():
             ts = _parse_ts(video_data.get("downloaded_at"))
             if ts and ts >= week_ago:
                 posts_this_week += 1
+
+        freshness = self._freshness()
 
         # Best platform by engagement (views + likes + comments + shares).
         # Callers pass precomputed engagement; the default reads persisted
@@ -986,6 +1013,7 @@ class AnalyticsCollector:
             "best_platform": best_platform or "—",
             "total_platform_posts": total_platform_posts,
             "engagement_by_platform": engagement,
+            **freshness,
         }
 
     def get_posts_over_time(self, days: int = 30) -> dict[str, int]:
@@ -1000,7 +1028,7 @@ class AnalyticsCollector:
 
         state = load_state(self.config_dir)
         posted = state.get("posted_videos", {})
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         start = now - timedelta(days=days)
 
         date_counts: dict[str, int] = {}
