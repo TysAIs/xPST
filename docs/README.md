@@ -535,7 +535,7 @@ xpst/
 │   ├── sessions.py     # SessionManager (auth consolidation)
 │   ├── video.py        # FFmpeg encoding per platform
 │   └── platform.py     # Cross-platform paths
-├── mcp/                # MCP server (28 tools)
+├── mcp/                # MCP server (36 tools)
 │   └── server.py       # stdio MCP server with audit logging
 ├── dashboard/          # Web API dashboard
 │   ├── server.py       # FastAPI server

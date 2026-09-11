@@ -92,7 +92,7 @@ network traffic is the platform API calls you configure. See
 ### Three Drivable Surfaces
 - **Desktop GUI** — PySide6/QML app with Dashboard, Compose, Content, Analytics, Connect, Schedule, Settings, and About pages + DetailPanel
 - **CLI** — 38 Click-based commands with `--json` output, `--dry-run` mode, and meaningful exit codes
-- **MCP server** — 36 tools (28 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
+- **MCP server** — 36 tools (30 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 ### Enterprise Hardening
 - **Encrypted credentials** — OS keychain storage (macOS Keychain, Linux Secret Service, Windows Credential Manager) with encrypted `.enc` file fallback (Fernet + scrypt)
