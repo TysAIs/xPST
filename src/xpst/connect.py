@@ -1334,133 +1334,31 @@ def connect_messenger(config: XPSTConfig) -> bool:
 # Test connections
 # ──────────────────────────────────────────────
 
+class ConnectionResults(dict[str, bool]):
+    """Backward-compatible bool mapping carrying canonical probe details."""
+
+    def __init__(self, values: dict[str, bool], canonical_status: dict[str, Any]) -> None:
+        super().__init__(values)
+        self.canonical_status = canonical_status
+
+
 async def test_connections(config: XPSTConfig) -> dict[str, bool]:
+    """Return backward-compatible booleans from canonical live checks.
+
+    The old implementation had independent probes and passed serialized X
+    cookies to ``twikit.load_cookies`` as a filename.  Keeping this wrapper's
+    bool return shape lets existing callers survive while doctor/auth/API all
+    share the same underlying canonical probe.
     """
-    Test all configured platform connections.
+    from xpst.auth_status import collect_live_auth_status_async
 
-    Returns dict of platform_name -> success_bool
-    """
-    results = {}
-
-    console.print(Panel("[bold]Testing Connections[/bold]", style="blue"))
-
-    # YouTube
-    if config.youtube.enabled:
-        try:
-            token_file = Path(config.youtube.token_file).expanduser()
-            if not token_file.exists():
-                console.print("  ⚠️  YouTube: No token found")
-                results["youtube"] = False
-            else:
-                from google.auth.transport.requests import Request
-                from google.oauth2.credentials import Credentials
-                from googleapiclient.discovery import build
-
-                creds = Credentials.from_authorized_user_file(str(token_file))
-                if creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                    # Save refreshed token with owner-only perms (see SECURITY.md)
-                    write_text_0600(token_file, creds.to_json())
-
-                service = build("youtube", "v3", credentials=creds)
-                response = service.channels().list(part="snippet", mine=True).execute()
-                channels = response.get("items", [])
-                if channels:
-                    name = channels[0]["snippet"]["title"]
-                    console.print(f"  ✅ YouTube: {name}")
-                    results["youtube"] = True
-                else:
-                    console.print("  ⚠️  YouTube: No channel found")
-                    results["youtube"] = False
-        except Exception as e:
-            console.print(f"  ❌ YouTube: {str(e)[:80]}")
-            results["youtube"] = False
-
-    # Instagram — supports both Graph API and instagrapi session
-    if config.instagram.enabled:
-        try:
-            if config.instagram.auth_mode == "graph_api":
-                token = config.instagram.graph_access_token
-                ig_user_id = config.instagram.graph_ig_user_id
-                if not token or not ig_user_id:
-                    # Try encrypted store
-                    cred_store = CredentialStore(config.config_dir)
-                    token = cred_store.retrieve("instagram_graph_token") or ""
-                    ig_user_id = cred_store.retrieve("instagram_graph_user_id") or ""
-                if not token or not ig_user_id:
-                    console.print("  ⚠️  Instagram: No Graph API token configured")
-                    results["instagram"] = False
-                else:
-                    import httpx
-                    r = httpx.get(
-                        f"https://graph.facebook.com/v21.0/{ig_user_id}",
-                        params={"fields": "username", "access_token": token},
-                        timeout=10,
-                    )
-                    if r.status_code == 200:
-                        console.print(f"  ✅ Instagram: @{r.json().get('username', '?')} (Graph API)")
-                        results["instagram"] = True
-                    else:
-                        console.print(f"  ❌ Instagram: Token invalid ({r.status_code})")
-                        results["instagram"] = False
-            else:
-                # Session mode — check encrypted store first, then file
-                cred_store = CredentialStore(config.config_dir)
-                stored = cred_store.retrieve_json("instagram_session")
-                session_file = Path(config.instagram.session_file).expanduser()
-                if not stored and not session_file.exists():
-                    console.print("  ⚠️  Instagram: No session found")
-                    results["instagram"] = False
-                else:
-                    console.print("  ✅ Instagram: Session file present (instagrapi mode)")
-                    results["instagram"] = True
-        except Exception as e:
-            console.print(f"  ❌ Instagram: {str(e)[:80]}")
-            results["instagram"] = False
-
-    # X/Twitter — check encrypted store first, then file
-    if config.x.enabled:
-        try:
-            cred_store = CredentialStore(config.config_dir)
-            stored_cookies = cred_store.retrieve_json("x_cookies")
-            cookies_file = Path(config.x.cookies_file).expanduser()
-            if not stored_cookies and not cookies_file.exists():
-                console.print("  ⚠️  X/Twitter: No cookies found")
-                results["x"] = False
-            else:
-                # Try actual verification
-                import twikit
-                client = twikit.Client("en-US")
-                if stored_cookies:
-                    import json as _json
-                    client.load_cookies(_json.dumps(stored_cookies))
-                else:
-                    client.load_cookies(str(cookies_file))
-                try:
-                    user = await client.user()
-                    console.print(f"  ✅ X/Twitter: @{user.screen_name}")
-                    results["x"] = True
-                except Exception:
-                    console.print("  ⚠️  X/Twitter: Cookies present but may be expired")
-                    results["x"] = True  # Mark as present, just expired
-        except Exception as e:
-            console.print(f"  ❌ X/Twitter: {str(e)[:80]}")
-            results["x"] = False
-
-    # TikTok (source only)
-    try:
-        import shutil
-        if shutil.which("yt-dlp"):
-            console.print("  ✅ TikTok: yt-dlp available")
-            results["tiktok"] = True
-        else:
-            console.print("  ⚠️  TikTok: yt-dlp not installed")
-            results["tiktok"] = False
-    except Exception as e:
-        logger.debug("Unexpected error: %s", e)
-        results["tiktok"] = False
-
-    return results
+    canonical = await collect_live_auth_status_async(config)
+    values = {
+        name: bool(entry.get("authenticated"))
+        for name, entry in canonical.items()
+        if name != "local"
+    }
+    return ConnectionResults(values, canonical)
 
 
 # ──────────────────────────────────────────────
