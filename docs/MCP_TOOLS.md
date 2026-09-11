@@ -2,7 +2,7 @@
 
 The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, run posting workflows, and query the personal content knowledge base without scraping CLI text.
 
-This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). **28 tools total: 22 `xpst_*` + 2 `messenger_*` + 4 `kb_*`.**
+This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). The current registry contains **36 tools: 30 `xpst_*` + 2 `messenger_*` + 4 `kb_*`**, including the canonical capability, readiness, browser-free auth plan, and resumable setup tools.
 
 xPST posts to six destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger (messaging/auto-reply) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
 
@@ -32,12 +32,15 @@ You can also start the server with `xpst-mcp` or `xpst mcp`.
 3. `xpst_backfill` also performs live uploads when not in dry-run mode.
 4. `xpst_delete` removes local post records; deleting a record for content that is still live on a platform can cause the engine to consider it "new" again. Treat it as destructive.
 
-Metadata-only tools (`xpst_providers`, `xpst_config_show`, `xpst_auth_status`) never initialize the posting engine and are always safe to call.
+Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers`, `xpst_config_show`, `xpst_auth_status`) never initialize the posting engine and are safe to call. `xpst_auth_start` is also side-effect-free: it returns a human action plan and never opens a browser or accepts secrets.
 
 ## Tool index
 
 | Tool | Purpose | Engine started | Live-account risk |
 |------|---------|----------------|-------------------|
+| `xpst_capabilities` | Canonical role-aware provider capabilities | No | None |
+| `xpst_readiness` | Local readiness checks and blockers | No | None |
+| `xpst_auth_start` | Browser-free human authentication action plan | No | None |
 | `xpst_providers` | List source/destination providers and capabilities | No | None |
 | `xpst_config_show` | Show sanitized configuration | No | None |
 | `xpst_auth_status` | Credential storage status and quota remaining | No | None |
