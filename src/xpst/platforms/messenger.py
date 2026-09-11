@@ -104,12 +104,14 @@ class MessengerAdapter(PlatformUploader):
         return ProviderManifest(
             name="messenger",
             display_name="Messenger",
-            roles=(ProviderRole.DESTINATION,),
+            # DESTINATION remains as a legacy compatibility marker for old
+            # catalogs; canonical truth uses MESSAGING and never treats this
+            # adapter as a video destination.
+            roles=(ProviderRole.MESSAGING, ProviderRole.DESTINATION),
             capabilities=(
                 ProviderCapability.HEALTH,
                 ProviderCapability.OFFICIAL_API,
                 ProviderCapability.RATE_LIMITS,
-                ProviderCapability.UPLOAD,
             ),
             auth_mode=AuthMode.OAUTH,
             is_official_api=True,
