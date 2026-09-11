@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
 # The 'mcp' package is an optional extra. Import it gracefully so that simply
@@ -963,7 +962,7 @@ def _serialize_result(result: CrossPostResult) -> dict[str, Any]:
     return {
         "video_id": result.video_id,
         "caption": result.caption,
-        "results": {p: asdict(r) for p, r in result.results.items()},
+        "results": {p: r.to_dict() for p, r in result.results.items()},
         "all_success": result.all_success,
         "partial_success": result.partial_success,
         "quota_blocked": {
