@@ -55,7 +55,8 @@ def test_tauri_builds_ui_and_maps_packaged_resources() -> None:
     build = config["build"]
     resources = config["bundle"]["resources"]
 
-    assert build["beforeBuildCommand"] == "cd ui && npm ci && npm run build"
+    # Tauri executes beforeBuildCommand with src-tauri as its working directory.
+    assert build["beforeBuildCommand"] == "cd ../ui && npm ci && npm run build"
     assert build["frontendDist"] == "../ui/dist"
     assert resources["../ui/dist"] == "ui"
     assert resources["binaries/engine"] == "binaries/engine"
