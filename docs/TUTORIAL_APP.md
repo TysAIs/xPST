@@ -121,7 +121,7 @@ The **primary** Instagram auth is the official Meta Graph API (`auth_mode: graph
 TikTok works as both a **source** (xPST monitors it for new videos to cross-post) and a **destination** — TikTok now supports posting via the official **Content Posting API (Direct Post)**.
 
 1. Log into [tiktok.com](https://tiktok.com) in your browser to enable cookie-based source downloads (HD / no-watermark)
-2. Export cookies to `~/.xpst/credentials/tiktok_cookies.json`, or run `xpst auth tiktok` in terminal
+2. Export cookies to `~/.xpst/credentials/tiktok_cookies.txt`, or run `xpst auth tiktok` in terminal
 3. To post TO TikTok, configure the official Content Posting API (OAuth 2.0 with `client_key` / `client_secret` / `access_token`)
 
 > **Note:** TikTok destination max caption 2200 chars, 6 posts/min.

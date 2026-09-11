@@ -12,10 +12,16 @@ Handles:
 """
 
 import asyncio
+import inspect
 import threading
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 
-from xpst.config import XPSTConfig
+from xpst.config import (
+    MAX_ANALYTICS_SNAPSHOT_INTERVAL,
+    MIN_ANALYTICS_SNAPSHOT_INTERVAL,
+    XPSTConfig,
+)
 from xpst.engine import CrossPostEngine
 from xpst.utils.logger import get_logger
 
@@ -47,11 +53,52 @@ class Scheduler:
         self._stop_event = threading.Event()
         self._last_wake_check: datetime | None = None
         self._last_results: list = []
+        # Optional analytics capture has its own cadence so a frequent post
+        # check does not consume analytics API quota.
+        self._last_snapshot_capture: float | None = None
 
     @property
     def last_results(self) -> list:
         """Get results from the most recent check cycle."""
         return self._last_results
+
+    def _maybe_capture_analytics(self) -> None:
+        """Capture persisted analytics snapshots on an optional cadence.
+
+        The feature is disabled by default. Capture failures are isolated from
+        the posting watch loop, and the attempt timestamp is recorded before
+        work starts so a failing provider cannot create a hot retry loop.
+        """
+        schedule = self.config.schedule
+        if not schedule.analytics_snapshot_enabled:
+            return
+
+        # Config validation enforces these bounds; clamp here too because
+        # tests and programmatic callers may construct dataclasses directly.
+        try:
+            interval = min(
+                max(int(schedule.analytics_snapshot_interval), MIN_ANALYTICS_SNAPSHOT_INTERVAL),
+                MAX_ANALYTICS_SNAPSHOT_INTERVAL,
+            )
+        except (TypeError, ValueError):
+            logger.warning("Scheduled analytics capture disabled: invalid snapshot interval")
+            return
+        now = time.monotonic()
+        if self._last_snapshot_capture is not None and now - self._last_snapshot_capture < interval:
+            return
+        self._last_snapshot_capture = now
+
+        try:
+            from xpst.analytics import AnalyticsCollector
+
+            collector = AnalyticsCollector(config_dir=self.config.config_dir)
+            result = collector.collect_all()
+            if inspect.isawaitable(result):
+                result = asyncio.run(result)
+            captured = sum(len(posts) for posts in result.values()) if isinstance(result, dict) else 0
+            logger.info("Scheduled analytics snapshot captured (%d posts)", captured)
+        except Exception as exc:  # noqa: BLE001 - isolate optional work
+            logger.warning("Scheduled analytics capture failed: %s", exc)
 
     def run(self, interval: int | None = None) -> None:
         """
@@ -76,7 +123,7 @@ class Scheduler:
                     self._run_check(catch_up=False)
 
                 # Update wake check
-                self._last_wake_check = datetime.now()
+                self._last_wake_check = datetime.now(timezone.utc)
                 self.engine.state.update_last_wake_check()
                 self.engine.state.save()
 
@@ -95,6 +142,9 @@ class Scheduler:
                 logger.error(f"Error in scheduler loop: {e}")
                 if self._stop_event.wait(60):  # Wait before retry
                     break
+
+            # Optional analytics capture is independent of posting success.
+            self._maybe_capture_analytics()
 
     def stop(self) -> None:
         """Stop the scheduler (interrupts a pending wait immediately)."""
@@ -117,7 +167,22 @@ class Scheduler:
         if not last_wake:
             return False
 
-        elapsed = (datetime.now() - last_wake).total_seconds()
+        if last_wake.tzinfo is None:
+            # Legacy/fake state providers expose naive local wall-clock time;
+            # compare it to the same clock. Persisted current state is aware
+            # UTC and follows the branch below.
+            current = datetime.now()
+            if current.tzinfo is not None:
+                current = current.replace(tzinfo=None)
+            elapsed = (current - last_wake).total_seconds()
+        else:
+            last_wake = last_wake.astimezone(timezone.utc)
+            current = datetime.now(timezone.utc)
+            if current.tzinfo is None:
+                current = current.replace(tzinfo=timezone.utc)
+            else:
+                current = current.astimezone(timezone.utc)
+            elapsed = (current - last_wake).total_seconds()
         threshold = self.config.schedule.check_interval * 2
 
         return elapsed > threshold

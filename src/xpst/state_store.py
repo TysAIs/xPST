@@ -6,6 +6,7 @@ cross-process file locking. No business logic - pure storage operations.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -63,26 +64,29 @@ class StateStore:
         # Lock file descriptor for test compatibility (-der)
         self._lock_fd = None
 
-        # Clean up temp files orphaned by a previous crash (kill -9 / power loss
-        # between temp-file creation and rename). Only touch files that are
-        # demonstrably stale so we never race a concurrent writer's in-flight
-        # temp file.
-        self._sweep_orphan_tmp_files()
-
-        # Load on init
-        self._state = self._load()
-        # Signature (mtime_ns, size) of state.json as of our last load/write.
-        # Used by update() to detect writes from OTHER processes.
-        self._disk_state_sig = self._disk_signature()
+        # Initialization must be serialized with writers: loading state and
+        # taking its freshness signature separately allowed another process to
+        # replace state.json between those operations, pairing stale memory with
+        # a current signature and losing the first update.
+        with self._file_lock():
+            self._sweep_orphan_tmp_files()
+            self._state = self._load()
+            self._disk_state_sig = self._disk_signature()
 
     # Temp files older than this are considered orphans from a crashed writer.
     _ORPHAN_TMP_MAX_AGE_S = 600
 
-    def _disk_signature(self) -> tuple[int, int] | None:
-        """Return a change-detection signature of state.json (or None if absent)."""
+    def _disk_signature(self) -> tuple[int, int, str] | None:
+        """Return metadata plus content hash for change detection.
+
+        mtime/size alone can collide for same-sized writes within filesystem
+        timestamp granularity. The digest keeps the in-memory fast path while
+        making cross-process freshness detection content-accurate.
+        """
         try:
             st = self.path.stat()
-            return (st.st_mtime_ns, st.st_size)
+            digest = hashlib.sha256(self.path.read_bytes()).hexdigest()
+            return (st.st_mtime_ns, st.st_size, digest)
         except OSError:
             return None
 
@@ -116,7 +120,10 @@ class StateStore:
     def _file_lock(self):
         """Cross-process file lock context manager."""
         self.lock_path.touch(exist_ok=True)
-        with open(self.lock_path, "w") as lock_file:
+        # Never truncate the shared lock inode while another process may hold
+        # it. Opening with ``w`` was unnecessary and can undermine advisory
+        # locking on some filesystems; append/update preserves the inode.
+        with open(self.lock_path, "a+") as lock_file:
             try:
                 self._lock_file(lock_file, blocking=True)
                 yield
