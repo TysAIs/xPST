@@ -89,6 +89,13 @@ test("all design-system primitives exist and declare accessible contracts", asyn
   assert.match(await text(join(UI_ROOT, "src/lib/components/BrandMark.svelte")), /assets\/icon\.png/);
 });
 
+test("settings is readable and links to capability truth", async () => {
+  const settings = await text(join(UI_ROOT, "src/pages/Settings.svelte"));
+  assert.match(settings, /Review capabilities/);
+  assert.match(settings, /Secrets remain masked server-side/);
+  assert.match(settings, /xpst-settings-grid/);
+});
+
 test("navigation uses one local icon family and exposes all foundation routes", () => {
   assert.deepEqual(NAV_ITEMS.map((item) => item.id), [
     "dashboard",
