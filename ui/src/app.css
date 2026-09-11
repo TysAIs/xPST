@@ -576,6 +576,28 @@ input,
   gap: var(--xpst-space-2);
 }
 
+.xpst-about-list {
+  display: grid;
+  gap: var(--xpst-space-3);
+  margin: 0;
+}
+
+.xpst-about-list > div {
+  display: grid;
+  grid-template-columns: minmax(7rem, 0.3fr) 1fr;
+  gap: var(--xpst-space-4);
+}
+
+.xpst-about-list dt {
+  color: var(--xpst-color-text-muted);
+  font: var(--xpst-type-label);
+}
+
+.xpst-about-list dd {
+  margin: 0;
+  color: var(--xpst-color-text-primary);
+}
+
 @media (max-width: 760px) {
   .xpst-shell__sidebar { display: none; }
   .xpst-shell__mobile-header {

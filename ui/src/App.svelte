@@ -7,6 +7,7 @@
   import Videos from "./pages/Videos.svelte";
   import Accounts from "./pages/Accounts.svelte";
   import Settings from "./pages/Settings.svelte";
+  import About from "./pages/About.svelte";
 
   let route = $state(currentRoute());
   const pages = {
@@ -15,6 +16,7 @@
     videos: Videos,
     accounts: Accounts,
     settings: Settings,
+    about: About,
   };
   const Page = $derived(pages[route] ?? Dashboard);
 
