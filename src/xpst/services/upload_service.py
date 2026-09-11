@@ -31,7 +31,7 @@ from xpst.media.loudness import (
 )
 from xpst.media.pipeline import plan_transform
 from xpst.media.specs import verify_media
-from xpst.platforms.base import PlatformUploader, UploadResult
+from xpst.platforms.base import PlatformUploader, UploadResult, normalize_upload_result
 from xpst.utils.circuit_breaker import CircuitBreakerManager, CircuitBreakerOpenError
 from xpst.utils.content_hash import compute_content_hash
 from xpst.utils.disk import DiskSpaceError, check_disk_space
@@ -345,7 +345,7 @@ class UploadService:
                 encoded_path,
             )
 
-            upload_result = await retry_operation(
+            raw_upload_result = await retry_operation(
                 uploader.upload,
                 encoded_path,
                 caption,
@@ -355,10 +355,13 @@ class UploadService:
                 # not, so ambiguous errors there must not blind-retry (G07).
                 ambiguous_safe=platform_name == "x",
             )
+            # Provider acknowledgments are not publication proof. Normalize at
+            # this single chokepoint before any state, quota, or success path.
+            upload_result = normalize_upload_result(raw_upload_result, platform_name)
 
             tracker.complete()
 
-            if upload_result.success:
+            if upload_result.is_published:
                 upload_result.metadata.setdefault("quality", quality_report)
                 self.crash_recovery_clear(video_id, platform_name)
                 self.state.mark_video_posted(
@@ -598,7 +601,7 @@ class UploadService:
                 media_paths[0],
             )
 
-            upload_result = await retry_operation(
+            raw_upload_result = await retry_operation(
                 uploader.upload_carousel,
                 media_paths,
                 caption,
@@ -606,10 +609,11 @@ class UploadService:
                 platform=platform_name,
                 ambiguous_safe=platform_name == "x",
             )
+            upload_result = normalize_upload_result(raw_upload_result, platform_name)
 
             tracker.complete()
 
-            if upload_result.success:
+            if upload_result.is_published:
                 self.state.mark_video_posted(
                     video_id,
                     platform_name,

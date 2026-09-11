@@ -234,9 +234,26 @@ class YouTubeUploader(PlatformUploader):
             # Execute upload in thread pool to avoid blocking event loop
             response = await self._execute_upload(request)
 
-            video_id = response.get("id") or ""
-            if not video_id:
-                logger.warning("YouTube upload response missing video ID")
+            video_id = response.get("id")
+            if (
+                not isinstance(video_id, str)
+                or not video_id.strip()
+                or video_id.strip().lower() in {"none", "null", "undefined", "unknown"}
+                or "://" in video_id
+                or any(char.isspace() for char in video_id)
+            ):
+                logger.error("YouTube upload response missing video ID; publication is unverified")
+                return UploadResult(
+                    success=False,
+                    error="YOUTUBE_UPLOAD_UNVERIFIED: Upload response did not contain a video ID",
+                    platform="youtube",
+                    metadata={
+                        "title": title,
+                        "tags": tags,
+                    },
+                    retryable=False,
+                )
+            video_id = video_id.strip()
             video_url = f"https://youtube.com/shorts/{video_id}"
 
             logger.info(f"Uploaded to YouTube: {video_url}")
