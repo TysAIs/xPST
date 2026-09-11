@@ -5,6 +5,7 @@
   import EmptyState from "../lib/components/EmptyState.svelte";
   import ErrorState from "../lib/components/ErrorState.svelte";
   import LoadingSkeleton from "../lib/components/LoadingSkeleton.svelte";
+  import PlatformBadge from "../lib/components/PlatformBadge.svelte";
   import StatusBadge from "../lib/components/StatusBadge.svelte";
 
   let state = $state("loading");
@@ -33,10 +34,10 @@
   const cards = $derived(
     summary
       ? [
-          { label: "Total posts", value: summary.total_posts ?? 0 },
-          { label: "Platform posts", value: summary.total_platform_posts ?? 0 },
-          { label: "This week", value: summary.posts_this_week ?? 0 },
-          { label: "Best platform", value: summary.best_platform || "—" },
+          { label: "Tracked source posts", value: summary.total_posts ?? 0 },
+          { label: "Platform post records", value: summary.total_platform_posts ?? 0 },
+          { label: "Posts this week", value: summary.posts_this_week ?? 0 },
+          { label: "Top platform", value: summary.best_platform || "—" },
         ]
       : []
   );
@@ -66,17 +67,28 @@
     {/each}
   </div>
 
+  {#if !hasPosts}
+    <section class="xpst-section xpst-section--empty" aria-label="Tracked post status">
+      <EmptyState
+        title="No posts tracked yet"
+        description="The engine has no recorded posts yet. Review account status or return after a post is recorded."
+        actionLabel="Review accounts"
+        actionHref="#/accounts"
+      />
+    </section>
+  {/if}
+
   <section class="xpst-section" aria-labelledby="health-heading">
     <div class="xpst-section__heading">
       <h2 id="health-heading">Engine health</h2>
-      <StatusBadge status={health?.status ?? "unknown"} label={health?.status ?? "Unknown"} />
+      <StatusBadge status={health?.status ?? "unknown"} />
     </div>
-    <Card description={`${health?.total_processed ?? 0} processed item${health?.total_processed === 1 ? "" : "s"}`}>
+    <Card description={`Engine reports ${health?.total_processed ?? 0} processed item${health?.total_processed === 1 ? "" : "s"}; this is separate from tracked source posts.`}>
       {#if platformHealth.length}
         <div class="xpst-settings-list">
           {#each platformHealth as [name, platform] (name)}
             <div class="xpst-inline-meta" style="justify-content: space-between;">
-              <span>{name}</span>
+              <PlatformBadge platform={name} size={16} />
               <StatusBadge status={platform?.status ?? "unknown"} />
             </div>
           {/each}
@@ -91,15 +103,4 @@
       {/if}
     </Card>
   </section>
-
-  {#if !hasPosts}
-    <section class="xpst-section" aria-labelledby="empty-dashboard-heading">
-      <EmptyState
-        title="No posts tracked yet"
-        description="When the engine records a post, its summary and platform health will appear here."
-        actionLabel="Review accounts"
-        actionHref="#/accounts"
-      />
-    </section>
-  {/if}
 {/if}

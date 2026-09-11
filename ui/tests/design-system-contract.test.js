@@ -3,6 +3,7 @@ import { readFile, access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { currentRoute, NAV_ITEMS } from "../src/lib/api.js";
+import { platformLabel, statusLabel } from "../src/lib/labels.js";
 
 const UI_ROOT = resolve(import.meta.dirname, "..");
 const REPO_ROOT = resolve(UI_ROOT, "..");
@@ -114,6 +115,26 @@ test("the shell listens to hash and history navigation", async () => {
   assert.match(app, /addEventListener\("popstate"/);
   assert.match(app, /removeEventListener\("hashchange"/);
   assert.match(app, /removeEventListener\("popstate"/);
+});
+
+test("platform and status labels are human-readable without changing API values", () => {
+  assert.equal(platformLabel("youtube"), "YouTube");
+  assert.equal(platformLabel("instagram"), "Instagram");
+  assert.equal(platformLabel("x"), "X");
+  assert.equal(platformLabel("tiktok"), "TikTok");
+  assert.equal(statusLabel("healthy"), "Healthy");
+  assert.equal(statusLabel("ok"), "OK");
+  assert.equal(statusLabel("degraded"), "Degraded");
+});
+
+test("dashboard empty action is placed before health and copy does not promise duplicate data", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+  const emptyPosition = dashboard.indexOf("No posts tracked yet");
+  const healthPosition = dashboard.indexOf("Engine health");
+  assert.ok(emptyPosition >= 0 && emptyPosition < healthPosition);
+  assert.match(dashboard, /Tracked source posts/);
+  assert.match(dashboard, /Platform post records/);
+  assert.doesNotMatch(dashboard, /platform health will appear here/);
 });
 
 test("the icon dependency and license manifest are explicit and offline-safe", async () => {
