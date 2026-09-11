@@ -62,7 +62,10 @@ def home(tmp_path, monkeypatch):
     # setup and wizard state can leak across tests on hosted Windows runners.
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     if sys.platform == "win32":
-        appdata = home / "AppData" / "Roaming"
+        # Legacy CLI tests seed ``home/.xpst`` directly. Point APPDATA at the
+        # isolated fixture root so the production resolver maps to that same
+        # test-only location without touching the runner profile.
+        appdata = home / ".xpst"
         appdata.mkdir(parents=True, exist_ok=True)
         monkeypatch.setenv("APPDATA", str(appdata))
         monkeypatch.setenv("USERPROFILE", str(home))
