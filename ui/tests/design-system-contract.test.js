@@ -103,6 +103,10 @@ test("navigation uses one local icon family and exposes all foundation routes", 
     "analytics",
     "videos",
     "accounts",
+    "schedule",
+    "activity",
+    "library",
+    "about",
     "settings",
   ]);
   for (const item of NAV_ITEMS) {
