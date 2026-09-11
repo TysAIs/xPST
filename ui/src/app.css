@@ -636,3 +636,19 @@ input,
     transition-duration: 1ms !important;
   }
 }
+
+.xpst-schedule-path {
+  display: block;
+  max-width: 280px;
+  margin-top: var(--xpst-space-1);
+  overflow: hidden;
+  color: var(--xpst-color-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xpst-schedule-platforms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--xpst-space-1);
+}
