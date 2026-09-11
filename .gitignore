@@ -120,12 +120,15 @@ tmp-manual-qa*
 # Tauri shell build artifacts
 src-tauri/target/
 # Tauri shell: built engine sidecar bundle (see src-tauri/binaries/README.md)
-src-tauri/binaries/engine/
+src-tauri/binaries/engine/*
+!src-tauri/binaries/engine/.gitkeep
 src-tauri/binaries/xpst-engine-*
 # Bundled media binaries (ffmpeg/ffprobe/yt-dlp) are fetched by
 # scripts/fetch-media-binaries.sh — never commit multi-MB binaries.
-src-tauri/binaries/ffmpeg/
-src-tauri/binaries/ytdlp/
+src-tauri/binaries/ffmpeg/*
+!src-tauri/binaries/ffmpeg/.gitkeep
+src-tauri/binaries/ytdlp/*
+!src-tauri/binaries/ytdlp/.gitkeep
 !src-tauri/binaries/README.md
 
 # Tauri shell generated ACL schemas + E2E throwaway signing key dir
