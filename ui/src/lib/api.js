@@ -34,6 +34,7 @@ export const NAV_ITEMS = [
   { id: "videos", href: "#/videos", label: "Videos", icon: "video" },
   { id: "accounts", href: "#/accounts", label: "Accounts", icon: "users" },
   { id: "settings", href: "#/settings", label: "Settings", icon: "settings" },
+  { id: "about", href: "#/about", label: "About", icon: "info" },
 ];
 
 /** Current route id derived from a hash ("dashboard" by default). */
