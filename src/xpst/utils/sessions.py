@@ -75,14 +75,7 @@ class SessionManager:
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        client_secrets = Path(client_secrets_path).expanduser()
         token_file = Path(token_path).expanduser()
-
-        if not client_secrets.exists():
-            raise FileNotFoundError(
-                f"YouTube client_secrets.json not found at {client_secrets}. "
-                "Download from Google Cloud Console: https://console.cloud.google.com/apis/credentials"
-            )
 
         creds = None
 
@@ -420,7 +413,11 @@ class SessionManager:
                         return {"status": "error", "error": f"Graph API returned {r.status_code}"}
                     except Exception as e:
                         return {"status": "error", "error": str(e)}
-                return {"status": "error", "error": "Graph API not configured"}
+                # The configured mode is authoritative. Do not silently run
+                # an instagrapi session probe when Graph API credentials are
+                # missing; that made health report a different auth path than
+                # the uploader would use.
+                return {"status": "error", "error": "Graph API not configured", "auth_mode": "graph_api"}
 
         # Session mode (instagrapi, fallback)
         try:
@@ -435,16 +432,30 @@ class SessionManager:
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
-    async def check_x_health(self, cookies_file: str) -> dict:
+    async def check_x_health(self, cookies_file: str, config=None) -> dict:
         """Check X/Twitter authentication health via API call.
 
         Args:
             cookies_file: Path to X cookies file.
+            config: Optional XPSTConfig; api_v2 selects the official probe.
 
         Returns:
             Dict with ``status`` (ok/error), ``username``, ``user_id``,
             or ``error`` message.
         """
+        if config is not None and getattr(config.x, "auth_mode", "cookies") == "api_v2":
+            from xpst.platforms.x import XUploader
+
+            health = await XUploader(config)._check_health_api_v2()
+            result = {
+                "status": "ok" if health.authenticated else "error",
+                "username": health.details.get("username", ""),
+                "user_id": health.details.get("user_id", ""),
+                "auth_mode": "api_v2",
+            }
+            if health.error:
+                result["error"] = health.error
+            return result
 
         try:
             client = await self.get_x_client(cookies_file)
@@ -453,6 +464,7 @@ class SessionManager:
                 "status": "ok",
                 "username": user.screen_name,
                 "user_id": user.id,
+                "auth_mode": "cookies",
             }
         except Exception as e:
             return {"status": "error", "error": str(e)}

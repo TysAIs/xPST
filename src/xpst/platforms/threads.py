@@ -55,6 +55,7 @@ class ThreadsUploader(PlatformUploader):
         """Initialize Threads uploader with lazy token caching."""
         super().__init__(config)
         self._access_token: str | None = None
+        self._threads_user_id: str | None = None
 
     @property
     def manifest(self) -> ProviderManifest:
@@ -62,7 +63,7 @@ class ThreadsUploader(PlatformUploader):
         return ProviderManifest(
             name="threads",
             display_name="Threads",
-            roles=(ProviderRole.DESTINATION,),
+            roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
             capabilities=(
                 ProviderCapability.UPLOAD,
                 ProviderCapability.HEALTH,
@@ -98,7 +99,18 @@ class ThreadsUploader(PlatformUploader):
             return self._access_token
 
         if self._session_manager:
-            token = await self._session_manager.get_threads_token()
+            stored = await self._session_manager.get_threads_token()
+            if isinstance(stored, (tuple, list)):
+                # SessionManager returns (access_token, threads_user_id).
+                # Treating the tuple as the token sent its repr over the wire.
+                token = str(stored[0]) if stored and stored[0] else ""
+                if len(stored) > 1 and stored[1]:
+                    self._threads_user_id = str(stored[1])
+            else:
+                token = str(stored or "")
+            if not token:
+                token = self.config.threads.graph_access_token
+                self._threads_user_id = self.config.threads.threads_user_id or None
         else:
             # Fallback for direct instantiation (testing)
             token = self.config.threads.graph_access_token
@@ -170,7 +182,7 @@ class ThreadsUploader(PlatformUploader):
                 platform="threads",
             )
 
-        user_id = self.config.threads.threads_user_id
+        user_id = self._threads_user_id or self.config.threads.threads_user_id
         if not user_id:
             return UploadResult(
                 success=False,
@@ -310,7 +322,7 @@ class ThreadsUploader(PlatformUploader):
         """
         try:
             token = await self._get_access_token()
-            user_id = self.config.threads.threads_user_id
+            user_id = self._threads_user_id or self.config.threads.threads_user_id
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.get(
                     f"{THREADS_API_BASE}/{THREADS_API_VERSION}/{user_id}/threads_insights",
@@ -340,7 +352,7 @@ class ThreadsUploader(PlatformUploader):
         """
         try:
             token = await self._get_access_token()
-            user_id = self.config.threads.threads_user_id
+            user_id = self._threads_user_id or self.config.threads.threads_user_id
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.get(
                     f"{THREADS_API_BASE}/{THREADS_API_VERSION}/{user_id}",
