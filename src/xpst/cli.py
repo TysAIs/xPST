@@ -667,9 +667,9 @@ def verify_media_cmd(
     warnings (the platform would re-encode / shift loudness). Exit code 1
     when any error was found for the selected platform(s).
     """
-    from xpst.media.pipeline import describe_plan, plan_transform
-    from xpst.media.specs import format_report, verify_media
-    from xpst.utils.video import FFmpegNotFoundError, VideoProcessor
+    from xpst.media.pipeline import TransformPlan, describe_plan
+    from xpst.media.specs import Check, MediaReport, format_report
+    from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
 
     quiet = ctx.obj.get("quiet", False)
     setup_logging(
@@ -680,42 +680,50 @@ def verify_media_cmd(
     media_path = Path(file)
     platforms = ["youtube", "tiktok", "instagram", "x", "threads"] if platform == "all" else [platform]
 
+    # This is deliberately the same side-effect-free service used by future
+    # desktop and MCP clients. Readiness is omitted here for compatibility:
+    # verify-media historically reported only local media checks.
+    config = load_config(ctx.obj.get("config_path")) if show_plan else None
+    request = PostPlanRequest(
+        media_paths=(media_path,),
+        target_platforms=tuple(platforms),
+        config=config,
+        include_transform=show_plan,
+        include_readiness=False,
+    )
+    post_plan = PostPreflightService(config).plan(request)
     reports = []
-    plans = []
     for name in platforms:
-        report = verify_media(media_path, name)
-        reports.append(report)
-
-    if show_plan:
-        # Build the transformation plan against the real per-platform
-        # EncodingConfig. The processor is only used for the compliance
-        # probe — a missing ffmpeg degrades to a conservative plan, never
-        # a crash (dry-run must work everywhere).
-        from xpst.media.pipeline import TransformPlan
-
-        config = load_config(ctx.obj.get("config_path"))
-        try:
-            processor = VideoProcessor()
-        except (FFmpegNotFoundError, RuntimeError, OSError):
-            processor = None
-        for name in platforms:
-            enc = getattr(config.video, f"encoding_{name}", None)
-            if enc is None:  # pragma: no cover - defensive
-                continue
-            if processor is not None:
-                plans.append(plan_transform(media_path, name, enc, processor))
-            else:
-                p = TransformPlan(platform=name, action="transcode")
-                p.reasons.append("ffmpeg unavailable — compliance not verified")
-                plans.append(p)
-
-    ok = all(r.ok for r in reports)
+        platform_plan = post_plan.platforms[name]
+        media_item = platform_plan.media[0]
+        checks = [Check(**check) for check in media_item.media_spec.get("checks", [])]
+        known_codes = {check.name for check in checks}
+        checks.extend(
+            Check(name=issue.code, status="error", detail=issue.message)
+            for issue in platform_plan.hard_blockers
+            if issue.media_path == str(media_path) and issue.code not in known_codes
+        )
+        reports.append(
+            MediaReport(
+                path=media_item.media_spec.get("path", str(media_path)),
+                platform=name,
+                checks=checks,
+                probe=media_item.media_spec.get("probe"),
+            )
+        )
+    plans = [
+        post_plan.platforms[name].transform
+        or TransformPlan(platform=name, action="transcode", reasons=["media transform unavailable"])
+        for name in platforms
+    ]
+    ok = post_plan.ok
     if as_json:
         json_output(
             {
                 "file": str(media_path),
                 "ok": ok,
                 "reports": [r.to_dict() for r in reports],
+                **({"post_plan": post_plan.to_dict()} if show_plan else {}),
                 **({"plans": [p.to_dict() for p in plans]} if show_plan else {}),
             },
             True,
