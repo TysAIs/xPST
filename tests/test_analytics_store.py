@@ -118,8 +118,8 @@ class TestAnalyticsStore:
             {"platform": "x", "post_id": "b", "views": 2,
              "timestamp": "2026-08-27T10:00:00+00:00"},
         ])
-        assert store.delete_youtube_snapshots_not_in(set()) == 1
-        assert store.latest("youtube") == []
+        assert store.delete_youtube_snapshots_not_in(set()) == 0
+        assert {str(r["post_id"]) for r in store.latest("youtube")} == {"a"}
         assert {str(r["post_id"]) for r in store.latest("x")} == {"b"}
 
 
