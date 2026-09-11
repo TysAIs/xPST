@@ -1071,9 +1071,8 @@ class TestOwnershipFiltering:
         assert "x:ghost" in collector._warned_foreign
 
     @pytest.mark.asyncio
-    async def test_x_foreign_rows_tolerated_when_state_empty(self, tmp_path):
-        """No state evidence → no judgement: explicit ids keep working on a
-        fresh install (nothing posted yet ≠ everything is foreign)."""
+    async def test_x_foreign_rows_rejected_when_ownership_unverifiable(self, tmp_path):
+        """Missing state cannot establish ownership, so persistence fails closed."""
         collector = AnalyticsCollector(config_dir=str(tmp_path))
 
         def row(pid: str) -> dict:
@@ -1087,7 +1086,7 @@ class TestOwnershipFiltering:
             await collector.collect_all({"x": ["any_id"]})
 
         persisted = collector.store.latest("x")
-        assert {str(p["post_id"]) for p in persisted} == {"any_id"}
+        assert {str(p["post_id"]) for p in persisted} == set()
 
     @pytest.mark.asyncio
     async def test_stale_foreign_youtube_rows_are_purged(self, tmp_path):
