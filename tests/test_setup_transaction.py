@@ -121,6 +121,8 @@ def test_structured_json_methods_expose_actionable_transaction(tmp_path: Path) -
 
 def test_legacy_cli_aliases_share_one_transaction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    # Windows production uses APPDATA; isolate the native root for this test.
+    monkeypatch.setenv("APPDATA", str(tmp_path))
     runner = CliRunner()
 
     outputs = []
@@ -137,6 +139,8 @@ def test_legacy_cli_aliases_share_one_transaction(tmp_path: Path, monkeypatch: p
 
 def test_non_tty_json_never_prompts_or_opens_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    # Windows production uses APPDATA; keep the non-TTY contract isolated.
+    monkeypatch.setenv("APPDATA", str(tmp_path))
     monkeypatch.setattr("builtins.input", lambda *args, **kwargs: pytest.fail("input() called"))
     monkeypatch.setattr("webbrowser.open", lambda *args, **kwargs: pytest.fail("browser opened"))
 
