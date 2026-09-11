@@ -49,6 +49,11 @@ def get_config_dir() -> Path:
         appdata = os.environ.get("APPDATA")
         if appdata:
             return Path(appdata) / "xPST"
+        # Some test runners and portable environments expose USERPROFILE but
+        # not APPDATA. Prefer it over a POSIX-style .xpst fallback.
+        user_profile = os.environ.get("USERPROFILE")
+        if user_profile:
+            return Path(user_profile) / "AppData" / "Roaming" / "xPST"
     # macOS and Linux: use home directory
     return Path.home() / ".xpst"
 
