@@ -19,6 +19,8 @@ export const api = {
   videos: () => getJSON("/api/videos"),
   /** Engine health + live auth liveness per platform. */
   healthStatus: () => getJSON("/api/health-status"),
+  /** Canonical provider roles and capability readiness. */
+  providers: () => getJSON("/api/providers"),
   /** Masked config sections for the Settings page. */
   settings: () => getJSON("/api/settings"),
 };

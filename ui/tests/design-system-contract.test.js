@@ -89,6 +89,14 @@ test("all design-system primitives exist and declare accessible contracts", asyn
   assert.match(await text(join(UI_ROOT, "src/lib/components/BrandMark.svelte")), /assets\/icon\.png/);
 });
 
+test("accounts presents canonical role capability status without legacy source assumptions", async () => {
+  const accounts = await text(join(UI_ROOT, "src/pages/Accounts.svelte"));
+  assert.match(accounts, /Capability readiness/);
+  assert.match(accounts, /role_status/);
+  assert.match(accounts, /blocked_external_review/);
+  assert.match(accounts, /Source capability remains separate/);
+});
+
 test("navigation uses one local icon family and exposes all foundation routes", () => {
   assert.deepEqual(NAV_ITEMS.map((item) => item.id), [
     "dashboard",
