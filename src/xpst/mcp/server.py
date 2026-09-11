@@ -1837,9 +1837,9 @@ async def main(config: XPSTConfig | None = None) -> None:
         )
 
 
-def cli_main() -> None:
-    """CLI entry point for xpst mcp command."""
-    config = XPSTConfig()
+def cli_main(config_path: str | None = None) -> None:
+    """CLI entry point for ``xpst mcp`` using the selected config path."""
+    config = XPSTConfig.load(config_path)
     asyncio.run(main(config))
 
 
