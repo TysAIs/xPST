@@ -473,6 +473,14 @@ input,
   margin-top: var(--xpst-space-8);
 }
 
+.xpst-section--empty {
+  margin-top: var(--xpst-space-6);
+}
+
+.xpst-section--empty .xpst-state {
+  padding-block: var(--xpst-space-6);
+}
+
 .xpst-section__heading {
   display: flex;
   align-items: center;
