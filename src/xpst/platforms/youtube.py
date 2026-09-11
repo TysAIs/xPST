@@ -57,7 +57,7 @@ class YouTubeUploader(PlatformUploader):
         return ProviderManifest(
             name="youtube",
             display_name="YouTube Shorts",
-            roles=(ProviderRole.DESTINATION,),
+            roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
             capabilities=(
                 ProviderCapability.UPLOAD,
                 ProviderCapability.DELETE,
