@@ -498,7 +498,9 @@ class SetupTransactionStore:
         fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=self.config_dir)
         temp = Path(name)
         try:
-            os.fchmod(fd, 0o600)
+            fchmod = getattr(os, "fchmod", None)
+            if fchmod is not None:
+                fchmod(fd, 0o600)
             with os.fdopen(fd, "wb") as handle:
                 handle.write(payload)
                 handle.flush()
