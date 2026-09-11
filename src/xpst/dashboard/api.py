@@ -61,6 +61,16 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
 
     @router.get("/health-status")
     def api_health_status() -> dict[str, Any]:
+        """Engine health from state + live auth liveness per platform.
+
+        Data: ``load_state`` health block (src/xpst/dashboard/analytics.py:70)
+        and ``collect_live_auth_status`` (src/xpst/auth_status.py:290 —
+        async core ``collect_live_auth_status_async`` :237). The live check
+        has its own internal timeout and degrades to honest all-false
+        entries instead of raising; any residual failure surfaces as
+        ``auth_error`` with HTTP 200 (the UI renders a degraded state,
+        it does not want a 5xx).
+        """
         from xpst.dashboard.analytics import load_state
 
         state = load_state(config_dir)
@@ -91,6 +101,45 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
             logger.debug("Live auth status unavailable: %s", exc)
             canonical = {"providers": {}, "platforms": {}, "roles": []}
 
+        provider_values = list(canonical.get("providers", {}).values())
+        role_values = [
+            role
+            for provider in provider_values
+            for role in provider.get("role_status", {}).values()
+            if role.get("enabled")
+        ]
+        blockers = [
+            {
+                "platform": role.get("platform"),
+                "role": role.get("role"),
+                "state": role.get("state"),
+                "error": role.get("error"),
+            }
+            for role in role_values
+            if role.get("state") != "ready"
+        ]
+        destinations = [
+            role for role in role_values if role.get("role") == "video_destination"
+        ]
+        destination = next(
+            (role for role in destinations if role.get("state") == "ready"),
+            destinations[0] if destinations else None,
+        )
+        destination_ready = bool(destination and destination.get("state") == "ready")
+        next_action = (
+            {
+                "kind": "create_post",
+                "label": "Create a post",
+                "role": "video_destination",
+            }
+            if destination_ready
+            else {
+                "kind": "connect" if destination and destination.get("state") == "unconfigured" else "review",
+                "label": "Connect a video destination" if destination and destination.get("state") == "unconfigured" else "Review readiness",
+                "role": destination.get("role") if destination else "video_destination",
+            }
+        )
+        ready = not blockers
         return {
             "status": status,
             "platforms": platforms,
@@ -99,7 +148,11 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
             "auth_error": auth_error,
             "canonical": canonical,
             "providers": canonical["providers"],
+            "readiness": {"ready": ready, "blockers": blockers},
+            "next_action": next_action,
+            "can_create_post": destination_ready,
         }
+
 
     @router.get("/providers")
     def api_providers() -> dict[str, Any]:
