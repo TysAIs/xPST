@@ -266,6 +266,7 @@ class ScheduleManager:
             "created_at": datetime.now().isoformat(),
             "completed_at": None,
             "error": None,
+            "post_results": {},
             "repeat_rule": repeat_rule,
         }
         with self._process_lock():
@@ -396,13 +397,18 @@ class ScheduleManager:
                     return True
                 return False
 
-    def mark_complete(self, entry_id: str, success: bool = True, error: str | None = None) -> None:
+    def mark_complete(
+        self,
+        entry_id: str,
+        success: bool = True,
+        error: str | None = None,
+        post_results: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         """Mark a scheduled post as completed or failed.
 
-        Args:
-            entry_id: The ID of the entry.
-            success: Whether the post succeeded.
-            error: Error message if failed.
+        ``post_results`` preserves each platform's verified result, including
+        confirmed IDs/URLs and retryable errors, so a partial run can be
+        targeted for recovery without losing source identity.
         """
         with self._process_lock():
             with self._lock:
@@ -413,6 +419,8 @@ class ScheduleManager:
                         entry["completed_at"] = datetime.now().isoformat()
                         if error:
                             entry["error"] = error
+                        if post_results is not None:
+                            entry["post_results"] = post_results
                         # Auto-create next occurrence for recurring entries
                         if success and entry.get("repeat_rule"):
                             self._create_next_occurrence(entry)
@@ -465,6 +473,7 @@ class ScheduleManager:
             "created_at": datetime.now().isoformat(),
             "completed_at": None,
             "error": None,
+            "post_results": {},
             "repeat_rule": repeat_rule,
         }
         self._entries.append(new_entry)
