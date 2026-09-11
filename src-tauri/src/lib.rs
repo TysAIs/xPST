@@ -35,7 +35,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use tauri::{Manager, RunEvent, WebviewWindow, Url};
+use tauri::{Manager, RunEvent, Url, WebviewWindow};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
@@ -151,9 +151,7 @@ fn forward_to_engine(url: &str) -> String {
             .write_all(request.as_bytes())
             .map_err(|e| e.to_string())?;
         let mut raw = Vec::new();
-        stream
-            .read_to_end(&mut raw)
-            .map_err(|e| e.to_string())?;
+        stream.read_to_end(&mut raw).map_err(|e| e.to_string())?;
         let text = String::from_utf8_lossy(&raw);
         // "HTTP/1.1 200 OK" -> 200
         let status = text
@@ -190,7 +188,9 @@ fn handle_deep_link(app: &tauri::AppHandle, url: &Url) {
 
     // 3) Forward to the engine's OAuth callback route (best effort).
     let outcome = forward_to_engine(&url_str);
-    log(&format!("DEEPLINK_FORWARDED url={url_str} outcome={outcome}"));
+    log(&format!(
+        "DEEPLINK_FORWARDED url={url_str} outcome={outcome}"
+    ));
 }
 
 fn focus_existing(app: &tauri::AppHandle) {
@@ -212,7 +212,8 @@ struct EngineHandle {
 /// state). Set once the engine child is spawned.
 static GLOBAL_ENGINE: OnceLock<Arc<EngineHandle>> = OnceLock::new();
 
-extern "C" fn handle_exit_signal(_sig: libc::c_int) {
+#[cfg(unix)]
+extern "C" fn handle_exit_signal(sig: libc::c_int) {
     // SIGTERM/SIGINT do NOT produce a Tauri RunEvent::ExitRequested, so
     // without this the engine sidecar would be orphaned when the shell is
     // terminated externally. Kill the child, then exit with 128+signal.
@@ -220,14 +221,27 @@ extern "C" fn handle_exit_signal(_sig: libc::c_int) {
     if let Some(engine) = GLOBAL_ENGINE.get() {
         engine.kill();
     }
-    std::process::exit(128 + _sig as i32);
+    std::process::exit(128 + sig);
 }
 
+#[cfg(unix)]
 fn install_signal_handlers() {
     unsafe {
-        libc::signal(libc::SIGTERM, handle_exit_signal as libc::sighandler_t);
-        libc::signal(libc::SIGINT, handle_exit_signal as libc::sighandler_t);
+        libc::signal(
+            libc::SIGTERM,
+            handle_exit_signal as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            handle_exit_signal as *const () as libc::sighandler_t,
+        );
     }
+}
+
+#[cfg(not(unix))]
+fn install_signal_handlers() {
+    // Windows has no POSIX SIGTERM/SIGINT handler ABI. Tauri exit events and
+    // the EngineHandle Drop/kill path own shutdown on this platform.
 }
 
 impl EngineHandle {
@@ -258,9 +272,7 @@ fn http_responds(addr: &str, path: &str) -> bool {
     };
     let _ = stream.set_read_timeout(Some(PROBE_TIMEOUT));
     let _ = stream.set_write_timeout(Some(PROBE_TIMEOUT));
-    let request = format!(
-        "GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n"
-    );
+    let request = format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
     if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }
@@ -322,17 +334,13 @@ fn boot_engine(app: tauri::AppHandle) {
     };
     log(&format!("engine port: {port}"));
 
-    // Spawn the engine from the bundle resources (onedir sidecar).
-    //
-    // NOTE (tradeoff vs externalBin): Tauri `externalBin` requires a single
-    // executable file, which forced PyInstaller --onefile — but onefile
-    // self-extracts ~45 MB to a temp dir on EVERY launch (~1.3 s), blowing
-    // the boot-to-ready <= 1 s gate. Shipping the onedir engine as a bundle
-    // resource (`bundle.resources: ["binaries/engine/"]`) removes the
-    // extraction step; the cost is manual process management (env, kill)
-    // which this module owns.
-    let engine_dir = match app.path().resource_dir() {
-        Ok(dir) => dir.join("binaries/engine"),
+    // NOTE (tradeoff vs externalBin): the PyInstaller onedir directory is
+    // shipped as a bundle resource. Tauri externalBin is intentionally not
+    // used because it accepts a single executable and would require a
+    // onefile build with per-launch extraction. The resource directory keeps
+    // all engine support files beside the executable and avoids extraction.
+    let resource_dir = match app.path().resource_dir() {
+        Ok(dir) => dir,
         Err(e) => {
             log(&format!("FATAL: no resource dir: {e}"));
             if let Some(w) = app.get_webview_window("main") {
@@ -341,11 +349,19 @@ fn boot_engine(app: tauri::AppHandle) {
             return;
         }
     };
-    let engine_exe = engine_dir.join("xpst-engine");
-    if !engine_exe.exists() {
+    let engine_dir = resource_dir.join("binaries/engine");
+    let engine_exe = engine_dir.join(if cfg!(windows) {
+        "xpst-engine.exe"
+    } else {
+        "xpst-engine"
+    });
+    let ui_dir = resource_dir.join("ui");
+    let ui_index = ui_dir.join("index.html");
+    if !engine_exe.is_file() || !ui_index.is_file() {
         log(&format!(
-            "FATAL: engine executable missing at {}",
-            engine_exe.display()
+            "FATAL: packaged resources missing engine={} ui_index={}",
+            engine_exe.display(),
+            ui_index.display()
         ));
         if let Some(w) = app.get_webview_window("main") {
             show_engine_error(&w);
@@ -355,29 +371,36 @@ fn boot_engine(app: tauri::AppHandle) {
     let mut command = app.shell().command(&engine_exe);
     command = command.env("XPST_DASHBOARD_PORT", port.to_string());
     command = command.env("XPST_ENGINE_MODE", "tauri");
+    command = command.env("XPST_UI_DIST", ui_dir);
     // Bundle-resolution: point the engine at the ffmpeg/ffprobe/yt-dlp
     // binaries shipped as bundle resources (see tauri.conf.json
-    // bundle.resources). The engine honors XPST_FFMPEG_PATH
-    // (xpst.utils.platform.resolve_ffmpeg_path) and XPST_YTDLP_PATH
-    // (xpst.utils.platform.get_ytdlp_fallback_path / setup wizard), so the
-    // app works with zero user-installed dependencies.
-    let resource_dir = app.path().resource_dir().ok();
-    if let Some(res) = resource_dir {
-        let ff_dir = res.join("binaries/ffmpeg");
-        let ff = ff_dir.join(if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" });
-        let fp = ff_dir.join(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" });
-        if ff.exists() {
-            command = command.env("XPST_FFMPEG_PATH", ff);
-        }
-        if fp.exists() {
-            command = command.env("XPST_FFPROBE_PATH", fp);
-        }
-        let ytdlp = res
-            .join("binaries/ytdlp")
-            .join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" });
-        if ytdlp.exists() {
-            command = command.env("XPST_YTDLP_PATH", ytdlp);
-        }
+    // bundle.resources). The engine honors XPST_FFMPEG_PATH,
+    // XPST_FFPROBE_PATH, and XPST_YTDLP_PATH, so the app works with zero
+    // user-installed media dependencies.
+    let ff_dir = resource_dir.join("binaries/ffmpeg");
+    let ff = ff_dir.join(if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    });
+    let fp = ff_dir.join(if cfg!(windows) {
+        "ffprobe.exe"
+    } else {
+        "ffprobe"
+    });
+    if ff.is_file() {
+        command = command.env("XPST_FFMPEG_PATH", ff);
+    }
+    if fp.is_file() {
+        command = command.env("XPST_FFPROBE_PATH", fp);
+    }
+    let ytdlp = resource_dir.join("binaries/ytdlp").join(if cfg!(windows) {
+        "yt-dlp.exe"
+    } else {
+        "yt-dlp"
+    });
+    if ytdlp.is_file() {
+        command = command.env("XPST_YTDLP_PATH", ytdlp);
     }
 
     let (mut rx, child) = match command.spawn() {
@@ -411,10 +434,16 @@ fn boot_engine(app: tauri::AppHandle) {
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
-                    log(&format!("engine stdout: {}", String::from_utf8_lossy(&line)));
+                    log(&format!(
+                        "engine stdout: {}",
+                        String::from_utf8_lossy(&line)
+                    ));
                 }
                 CommandEvent::Stderr(line) => {
-                    log(&format!("engine stderr: {}", String::from_utf8_lossy(&line)));
+                    log(&format!(
+                        "engine stderr: {}",
+                        String::from_utf8_lossy(&line)
+                    ));
                 }
                 CommandEvent::Terminated(status) => {
                     log(&format!("engine terminated: {status:?}"));
@@ -424,10 +453,7 @@ fn boot_engine(app: tauri::AppHandle) {
                     }
                     let n = RESPAWNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     if n >= MAX_ENGINE_RESPAWNS {
-                        log(&format!(
-                            "ENGINE_RESPAWN_GIVE_UP attempts={}",
-                            n + 1
-                        ));
+                        log(&format!("ENGINE_RESPAWN_GIVE_UP attempts={}", n + 1));
                         if let Some(w) = app_for_drain.get_webview_window("main") {
                             show_engine_error(&w);
                         }
@@ -457,15 +483,19 @@ fn boot_engine(app: tauri::AppHandle) {
             // one-off crash does not permanently consume the retries.
             RESPAWNS.store(0, std::sync::atomic::Ordering::SeqCst);
             let health_wait = started.elapsed();
-            log(&format!("ENGINE_HEALTH_WAIT_SECS={:.3}", health_wait.as_secs_f64()));
+            log(&format!(
+                "ENGINE_HEALTH_WAIT_SECS={:.3}",
+                health_wait.as_secs_f64()
+            ));
 
             if let Some(window) = app.get_webview_window("main") {
                 let url = tauri::Url::parse(&format!("http://127.0.0.1:{port}/"))
                     .expect("valid engine URL");
                 if let Err(e) = window.navigate(url) {
                     log(&format!("navigate failed, falling back to eval: {e}"));
-                    let _ = window
-                        .eval(&format!("window.location.replace('http://127.0.0.1:{port}/')"));
+                    let _ = window.eval(&format!(
+                        "window.location.replace('http://127.0.0.1:{port}/')"
+                    ));
                 }
                 let _ = window.show();
                 let _ = window.set_focus();
@@ -520,7 +550,11 @@ fn write_version_marker(version: &str) {
             .map(|d| d.as_secs().to_string())
             .unwrap_or_default()
     );
-    std::fs::write(format!("{UPDATER_MARKER_DIR}/started-{version}.txt"), &stamp).ok();
+    std::fs::write(
+        format!("{UPDATER_MARKER_DIR}/started-{version}.txt"),
+        &stamp,
+    )
+    .ok();
     std::fs::write(format!("{UPDATER_MARKER_DIR}/current.txt"), &stamp).ok();
 }
 
@@ -574,42 +608,59 @@ fn run_updater_check(handle: tauri::AppHandle) {
     });
 }
 
+#[cfg(unix)]
+fn acquire_single_instance_lock() -> Option<std::fs::File> {
+    use std::os::fd::AsRawFd;
+
+    let lock_path = std::env::temp_dir().join("xpst-shell-single-instance.lock");
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+    {
+        Ok(file) => {
+            let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+            if rc != 0 {
+                // Another instance is booting/booted. Give it a moment to
+                // register its single-instance socket, then exit — never
+                // spawn a second engine.
+                log("SINGLE_INSTANCE_RACE_LOSER exiting");
+                std::thread::sleep(Duration::from_millis(1500));
+                std::process::exit(0);
+            }
+            Some(file)
+        }
+        Err(e) => {
+            log(&format!("SINGLE_INSTANCE_LOCK_ERROR error={e}"));
+            None
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn acquire_single_instance_lock() -> Option<std::fs::File> {
+    // The Tauri single-instance plugin is the Windows source of truth. POSIX
+    // flock is unavailable there, so do not reference Unix-only APIs.
+    log("SINGLE_INSTANCE_PLATFORM_GUARD plugin_only=true");
+    None
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     BOOT_START.get_or_init(Instant::now);
     install_signal_handlers();
 
     // Single-instance race guard (QA adversarial 2026-08): two launches in
-    // the same second both passed tauri-plugin-single-instance (neither had
-    // bound its socket yet) and each spawned an engine sidecar. An flock on
-    // a stable lockfile closes that window: the loser waits briefly (so the
-    // winner's single-instance socket is definitely up) and exits before
-    // spawning anything.
-    if std::env::var("XPST_ALLOW_SECOND_INSTANCE").ok().as_deref() != Some("1") {
-        let lock_path = std::env::temp_dir().join("xpst-shell-single-instance.lock");
-        match std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&lock_path)
-        {
-            Ok(file) => {
-                let fd = std::os::unix::io::AsRawFd::as_raw_fd(&file);
-                let rc = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
-                if rc != 0 {
-                    // Another instance is booting/booted. Give it a moment
-                    // to register its single-instance socket, then exit —
-                    // never spawn a second engine.
-                    log("SINGLE_INSTANCE_RACE_LOSER exiting");
-                    std::thread::sleep(Duration::from_millis(1500));
-                    std::process::exit(0);
-                }
-                // Leak the file handle so the lock is held for process life.
-                std::mem::forget(file);
-            }
-            Err(e) => log(&format!("SINGLE_INSTANCE_LOCK_ERROR error={e}")),
-        }
-    }
+    // the same second can both pass tauri-plugin-single-instance before either
+    // socket is bound. Unix uses a stable flock; Windows relies on the
+    // single-instance plugin because flock is not a Windows API.
+    let _instance_lock = if std::env::var("XPST_ALLOW_SECOND_INSTANCE").ok().as_deref() != Some("1")
+    {
+        acquire_single_instance_lock()
+    } else {
+        None
+    };
 
     let engine = Arc::new(EngineHandle::default());
 
@@ -709,8 +760,13 @@ pub fn run() {
         }
         // macOS dock-icon click while the window is hidden (close-to-dock):
         // bring the window back instead of ignoring the user.
-        RunEvent::Reopen { has_visible_windows, .. } if cfg!(target_os = "macos") => {
-            log(&format!("APP_REOPEN has_visible_windows={has_visible_windows}"));
+        RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } if cfg!(target_os = "macos") => {
+            log(&format!(
+                "APP_REOPEN has_visible_windows={has_visible_windows}"
+            ));
             if !has_visible_windows {
                 focus_existing(app);
             }
