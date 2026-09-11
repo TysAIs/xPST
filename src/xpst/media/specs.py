@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from xpst.utils.video import (
     _parse_frame_rate,
@@ -133,6 +133,7 @@ class MediaReport:
     path: str
     platform: str
     checks: list[Check] = field(default_factory=list)
+    probe: dict[str, Any] | None = None
 
     @property
     def errors(self) -> list[Check]:
@@ -147,13 +148,16 @@ class MediaReport:
         """True when nothing blocks the upload (warnings allowed)."""
         return not self.errors
 
-    def to_dict(self) -> dict:
-        return {
+    def to_dict(self, *, include_probe: bool = False) -> dict:
+        result = {
             "path": self.path,
             "platform": self.platform,
             "ok": self.ok,
             "checks": [{"name": c.name, "status": c.status, "detail": c.detail} for c in self.checks],
         }
+        if include_probe:
+            result["probe"] = self.probe
+        return result
 
 
 def _add(checks: list[Check], name: str, ok: bool, detail: str, error_level: str = "warn") -> None:
@@ -236,6 +240,7 @@ def verify_media(
 
     try:
         info = get_video_info_standalone(video_path)
+        report.probe = info
     except Exception as e:  # noqa: BLE001 - pre-flight must never block on a probe hiccup
         checks.append(Check(name="probe", status="warn", detail=f"ffprobe failed ({e}); spec not verified"))
         return report
