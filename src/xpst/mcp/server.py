@@ -75,6 +75,7 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
 
 from xpst.config import XPSTConfig
 from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.providers import ProviderRole
 from xpst.utils.logger import get_logger, setup_logging
 
 if TYPE_CHECKING:
@@ -86,13 +87,27 @@ def _provider_enums() -> tuple[list[str], list[str]]:
     """Platform/source enums for tool schemas, derived from the live provider
     catalog instead of hardcoded literals (G25) so plugin providers are
     reachable over MCP. Falls back to the built-ins if discovery fails."""
-    platforms = ["youtube", "x", "instagram"]
-    sources = ["tiktok", "youtube", "x", "instagram", "local"]
+    from xpst.provider_truth import SUPPORTED_PROVIDERS
+
+    platforms = [
+        definition.name
+        for definition in SUPPORTED_PROVIDERS
+        if ProviderRole.VIDEO_DESTINATION in definition.roles
+    ]
+    sources = [
+        definition.name
+        for definition in SUPPORTED_PROVIDERS
+        if ProviderRole.SOURCE in definition.roles
+    ]
     try:
         from xpst.platforms.base import PlatformRegistry
 
         PlatformRegistry.auto_discover()
-        discovered = [m.name for m in PlatformRegistry.list_manifests(None)]
+        discovered = [
+            m.name
+            for m in PlatformRegistry.list_manifests(None)
+            if ProviderRole.VIDEO_DESTINATION in m.canonical_roles
+        ]
         if discovered:
             platforms = sorted(set(platforms) | set(discovered))
     except Exception:  # noqa: BLE001 — schema fallback must never crash startup
@@ -1002,8 +1017,14 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
 
 
 async def _handle_health(engine: CrossPostEngine) -> CallToolResult:
-    """Handle xpst_health tool."""
+    """Handle xpst_health with canonical provider role truth."""
+    from xpst.auth_status import collect_live_auth_status_async
+    from xpst.provider_truth import canonical_status_report
+
     health = await engine.check_health()
+    canonical = await collect_live_auth_status_async(engine.config, engine._platforms)
+    health["canonical"] = canonical_status_report(engine.config, canonical)
+    health["providers"] = health["canonical"]["providers"]
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(health, indent=2, default=str))],
     )
@@ -1411,45 +1432,53 @@ async def _handle_config_show(config: XPSTConfig) -> CallToolResult:
 
 
 async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
-    """Handle xpst_auth_status tool."""
+    """Handle xpst_auth_status with canonical live role state."""
+    from xpst.auth_status import collect_live_auth_status_async
     from xpst.utils.credentials import CredentialStore
     from xpst.utils.quota import QuotaManager
 
     cred_store = CredentialStore(config.config_dir)
     quota_mgr = QuotaManager(config.config_dir)
-
     stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (encrypted fallback)"
+    live = await collect_live_auth_status_async(config)
 
     result: dict[str, Any] = {
         "credential_storage": storage_type,
         "stored_credentials": stored_keys,
         "platforms": {},
     }
-
-    for platform in ["youtube", "x", "instagram"]:
-        creds = None
-        if platform == "youtube":
-            creds = cred_store.retrieve("youtube_token")
-        elif platform == "x":
-            creds = cred_store.retrieve_json("x_cookies")
-        elif platform == "instagram":
-            creds = cred_store.retrieve_json("instagram_session")
-
-        remaining = quota_mgr.get_remaining(platform)
-        result["platforms"][platform] = {
-            "authenticated": bool(creds),
-            "quota_remaining": remaining.get("daily", "N/A"),
-        }
-
-    # Messenger (static page token; token lives in CredentialStore)
-    messenger_creds = cred_store.retrieve("messenger_page_token") or config.messenger.page_access_token
-    result["platforms"]["messenger"] = {
-        "authenticated": bool(messenger_creds),
-        "auto_reply": bool(config.messenger.auto_reply),
-        "quota_remaining": quota_mgr.get_remaining("messenger").get("daily", "N/A"),
+    credential_keys = {
+        "youtube": "youtube_token",
+        "x": "x_cookies",
+        "instagram": "instagram_session",
+        "tiktok": "tiktok_cookies",
+        "threads": "threads_access_token",
+        "messenger": "messenger_page_token",
     }
+    for platform in ("youtube", "x", "instagram", "tiktok", "threads", "messenger"):
+        key = credential_keys[platform]
+        stored = bool(cred_store.retrieve_json(key) if platform in {"x", "instagram", "tiktok"} else cred_store.retrieve(key))
+        entry = dict(live.get(platform, {}))
+        entry.update(
+            {
+                # Backward-compatible presence signal; authenticated is live
+                # truth in the canonical entry.
+                "credentials_stored": stored,
+                "quota_remaining": quota_mgr.get_remaining(platform).get("daily", "N/A"),
+            }
+        )
+        if not entry:
+            entry = {"authenticated": stored, "live_checked": False}
+        result["platforms"][platform] = entry
 
+    local_entry = dict(live.get("local", {}))
+    local_entry["credentials_stored"] = False
+    local_entry["quota_remaining"] = quota_mgr.get_remaining("local").get("daily", "N/A")
+    result["platforms"]["local"] = local_entry
+
+    result["providers"] = result["platforms"]
+    result["roles"] = ["source", "video_destination", "messaging", "analytics"]
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
     )
@@ -1483,16 +1512,21 @@ async def _handle_providers(config: XPSTConfig) -> CallToolResult:
 
 
 def build_provider_catalog(config: XPSTConfig) -> dict[str, Any]:
-    """Return provider metadata for MCP clients and support tooling."""
+    """Return legacy catalogs plus the canonical role-aware provider list."""
     from xpst.platforms.base import PlatformRegistry
+    from xpst.provider_truth import canonical_provider_catalog
     from xpst.sources.base import SourceRegistry
 
     SourceRegistry.auto_discover()
     PlatformRegistry.auto_discover()
     sources = SourceRegistry.list_manifests(config)
     destinations = PlatformRegistry.list_manifests(config)
+    canonical = canonical_provider_catalog(config)
+    providers = canonical["providers"]
 
     return {
+        # Existing clients use these two manifest arrays.  They remain intact;
+        # canonical consumers use providers/video_destinations/messaging below.
         "sources": [
             manifest.to_dict()
             for manifest in sorted(sources, key=lambda item: item.name)
@@ -1501,6 +1535,13 @@ def build_provider_catalog(config: XPSTConfig) -> dict[str, Any]:
             manifest.to_dict()
             for manifest in sorted(destinations, key=lambda item: item.name)
         ],
+        "providers": providers,
+        "video_destinations": [
+            item for item in providers if "video_destination" in item["roles"]
+        ],
+        "messaging": [item for item in providers if "messaging" in item["roles"]],
+        "analytics": [item for item in providers if "analytics" in item["roles"]],
+        "roles": canonical["roles"],
     }
 
 

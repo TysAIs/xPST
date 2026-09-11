@@ -183,13 +183,28 @@ def _config_snapshot(config: XPSTConfig) -> dict[str, Any]:
     }
 
 
-def _provider_catalog(config: XPSTConfig) -> dict[str, list[dict[str, Any]]]:
+def _provider_catalog(config: XPSTConfig) -> dict[str, Any]:
     SourceRegistry.auto_discover()
     PlatformRegistry.auto_discover()
-    return {
+    from xpst.provider_truth import canonical_provider_catalog
+
+    legacy = {
         "sources": [manifest.to_dict() for manifest in SourceRegistry.list_manifests(config)],
         "destinations": [manifest.to_dict() for manifest in PlatformRegistry.list_manifests(config)],
     }
+    canonical = canonical_provider_catalog(config)
+    legacy.update(
+        {
+            "providers": canonical["providers"],
+            "video_destinations": [
+                item for item in canonical["providers"] if "video_destination" in item["roles"]
+            ],
+            "messaging": [item for item in canonical["providers"] if "messaging" in item["roles"]],
+            "analytics": [item for item in canonical["providers"] if "analytics" in item["roles"]],
+            "roles": canonical["roles"],
+        }
+    )
+    return legacy
 
 
 def _credential_status(config: XPSTConfig) -> dict[str, Any]:

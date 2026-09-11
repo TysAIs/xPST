@@ -104,16 +104,24 @@ def repair_local_setup(config: XPSTConfig, config_path: str | None = None) -> di
     }
 
 
-def build_readiness_report(config: XPSTConfig | None = None) -> ReadinessReport:
-    """Build a local-first readiness report without making network calls."""
+def build_readiness_report(
+    config: XPSTConfig | None = None,
+    live_status: dict[str, Any] | None = None,
+) -> ReadinessReport:
+    """Build readiness from the canonical role model.
+
+    ``live_status`` is optional so the existing local-only readiness command
+    remains offline and deterministic. Doctor/auth callers can pass the live
+    canonical probe output and receive exactly the same role states.
+    """
     config = config or XPSTConfig.load()
     checks = [
         _python_check(),
         _directory_check(config),
         _ffmpeg_check(),
         _ytdlp_check(),
-        _source_check(config),
-        *_destination_checks(config),
+        _source_check(config, live_status),
+        *_destination_checks(config, live_status),
         _helper_update_check(),
     ]
 
@@ -186,143 +194,114 @@ def _ytdlp_check() -> ReadinessCheck:
     )
 
 
-def _source_check(config: XPSTConfig) -> ReadinessCheck:
-    has_tiktok = bool(config.tiktok.username)
+def _source_check(
+    config: XPSTConfig,
+    live_status: dict[str, Any] | None = None,
+) -> ReadinessCheck:
+    """Use canonical source-role states for the readiness summary."""
+    from xpst.provider_truth import build_canonical_status
+
+    canonical = build_canonical_status(config, live_status)
+    source_candidates = ("tiktok", "local")
+    ready_sources = [
+        name
+        for name in source_candidates
+        if canonical[name]["roles"].get("source", {}).get("state") == "ready"
+    ]
     local_path = Path(config.local.path).expanduser() if config.local.path else None
-    has_local = bool(local_path and local_path.exists())
-    ok = has_tiktok or has_local
+    local_exists = bool(local_path and local_path.exists())
+    ok = bool(ready_sources)
     return ReadinessCheck(
         id="source",
         label="Content source",
         ok=ok,
         severity="error",
-        message="At least one content source is configured."
-        if ok
-        else "No usable content source is configured.",
+        message="At least one content source is configured." if ok else "No usable content source is configured.",
         action="" if ok else "Add a TikTok username or choose an existing local source folder.",
         details={
+            "ready_sources": ready_sources,
             "tiktok_username": bool(config.tiktok.username),
             "local_path": str(local_path) if local_path else "",
-            "local_path_exists": has_local,
+            "local_path_exists": local_exists,
         },
     )
 
 
-def _destination_checks(config: XPSTConfig) -> list[ReadinessCheck]:
-    def _build_uploader(name: str, cfg: XPSTConfig):
-        """Instantiate the platform uploader for session validation, or None.
+def _destination_checks(
+    config: XPSTConfig,
+    live_status: dict[str, Any] | None = None,
+) -> list[ReadinessCheck]:
+    """Build destination checks from canonical video-destination states."""
+    from xpst.provider_truth import SUPPORTED_PROVIDERS, ProviderState, build_canonical_status
 
-        Mirrors engine.py's lazy per-platform imports; failures (missing
-        deps, disabled platform) simply skip validation.
-        """
-        try:
-            if name == "youtube":
-                from xpst.platforms.youtube import YouTubeUploader
-                return YouTubeUploader(cfg)
-            if name == "x":
-                from xpst.platforms.x import XUploader
-                return XUploader(cfg)
-            if name == "instagram":
-                from xpst.platforms.instagram import InstagramUploader
-                return InstagramUploader(cfg)
-        except Exception:
-            return None
-        return None
-
-    destinations: list[tuple[str, bool, str, str]] = [
-        ("youtube", config.youtube.enabled, config.youtube.client_secrets, "Add YouTube OAuth credentials or disable YouTube."),
-        ("x", config.x.enabled, config.x.cookies_file, "Connect X or disable X."),
-        ("instagram", config.instagram.enabled, config.instagram.session_file, "Connect Instagram or disable Instagram."),
+    canonical = build_canonical_status(config, live_status)
+    destination_names = [
+        definition.name
+        for definition in SUPPORTED_PROVIDERS
+        if "video_destination" in [role.value for role in definition.roles]
     ]
-    checks: list[ReadinessCheck] = []
-    enabled_count = sum(1 for _name, enabled, _path, _action in destinations if enabled)
-    checks.append(
+    ready_count = sum(
+        1
+        for name in destination_names
+        if canonical[name]["roles"]["video_destination"]["state"] == ProviderState.READY.value
+    )
+    checks: list[ReadinessCheck] = [
         ReadinessCheck(
             id="destinations",
             label="Destinations",
-            ok=enabled_count > 0,
+            ok=ready_count > 0,
             severity="error",
-            message=f"{enabled_count} destination(s) enabled." if enabled_count else "No posting destinations are enabled.",
-            action="" if enabled_count else "Enable at least one destination platform.",
-            details={"enabled_count": enabled_count},
+            message=f"{ready_count} destination(s) ready." if ready_count else "No posting destinations are ready.",
+            action="" if ready_count else "Enable and connect at least one destination platform.",
+            details={"ready_count": ready_count, "destinations": destination_names},
         )
-    )
+    ]
 
-    for name, enabled, credential_path, action in destinations:
-        if not enabled:
+    for name in destination_names:
+        info = canonical[name]
+        role = info["roles"]["video_destination"]
+        state = role["state"]
+        if state == ProviderState.DISABLED.value:
             checks.append(
                 ReadinessCheck(
                     id=f"{name}_connection",
                     label=f"{name.title()} connection",
                     ok=True,
                     message=f"{name.title()} is disabled.",
-                    details={"enabled": False},
+                    details={"enabled": False, "state": state},
                 )
             )
             continue
-
-        path = Path(credential_path).expanduser() if credential_path else None
-        exists = bool(path and path.exists())
-        # A credential file merely EXISTING was reported as connected —
-        # an expired session (e.g. instagram_session.json past its login
-        # validity) then sailed through readiness as "ready to post".
-        # Cross-check the platform uploader's real session state, keeping
-        # the file-existence result as the fallback when validation cannot
-        # run (no network / uploader unavailable).
-        session_error = ""
-        if exists:
-            uploader = _build_uploader(name, config)
-            if uploader is not None:
-                try:
-                    import asyncio
-
-                    loop = asyncio.new_event_loop()
-                    try:
-                        health = loop.run_until_complete(uploader.check_health())
-                    finally:
-                        loop.close()
-                    if health is not None and not health.authenticated:
-                        error_text = str(health.error or "")
-                        # Missing optional dependency ≠ invalid session: a
-                        # test env without `instagrapi` must not flag every
-                        # session expired. Only treat genuine auth failures
-                        # as session errors.
-                        low = error_text.lower()
-                        dep_hints = ("required for", "install it with", "not installed")
-                        # Structurally-empty/placeholder session files (test
-                        # fixtures write "{}") mean "no stored credentials",
-                        # not "stored credentials expired" — treat as the
-                        # plain file-based result, not a hard failure.
-                        no_creds = (
-                            "no sessionid" in low
-                            or "invalid json in session file" in low
-                            or "session file not found" in low
-                        )
-                        is_soft = any(h in low for h in dep_hints) or no_creds
-                        if not is_soft:
-                            session_error = error_text or "Session invalid or expired"
-                except Exception:
-                    session_error = ""  # validation itself failed — stay file-based
-
-        ok = exists and not session_error
-        message = (
-            f"{name.title()} session invalid or expired." if session_error
-            else f"{name.title()} credential file exists." if exists
-            else f"{name.title()} is enabled but not connected."
-        )
+        if state == ProviderState.READY.value:
+            message = f"{name.title()} is ready."
+            action = ""
+        elif state == ProviderState.BLOCKED_EXTERNAL_REVIEW.value:
+            message = f"{name.title()} is blocked pending external review."
+            action = "Complete the provider's external review before posting."
+        elif state == ProviderState.UNCONFIGURED.value:
+            message = f"{name.title()} is enabled but not configured."
+            action = f"Connect {name.title()} or disable {name}."
+        else:
+            message = f"{name.title()} health is degraded."
+            action = str(role.get("error") or f"Reconnect {name}.")
         checks.append(
             ReadinessCheck(
                 id=f"{name}_connection",
                 label=f"{name.title()} connection",
-                ok=ok,
-                severity="warning",
+                ok=state == ProviderState.READY.value,
+                severity=(
+                    "info"
+                    if state == ProviderState.UNCONFIGURED.value and name in {"tiktok", "threads"}
+                    else "warning"
+                ),
                 message=message,
-                action=session_error if session_error else ("" if exists else action),
+                action=action,
                 details={
-                    "enabled": True,
-                    "credential_path": str(path) if path else "",
-                    "session_valid": ok,
-                    **({"session_error": session_error} if session_error else {}),
+                    "enabled": role["enabled"],
+                    "state": state,
+                    "session_valid": role["session_valid"],
+                    "live_checked": role["live_checked"],
+                    "error": role["error"],
                 },
             )
         )
