@@ -165,7 +165,13 @@ class ServeSupervisor:
                 error_msg = None
                 if not success:
                     error_msg = "; ".join(f"{p}: {ur.error}" for p, ur in result.results.items() if not ur.success)
-                manager.mark_complete(entry_id, success=success, error=error_msg)
+                post_results = {platform: upload_result.to_dict() for platform, upload_result in result.results.items()}
+                manager.mark_complete(
+                    entry_id,
+                    success=success,
+                    error=error_msg,
+                    post_results=post_results,
+                )
                 if success:
                     counts["posted"] += 1
                     logger.info("xpst serve: scheduled post %s published", entry_id)
