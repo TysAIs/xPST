@@ -460,6 +460,15 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="xpst_activity",
+        description="List recorded platform failures with targeted retry or review actions (read-only)",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_schedule_list",
         description="List scheduled posts (pending, completed, failed) with times and targets",
         inputSchema={
@@ -566,6 +575,26 @@ TOOLS: list[Tool] = [
         inputSchema={
             "type": "object",
             "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_capabilities",
+        description="Return the canonical role-aware provider and capability contract without network calls",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="xpst_readiness",
+        description="Return local setup readiness and actionable blockers without starting the posting engine",
+        inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
+    ),
+    Tool(
+        name="xpst_auth_start",
+        description="Return a human-only authentication action plan; never opens a browser or accepts secrets",
+        inputSchema={
+            "type": "object",
+            "properties": {"platform": {"type": "string", "enum": ["tiktok", "youtube", "x", "instagram", "threads", "messenger"]}},
+            "required": ["platform"],
             "additionalProperties": False,
         },
     ),
@@ -970,6 +999,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             result = await _handle_transcript(arguments)
         elif name == "xpst_search":
             result = await _handle_search(arguments)
+        elif name == "xpst_activity":
+            result = await _handle_activity(server.config)
         elif name == "xpst_schedule_list":
             result = await _handle_schedule_list(server.config)
         elif name == "xpst_schedule_add":
@@ -980,6 +1011,12 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             result = await _handle_auth_status(server.config)
         elif name == "xpst_providers":
             result = await _handle_providers(server.config)
+        elif name == "xpst_capabilities":
+            result = await _handle_capabilities(server.config)
+        elif name == "xpst_readiness":
+            result = await _handle_readiness(server.config)
+        elif name == "xpst_auth_start":
+            result = await _handle_auth_start(server.config, arguments)
         elif name == "xpst_delete":
             engine = server.get_engine()
             result = await _handle_delete(engine, arguments)
@@ -1174,6 +1211,37 @@ async def _handle_backfill(engine: CrossPostEngine, args: dict[str, Any]) -> Cal
     }
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
+    )
+
+
+async def _handle_activity(config: XPSTConfig) -> CallToolResult:
+    """Return recorded failures with targeted recovery actions."""
+    from xpst.state_store import StateStore
+
+    state = StateStore(config.config_dir).get()
+    failures: list[dict[str, Any]] = []
+    for video_id, video in (state.get("posted_videos") or {}).items():
+        for platform, result in (video.get("errors") or {}).items():
+            if not isinstance(result, dict):
+                continue
+            retryable = result.get("retryable")
+            failures.append({
+                "video_id": str(video_id),
+                "platform": str(platform),
+                "error": str(result.get("error") or "Unknown error"),
+                "retryable": retryable,
+                "post_id": None,
+                "post_url": None,
+                "source_url": video.get("source_url"),
+                "last_attempt": result.get("timestamp") or video.get("last_attempt"),
+                "action": "retry" if retryable is True else "review",
+            })
+    failures.sort(
+        key=lambda item: (item.get("last_attempt") or "", item["video_id"], item["platform"]),
+        reverse=True,
+    )
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps({"failures": failures, "count": len(failures)}))],
     )
 
 
@@ -1609,6 +1677,70 @@ async def _handle_providers(config: XPSTConfig) -> CallToolResult:
     )
 
 
+async def _handle_capabilities(config: XPSTConfig) -> CallToolResult:
+    """Return the canonical role-aware catalog without network access."""
+    from xpst.provider_truth import canonical_provider_catalog
+
+    catalog = canonical_provider_catalog(config)
+    payload = {
+        "ok": True,
+        "contract_version": 1,
+        "roles": catalog["roles"],
+        "providers": [
+            {
+                "name": item["name"],
+                "display_name": item["display_name"],
+                "roles": item["role_names"],
+                "capabilities": item["capabilities"],
+                "state": item["state"],
+                "docs_url": item["docs_url"],
+            }
+            for item in catalog["providers"]
+        ],
+    }
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
+
+
+async def _handle_readiness(config: XPSTConfig) -> CallToolResult:
+    """Return local readiness without initializing the posting engine."""
+    from xpst.readiness import build_readiness_report
+
+    payload = {
+        "ok": True,
+        "contract_version": 1,
+        "readiness": build_readiness_report(config).to_dict(),
+    }
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, default=str))])
+
+
+async def _handle_auth_start(config: XPSTConfig, arguments: dict[str, Any]) -> CallToolResult:
+    """Return a browser-free human action plan; never accept secrets."""
+    from xpst.provider_truth import provider_definition
+
+    platform = arguments.get("platform")
+    try:
+        definition = provider_definition(str(platform))
+    except KeyError:
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "contract_version": 1,
+                "error": {"code": "UNKNOWN_PROVIDER", "message": "Choose a supported provider."},
+            }))],
+        )
+    payload = {
+        "ok": True,
+        "contract_version": 1,
+        "platform": definition.name,
+        "status": "human_action_required",
+        "browser_opened": False,
+        "command": f"xpst connect {definition.name}",
+        "docs_url": definition.docs_url,
+    }
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload))])
+
+
 def build_provider_catalog(config: XPSTConfig) -> dict[str, Any]:
     """Return provider metadata for MCP clients and support tooling."""
     from xpst.platforms.base import PlatformRegistry
@@ -1837,9 +1969,9 @@ async def main(config: XPSTConfig | None = None) -> None:
         )
 
 
-def cli_main() -> None:
-    """CLI entry point for xpst mcp command."""
-    config = XPSTConfig()
+def cli_main(config_path: str | None = None) -> None:
+    """CLI entry point for ``xpst mcp`` using the selected config path."""
+    config = XPSTConfig.load(config_path)
     asyncio.run(main(config))
 
 

@@ -2656,14 +2656,16 @@ def mcp(ctx):
     """MCP (Model Context Protocol) server commands"""
     if ctx.invoked_subcommand is None:
         from xpst.mcp import cli_main
-        cli_main()
+        config_path = ctx.obj.get("config_path") if ctx.obj else None
+        cli_main(config_path) if config_path else cli_main()
 
 
 @mcp.command()
-def start():
-    """Start MCP server over stdio"""
+@click.pass_context
+def start(ctx):
+    """Start MCP server over stdio using the selected config."""
     from xpst.mcp import cli_main
-    cli_main()
+    cli_main(ctx.parent.obj.get("config_path") if ctx.parent and ctx.parent.obj else None)
 
 
 @mcp.command(name="list")
@@ -4065,7 +4067,13 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
                 failed = [f"{p}: {ur.error}" for p, ur in result.results.items() if not ur.success]
                 error_msg = "; ".join(failed)
 
-            manager.mark_complete(entry_id, success=success, error=error_msg)
+            post_results = {platform: upload_result.to_dict() for platform, upload_result in result.results.items()}
+            manager.mark_complete(
+                entry_id,
+                success=success,
+                error=error_msg,
+                post_results=post_results,
+            )
 
             if not as_json:
                 if success:
