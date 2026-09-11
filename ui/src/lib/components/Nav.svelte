@@ -1,5 +1,5 @@
 <script>
-  import { LayoutDashboard, ChartNoAxesCombined, Video, Users, Settings } from "@lucide/svelte";
+  import { LayoutDashboard, ChartNoAxesCombined, Video, Users, Settings, Info } from "@lucide/svelte";
   import { NAV_ITEMS } from "../api.js";
 
   const ICONS = {
@@ -8,6 +8,7 @@
     video: Video,
     users: Users,
     settings: Settings,
+    info: Info,
   };
 
   let { items = NAV_ITEMS, route = "dashboard", onNavigate = undefined, mobile = false } = $props();
