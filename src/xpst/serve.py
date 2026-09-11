@@ -75,6 +75,9 @@ class ServeSupervisor:
         self.check_interval = max(1, int(check_interval or config.schedule.check_interval))
         self.source = source
         self.engine = engine or CrossPostEngine(config)
+        # Keep one Scheduler instance so its optional analytics cadence
+        # survives across the supervisor's individual watch cycles.
+        self._watch_scheduler = Scheduler(self.engine, self.config)
         self.pidfile = PidfileLock(config.config_dir)
 
         self._stop = threading.Event()
@@ -185,7 +188,7 @@ class ServeSupervisor:
 
     def _run_watch_check(self) -> None:
         """Run one new-video/catch-up check via the existing Scheduler logic."""
-        scheduler = Scheduler(self.engine, self.config)
+        scheduler = self._watch_scheduler
         try:
             catch_up = scheduler._needs_catch_up()  # noqa: SLF001 - existing API
             scheduler._run_check(catch_up=catch_up, source=self.source)  # noqa: SLF001
@@ -193,6 +196,10 @@ class ServeSupervisor:
             self.engine.state.save()
         except Exception as exc:  # noqa: BLE001 - keep the daemon alive
             logger.error("xpst serve: watch check failed: %s", exc)
+        finally:
+            # Analytics is optional and independently failure-isolated; a
+            # failed post check must not prevent a scheduled snapshot attempt.
+            scheduler._maybe_capture_analytics()  # noqa: SLF001
 
     def _cycle_once(self) -> dict[str, int]:
         """Run one full scheduler cycle (due posts + new-video watch check)."""

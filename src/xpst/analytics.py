@@ -85,6 +85,65 @@ def platform_metric_capability(platform: str) -> dict[str, Any]:
 # playlistItems walk, so it is cached much longer than metric data.
 OWNED_IDS_TTL = 3600
 
+# State-backed identity is the source of truth for platforms without a
+# channel-wide ownership endpoint. Keep this list explicit so a new platform
+# cannot accidentally bypass the persistence gate.
+STATE_OWNERSHIP_PLATFORMS: tuple[str, ...] = ("x", "instagram", "tiktok", "threads")
+
+
+def _coerce_metric(value: Any) -> int | None:
+    """Return a numeric metric, preserving ``None`` for unavailable data."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _first_metric(container: dict[str, Any], *keys: str) -> int | None:
+    """Return the first present numeric metric, including a real zero."""
+    for key in keys:
+        if key in container:
+            value = _coerce_metric(container[key])
+            if value is not None:
+                return value
+    return None
+
+
+def _parse_utc_timestamp(value: Any) -> datetime | None:
+    """Parse a timestamp as an aware UTC datetime, or return ``None``."""
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    parsed = parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    return parsed
+
+
+def _freshness_metadata(timestamp: str | None, now: datetime | None = None) -> dict[str, Any]:
+    """Build honest freshness fields for a capture timestamp."""
+    captured = _parse_utc_timestamp(timestamp)
+    if captured is None:
+        return {
+            "last_captured": None,
+            "staleness_hours": None,
+            "staleness": "unknown",
+            "freshness": "unknown",
+        }
+    current = now or datetime.now(timezone.utc)
+    hours = max(0.0, (current - captured).total_seconds() / 3600)
+    return {
+        "last_captured": timestamp,
+        "staleness_hours": round(hours, 3),
+        "staleness": "fresh" if hours < 24 else "stale",
+        "freshness": "fresh" if hours < 24 else "stale",
+    }
+
 
 
 class PlatformMetrics:
@@ -167,6 +226,7 @@ class AnalyticsCollector:
         # per process instead of spamming every collection run.
         self._warned_foreign: set[str] = set()
         self._warned_youtube_unverified = False
+        self._warned_ownership_unverified: set[str] = set()
 
     def _load_config(self) -> None:
         """Load xPST config.yaml."""
@@ -256,7 +316,9 @@ class AnalyticsCollector:
                         .execute()
                     )
                     for item in resp.get("items", []):
-                        owned.add(item["contentDetails"]["videoId"])
+                        video_id = str(item["contentDetails"]["videoId"]).strip()
+                        if video_id:
+                            owned.add(video_id)
                     page_token = resp.get("nextPageToken")
                     if not page_token:
                         break
@@ -271,35 +333,71 @@ class AnalyticsCollector:
             logger.warning("YouTube ownership check failed: %s", e)
             return None
 
-    def _state_platform_ids(self, platform: str) -> set[str]:
-        """Post ids for a platform recorded in xPST's own state.json.
+    def _read_state_platform_ids(self, platform: str) -> tuple[bool, set[str]]:
+        """Read state-backed ownership and whether it was verifiable.
 
-        state.json is written by xPST at post time, so on platforms without
-        a channel-discovery API (X, Instagram) it is the source of truth for
-        identity: an id that never appears there was never posted by us.
-
-        Returns:
-            Set of recorded post ids (empty when the file is absent or the
-            platform has never been posted to).
+        A valid state file with no IDs is a verified empty ownership set.
+        Missing, malformed, or structurally invalid state is unverifiable;
+        callers must fail closed for writes and skip destructive purges.
         """
         state_path = Path(self.config_dir) / "state.json"
         if not state_path.exists():
-            return set()
+            return False, set()
         try:
             with open(state_path) as f:
                 state = json.load(f)
         except (json.JSONDecodeError, OSError):
-            return set()
+            return False, set()
+        if not isinstance(state, dict) or not isinstance(state.get("posted_videos", {}), dict):
+            return False, set()
 
         ids: set[str] = set()
-        for _video_id, data in state.get("posted_videos", {}).items():
-            info = (data.get("posted_to") or {}).get(platform) or {}
+        for data in state.get("posted_videos", {}).values():
+            if not isinstance(data, dict):
+                continue
+            posted_to = data.get("posted_to") or {}
+            if not isinstance(posted_to, dict):
+                continue
+            info = posted_to.get(platform) or {}
+            if not isinstance(info, dict):
+                continue
             # Production state stores the platform id under "id"; legacy
             # fixtures used "post_id".
             post_id = info.get("id") or info.get("post_id")
-            if post_id:
-                ids.add(str(post_id))
-        return ids
+            candidate = str(post_id).strip() if post_id is not None else ""
+            if candidate:
+                ids.add(candidate)
+        return True, ids
+
+    def _state_platform_ids(self, platform: str) -> set[str]:
+        """Return state-backed post IDs, preserving the legacy API."""
+        return self._read_state_platform_ids(platform)[1]
+
+    def _get_owned_platform_ids(self, platform: str) -> set[str] | None:
+        """Return verified ownership IDs for a supported platform.
+
+        ``None`` means ownership cannot be verified. A returned empty set is a
+        verified account with no recorded posts; both cases reject new rows,
+        while only a non-empty set is safe for stale-row deletion.
+        """
+        platform = str(platform).lower()
+        if platform == "youtube":
+            return self._get_owned_youtube_ids()
+        if platform in STATE_OWNERSHIP_PLATFORMS:
+            verified, ids = self._read_state_platform_ids(platform)
+            return ids if verified else None
+        return None
+
+    def _warn_ownership_unverified(self, platform: str) -> None:
+        """Log at most one warning when a state ownership source is absent."""
+        if platform in self._warned_ownership_unverified:
+            return
+        self._warned_ownership_unverified.add(platform)
+        logger.warning(
+            "%s ownership could not be verified; dropping analytics snapshots "
+            "for this round (fail closed)",
+            platform,
+        )
 
     def _warn_once_foreign(self, platform: str, post_id: str, reason: str) -> None:
         """Log one warning per unowned post id, never spamming repeats.
@@ -316,92 +414,78 @@ class AnalyticsCollector:
         )
 
     def _filter_owned_snapshots(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Drop snapshot rows whose post id is not attributable to our account.
+        """Drop rows that cannot be attributed to this account.
 
-        Enforced at the persistence boundary (in addition to the per-platform
-        collectors) so no foreign id can ever enter ``metric_snapshots``,
-        even if a collector is bypassed or mocked.
-
-        - youtube: id must be on the authenticated channel's uploads
-          playlist; when ownership cannot be verified the row is dropped
-          (fail closed — unverified ids are exactly the skew source).
-        - x/instagram: id must be recorded in state.json (written by xPST at
-          post time). Only enforced when state holds at least one recorded id
-          for the platform, so a fresh install with no post history keeps
-          working.
-        - everything else (tiktok/threads): passed through.
+        This is the final persistence-boundary gate. YouTube uses its
+        fail-closed uploads-playlist authority; X, Instagram, TikTok, and
+        Threads use the state IDs xPST recorded at post time. Missing or empty
+        ownership evidence rejects new rows rather than guessing.
         """
-        yt_owned: set[str] | None = None
-        yt_checked = False
-        state_cache: dict[str, set[str] | None] = {}
-
-        def recorded_ids(platform: str) -> set[str] | None:
-            if platform not in state_cache:
-                ids = self._state_platform_ids(platform)
-                state_cache[platform] = ids if ids else None
-            return state_cache[platform]
-
+        ownership: dict[str, set[str] | None] = {}
         filtered: list[dict[str, Any]] = []
         for row in rows:
-            platform = row.get("platform")
+            platform = str(row.get("platform") or "").lower()
             post_id = row.get("post_id")
             if not platform or not post_id:
                 continue
-            if platform == "youtube":
-                if not yt_checked:
-                    yt_owned = self._get_owned_youtube_ids()
-                    yt_checked = True
-                if yt_owned is None:
+            if platform not in ("youtube", *STATE_OWNERSHIP_PLATFORMS):
+                # Preserve compatibility for integrations outside this
+                # analytics contract; the supported platforms are gated.
+                filtered.append(row)
+                continue
+
+            if platform not in ownership:
+                ownership[platform] = self._get_owned_platform_ids(platform)
+            owned = ownership[platform]
+            if owned is None:
+                if platform == "youtube":
                     if not self._warned_youtube_unverified:
                         self._warned_youtube_unverified = True
                         logger.warning(
-                            "YouTube ownership could not be verified; dropping %d unverifiable "
-                            "snapshot(s) this round (fail closed)",
-                            sum(1 for r in rows if r.get("platform") == "youtube" and r.get("post_id")),
+                            "YouTube ownership could not be verified; dropping snapshots "
+                            "this round (fail closed)"
                         )
-                    continue
-                if str(post_id) in yt_owned:
-                    filtered.append(row)
                 else:
-                    self._warn_once_foreign(
-                        "youtube",
-                        str(post_id),
-                        "video is not on the authenticated channel's uploads playlist",
-                    )
-            elif platform in ("x", "instagram"):
-                allowed = recorded_ids(str(platform))
-                if allowed is not None and str(post_id) not in allowed:
-                    self._warn_once_foreign(
-                        str(platform),
-                        str(post_id),
-                        f"post id not recorded in xPST state.json for {platform}",
-                    )
-                else:
-                    filtered.append(row)
-            else:
+                    self._warn_ownership_unverified(platform)
+                continue
+            if str(post_id) in owned:
                 filtered.append(row)
+            else:
+                self._warn_once_foreign(
+                    platform,
+                    str(post_id),
+                    "post id is not in the verified ownership set",
+                )
         return filtered
 
-    def _purge_stale_youtube_snapshots(self) -> None:
-        """Remove pre-existing foreign youtube rows from ``metric_snapshots``.
+    def _purge_stale_snapshots(self) -> None:
+        """Purge stale rows only for non-empty verified ownership sets.
 
-        Complements the persistence gate: the gate stops NEW unowned ids from
-        being written, this removes unowned rows that are ALREADY present —
-        the original skew incident (stale test posts, videos deleted from the
-        channel, rows persisted before ownership verification existed).
-
-        Only ever runs on a VERIFIED ownership set: when ownership cannot be
-        determined (``None`` — no token or API failure) nothing is purged, so
-        a transient ownership failure can never wipe real history. Failures
-        here are logged and never block collection.
+        An empty set can mean a real account with no posts, but it can also be
+        incomplete state. In either case deleting every historical row is too
+        destructive, so empty and unverifiable sets are always no-ops.
         """
+        for platform in ("youtube", *STATE_OWNERSHIP_PLATFORMS):
+            try:
+                owned = self._get_owned_platform_ids(platform)
+                if owned:
+                    self.store.delete_snapshots_not_in(platform, owned)
+                else:
+                    logger.debug(
+                        "Skipping %s stale-snapshot purge: ownership is empty or unverifiable",
+                        platform,
+                    )
+            except Exception as exc:  # defensive — collection must never break
+                logger.warning("%s stale-snapshot purge failed: %s", platform, exc)
+
+    def _purge_stale_youtube_snapshots(self) -> None:
+        """Compatibility wrapper for the former YouTube-only purge API."""
         try:
             owned = self._get_owned_youtube_ids()
-            if owned is None:
-                return
-            self.store.delete_youtube_snapshots_not_in(owned)
-        except Exception as e:  # defensive — collection must never break
-            logger.warning("YouTube stale-snapshot purge failed: %s", e)
+            if owned:
+                self.store.delete_youtube_snapshots_not_in(owned)
+        except Exception as exc:  # defensive — collection must never break
+            logger.warning("YouTube stale-snapshot purge failed: %s", exc)
 
     def _is_cache_valid(self) -> bool:
         """Check if cached data is still within TTL."""
@@ -454,7 +538,8 @@ class AnalyticsCollector:
             "as_of", "posts", "metrics_available", "metrics_missing",
             "totals", "post_metrics"}}}``
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
         platforms: dict[str, Any] = {}
         names = set(data)
         if requested:
@@ -473,20 +558,21 @@ class AnalyticsCollector:
 
             populated: set[str] = set()
             totals: dict[str, int] = {}
-            timestamps: list[str] = []
+            timestamps: list[datetime] = []
             for metrics in posts_data.values():
                 for key, value in metrics.items():
                     if key in universe and isinstance(value, (int, float)) and not isinstance(value, bool):
                         totals[key] = totals.get(key, 0) + int(value)
                         populated.add(key)
-                ts = metrics.get("timestamp")
-                if isinstance(ts, str) and ts:
-                    timestamps.append(ts)
+                parsed = _parse_utc_timestamp(metrics.get("timestamp"))
+                if parsed is not None:
+                    timestamps.append(parsed)
 
             available = sorted(populated & capability)
-            as_of = max(timestamps) if timestamps else now
+            as_of = max(timestamps).isoformat() if timestamps else None
             platforms[platform] = {
                 "as_of": as_of,
+                **_freshness_metadata(as_of, now_dt),
                 "posts": len(posts_data),
                 "metrics_available": available,
                 "metrics_missing": sorted(universe - set(available)),
@@ -555,11 +641,11 @@ class AnalyticsCollector:
         # collectors already filter; this second gate keeps the invariant
         # even if a collector is bypassed or mocked.
         try:
-            # Self-healing half of the invariant: purge youtube rows whose
-            # id is not on the VERIFIED ownership set, so the skew can
-            # never be reintroduced by stale history predating the gate
-            # (no-op when nothing is stale or ownership is unverifiable).
-            self._purge_stale_youtube_snapshots()
+            # Self-healing half of the invariant: purge rows whose id is not
+            # in a non-empty VERIFIED ownership set. Empty/unverifiable sets
+            # are always a no-op, so stale identity evidence cannot wipe
+            # history.
+            self._purge_stale_snapshots()
             rows = [
                 {"platform": platform, "post_id": post_id, **metrics}
                 for platform, posts in data.items()
@@ -650,15 +736,20 @@ class AnalyticsCollector:
                         )
                         continue
                     stats = item.get("statistics", {})
-                    results.append({
+                    row: dict[str, Any] = {
                         "platform": "youtube",
                         "post_id": video_id,
-                        "views": int(stats.get("viewCount", 0)),
-                        "likes": int(stats.get("likeCount", 0)),
-                        "comments": int(stats.get("commentCount", 0)),
-                        "shares": 0,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
+                    }
+                    for source_key, field in (
+                        ("viewCount", "views"),
+                        ("likeCount", "likes"),
+                        ("commentCount", "comments"),
+                    ):
+                        value = _coerce_metric(stats.get(source_key))
+                        if value is not None:
+                            row[field] = value
+                    results.append(row)
             return results
 
         except Exception as e:
@@ -696,12 +787,12 @@ class AnalyticsCollector:
                 client.load_settings(str(session_path))
 
             results = []
-            # Identity gate: only media ids xPST recorded at post time in
-            # state.json are ours (enforced only when state has evidence —
-            # empty state means nothing posted yet, not that ids are foreign).
-            state_ids = self._state_platform_ids("instagram")
+            # A valid state file is authoritative, including when its set is
+            # empty. Missing/corrupt state remains unverifiable and is gated
+            # at persistence for compatibility with direct collector callers.
+            state_verified, state_ids = self._read_state_platform_ids("instagram")
             for media_id in media_ids:
-                if state_ids and str(media_id) not in state_ids:
+                if state_verified and str(media_id) not in state_ids:
                     self._warn_once_foreign(
                         "instagram",
                         str(media_id),
@@ -712,47 +803,55 @@ class AnalyticsCollector:
                     media_pk = int(media_id) if str(media_id).isdigit() else media_id
 
                     # Insights require a Business/Creator account; parse
-                    # defensively and fall back to public media_info counts.
+                    # defensively and leave gated fields absent on failure.
                     metric_map: dict[str, int] = {}
                     try:
                         insights = client.insights_media(media_pk)
                         if isinstance(insights, dict):
                             for metric in insights.get("data", []) or []:
-                                name = metric.get("name", "")
+                                if not isinstance(metric, dict):
+                                    continue
+                                name = str(metric.get("name") or "")
                                 values = metric.get("values", [])
-                                if values:
-                                    metric_map[name] = values[0].get("value", 0)
+                                if name and isinstance(values, list) and values:
+                                    value = _coerce_metric(values[0].get("value"))
+                                    if value is not None:
+                                        metric_map[name] = value
                             for key in (
                                 "impression_count", "impressions",
                                 "save_count", "saved",
                                 "share_count", "shares",
                             ):
-                                value = insights.get(key)
-                                if isinstance(value, int):
-                                    metric_map[key] = value
-                    except Exception as e:
+                                if key in insights:
+                                    value = _coerce_metric(insights[key])
+                                    if value is not None:
+                                        metric_map[key] = value
+                    except Exception as exc:
                         logger.debug(
-                            "Instagram insights unavailable (Business account required?): %s", e
+                            "Instagram insights unavailable (Business account required?): %s", exc
                         )
 
                     info = client.media_info(str(media_pk))
-                    play_count = getattr(info, "play_count", 0) or 0
-                    results.append({
+                    row: dict[str, Any] = {
                         "platform": "instagram",
                         "post_id": str(media_id),
-                        "views": (
-                            metric_map.get("impressions")
-                            or metric_map.get("impression_count")
-                            or play_count
-                        ),
-                        "likes": getattr(info, "like_count", 0) or 0,
-                        "comments": getattr(info, "comment_count", 0) or 0,
-                        "shares": metric_map.get("shares") or metric_map.get("share_count") or 0,
-                        "saves": metric_map.get("saved") or metric_map.get("save_count") or 0,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
-                except Exception as e:
-                    logger.warning(f"Instagram insights failed for {media_id}: {e}")
+                    }
+                    values = {
+                        "views": _first_metric(metric_map, "impressions", "impression_count")
+                        if "impressions" in metric_map or "impression_count" in metric_map
+                        else _coerce_metric(getattr(info, "play_count", None)),
+                        "likes": _coerce_metric(getattr(info, "like_count", None)),
+                        "comments": _coerce_metric(getattr(info, "comment_count", None)),
+                        "shares": _first_metric(metric_map, "shares", "share_count"),
+                        "saves": _first_metric(metric_map, "saved", "save_count"),
+                    }
+                    for key, value in values.items():
+                        if value is not None:
+                            row[key] = value
+                    results.append(row)
+                except Exception as exc:
+                    logger.warning(f"Instagram insights failed for {media_id}: {exc}")
 
             return results
 
@@ -797,37 +896,38 @@ class AnalyticsCollector:
             client = twikit.Client("en-US")
             client.load_cookies(str(cookies_path))
 
-            # Identity gate: only tweet ids xPST recorded at post time in
-            # state.json are ours. Enforced only when state has at least one
-            # recorded id — an empty state means "nothing posted yet", not
-            # "everything is foreign", so fresh installs keep working.
-            state_ids = self._state_platform_ids("x")
+            # A valid state file is authoritative, including an empty set.
+            state_verified, state_ids = self._read_state_platform_ids("x")
 
             results = []
             for tweet_id in tweet_ids:
-                if state_ids and str(tweet_id) not in state_ids:
+                if state_verified and str(tweet_id) not in state_ids:
                     self._warn_once_foreign(
                         "x", str(tweet_id), "tweet id is not recorded in xPST state.json"
                     )
                     continue
                 try:
                     tweet = await client.get_tweet_by_id(tweet_id)
-                    results.append({
+                    row: dict[str, Any] = {
                         "platform": "x",
                         "post_id": str(tweet_id),
-                        "views": int(getattr(tweet, "view_count", 0) or 0),
-                        "likes": getattr(tweet, "favorite_count", 0) or 0,
-                        "comments": getattr(tweet, "reply_count", 0) or 0,
-                        # retweets stay under "shares" for schema compat;
-                        # reposts/quotes are the precise fields (ISC-123)
-                        "shares": getattr(tweet, "retweet_count", 0) or 0,
-                        "reposts": getattr(tweet, "retweet_count", 0) or 0,
-                        "quotes": getattr(tweet, "quote_count", 0) or 0,
-                        "bookmarks": getattr(tweet, "bookmark_count", 0) or 0,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
-                except Exception as e:
-                    logger.warning(f"X metrics failed for {tweet_id}: {e}")
+                    }
+                    for source_key, fields in (
+                        ("view_count", ("views",)),
+                        ("favorite_count", ("likes",)),
+                        ("reply_count", ("comments",)),
+                        ("retweet_count", ("shares", "reposts")),
+                        ("quote_count", ("quotes",)),
+                        ("bookmark_count", ("bookmarks",)),
+                    ):
+                        value = _coerce_metric(getattr(tweet, source_key, None))
+                        if value is not None:
+                            for field in fields:
+                                row[field] = value
+                    results.append(row)
+                except Exception as exc:
+                    logger.warning(f"X metrics failed for {tweet_id}: {exc}")
 
             return results
 
@@ -878,21 +978,40 @@ class AnalyticsCollector:
                 )
                 response.raise_for_status()
                 for tweet in response.json().get("data") or []:
-                    public = tweet.get("public_metrics", {}) or {}
-                    organic = tweet.get("organic_metrics", {}) or {}
-                    views = public.get("view_count") or organic.get("impression_count")
-                    results.append({
+                    if not isinstance(tweet, dict):
+                        continue
+                    post_id = str(tweet.get("id") or "")
+                    state_verified, state_ids = self._read_state_platform_ids("x")
+                    if not post_id or (state_verified and post_id not in state_ids):
+                        if post_id:
+                            self._warn_once_foreign(
+                                "x", post_id, "tweet id is not recorded in xPST state.json"
+                            )
+                        continue
+                    public = tweet.get("public_metrics") or {}
+                    organic = tweet.get("organic_metrics") or {}
+                    if not isinstance(public, dict) or not isinstance(organic, dict):
+                        continue
+                    row: dict[str, Any] = {
                         "platform": "x",
-                        "post_id": str(tweet.get("id", "")),
-                        "views": int(views or 0),
-                        "likes": int(public.get("like_count", 0) or 0),
-                        "comments": int(public.get("reply_count", 0) or 0),
-                        "shares": int(public.get("retweet_count", 0) or 0),
-                        "reposts": int(public.get("retweet_count", 0) or 0),
-                        "quotes": int(public.get("quote_count", 0) or 0),
-                        "bookmarks": int(public.get("bookmark_count", 0) or 0),
+                        "post_id": post_id,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
+                    }
+                    metric_values = {
+                        "views": _first_metric(public, "view_count")
+                        if "view_count" in public
+                        else _first_metric(organic, "impression_count"),
+                        "likes": _first_metric(public, "like_count"),
+                        "comments": _first_metric(public, "reply_count"),
+                        "shares": _first_metric(public, "retweet_count"),
+                        "reposts": _first_metric(public, "retweet_count"),
+                        "quotes": _first_metric(public, "quote_count"),
+                        "bookmarks": _first_metric(public, "bookmark_count"),
+                    }
+                    for key, value in metric_values.items():
+                        if value is not None:
+                            row[key] = value
+                    results.append(row)
         return results
 
     def _tiktok_access_token(self) -> str:
@@ -906,6 +1025,27 @@ class AnalyticsCollector:
             or ""
         ).strip()
         return token
+
+    def _filter_live_state_owned(self, platform: str, rows: list[dict]) -> list[dict]:
+        """Apply state identity to live rows when state is valid.
+
+        Missing state is left to the persistence-boundary gate so direct
+        collector callers retain their historical response shape. A valid
+        empty state is authoritative and rejects every returned ID.
+        """
+        verified, owned = self._read_state_platform_ids(platform)
+        if not verified:
+            return rows
+        filtered: list[dict] = []
+        for row in rows:
+            post_id = str(row.get("post_id") or "")
+            if post_id in owned:
+                filtered.append(row)
+            elif post_id:
+                self._warn_once_foreign(
+                    platform, post_id, "post id is not recorded in xPST state.json"
+                )
+        return filtered
 
     def _x_metrics_backend(self) -> str:
         """Analytics backend for X: primary = twikit (free, shipped, no paid
@@ -1091,7 +1231,7 @@ class AnalyticsCollector:
         except Exception as exc:  # noqa: BLE001 — degrade, never raise into collect_all
             logger.warning("TikTok analytics failed: %s", exc)
 
-        return results
+        return self._filter_live_state_owned("tiktok", results)
 
     async def _collect_threads(self, post_ids: list[str]) -> list[dict]:
         """Fetch Threads metrics.
