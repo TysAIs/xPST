@@ -9,6 +9,8 @@
   import Accounts from "./pages/Accounts.svelte";
   import Schedule from "./pages/Schedule.svelte";
   import Activity from "./pages/Activity.svelte";
+  import Library from "./pages/Library.svelte";
+  import About from "./pages/About.svelte";
   import Settings from "./pages/Settings.svelte";
 
   let route = $state(currentRoute());
@@ -20,6 +22,8 @@
     accounts: Accounts,
     schedule: Schedule,
     activity: Activity,
+    library: Library,
+    about: About,
     settings: Settings,
   };
   const Page = $derived(pages[route] ?? Dashboard);

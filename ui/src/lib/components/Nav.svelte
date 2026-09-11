@@ -1,5 +1,5 @@
 <script>
-  import { LayoutDashboard, ChartNoAxesCombined, Video, Users, Settings, CalendarClock, TriangleAlert } from "@lucide/svelte";
+  import { LayoutDashboard, ChartNoAxesCombined, Video, Users, Settings, CalendarClock, TriangleAlert, Library as LibraryIcon, Info } from "@lucide/svelte";
   import { NAV_ITEMS } from "../api.js";
 
   const ICONS = {
@@ -9,6 +9,8 @@
     users: Users,
     "calendar-clock": CalendarClock,
     "triangle-alert": TriangleAlert,
+    library: LibraryIcon,
+    info: Info,
     settings: Settings,
   };
 

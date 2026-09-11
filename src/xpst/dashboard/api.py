@@ -147,6 +147,33 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
         )
         return {"failures": failures, "count": len(failures)}
 
+    @router.get("/library")
+    def api_library() -> dict[str, Any]:
+        """Return local library items with only verified platform results."""
+        from xpst.state_store import StateStore
+
+        state = StateStore(config_dir).get()
+        items: list[dict[str, Any]] = []
+        for video_id, video in (state.get("posted_videos") or {}).items():
+            posts = []
+            for platform, result in (video.get("posted_to") or {}).items():
+                if not isinstance(result, dict):
+                    continue
+                post_id = result.get("id") or result.get("post_id")
+                post_url = result.get("url") or result.get("post_url")
+                if post_id or post_url:
+                    posts.append({"platform": str(platform), "post_id": post_id, "post_url": post_url})
+            items.append({
+                "video_id": str(video_id),
+                "source_url": video.get("source_url"),
+                "source_platform": video.get("source_platform"),
+                "caption": video.get("caption", ""),
+                "last_attempt": video.get("last_attempt"),
+                "posts": posts,
+            })
+        items.sort(key=lambda item: item.get("last_attempt") or "", reverse=True)
+        return {"items": items, "count": len(items)}
+
     @router.get("/settings")
     def api_settings() -> dict[str, Any]:
         from xpst.cli import _mask_sensitive_values
