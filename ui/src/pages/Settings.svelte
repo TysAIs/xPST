@@ -31,6 +31,37 @@
       ? Object.entries(settings).map(([name, value]) => ({ name, value }))
       : []
   );
+
+  const ACCOUNT_LABELS = {
+    youtube: "YouTube",
+    x: "X",
+    instagram: "Instagram",
+    tiktok: "TikTok",
+    threads: "Threads",
+    messenger: "Messenger",
+    local: "Local files",
+  };
+
+  function humanize(key) {
+    return key.replaceAll("_", " ").replace(/(^|\\s)\\S/g, (letter) => letter.toUpperCase());
+  }
+
+  function isSensitiveKey(key) {
+    return /token|secret|password|cookie|session|credential|hash|key/i.test(key);
+  }
+
+  function valueLabel(value) {
+    if (value === null || value === undefined || value === "") return "Not configured";
+    if (typeof value === "boolean") return value ? "Enabled" : "Disabled";
+    if (typeof value === "object") return "Configured";
+    return String(value);
+  }
+
+  const accountSections = $derived(
+    settings?.accounts
+      ? Object.entries(settings.accounts).map(([name, value]) => ({ name, value }))
+      : []
+  );
 </script>
 
 <header class="xpst-page-header">
@@ -52,14 +83,42 @@
     onAction={load}
   />
 {:else}
-  <div class="xpst-settings-list">
-    {#each sections as section (section.name)}
-      <Card title={section.name}>
-        <pre>{JSON.stringify(section.value, null, 2)}</pre>
-      </Card>
-    {/each}
-  </div>
-  <p class="xpst-page-header" style="display: block; margin-top: var(--xpst-space-4); margin-bottom: 0; font: var(--xpst-type-caption); color: var(--xpst-color-text-muted);">
-    Secrets are masked server-side (the same masker as <code>xpst_config_show</code>). Editing remains outside this foundation.
-  </p>
+  {#if accountSections.length}
+    <section class="xpst-section" aria-labelledby="accounts-heading">
+      <div class="xpst-section__heading">
+        <h2 id="accounts-heading">Accounts</h2>
+        <a class="xpst-button" data-variant="secondary" href="#/accounts">Review capabilities</a>
+      </div>
+      <div class="xpst-settings-list">
+        {#each accountSections as section (section.name)}
+          <Card title={ACCOUNT_LABELS[section.name] ?? humanize(section.name)}>
+            <dl class="xpst-settings-grid">
+              {#each Object.entries(section.value ?? {}).filter(([key]) => !isSensitiveKey(key)) as [key, value] (key)}
+                <div><dt>{humanize(key)}</dt><dd>{valueLabel(value)}</dd></div>
+              {/each}
+            </dl>
+          </Card>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  <section class="xpst-section" aria-labelledby="settings-heading">
+    <div class="xpst-section__heading">
+      <h2 id="settings-heading">Engine configuration</h2>
+      <span class="xpst-card__description">Read-only</span>
+    </div>
+    <div class="xpst-settings-list">
+      {#each sections.filter((section) => section.name !== "accounts") as section (section.name)}
+        <Card title={humanize(section.name)}>
+          <dl class="xpst-settings-grid">
+            {#each Object.entries(section.value ?? {}).filter(([key]) => !isSensitiveKey(key)) as [key, value] (key)}
+              <div><dt>{humanize(key)}</dt><dd>{valueLabel(value)}</dd></div>
+            {/each}
+          </dl>
+        </Card>
+      {/each}
+    </div>
+  </section>
+  <p class="xpst-card__description">Secrets remain masked server-side. Account capability truth is managed separately from these read-only settings.</p>
 {/if}
