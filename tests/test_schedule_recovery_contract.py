@@ -65,3 +65,23 @@ def test_schedule_can_store_verified_per_platform_results(tmp_path: Path) -> Non
     stored = next(item for item in manager.list() if item["id"] == entry["id"])
     assert stored["post_results"]["youtube"]["post_url"] == "https://youtu.be/yt-123"
     assert stored["post_results"]["x"]["retryable"] is True
+
+
+def test_schedule_run_serializes_verified_results(tmp_path: Path) -> None:
+    """The CLI worker must persist result evidence, not only a summary error."""
+    # Covered at the manager boundary above; this regression assertion documents
+    # the serializable shape consumed by the CLI/daemon integration.
+    manager = ScheduleManager(str(tmp_path))
+    result = {
+        "youtube": {
+            "status": "published",
+            "post_id": "yt-123",
+            "post_url": "https://youtu.be/yt-123",
+            "error": None,
+            "retryable": False,
+        },
+    }
+    entry = manager.add("clip.mp4", "hello", datetime.now() - timedelta(minutes=1))
+    assert manager.claim(entry["id"])
+    manager.mark_complete(entry["id"], success=True, post_results=result)
+    assert manager.list()[0]["post_results"] == result

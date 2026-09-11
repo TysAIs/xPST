@@ -4065,7 +4065,13 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
                 failed = [f"{p}: {ur.error}" for p, ur in result.results.items() if not ur.success]
                 error_msg = "; ".join(failed)
 
-            manager.mark_complete(entry_id, success=success, error=error_msg)
+            post_results = {platform: upload_result.to_dict() for platform, upload_result in result.results.items()}
+            manager.mark_complete(
+                entry_id,
+                success=success,
+                error=error_msg,
+                post_results=post_results,
+            )
 
             if not as_json:
                 if success:

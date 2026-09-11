@@ -16,7 +16,8 @@ Each entry:
         "status": "pending" | "completed" | "failed",
         "created_at": "2026-06-07T12:00:00",
         "completed_at": null,
-        "error": null
+        "error": null,
+        "post_results": {}
     }
 """
 
