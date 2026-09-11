@@ -258,6 +258,8 @@ class ScheduleManager:
 
         entry: dict[str, Any] = {
             "id": str(uuid.uuid4())[:8],
+            "operation_id": (operation_id := str(uuid.uuid4())),
+            "idempotency_key": operation_id,
             "video_path": str(video_path),
             "caption": caption,
             "platforms": clean_platforms,
@@ -455,8 +457,11 @@ class ScheduleManager:
         else:
             return
 
+        operation_id = str(uuid.uuid4())
         new_entry: dict[str, Any] = {
             "id": str(uuid.uuid4())[:8],
+            "operation_id": operation_id,
+            "idempotency_key": operation_id,
             "video_path": entry["video_path"],
             "caption": entry["caption"],
             "platforms": entry.get("platforms", []),
