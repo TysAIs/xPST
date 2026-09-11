@@ -1,5 +1,6 @@
 <script>
   import { AlertCircle, AlertTriangle, CheckCircle2, CircleHelp, MinusCircle } from "@lucide/svelte";
+  import { statusLabel } from "../labels.js";
 
   const STATUS_ICONS = {
     success: CheckCircle2,
@@ -17,7 +18,7 @@
   let { status = "unknown", label = undefined } = $props();
   const normalized = $derived(String(status || "unknown").toLowerCase());
   const Icon = $derived(STATUS_ICONS[normalized] ?? CircleHelp);
-  const displayLabel = $derived(label ?? normalized.replaceAll("_", " "));
+  const displayLabel = $derived(label ?? statusLabel(normalized));
 </script>
 
 <span class="xpst-status-badge" data-status={normalized}>
