@@ -26,8 +26,9 @@ def test_windows_uses_appdata(monkeypatch):
     assert plat.get_config_dir() == Path(r"C:\Users\tester\AppData\Roaming") / "xPST"
 
 
-def test_windows_falls_back_to_home_without_appdata(monkeypatch):
+def test_windows_falls_back_to_userprofile_without_appdata(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.delenv("APPDATA", raising=False)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/home/tester")))
-    assert plat.get_config_dir() == Path("/home/tester/.xpst")
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\tester")
+    expected = Path(r"C:\Users\tester") / "AppData" / "Roaming" / "xPST"
+    assert plat.get_config_dir() == expected
