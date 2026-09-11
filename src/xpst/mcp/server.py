@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
 # The 'mcp' package is an optional extra. Import it gracefully so that simply
@@ -74,7 +75,12 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
 
 from xpst.config import XPSTConfig
 from xpst.engine import CrossPostEngine, CrossPostResult
-from xpst.providers import ProviderRole
+from xpst.provider_truth import ProviderRole
+from xpst.setup_transaction import (
+    SetupTransactionError,
+    SetupTransactionNotFound,
+    SetupTransactionService,
+)
 from xpst.utils.logger import get_logger, setup_logging
 
 if TYPE_CHECKING:
@@ -103,9 +109,9 @@ def _provider_enums() -> tuple[list[str], list[str]]:
 
         PlatformRegistry.auto_discover()
         discovered = [
-            m.name
-            for m in PlatformRegistry.list_manifests(None)
-            if ProviderRole.VIDEO_DESTINATION in m.canonical_roles
+            manifest.name
+            for manifest in PlatformRegistry.list_manifests(None)
+            if ProviderRole.VIDEO_DESTINATION in manifest.canonical_roles
         ]
         if discovered:
             platforms = sorted(set(platforms) | set(discovered))
@@ -185,6 +191,21 @@ async def get_server(
 
 
 # ── Tool Definitions ──
+
+_SETUP_ROLE_CAPABILITY_SCHEMA = {
+    "type": "array",
+    "description": "Non-secret role-capability selections such as source/tiktok and video_destination/youtube",
+    "items": {
+        "type": "object",
+        "properties": {
+            "role": {"type": "string", "enum": ["source", "video_destination", "analytics", "messaging"]},
+            "capability": {"type": "string"},
+        },
+        "required": ["role", "capability"],
+        "additionalProperties": False,
+    },
+}
+
 
 TOOLS: list[Tool] = [
     Tool(
@@ -747,6 +768,50 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    Tool(
+        name="xpst_setup_start",
+        description="Start or return the shared resumable setup transaction",
+        inputSchema={
+            "type": "object",
+            "properties": {"selected_role_capabilities": _SETUP_ROLE_CAPABILITY_SCHEMA},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_setup_status",
+        description="Read the shared setup transaction and pending human actions",
+        inputSchema={
+            "type": "object",
+            "properties": {"transaction_id": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_setup_resume",
+        description="Resume setup with safe step state or caller-verified readiness",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "transaction_id": {"type": "string"},
+                "step_id": {"type": "string"},
+                "step_state": {"type": "string", "enum": ["pending", "in_progress", "waiting_human", "verified", "skipped", "error"]},
+                "step_updates": {"type": "object"},
+                "readiness": {"type": "object"},
+                "finish_later": {"type": "boolean", "default": False},
+                "error": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_setup_reset",
+        description="Reset the shared setup transaction and its recovery copies",
+        inputSchema={
+            "type": "object",
+            "properties": {"transaction_id": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 
@@ -809,6 +874,52 @@ def _guardrail_block(name: str, arguments: dict[str, Any]) -> CallToolResult | N
     return None
 
 
+_SETUP_TOOL_NAMES = {
+    "xpst_setup_start",
+    "xpst_setup_status",
+    "xpst_setup_resume",
+    "xpst_setup_reset",
+}
+
+
+def _setup_tool_result(payload: dict[str, Any], *, is_error: bool = False) -> CallToolResult:
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, indent=2, sort_keys=True))],
+        isError=is_error,
+    )
+
+
+async def _handle_setup_tool(server: XPSTMCPServer, name: str, arguments: dict[str, Any]) -> CallToolResult:
+    """Dispatch setup transaction tools without initializing the posting engine."""
+    service = SetupTransactionService(server.config.config_dir)
+    try:
+        if name == "xpst_setup_start":
+            payload = service.start_json(arguments.get("selected_role_capabilities"), alias="mcp")
+        elif name == "xpst_setup_status":
+            payload = service.status_json(arguments.get("transaction_id"), alias="mcp")
+        elif name == "xpst_setup_resume":
+            resume_args = {
+                key: arguments[key]
+                for key in ("step_id", "step_state", "step_updates", "readiness", "finish_later", "error")
+                if key in arguments
+            }
+            payload = service.resume_json(arguments.get("transaction_id"), alias="mcp", **resume_args)
+        else:
+            payload = service.reset_json(arguments.get("transaction_id"), alias="mcp")
+        return _setup_tool_result(payload)
+    except (SetupTransactionError, SetupTransactionNotFound):
+        payload = {
+            "ok": False,
+            "operation": name.removeprefix("xpst_setup_") or "setup",
+            "error": {
+                "code": "SETUP_REQUEST_INVALID",
+                "message": "The setup request could not be applied to the active transaction.",
+                "action": "Read setup status, correct the non-secret request, and retry.",
+            },
+        }
+        return _setup_tool_result(payload, is_error=True)
+
+
 async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
     """Handle a tool call — with audit logging and retry on transient failures."""
     import time as _time
@@ -826,7 +937,9 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
     server = await get_server(initialize=name in engine_tools)
 
     try:
-        if name == "xpst_run":
+        if name in _SETUP_TOOL_NAMES:
+            result = await _handle_setup_tool(server, name, arguments)
+        elif name == "xpst_run":
             engine = server.get_engine()
             result = await _handle_run(engine, arguments)
         elif name == "xpst_post":
@@ -962,7 +1075,7 @@ def _serialize_result(result: CrossPostResult) -> dict[str, Any]:
     return {
         "video_id": result.video_id,
         "caption": result.caption,
-        "results": {p: r.to_dict() for p, r in result.results.items()},
+        "results": {p: asdict(r) for p, r in result.results.items()},
         "all_success": result.all_success,
         "partial_success": result.partial_success,
         "quota_blocked": {
@@ -1016,14 +1129,8 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
 
 
 async def _handle_health(engine: CrossPostEngine) -> CallToolResult:
-    """Handle xpst_health with canonical provider role truth."""
-    from xpst.auth_status import collect_live_auth_status_async
-    from xpst.provider_truth import canonical_status_report
-
+    """Handle xpst_health tool."""
     health = await engine.check_health()
-    canonical = await collect_live_auth_status_async(engine.config, engine._platforms)
-    health["canonical"] = canonical_status_report(engine.config, canonical)
-    health["providers"] = health["canonical"]["providers"]
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(health, indent=2, default=str))],
     )
@@ -1431,53 +1538,45 @@ async def _handle_config_show(config: XPSTConfig) -> CallToolResult:
 
 
 async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
-    """Handle xpst_auth_status with canonical live role state."""
-    from xpst.auth_status import collect_live_auth_status_async
+    """Handle xpst_auth_status tool."""
     from xpst.utils.credentials import CredentialStore
     from xpst.utils.quota import QuotaManager
 
     cred_store = CredentialStore(config.config_dir)
     quota_mgr = QuotaManager(config.config_dir)
+
     stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (encrypted fallback)"
-    live = await collect_live_auth_status_async(config)
 
     result: dict[str, Any] = {
         "credential_storage": storage_type,
         "stored_credentials": stored_keys,
         "platforms": {},
     }
-    credential_keys = {
-        "youtube": "youtube_token",
-        "x": "x_cookies",
-        "instagram": "instagram_session",
-        "tiktok": "tiktok_cookies",
-        "threads": "threads_access_token",
-        "messenger": "messenger_page_token",
+
+    for platform in ["youtube", "x", "instagram"]:
+        creds = None
+        if platform == "youtube":
+            creds = cred_store.retrieve("youtube_token")
+        elif platform == "x":
+            creds = cred_store.retrieve_json("x_cookies")
+        elif platform == "instagram":
+            creds = cred_store.retrieve_json("instagram_session")
+
+        remaining = quota_mgr.get_remaining(platform)
+        result["platforms"][platform] = {
+            "authenticated": bool(creds),
+            "quota_remaining": remaining.get("daily", "N/A"),
+        }
+
+    # Messenger (static page token; token lives in CredentialStore)
+    messenger_creds = cred_store.retrieve("messenger_page_token") or config.messenger.page_access_token
+    result["platforms"]["messenger"] = {
+        "authenticated": bool(messenger_creds),
+        "auto_reply": bool(config.messenger.auto_reply),
+        "quota_remaining": quota_mgr.get_remaining("messenger").get("daily", "N/A"),
     }
-    for platform in ("youtube", "x", "instagram", "tiktok", "threads", "messenger"):
-        key = credential_keys[platform]
-        stored = bool(cred_store.retrieve_json(key) if platform in {"x", "instagram", "tiktok"} else cred_store.retrieve(key))
-        entry = dict(live.get(platform, {}))
-        entry.update(
-            {
-                # Backward-compatible presence signal; authenticated is live
-                # truth in the canonical entry.
-                "credentials_stored": stored,
-                "quota_remaining": quota_mgr.get_remaining(platform).get("daily", "N/A"),
-            }
-        )
-        if not entry:
-            entry = {"authenticated": stored, "live_checked": False}
-        result["platforms"][platform] = entry
 
-    local_entry = dict(live.get("local", {}))
-    local_entry["credentials_stored"] = False
-    local_entry["quota_remaining"] = quota_mgr.get_remaining("local").get("daily", "N/A")
-    result["platforms"]["local"] = local_entry
-
-    result["providers"] = result["platforms"]
-    result["roles"] = ["source", "video_destination", "messaging", "analytics"]
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
     )
@@ -1511,21 +1610,16 @@ async def _handle_providers(config: XPSTConfig) -> CallToolResult:
 
 
 def build_provider_catalog(config: XPSTConfig) -> dict[str, Any]:
-    """Return legacy catalogs plus the canonical role-aware provider list."""
+    """Return provider metadata for MCP clients and support tooling."""
     from xpst.platforms.base import PlatformRegistry
-    from xpst.provider_truth import canonical_provider_catalog
     from xpst.sources.base import SourceRegistry
 
     SourceRegistry.auto_discover()
     PlatformRegistry.auto_discover()
     sources = SourceRegistry.list_manifests(config)
     destinations = PlatformRegistry.list_manifests(config)
-    canonical = canonical_provider_catalog(config)
-    providers = canonical["providers"]
 
     return {
-        # Existing clients use these two manifest arrays.  They remain intact;
-        # canonical consumers use providers/video_destinations/messaging below.
         "sources": [
             manifest.to_dict()
             for manifest in sorted(sources, key=lambda item: item.name)
@@ -1534,13 +1628,6 @@ def build_provider_catalog(config: XPSTConfig) -> dict[str, Any]:
             manifest.to_dict()
             for manifest in sorted(destinations, key=lambda item: item.name)
         ],
-        "providers": providers,
-        "video_destinations": [
-            item for item in providers if "video_destination" in item["roles"]
-        ],
-        "messaging": [item for item in providers if "messaging" in item["roles"]],
-        "analytics": [item for item in providers if "analytics" in item["roles"]],
-        "roles": canonical["roles"],
     }
 
 
