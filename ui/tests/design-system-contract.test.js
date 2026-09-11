@@ -147,6 +147,8 @@ test("dashboard empty action is placed before health and copy does not promise d
   assert.match(dashboard, /Tracked source posts/);
   assert.match(dashboard, /Platform post records/);
   assert.doesNotMatch(dashboard, /platform health will appear here/);
+  assert.match(dashboard, /Readiness/);
+  assert.match(dashboard, /Create post/);
 });
 
 test("loading state exposes a bounded retry path", async () => {
