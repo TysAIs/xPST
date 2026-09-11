@@ -1,6 +1,6 @@
 [package]
 name = "xpst-shell"
-version = "1.0.0"
+version = "1.1.0"
 description = "xPST desktop shell — Tauri 2 wrapper around the Python engine sidecar"
 edition = "2021"
 rust-version = "1.77"
