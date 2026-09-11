@@ -38,7 +38,7 @@
 </header>
 
 {#if state === "loading"}
-  <LoadingSkeleton rows={6} label="Loading analytics" />
+  <LoadingSkeleton rows={6} label="Loading analytics" onRetry={load} />
 {:else if state === "error"}
   <ErrorState message={error} retry={load} />
 {:else if rows.length === 0}
