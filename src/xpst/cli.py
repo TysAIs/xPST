@@ -980,8 +980,9 @@ def readiness(ctx: click.Context, fix_local: bool, as_json: bool):
 @json_option
 @click.pass_context
 def providers(ctx: click.Context, as_json: bool):
-    """Show supported source and destination providers"""
+    """Show supported providers and their canonical roles."""
     from xpst.platforms.base import PlatformRegistry
+    from xpst.provider_truth import canonical_provider_catalog
     from xpst.sources.base import SourceRegistry
 
     config = load_config(ctx.obj.get("config_path"))
@@ -989,12 +990,20 @@ def providers(ctx: click.Context, as_json: bool):
     PlatformRegistry.auto_discover()
     sources = SourceRegistry.list_manifests(config)
     destinations = PlatformRegistry.list_manifests(config)
+    canonical = canonical_provider_catalog(config)
     data: dict[str, Any] = {
         "sources": [manifest.to_dict() for manifest in sorted(sources, key=lambda item: item.name)],
         "destinations": [
             manifest.to_dict()
             for manifest in sorted(destinations, key=lambda item: item.name)
         ],
+        "providers": canonical["providers"],
+        "video_destinations": [
+            item for item in canonical["providers"] if "video_destination" in item["roles"]
+        ],
+        "messaging": [item for item in canonical["providers"] if "messaging" in item["roles"]],
+        "analytics": [item for item in canonical["providers"] if "analytics" in item["roles"]],
+        "roles": canonical["roles"],
         "provider_mode": config.provider_mode,
     }
 
@@ -1557,8 +1566,29 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     results: dict[str, bool] = {}
     with redirect_stdout(sys.stderr):
         results = asyncio.run(test_connections(config))
+    canonical_results = getattr(results, "canonical_status", None)
     if platform:
         results = {p: ok for p, ok in results.items() if p == platform}
+
+    # test_connections is a backward-compatible bool wrapper around the
+    # canonical live probes. Rehydrate its result into the same role-aware
+    # model so doctor cannot invent a second definition of "connected".
+    from xpst.provider_truth import build_canonical_status
+
+    if canonical_results:
+        canonical = build_canonical_status(config, canonical_results)
+    else:
+        canonical_live = {
+            name: {
+                "authenticated": ok,
+                "session_valid": ok,
+                "live_checked": True,
+                "error": None if ok else "Live check failed",
+                "details": {},
+            }
+            for name, ok in results.items()
+        }
+        canonical = build_canonical_status(config, canonical_live)
 
     sessions = _session_health(config)
     quota_mgr = QuotaManager(config.config_dir, config=config)
@@ -1570,7 +1600,10 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     for p, ok in results.items():
         session = sessions.get(p, {})
         creds_present = bool(session.get("present"))
-        if ok:
+        canonical_info = canonical.get(p, {})
+        connected = bool(canonical_info.get("authenticated", ok))
+        disabled = canonical_info.get("state") == "disabled" and canonical_results is not None
+        if connected or disabled:
             problem = None
             fix = None
         elif creds_present:
@@ -1582,8 +1615,12 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
 
         qinfo = quota_status.get(p, {})
         platforms_report[p] = {
-            "connected": ok,
-            "auth_mode": getattr(getattr(config, p, None), "auth_mode", None),
+            "connected": connected,
+            "state": canonical_info.get("state", "degraded"),
+            "roles": canonical_info.get("roles", {}),
+            "auth_mode": canonical_info.get(
+                "auth_mode", getattr(getattr(config, p, None), "auth_mode", None)
+            ),
             "session_age_days": session.get("age_days"),
             "problem": problem,
             "fix": fix,
@@ -1593,7 +1630,7 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
                 "remaining": qinfo.get("remaining"),
             },
         }
-        if not ok:
+        if not connected and not disabled:
             issues.append({
                 "severity": "error",
                 "platform": p,
@@ -1648,6 +1685,7 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     report: dict[str, Any] = {
         "doctor": True,
         "platforms": platforms_report,
+        "canonical": {"providers": canonical, "roles": ["source", "video_destination", "messaging", "analytics"]},
         "environment": environment,
         "issues": issues,
         "all_clear": not issues,
@@ -1771,6 +1809,7 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
             ("tiktok", tiktok_creds),
             ("threads", threads_creds),
             ("messenger", messenger_creds),
+            ("local", config.local.path),
         ]:
             remaining = quota_mgr.get_remaining(plat)
             stored = bool(creds)
@@ -1791,6 +1830,8 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
                 entry["authenticated"] = stored
                 entry["live_checked"] = False
             data["platforms"][plat] = entry
+        data["providers"] = data["platforms"]
+        data["roles"] = ["source", "video_destination", "messaging", "analytics"]
         json_output(data, True)
         return
 

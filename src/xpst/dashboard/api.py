@@ -155,12 +155,23 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
         try:
             from xpst.auth_status import collect_live_auth_status
             from xpst.config import XPSTConfig
+            from xpst.provider_truth import canonical_status_report
 
             config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
             auth = collect_live_auth_status(config)
+            canonical = canonical_status_report(config, auth)
+            role_states = [
+                role.get("state")
+                for provider in canonical["providers"].values()
+                for role in provider.get("role_status", {}).values()
+                if role.get("enabled")
+            ]
+            if any(state in {"unconfigured", "degraded", "blocked_external_review"} for state in role_states):
+                status = "degraded"
         except Exception as exc:
             auth_error = str(exc)[:200]
             logger.debug("Live auth status unavailable: %s", exc)
+            canonical = {"providers": {}, "platforms": {}, "roles": []}
 
         return {
             "status": status,
@@ -168,7 +179,18 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
             "total_processed": health.get("total_processed", 0),
             "auth": auth,
             "auth_error": auth_error,
+            "canonical": canonical,
+            "providers": canonical["providers"],
         }
+
+    @router.get("/providers")
+    def api_providers() -> dict[str, Any]:
+        """Return the static role-aware provider catalog."""
+        from xpst.config import XPSTConfig
+        from xpst.provider_truth import canonical_provider_catalog
+
+        config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+        return canonical_provider_catalog(config)
 
     @router.get("/settings")
     def api_settings() -> dict[str, Any]:

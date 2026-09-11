@@ -60,7 +60,7 @@ class TikTokUploader(PlatformUploader):
         return ProviderManifest(
             name="tiktok",
             display_name="TikTok",
-            roles=(ProviderRole.DESTINATION,),
+            roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
             capabilities=(
                 ProviderCapability.UPLOAD,
                 ProviderCapability.DELETE,

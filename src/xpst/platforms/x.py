@@ -185,23 +185,37 @@ class XUploader(PlatformUploader):
 
     @property
     def manifest(self) -> ProviderManifest:
-        """Return X destination capabilities."""
+        """Return X video-destination capabilities for the active auth mode."""
         return ProviderManifest(
             name="x",
             display_name="X",
-            roles=(ProviderRole.DESTINATION,),
+            roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
             capabilities=(
                 ProviderCapability.UPLOAD,
                 ProviderCapability.DELETE,
                 ProviderCapability.CAROUSEL,
                 ProviderCapability.HEALTH,
-                ProviderCapability.COOKIE_AUTH,
+                ProviderCapability.OFFICIAL_API
+                if self.config.x.auth_mode == "api_v2"
+                else ProviderCapability.COOKIE_AUTH,
                 ProviderCapability.RATE_LIMITS,
             ),
-            auth_mode=AuthMode.COOKIES,
-            is_official_api=False,
-            docs_url="https://github.com/d60/twikit",
-            notes="Uses persisted X cookies through twikit; carousel posts are published as threads.",
+            auth_mode=(
+                AuthMode.API_V2
+                if self.config.x.auth_mode == "api_v2"
+                else AuthMode.COOKIES
+            ),
+            is_official_api=self.config.x.auth_mode == "api_v2",
+            docs_url=(
+                "https://developer.x.com/en/docs/x-api"
+                if self.config.x.auth_mode == "api_v2"
+                else "https://github.com/d60/twikit"
+            ),
+            notes=(
+                "Uses the official X API v2 media/tweet path."
+                if self.config.x.auth_mode == "api_v2"
+                else "Uses persisted X cookies through twikit; carousel posts are published as threads."
+            ),
             extra={
                 "content": ("video", "thread"),
                 "max_caption_length": 280,
@@ -500,12 +514,83 @@ class XUploader(PlatformUploader):
                 platform="x",
             )
 
+    async def _check_health_api_v2(self) -> PlatformHealth:
+        """Check the configured official X API v2 user context."""
+        import httpx
+
+        x_config = self.config.x
+        has_oauth1 = all(
+            getattr(x_config, field, "")
+            for field in ("api_key", "api_secret", "access_token", "access_token_secret")
+        )
+        bearer = x_config.bearer_token
+        if not bearer and not has_oauth1:
+            return PlatformHealth(
+                platform="x",
+                authenticated=False,
+                session_valid=False,
+                error="X_API_V2_NOT_CONFIGURED: API credentials are missing",
+                details={"auth_mode": "api_v2", "probe": "api_v2"},
+            )
+
+        try:
+            if bearer:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    response = await client.get(
+                        "https://api.twitter.com/2/users/me",
+                        headers={"Authorization": f"Bearer {bearer}"},
+                    )
+            else:
+                from authlib.integrations.httpx_client import AsyncOAuth1Client
+
+                async with AsyncOAuth1Client(
+                    x_config.api_key,
+                    x_config.api_secret,
+                    x_config.access_token,
+                    x_config.access_token_secret,
+                    timeout=30,
+                ) as client:
+                    response = await client.get("https://api.twitter.com/2/users/me")
+            response.raise_for_status()
+            data = response.json().get("data", {})
+            if not data.get("id"):
+                return PlatformHealth(
+                    platform="x",
+                    authenticated=False,
+                    session_valid=False,
+                    error="X API v2 returned no user data",
+                    details={"auth_mode": "api_v2", "probe": "api_v2"},
+                )
+            return PlatformHealth(
+                platform="x",
+                authenticated=True,
+                session_valid=True,
+                details={
+                    "username": data.get("username", ""),
+                    "name": data.get("name", ""),
+                    "user_id": str(data["id"]),
+                    "auth_mode": "api_v2",
+                    "probe": "api_v2",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — health must fail closed
+            return PlatformHealth(
+                platform="x",
+                authenticated=False,
+                session_valid=False,
+                error=f"X API v2 health check failed: {str(exc)[:200]}",
+                details={"auth_mode": "api_v2", "probe": "api_v2"},
+            )
+
     async def check_health(self) -> PlatformHealth:
         """Check X/Twitter authentication health.
 
         Returns:
             PlatformHealth with authentication status
         """
+        if self.config.x.auth_mode == "api_v2":
+            return await self._check_health_api_v2()
+
         try:
             client = await self._get_client()
 
@@ -519,6 +604,8 @@ class XUploader(PlatformUploader):
                     details={
                         "username": user.screen_name,
                         "user_id": user.id,
+                        "auth_mode": "cookies",
+                        "probe": "cookie_session",
                     },
                 )
             except Exception:
