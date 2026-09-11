@@ -95,6 +95,9 @@ jobs:
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
 
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+
       - name: Build Tauri app + updater artifacts
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
