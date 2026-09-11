@@ -103,8 +103,8 @@ if [[ -n "$PORT" ]]; then
 fi
 
 # Gate: boot-to-VISIBLE window must stay under 1s (size/boot gates).
-# boot_to_ready additionally includes the PyInstaller onefile extraction
-# (~1.5s) and is reported but not gated.
+# boot_to_ready includes engine startup and webview navigation and is
+# reported but not gated.
 VIS="$(sed -n 's/^.*BOOT_TO_VISIBLE_SECS=//p' "$LOG" | head -1)"
 if [[ -n "$VIS" ]] && awk -v b="$VIS" -v l="$BOOT_LIMIT_SECS" 'BEGIN { exit (b+0 <= l+0) ? 0 : 1 }'; then
     echo "PASS: boot_to_visible ${VIS}s <= ${BOOT_LIMIT_SECS}s (boot_to_ready=${BOOT}s)"
