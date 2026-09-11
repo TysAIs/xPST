@@ -57,11 +57,14 @@ def home(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    # Windows' os.path.expanduser()/Path.home() ignore HOME and read
-    # USERPROFILE/HOMEPATH — without these the isolation silently breaks
-    # on the win32 CI leg (wizard resume, config writes hit the real profile).
+    # Isolate the platform-native config root too. Windows production code
+    # prefers APPDATA, so leaving the runner's real APPDATA leaks state across
+    # tests and defeats the fixture's HOME isolation.
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     if sys.platform == "win32":
+        appdata = home / "AppData" / "Roaming"
+        appdata.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv("APPDATA", str(appdata))
         monkeypatch.setenv("USERPROFILE", str(home))
         monkeypatch.setenv("HOMEDRIVE", str(home)[:2])
         monkeypatch.setenv("HOMEPATH", str(home)[2:])
