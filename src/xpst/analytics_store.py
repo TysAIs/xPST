@@ -66,6 +66,36 @@ CREATE TABLE IF NOT EXISTS follower_snapshots (
 """
 
 
+def _normalise_capture_timestamp(value: Any, fallback: str) -> str:
+    """Store valid timestamps as UTC ISO-8601 strings.
+
+    Legacy callers may provide naive timestamps; they are interpreted as UTC
+    rather than compared directly with aware timestamps. Invalid legacy text
+    is preserved for API compatibility, but cannot be used as a reliable
+    freshness value by callers.
+    """
+    if not value:
+        return fallback
+    raw = str(value)
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return raw
+    parsed = parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    return parsed.isoformat()
+
+
+def _parse_capture_timestamp(value: Any) -> datetime | None:
+    """Parse a stored capture timestamp into aware UTC, if valid."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+
+
 class AnalyticsStore:
     """Append-only store of per-post metric snapshots."""
 
@@ -110,7 +140,7 @@ class AnalyticsStore:
                     (
                         str(platform),
                         str(post_id),
-                        str(row.get("timestamp") or now),
+                        _normalise_capture_timestamp(row.get("timestamp"), now),
                         *(row.get(f) for f in _CORE_FIELDS),
                         json.dumps(extra, default=str) if extra else None,
                     ),
@@ -265,55 +295,75 @@ class AnalyticsStore:
         with self._connect() as conn:
             return int(conn.execute("SELECT COUNT(*) FROM metric_snapshots").fetchone()[0])
 
-    def delete_youtube_snapshots_not_in(self, owned_ids: set[str]) -> int:
-        """Purge stale ``metric_snapshots`` rows whose id is not owned.
+    def last_captured_at(self, platform: str | None = None) -> str | None:
+        """Return the newest persisted capture timestamp.
 
-        Self-healing half of the ownership invariant (root-cause hardening
-        for the skewed views/likes/comments dashboard aggregates): the
-        persistence gate in the collector stops NEW foreign ids from being
-        written, and this removes foreign rows that are ALREADY present —
-        test posts, videos later deleted from the channel, or rows persisted
-        before the ownership gate existed. Only ``platform='youtube'`` rows
-        are touched; X/Instagram identity is governed by state.json and
-        never purged here.
-
-        Args:
-            owned_ids: Verified ids on the authenticated channel's uploads
-                playlist. Callers must pass a VERIFIED set — never a
-                failure sentinel — or a transient ownership check failure
-                would wipe the whole table.
-
-        Returns:
-            Number of rows deleted.
+        ``None`` means no snapshots exist (or no snapshots exist for the
+        requested platform). Values are parsed as UTC before selecting the
+        newest one, so legacy offset-aware timestamps remain chronological.
         """
+        query = "SELECT captured_at FROM metric_snapshots"
+        params: tuple[str, ...] = ()
+        if platform:
+            query += " WHERE platform = ?"
+            params = (platform,)
+        with self._connect() as conn:
+            values = [row[0] for row in conn.execute(query, params)]
+        timestamps = [_parse_capture_timestamp(value) for value in values]
+        valid = [timestamp for timestamp in timestamps if timestamp is not None]
+        if not valid:
+            return None
+        return max(valid).isoformat()
+
+    def delete_snapshots_not_in(self, platform: str, owned_ids: set[str] | None) -> int:
+        """Purge stale rows for ``platform`` not in a verified ID set.
+
+        The caller must only pass an ownership set obtained from a successful
+        identity check. Empty or ``None`` sets are deliberately a no-op:
+        absence of ownership evidence must never turn into a destructive
+        ``DELETE all rows for this platform`` operation.
+        """
+        if not platform or not owned_ids:
+            return 0
+        valid_owned_ids = {
+            candidate
+            for item in owned_ids
+            if (candidate := str(item).strip())
+        }
+        if not valid_owned_ids:
+            return 0
         deleted = 0
-        # A temp table avoids the sqlite parameter limit entirely and makes
-        # the "channel owns nothing" case (empty set → delete all youtube
-        # rows) a plain inner join, not a special branch.
         with self._connect() as conn:
             conn.execute("CREATE TEMP TABLE _owned_snap (id TEXT PRIMARY KEY)")
             try:
                 conn.executemany(
                     "INSERT OR IGNORE INTO _owned_snap (id) VALUES (?)",
-                    ((str(i),) for i in owned_ids),
+                    ((item,) for item in valid_owned_ids),
                 )
                 deleted = int(
                     conn.execute(
                         """
                         DELETE FROM metric_snapshots
-                        WHERE platform = 'youtube'
+                        WHERE platform = ?
                           AND NOT EXISTS (
                               SELECT 1 FROM _owned_snap o
                               WHERE o.id = metric_snapshots.post_id
                           )
-                        """
+                        """,
+                        (platform,),
                     ).rowcount
                 )
             finally:
                 conn.execute("DROP TABLE _owned_snap")
         if deleted:
-            logger.info("Purged %d stale youtube snapshot(s) not owned by the channel", deleted)
+            logger.info(
+                "Purged %d stale %s snapshot(s) not owned by the account", deleted, platform
+            )
         return deleted
+
+    def delete_youtube_snapshots_not_in(self, owned_ids: set[str] | None) -> int:
+        """Backwards-compatible YouTube-specific purge wrapper."""
+        return self.delete_snapshots_not_in("youtube", owned_ids)
 
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:

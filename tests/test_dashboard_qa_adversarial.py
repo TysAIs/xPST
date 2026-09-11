@@ -5,7 +5,7 @@ dashboard surface:
 
 * /state must not 500 when state.json carries timezone-aware or malformed
   timestamps (one bad entry used to kill the whole dashboard summary).
-* _parse_ts normalizes aware timestamps to naive UTC.
+* _parse_ts normalizes aware timestamps to aware UTC.
 * AnalyticsCollector._store() caches one AnalyticsStore per db path (the
   old per-call construction re-ran CREATE TABLE DDL — a SQLite write lock —
   several times per request, serializing concurrent dashboard + CLI load).
@@ -32,13 +32,14 @@ from .test_dashboard import (  # reuse helpers
 # ──────────────────────────────────────────────
 
 
-def test_parse_ts_normalizes_aware_to_naive_utc():
+def test_parse_ts_normalizes_aware_to_aware_utc():
     """An aware timestamp is converted to naive UTC, never returned aware."""
     aware = "2026-08-20T12:00:00+02:00"
     dt = _parse_ts(aware)
     assert dt is not None
-    assert dt.tzinfo is None
-    assert dt == datetime(2026, 8, 20, 10, 0, 0)
+    assert dt.tzinfo is not None
+    assert dt.utcoffset() == timedelta(0)
+    assert dt == datetime(2026, 8, 20, 10, 0, 0, tzinfo=timezone.utc)
 
 
 def test_parse_ts_garbage_and_none():

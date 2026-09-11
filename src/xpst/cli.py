@@ -35,6 +35,7 @@ from rich.table import Table
 
 from xpst.config import XPSTConfig
 from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.setup_transaction import SetupTransactionService
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger, setup_logging
@@ -219,42 +220,100 @@ def main(ctx: click.Context, config: str | None, verbose: bool, quiet: bool, jso
 
 
 # ──────────────────────────────────────────────
-# Setup Wizard
+# Setup transaction commands
 # ──────────────────────────────────────────────
 
+
+def _setup_transaction_service(ctx: click.Context) -> SetupTransactionService:
+    """Return the one transaction service used by every setup entry point."""
+    config_path = ctx.obj.get("config_path") if ctx.obj else None
+    config_dir = Path(config_path).expanduser().parent if config_path else get_config_dir()
+    return SetupTransactionService(config_dir)
+
+
+def _setup_pending_payload(payload: dict[str, Any], command: str) -> dict[str, Any]:
+    """Add the compatibility error without hiding resumable state."""
+    payload["ok"] = False
+    payload["error"] = {
+        "code": "INTERACTIVE_REQUIRED",
+        "message": f"{command} cannot perform human approval actions in non-TTY JSON mode.",
+        "action": "Complete the listed human actions, then run the command again or use setup resume.",
+        "hint": f"xpst {command} --dry-run --json" if command == "onboard" else f"xpst {command} --resume",
+    }
+    return payload
+
+
+def _render_setup_transaction(payload: dict[str, Any], command: str) -> None:
+    """Render a terse human view while keeping the same JSON state underneath."""
+    transaction_id = payload.get("transaction_id")
+    completion = payload.get("completion") or {}
+    console.print(f"[bold blue]Setup transaction[/bold blue] {transaction_id or 'none'}")
+    console.print(f"  State: {completion.get('state', payload.get('state', 'not_started'))}")
+    actions = payload.get("pending_human_actions", [])
+    if actions:
+        console.print(f"  [yellow]{len(actions)} human action(s) pending.[/yellow]")
+        console.print(f"  Resume with: [cyan]xpst {command} --resume[/cyan]")
+    elif completion.get("complete"):
+        console.print("  [green]Setup readiness verified.[/green]")
+
+
 @main.command()
+@click.option("--status", "show_status", is_flag=True, help="Show the active setup transaction")
+@click.option("--resume", "resume_transaction", is_flag=True, help="Resume the active setup transaction")
+@click.option("--finish-later", is_flag=True, help="Save an explicit resumable finish-later state")
+@click.option("--reset", "reset_transaction", is_flag=True, help="Reset the active setup transaction")
 @json_option
 @click.pass_context
-def setup(ctx: click.Context, as_json: bool):
-    """Interactive first-time setup wizard
+def setup(
+    ctx: click.Context,
+    show_status: bool,
+    resume_transaction: bool,
+    finish_later: bool,
+    reset_transaction: bool,
+    as_json: bool,
+):
+    """Start or resume the canonical, durable setup transaction.
 
-    Full system configuration: requirements check (auto-installs
-    yt-dlp if missing), directories, content source, platform links.
-    Only linking accounts? `xpst wizard` is faster.
+    ``setup`` is canonical. ``onboard`` and ``wizard`` are compatibility
+    aliases that address this same transaction; they do not own separate state.
+    JSON/non-TTY mode never prompts or opens a browser and returns pending human
+    actions instead.
     """
-    # Agent-safety gate: setup writes config based on interactive prompts.
-    # On closed/piped stdin the EOF-as-default path would silently write a
-    # default config; agents get data instead.
-    if as_json or not sys.stdin.isatty():
-        payload = {
-            "ok": False,
-            "error": {
-                "code": "INTERACTIVE_REQUIRED",
-                "message": (
-                    "setup is an interactive wizard and was not run. "
-                    "No config was written."
-                ),
-            },
-            "hint": "xpst wizard --json (agent checklist) or run `xpst setup` in a terminal",
-        }
-        if as_json:
-            json_output(payload, True)
-        else:
-            console.print("[yellow]setup is interactive — nothing was changed.[/yellow]")
-            console.print("[dim]Run `xpst setup` in a terminal, or `xpst wizard` for account linking.[/dim]")
-        sys.exit(EXIT_CONFIG_ERROR)
+    service = _setup_transaction_service(ctx)
+    if reset_transaction:
+        payload = service.reset_json(alias="setup")
+    elif show_status:
+        payload = service.status_json(alias="setup")
+    elif resume_transaction:
+        if service.status() is None:
+            service.start()
+        payload = service.resume_json(alias="setup")
+    elif finish_later:
+        if service.status() is None:
+            service.start()
+        payload = service.resume_json(alias="setup", finish_later=True)
+    else:
+        payload = service.start_json(alias="setup")
+
+    if as_json or not stdin_is_interactive():
+        if payload.get("transaction_id") and not (payload.get("completion") or {}).get("complete") and not reset_transaction and not show_status and not finish_later:
+            payload = _setup_pending_payload(payload, "setup")
+        json_output(payload, True)
+        if payload.get("error") and payload["error"].get("code") == "INTERACTIVE_REQUIRED":
+            ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    if reset_transaction or show_status or finish_later:
+        _render_setup_transaction(payload, "setup")
+        return
+
+    # Preserve the legacy interactive setup experience as the human-action
+    # executor. Its progress is now anchored by the shared transaction above;
+    # readiness completion is only recorded by an explicit live adapter.
     from xpst.setup import run_setup
+
     run_setup()
+    _render_setup_transaction(service.status_json(alias="setup"), "setup")
 
 
 # ──────────────────────────────────────────────
@@ -667,9 +726,9 @@ def verify_media_cmd(
     warnings (the platform would re-encode / shift loudness). Exit code 1
     when any error was found for the selected platform(s).
     """
-    from xpst.media.pipeline import describe_plan, plan_transform
-    from xpst.media.specs import format_report, verify_media
-    from xpst.utils.video import FFmpegNotFoundError, VideoProcessor
+    from xpst.media.pipeline import TransformPlan, describe_plan
+    from xpst.media.specs import Check, MediaReport, format_report
+    from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
 
     quiet = ctx.obj.get("quiet", False)
     setup_logging(
@@ -680,42 +739,50 @@ def verify_media_cmd(
     media_path = Path(file)
     platforms = ["youtube", "tiktok", "instagram", "x", "threads"] if platform == "all" else [platform]
 
+    # This is deliberately the same side-effect-free service used by future
+    # desktop and MCP clients. Readiness is omitted here for compatibility:
+    # verify-media historically reported only local media checks.
+    config = load_config(ctx.obj.get("config_path")) if show_plan else None
+    request = PostPlanRequest(
+        media_paths=(media_path,),
+        target_platforms=tuple(platforms),
+        config=config,
+        include_transform=show_plan,
+        include_readiness=False,
+    )
+    post_plan = PostPreflightService(config).plan(request)
     reports = []
-    plans = []
     for name in platforms:
-        report = verify_media(media_path, name)
-        reports.append(report)
-
-    if show_plan:
-        # Build the transformation plan against the real per-platform
-        # EncodingConfig. The processor is only used for the compliance
-        # probe — a missing ffmpeg degrades to a conservative plan, never
-        # a crash (dry-run must work everywhere).
-        from xpst.media.pipeline import TransformPlan
-
-        config = load_config(ctx.obj.get("config_path"))
-        try:
-            processor = VideoProcessor()
-        except (FFmpegNotFoundError, RuntimeError, OSError):
-            processor = None
-        for name in platforms:
-            enc = getattr(config.video, f"encoding_{name}", None)
-            if enc is None:  # pragma: no cover - defensive
-                continue
-            if processor is not None:
-                plans.append(plan_transform(media_path, name, enc, processor))
-            else:
-                p = TransformPlan(platform=name, action="transcode")
-                p.reasons.append("ffmpeg unavailable — compliance not verified")
-                plans.append(p)
-
-    ok = all(r.ok for r in reports)
+        platform_plan = post_plan.platforms[name]
+        media_item = platform_plan.media[0]
+        checks = [Check(**check) for check in media_item.media_spec.get("checks", [])]
+        known_codes = {check.name for check in checks}
+        checks.extend(
+            Check(name=issue.code, status="error", detail=issue.message)
+            for issue in platform_plan.hard_blockers
+            if issue.media_path == str(media_path) and issue.code not in known_codes
+        )
+        reports.append(
+            MediaReport(
+                path=media_item.media_spec.get("path", str(media_path)),
+                platform=name,
+                checks=checks,
+                probe=media_item.media_spec.get("probe"),
+            )
+        )
+    plans = [
+        post_plan.platforms[name].transform
+        or TransformPlan(platform=name, action="transcode", reasons=["media transform unavailable"])
+        for name in platforms
+    ]
+    ok = post_plan.ok
     if as_json:
         json_output(
             {
                 "file": str(media_path),
                 "ok": ok,
                 "reports": [r.to_dict() for r in reports],
+                **({"post_plan": post_plan.to_dict()} if show_plan else {}),
                 **({"plans": [p.to_dict() for p in plans]} if show_plan else {}),
             },
             True,
@@ -972,8 +1039,9 @@ def readiness(ctx: click.Context, fix_local: bool, as_json: bool):
 @json_option
 @click.pass_context
 def providers(ctx: click.Context, as_json: bool):
-    """Show supported source and destination providers"""
+    """Show supported providers and their canonical roles."""
     from xpst.platforms.base import PlatformRegistry
+    from xpst.provider_truth import canonical_provider_catalog
     from xpst.sources.base import SourceRegistry
 
     config = load_config(ctx.obj.get("config_path"))
@@ -981,12 +1049,20 @@ def providers(ctx: click.Context, as_json: bool):
     PlatformRegistry.auto_discover()
     sources = SourceRegistry.list_manifests(config)
     destinations = PlatformRegistry.list_manifests(config)
+    canonical = canonical_provider_catalog(config)
     data: dict[str, Any] = {
         "sources": [manifest.to_dict() for manifest in sorted(sources, key=lambda item: item.name)],
         "destinations": [
             manifest.to_dict()
             for manifest in sorted(destinations, key=lambda item: item.name)
         ],
+        "providers": canonical["providers"],
+        "video_destinations": [
+            item for item in canonical["providers"] if "video_destination" in item["roles"]
+        ],
+        "messaging": [item for item in canonical["providers"] if "messaging" in item["roles"]],
+        "analytics": [item for item in canonical["providers"] if "analytics" in item["roles"]],
+        "roles": canonical["roles"],
         "provider_mode": config.provider_mode,
     }
 
@@ -1161,12 +1237,14 @@ def health(ctx: click.Context, as_json: bool):
 @main.command()
 @click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
 @click.option("--guide", is_flag=True, help="Print the step-by-step setup guide for the platform (YouTube: Google Cloud OAuth) and exit")
+@click.option("--open-browser/--no-browser", default=None,
+              help="Allow/deny browser launches during account setup (default: TTY only)")
 @click.option("--test", "test_only", is_flag=True, help="Test existing connections only")
 @click.option("--dry-run", "dry_run", is_flag=True,
               help="Show what connect would do (platform, steps, config impact) without connecting or writing config")
 @json_option
 @click.pass_context
-def connect(ctx: click.Context, platform: str | None, guide: bool, test_only: bool, dry_run: bool, as_json: bool):
+def connect(ctx: click.Context, platform: str | None, guide: bool, open_browser: bool | None, test_only: bool, dry_run: bool, as_json: bool):
     """Connect social media accounts (one platform at a time)
 
     Use when you need to link or re-link a SPECIFIC account, e.g.
@@ -1248,7 +1326,7 @@ def connect(ctx: click.Context, platform: str | None, guide: bool, test_only: bo
         return
 
     platforms = [platform] if platform else None
-    success = run_connect(platforms=platforms, test_only=test_only)
+    success = run_connect(platforms=platforms, test_only=test_only, open_browser=open_browser)
     if not success:
         sys.exit(EXIT_AUTH_FAILURE)
 
@@ -1343,32 +1421,128 @@ def disconnect(ctx: click.Context, platform: str, yes: bool, as_json: bool):
             sys.exit(EXIT_GENERAL)
 
 
+def _legacy_wizard_checklist(service: SetupTransactionService) -> list[dict[str, Any]]:
+    """Keep the old checklist shape while its state migrates to the service."""
+    from xpst.wizard import PLATFORM_GUIDES, PLATFORM_ORDER
+
+    legacy_state: dict[str, Any] = {}
+    legacy_path = service.store.config_dir / "wizard_state.json"
+    try:
+        raw = _json.loads(legacy_path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            legacy_state = raw
+    except (OSError, UnicodeDecodeError, ValueError):
+        pass
+    active = service.status() or {}
+    steps_by_platform = {
+        (step.get("role"), step.get("capability")): step
+        for step in active.get("steps", [])
+    }
+    checklist: list[dict[str, Any]] = []
+    for key in PLATFORM_ORDER:
+        guide = PLATFORM_GUIDES[key]
+        step = steps_by_platform.get(("source", key)) or steps_by_platform.get(("video_destination", key))
+        previous = legacy_state.get("platforms", {}).get(key, {})
+        checklist.append({
+            "platform": key,
+            "title": guide.title,
+            "why": guide.why,
+            "steps": [item.text for item in guide.steps],
+            "docs_url": guide.docs_url,
+            "health": "pass" if step and step.get("state") == "verified" else "fail",
+            "last_wizard_status": previous.get("status"),
+            "action": None if step and step.get("state") == "verified" else f"xpst wizard {key}",
+        })
+    return checklist
+
+
 @main.command()
 @click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
 @click.option("--export-md", "export_md", type=click.Path(), default=None, help="Export the step-by-step guide as markdown and exit")
+@click.option("--status", "show_status", is_flag=True, help="Show the active setup transaction")
+@click.option("--resume", "resume_transaction", is_flag=True, help="Resume the active setup transaction")
+@click.option("--finish-later", is_flag=True, help="Save an explicit resumable finish-later state")
+@click.option("--reset", "reset_transaction", is_flag=True, help="Reset the active setup transaction")
 @json_option
-def wizard(platform: str | None, export_md: str | None, as_json: bool):
-    """Polished first-run connection wizard (resumes progress)
+def wizard(
+    platform: str | None,
+    export_md: str | None,
+    show_status: bool,
+    resume_transaction: bool,
+    finish_later: bool,
+    reset_transaction: bool,
+    as_json: bool,
+):
+    """Compatibility view of the canonical setup transaction.
 
-    The recommended path for first-time setup of all accounts. To
-    re-link just one platform later, use `xpst connect <platform>`.
-    For full system configuration (folders, quotas, sources) use
-    `xpst setup` instead.
+    ``wizard`` is a deprecated alias of ``setup``. It keeps guide export and
+    platform arguments for compatibility, but durable progress and completion
+    are owned by ``xpst setup``.
     """
     from xpst.wizard import export_markdown, run_wizard
 
     if export_md:
         path = export_markdown(export_md)
         if as_json:
-            json_output({"exported": str(path)}, True)
+            json_output({"exported": str(path), "alias": {"command": "wizard", "alias_of": "setup", "deprecated": True}}, True)
         else:
             console.print(f"[green]✅ Guide written to {path}[/green]")
         return
 
-    platforms = [platform] if platform else None
-    success = run_wizard(platforms=platforms, json_mode=as_json)
-    if not success:
-        sys.exit(EXIT_AUTH_FAILURE)
+    # ``wizard`` does not load config or run probes in JSON/non-TTY mode. This
+    # is the important agent contract: pending human actions are data, never an
+    # input() or browser side effect.
+    ctx = click.get_current_context()
+    service = _setup_transaction_service(ctx)
+    if reset_transaction:
+        payload = service.reset_json(alias="wizard")
+    elif show_status:
+        payload = service.status_json(alias="wizard")
+    elif resume_transaction:
+        if service.status() is None:
+            service.start()
+        payload = service.resume_json(alias="wizard")
+    elif finish_later:
+        if service.status() is None:
+            service.start()
+        payload = service.resume_json(alias="wizard", finish_later=True)
+    else:
+        payload = service.start_json(alias="wizard")
+
+    if as_json or not stdin_is_interactive():
+        completion = payload.get("completion") or {}
+        payload.update({
+            "mode": "agent",
+            "interactive": False,
+            "all_pass": bool(completion.get("complete")),
+            "completed": bool(completion.get("complete")),
+            "next_action": (payload.get("pending_human_actions") or [{}])[0].get("label"),
+            "checklist": _legacy_wizard_checklist(service),
+        })
+        if payload.get("transaction_id") and not completion.get("complete") and not reset_transaction and not show_status and not finish_later:
+            payload = _setup_pending_payload(payload, "wizard")
+        json_output(payload, True)
+        if payload.get("error") and payload["error"].get("code") == "INTERACTIVE_REQUIRED":
+            ctx.exit(EXIT_AUTH_FAILURE)
+        return
+
+    if reset_transaction or show_status or finish_later:
+        _render_setup_transaction(payload, "wizard")
+        return
+
+    success = run_wizard(platforms=[platform] if platform else None, json_mode=False)
+    # The legacy executor performs the human interaction and its live checks.
+    # Feed only role-level booleans into the provider-neutral service; no raw
+    # provider responses or credentials cross the persistence boundary.
+    if success:
+        service.record_readiness(
+            sources=["tiktok"],
+            video_destinations=["youtube", "x", "instagram", "threads"],
+        )
+    final_payload = service.status_json(alias="wizard")
+    _render_setup_transaction(final_payload, "wizard")
+    if not (final_payload.get("completion") or {}).get("complete"):
+        ctx.exit(EXIT_AUTH_FAILURE)
 
 
 # ──────────────────────────────────────────────
@@ -1402,8 +1576,8 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
     from xpst.wizard import PLATFORM_GUIDES, load_wizard_state, save_wizard_state
 
     config = load_config(ctx.obj.get("config_path"))
-
-    # Snapshot current health (redirect test_connections chatter to stderr
+    service = _setup_transaction_service(ctx)
+    transaction_payload = service.start_json(alias="onboard")
     # so --json stdout stays parseable — same trick as xpst.wizard).
     results: dict[str, bool] = {}
     with redirect_stdout(sys.stderr):
@@ -1428,6 +1602,11 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
             "would_connect": targets,
             "config_impact": "accounts.<platform>.enabled=true + platform credentials (encrypted)",
         }
+        plan.update({
+            key: value
+            for key, value in transaction_payload.items()
+            if key not in {"ok", "operation", "transaction"}
+        })
         if as_json:
             json_output(plan, True)
             return
@@ -1443,9 +1622,24 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
     # All connected? Report and exit before any interactive gate — no
     # prompting would happen anyway, so agent mode must succeed here.
     if not targets:
+        service.record_readiness(
+            sources=["tiktok"] if connected.get("tiktok") else [],
+            video_destinations=[p for p in ("youtube", "x", "instagram", "threads") if connected.get(p)],
+        )
+        report = {
+            "mode": "onboard",
+            "connected": connected,
+            "connected_count": sum(connected.values()),
+            "total": len(_ONBOARD_PLATFORMS),
+            "actions": [],
+        }
+        report.update({
+            key: value
+            for key, value in service.status_json(alias="onboard").items()
+            if key not in {"ok", "operation", "transaction"}
+        })
         if as_json:
-            json_output({"mode": "onboard", "connected": connected, "connected_count": sum(connected.values()),
-                         "total": len(_ONBOARD_PLATFORMS), "actions": []}, True)
+            json_output(report, True)
         else:
             console.print("[green]✅ All platforms are already connected — nothing to do.[/green]")
             console.print("[dim]Run `xpst doctor` for a full health report.[/dim]")
@@ -1455,16 +1649,19 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
     # never prompt, never open browsers on a pipe.
     if not stdin_is_interactive():
         message = (
-            "onboard requires an interactive terminal. "
-            "Use `xpst onboard --dry-run --json` for the plan, "
-            "`xpst wizard --json` for the agent-mode checklist, or "
-            "`xpst connect <platform> --guide` for setup steps."
+            "onboard requires an interactive terminal for provider connection. "
+            "The shared setup transaction was saved; complete its pending human "
+            "actions and resume it from a TTY."
         )
+        pending = _setup_pending_payload(service.status_json(alias="onboard"), "onboard")
+        pending["error"]["message"] = message
+        pending["mode"] = "onboard"
+        pending["interactive"] = False
         if as_json:
-            json_output(_error_payload("INTERACTIVE_REQUIRED", message, hint="xpst onboard --dry-run --json"), True)
+            json_output(pending, True)
         else:
             console.print("[red]onboard requires an interactive terminal.[/red]")
-            console.print("[dim]Try:[/dim] xpst onboard --dry-run  ·  xpst wizard --json")
+            console.print("[dim]Try:[/dim] xpst onboard --dry-run --json  ·  xpst setup --resume")
         sys.exit(EXIT_AUTH_FAILURE)
         return
 
@@ -1495,11 +1692,29 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
         }
         save_wizard_state(config, state)
 
+        if verified:
+            if p == "tiktok":
+                service.record_readiness(sources=[p])
+            elif p in {"youtube", "x", "instagram", "threads"}:
+                service.record_readiness(video_destinations=[p])
+        else:
+            active = service.status() or {}
+            step_id = next(
+                (
+                    step["step_id"]
+                    for step in active.get("steps", [])
+                    if step.get("capability") == p
+                ),
+                None,
+            )
+            if step_id:
+                service.resume(step_id=step_id, step_state="error", error="AUTH_REQUIRED")
+
     succeeded = [p for p, o in outcomes.items() if o["verified"]]
     failed = [p for p in outcomes if p not in succeeded]
 
     if as_json:
-        json_output({
+        report = {
             "mode": "onboard",
             "connected": connected,
             "outcomes": outcomes,
@@ -1507,7 +1722,13 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
             "total": len(_ONBOARD_PLATFORMS),
             "succeeded": succeeded,
             "failed": failed,
-        }, True)
+        }
+        report.update({
+            key: value
+            for key, value in service.status_json(alias="onboard").items()
+            if key not in {"ok", "operation", "transaction"}
+        })
+        json_output(report, True)
     else:
         console.print(Panel("[bold]Onboarding Summary[/bold]", style="blue"))
         for p, o in outcomes.items():
@@ -1547,8 +1768,29 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     results: dict[str, bool] = {}
     with redirect_stdout(sys.stderr):
         results = asyncio.run(test_connections(config))
+    canonical_results = getattr(results, "canonical_status", None)
     if platform:
         results = {p: ok for p, ok in results.items() if p == platform}
+
+    # test_connections is a backward-compatible bool wrapper around the
+    # canonical live probes. Rehydrate its result into the same role-aware
+    # model so doctor cannot invent a second definition of "connected".
+    from xpst.provider_truth import build_canonical_status
+
+    if canonical_results:
+        canonical = build_canonical_status(config, canonical_results)
+    else:
+        canonical_live = {
+            name: {
+                "authenticated": ok,
+                "session_valid": ok,
+                "live_checked": True,
+                "error": None if ok else "Live check failed",
+                "details": {},
+            }
+            for name, ok in results.items()
+        }
+        canonical = build_canonical_status(config, canonical_live)
 
     sessions = _session_health(config)
     quota_mgr = QuotaManager(config.config_dir, config=config)
@@ -1560,7 +1802,10 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     for p, ok in results.items():
         session = sessions.get(p, {})
         creds_present = bool(session.get("present"))
-        if ok:
+        canonical_info = canonical.get(p, {})
+        connected = bool(canonical_info.get("authenticated", ok))
+        disabled = canonical_info.get("state") == "disabled" and canonical_results is not None
+        if connected or disabled:
             problem = None
             fix = None
         elif creds_present:
@@ -1572,8 +1817,12 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
 
         qinfo = quota_status.get(p, {})
         platforms_report[p] = {
-            "connected": ok,
-            "auth_mode": getattr(getattr(config, p, None), "auth_mode", None),
+            "connected": connected,
+            "state": canonical_info.get("state", "degraded"),
+            "roles": canonical_info.get("roles", {}),
+            "auth_mode": canonical_info.get(
+                "auth_mode", getattr(getattr(config, p, None), "auth_mode", None)
+            ),
             "session_age_days": session.get("age_days"),
             "problem": problem,
             "fix": fix,
@@ -1583,7 +1832,7 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
                 "remaining": qinfo.get("remaining"),
             },
         }
-        if not ok:
+        if not connected and not disabled:
             issues.append({
                 "severity": "error",
                 "platform": p,
@@ -1638,6 +1887,7 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     report: dict[str, Any] = {
         "doctor": True,
         "platforms": platforms_report,
+        "canonical": {"providers": canonical, "roles": ["source", "video_destination", "messaging", "analytics"]},
         "environment": environment,
         "issues": issues,
         "all_clear": not issues,
@@ -1761,6 +2011,7 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
             ("tiktok", tiktok_creds),
             ("threads", threads_creds),
             ("messenger", messenger_creds),
+            ("local", config.local.path),
         ]:
             remaining = quota_mgr.get_remaining(plat)
             stored = bool(creds)
@@ -1781,6 +2032,8 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
                 entry["authenticated"] = stored
                 entry["live_checked"] = False
             data["platforms"][plat] = entry
+        data["providers"] = data["platforms"]
+        data["roles"] = ["source", "video_destination", "messaging", "analytics"]
         json_output(data, True)
         return
 
@@ -2420,7 +2673,11 @@ def mcp_list(as_json: bool):
     import importlib.util
 
     if importlib.util.find_spec("mcp") is None:
-        click.echo("MCP package not installed. Install with: pip install 'xpst[mcp]'")
+        message = "MCP package not installed. Install with: pip install 'xpst[mcp]'"
+        if as_json:
+            json_output(_error_payload("MCP_EXTRA_MISSING", message, hint="pip install 'xpst[mcp]'"), True)
+        else:
+            click.echo(message)
         return
 
     from xpst.mcp.server import TOOLS
@@ -2571,11 +2828,16 @@ def _result_to_dict(result: CrossPostResult) -> dict:
     for platform, ur in result.results.items():
         entry = {
             "success": ur.success,
+            "outcome": ur.status,
+            "status": ur.status,
             "post_url": ur.post_url,
             "post_id": ur.post_id,
             "error": ur.error,
             "platform": ur.platform,
         }
+        if ur.retryable is not None:
+            entry["retryable"] = ur.retryable
+            entry["terminal"] = not ur.retryable
         if not ur.success and ur.error:
             hint = describe_remediation(platform, ur.error)
             if hint:

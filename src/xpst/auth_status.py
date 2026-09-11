@@ -103,6 +103,12 @@ def _auth_mode_for(config: XPSTConfig, platform: str) -> str:
         if config.tiktok.client_key and (config.tiktok.access_token or config.tiktok.refresh_token):
             return "content_posting_api"
         return "source_only"
+    if platform == "threads":
+        return "oauth"
+    if platform == "messenger":
+        return "oauth"
+    if platform == "local":
+        return "local"
     return "unknown"
 
 
@@ -198,6 +204,22 @@ def _build_uploaders(config: XPSTConfig) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             logger.warning("TikTok uploader unavailable: %s", exc)
 
+    if config.threads.enabled:
+        try:
+            from xpst.platforms.threads import ThreadsUploader
+
+            uploaders["threads"] = ThreadsUploader(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Threads uploader unavailable: %s", exc)
+
+    if config.messenger.enabled:
+        try:
+            from xpst.platforms.messenger import MessengerAdapter
+
+            uploaders["messenger"] = MessengerAdapter(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Messenger adapter unavailable: %s", exc)
+
     # Same session-manager wiring the engine does (secure auth path).
     session_manager = SessionManager(config.config_dir)
     for uploader in uploaders.values():
@@ -234,29 +256,36 @@ async def _check_via_uploader(uploader: Any) -> dict[str, Any]:
         }
 
 
+async def _local_source_check(config: XPSTConfig) -> dict[str, Any]:
+    """Check the local source without network access."""
+    path = Path(config.local.path).expanduser() if config.local.path else None
+    exists = bool(path and path.exists())
+    return {
+        "authenticated": exists,
+        "session_valid": exists,
+        "auth_mode": "local",
+        "live_checked": True,
+        "error": None if exists else "Local source is not configured",
+        "details": {"path_configured": bool(config.local.path), "path_exists": exists},
+    }
+
+
 async def collect_live_auth_status_async(
     config: XPSTConfig,
     uploaders: dict[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Live per-platform auth status (async core).
+    """Collect live probes and return the canonical role-aware mapping.
 
-    Args:
-        config: Loaded xPST configuration.
-        uploaders: Optional pre-built uploader dict (tests inject fakes
-            here to mock the validators).
-
-    Returns:
-        ``{platform: {authenticated, session_valid, auth_mode,
-        session_age_days, live_checked, error, details}}`` for
-        youtube/x/instagram/tiktok. Validation failures degrade to
-        ``authenticated=False`` + ``error`` — never an exception and
-        never a prompt.
+    The returned mapping is keyed by every supported provider, including
+    disabled Threads and messaging-only Messenger.  The flat authentication
+    fields are retained for CLI/MCP compatibility; role-specific checks are
+    nested under ``roles`` and ``role_status``.
     """
     if uploaders is None:
         uploaders = _build_uploaders(config)
 
-    result: dict[str, dict[str, Any]] = {}
-    for name in ("youtube", "x", "instagram", "tiktok"):
+    raw: dict[str, dict[str, Any]] = {}
+    for name in ("youtube", "x", "instagram"):
         entry: dict[str, Any] = {
             "authenticated": False,
             "session_valid": False,
@@ -266,25 +295,106 @@ async def collect_live_auth_status_async(
             "error": None,
             "details": {},
         }
-
         uploader = uploaders.get(name)
-        if name == "tiktok" and config.tiktok.enabled and entry["auth_mode"] == "source_only":
-            # Source-mode TikTok needs no uploader/credentials — the check
-            # is yt-dlp + cookie jar availability (offline, non-interactive).
-            ok, error, details = _tiktok_source_check(config)
-            entry.update(authenticated=ok, session_valid=ok, error=error, details=details)
-        elif uploader is None:
-            # Matches engine.check_health's wording for known-but-off platforms.
+        if not getattr(config, name).enabled or uploader is None:
             entry["error"] = "disabled"
         elif name == "instagram" and entry["auth_mode"] == "graph_api":
             ok, error, details = await _graph_api_probe(config.instagram.graph_access_token)
             entry.update(authenticated=ok, session_valid=ok, error=error, details=details)
         else:
             entry.update(await _check_via_uploader(uploader))
+        raw[name] = entry
 
-        result[name] = entry
+    # TikTok is intentionally two independent capabilities.  A source check
+    # must not be replaced by a failed Content Posting API check and vice versa.
+    tiktok_base: dict[str, Any] = {
+        "auth_mode": _auth_mode_for(config, "tiktok"),
+        "session_age_days": _age_days(_credential_file_for(config, "tiktok")),
+        "live_checked": True,
+        "error": None,
+        "details": {},
+    }
+    if not config.tiktok.enabled:
+        source_check = {
+            "authenticated": False,
+            "session_valid": False,
+            "live_checked": True,
+            "error": "disabled",
+            "details": {},
+        }
+        destination_check = dict(source_check)
+    else:
+        source_ok, source_error, source_details = _tiktok_source_check(config)
+        source_check = {
+            "authenticated": source_ok,
+            "session_valid": source_ok,
+            "auth_mode": "source_only",
+            "live_checked": True,
+            "error": source_error,
+            "details": source_details,
+        }
+        if tiktok_base["auth_mode"] == "content_posting_api":
+            uploader = uploaders.get("tiktok")
+            destination_check = (
+                await _check_via_uploader(uploader)
+                if uploader is not None
+                else {
+                    "authenticated": False,
+                    "session_valid": False,
+                    "auth_mode": "content_posting_api",
+                    "live_checked": True,
+                    "error": "disabled",
+                    "details": {},
+                }
+            )
+        else:
+            destination_check = {
+                "authenticated": False,
+                "session_valid": False,
+                "auth_mode": "source_only",
+                "live_checked": True,
+                "error": "TikTok Content Posting API is not configured",
+                "details": {"auth_mode": "source_only"},
+            }
+    compat = destination_check if tiktok_base["auth_mode"] == "content_posting_api" else source_check
+    tiktok_base.update(compat)
+    tiktok_base["source_check"] = source_check
+    tiktok_base["destination_check"] = destination_check
+    raw["tiktok"] = tiktok_base
 
-    return result
+    for name in ("threads", "messenger"):
+        entry = {
+            "authenticated": False,
+            "session_valid": False,
+            "auth_mode": _auth_mode_for(config, name),
+            "session_age_days": None,
+            "live_checked": True,
+            "error": None,
+            "details": {},
+        }
+        uploader = uploaders.get(name)
+        if not getattr(config, name).enabled or uploader is None:
+            entry["error"] = "disabled"
+        else:
+            entry.update(await _check_via_uploader(uploader))
+        raw[name] = entry
+
+    raw["local"] = await _local_source_check(config)
+
+    from xpst.provider_truth import build_canonical_status
+
+    canonical = build_canonical_status(config, raw)
+    # Keep the mtime field and role-specific raw details on the canonical
+    # entries; these were part of the original auth-status JSON contract.
+    for name, entry in raw.items():
+        canonical[name].update(
+            {
+                key: entry[key]
+                for key in ("session_age_days",)
+                if key in entry
+            }
+        )
+    return canonical
 
 
 def collect_live_auth_status(
@@ -297,12 +407,12 @@ def collect_live_auth_status(
     degrades to all-false entries with an error — the command still
     returns honest, backward-compatible JSON instead of crashing.
     """
-    platforms = ("youtube", "x", "instagram", "tiktok")
+    platforms = ("youtube", "x", "instagram", "tiktok", "threads", "messenger", "local")
     try:
         return asyncio.run(collect_live_auth_status_async(config, uploaders))
     except Exception as exc:  # noqa: BLE001 — status must never crash
         logger.warning("Live auth status collection failed: %s", exc)
-        return {
+        fallback = {
             name: {
                 "authenticated": False,
                 "session_valid": False,
@@ -314,3 +424,9 @@ def collect_live_auth_status(
             }
             for name in platforms
         }
+        from xpst.provider_truth import build_canonical_status
+
+        canonical = build_canonical_status(config, fallback)
+        for name in platforms:
+            canonical[name]["session_age_days"] = None
+        return canonical

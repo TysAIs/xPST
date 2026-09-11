@@ -26,6 +26,9 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+MIN_ANALYTICS_SNAPSHOT_INTERVAL = 60
+MAX_ANALYTICS_SNAPSHOT_INTERVAL = 86_400
+
 
 def _backup_corrupt_config_file(cfg_path: Path) -> Path | None:
     """Back up a config file that cannot be parsed, leaving the original untouched.
@@ -194,6 +197,8 @@ DEFAULT_CONFIG = {
         "check_interval": 900,  # 15 minutes
         "catchup_window": 172800,  # 48 hours
         "catchup_times_per_day": 3,
+        "analytics_snapshot_enabled": False,
+        "analytics_snapshot_interval": 3600,  # 1 hour
     },
     "shortcuts": {
         "dashboard": "Ctrl+1",
@@ -417,6 +422,8 @@ class ScheduleConfig:
     check_interval: int = 900
     catchup_window: int = 172800
     catchup_times_per_day: int = 3
+    analytics_snapshot_enabled: bool = False
+    analytics_snapshot_interval: int = 3600
 
 
 @dataclass
@@ -972,6 +979,12 @@ class XPSTConfig:
         if v := os.getenv("XPST_MAX_RETRIES"):
             config.reliability.max_retries = int(v)
 
+        # Schedule / analytics snapshots
+        if v := os.getenv("XPST_ANALYTICS_SNAPSHOT_ENABLED"):
+            config.schedule.analytics_snapshot_enabled = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_ANALYTICS_SNAPSHOT_INTERVAL"):
+            config.schedule.analytics_snapshot_interval = int(v)
+
         # Monitoring
         if v := os.getenv("XPST_LOG_LEVEL"):
             config.monitoring.log_level = v
@@ -1037,6 +1050,12 @@ class XPSTConfig:
 
         if self.schedule.catchup_window < 3600:
             errors.append("Catchup window must be at least 1 hour")
+
+        if not MIN_ANALYTICS_SNAPSHOT_INTERVAL <= self.schedule.analytics_snapshot_interval <= MAX_ANALYTICS_SNAPSHOT_INTERVAL:
+            errors.append(
+                "Analytics snapshot interval must be between "
+                f"{MIN_ANALYTICS_SNAPSHOT_INTERVAL} and {MAX_ANALYTICS_SNAPSHOT_INTERVAL} seconds"
+            )
 
         # Validate encoding configs
         for name, enc in [("youtube", self.video.encoding_youtube), ("instagram", self.video.encoding_instagram), ("x", self.video.encoding_x), ("tiktok", self.video.encoding_tiktok)]:
@@ -1227,6 +1246,8 @@ class XPSTConfig:
                 "check_interval": self.schedule.check_interval,
                 "catchup_window": self.schedule.catchup_window,
                 "catchup_times_per_day": self.schedule.catchup_times_per_day,
+                "analytics_snapshot_enabled": self.schedule.analytics_snapshot_enabled,
+                "analytics_snapshot_interval": self.schedule.analytics_snapshot_interval,
             },
             "notifications": {
                 "enabled": self.notifications.enabled,

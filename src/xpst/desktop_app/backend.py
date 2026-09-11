@@ -8,6 +8,10 @@ data is serialised as JSON strings so QML can parse with JSON.parse().
 import asyncio
 import json
 import logging
+import os
+import plistlib
+import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -121,7 +125,46 @@ from xpst.desktop_app import icon_glyphs
 try:
     from xpst import __version__ as xpst_version
 except Exception:  # pragma: no cover
-    xpst_version = "0.0.0"
+    xpst_version = "1.1.0"
+
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _resolve_source_sha() -> str:
+    """Resolve the exact commit represented by this source or frozen bundle."""
+    candidate = os.environ.get("XPST_SOURCE_SHA", "").strip()
+    if _SHA_RE.fullmatch(candidate):
+        return candidate
+
+    if getattr(sys, "frozen", False):
+        info_plist = Path(sys.executable).resolve().parents[1] / "Info.plist"
+        try:
+            with info_plist.open("rb") as handle:
+                candidate = str(plistlib.load(handle).get("XPSTSourceCommit", ""))
+            if _SHA_RE.fullmatch(candidate):
+                return candidate
+        except (OSError, plistlib.InvalidFileException, ValueError, TypeError):
+            pass
+
+    repo_root = Path(__file__).resolve().parents[3]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        candidate = result.stdout.strip()
+        if _SHA_RE.fullmatch(candidate):
+            return candidate
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unknown"
+
+
+source_sha = _resolve_source_sha()
 
 # ── Optional xPST dependencies (graceful fallback) ───────────────────
 try:
@@ -372,7 +415,12 @@ class AppController(QObject):
 
     appVersion = Property(str, _get_app_version, constant=True)
 
-    # ── Data refresh ─────────────────────────────────────────────────
+    def _get_source_sha(self) -> str:
+        return source_sha
+
+    sourceSha = Property(str, _get_source_sha, constant=True)
+
+    # ── Data refresh ──────────────────────────────────────────────────
 
     @Slot(result=str)
     def refreshData(self) -> str:
@@ -2199,7 +2247,30 @@ class AppController(QObject):
         "http://localhost",
     )
 
+    @staticmethod
+    def _auth_command(platform: str) -> tuple[list[str] | None, str | None]:
+        """Return a real CLI command for interactive auth.
+
+        A PyInstaller app's ``sys.executable`` is the GUI binary, not a Python
+        interpreter. Re-launching it with ``-m xpst`` recursively opens the
+        desktop app and can be mistaken for a successful auth flow. Source
+        installs use the current interpreter; frozen builds require an
+        explicitly discoverable external Python and otherwise return a clear,
+        actionable error instead of pretending to authenticate.
+        """
+        if not getattr(sys, "frozen", False):
+            return [sys.executable, "-m", "xpst", "connect", platform, "--open-browser"], None
+        interpreter = shutil.which("python3") or shutil.which("python")
+        if not interpreter:
+            return None, (
+                "Interactive sign-in needs a Python runtime. This packaged build "
+                "could not find python3; install Python 3.11+ or run `xpst connect "
+                f"{platform}` from the project environment."
+            )
+        return [interpreter, "-m", "xpst", "connect", platform, "--open-browser"], None
+
     _connect_active: dict[str, bool] = {}
+
 
     @Slot(str)
     def connectPlatformAsync(self, platform: str) -> None:
@@ -2232,8 +2303,18 @@ class AppController(QObject):
         def _run() -> None:
             state_emitted = "connecting"
             try:
+                command, command_error = self._auth_command(platform)
+                if command_error:
+                    self.connectResult.emit(json.dumps({
+                        "ok": False, "platform": platform, "error": command_error,
+                    }))
+                    self.connectStateChanged.emit(json.dumps({
+                        "platform": platform, "state": "error",
+                    }))
+                    return
+                assert command is not None  # narrowed after command_error return
                 result = subprocess.run(
-                    [sys.executable, "-m", "xpst", "auth", platform],
+                    command,
                     capture_output=True,
                     text=True,
                     timeout=self.CONNECT_SUBPROCESS_TIMEOUT,
@@ -2324,7 +2405,7 @@ class AppController(QObject):
         """
         try:
             result = subprocess.run(
-                ["git", "log", "--oneline", "-10"],
+                ["git", "log", "--format=%H %s", "-10"],
                 capture_output=True,
                 text=True,
                 timeout=5,

@@ -75,6 +75,12 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
 
 from xpst.config import XPSTConfig
 from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.provider_truth import ProviderRole
+from xpst.setup_transaction import (
+    SetupTransactionError,
+    SetupTransactionNotFound,
+    SetupTransactionService,
+)
 from xpst.utils.logger import get_logger, setup_logging
 
 if TYPE_CHECKING:
@@ -86,13 +92,27 @@ def _provider_enums() -> tuple[list[str], list[str]]:
     """Platform/source enums for tool schemas, derived from the live provider
     catalog instead of hardcoded literals (G25) so plugin providers are
     reachable over MCP. Falls back to the built-ins if discovery fails."""
-    platforms = ["youtube", "x", "instagram"]
-    sources = ["tiktok", "youtube", "x", "instagram", "local"]
+    from xpst.provider_truth import SUPPORTED_PROVIDERS
+
+    platforms = [
+        definition.name
+        for definition in SUPPORTED_PROVIDERS
+        if ProviderRole.VIDEO_DESTINATION in definition.roles
+    ]
+    sources = [
+        definition.name
+        for definition in SUPPORTED_PROVIDERS
+        if ProviderRole.SOURCE in definition.roles
+    ]
     try:
         from xpst.platforms.base import PlatformRegistry
 
         PlatformRegistry.auto_discover()
-        discovered = [m.name for m in PlatformRegistry.list_manifests(None)]
+        discovered = [
+            manifest.name
+            for manifest in PlatformRegistry.list_manifests(None)
+            if ProviderRole.VIDEO_DESTINATION in manifest.canonical_roles
+        ]
         if discovered:
             platforms = sorted(set(platforms) | set(discovered))
     except Exception:  # noqa: BLE001 — schema fallback must never crash startup
@@ -171,6 +191,21 @@ async def get_server(
 
 
 # ── Tool Definitions ──
+
+_SETUP_ROLE_CAPABILITY_SCHEMA = {
+    "type": "array",
+    "description": "Non-secret role-capability selections such as source/tiktok and video_destination/youtube",
+    "items": {
+        "type": "object",
+        "properties": {
+            "role": {"type": "string", "enum": ["source", "video_destination", "analytics", "messaging"]},
+            "capability": {"type": "string"},
+        },
+        "required": ["role", "capability"],
+        "additionalProperties": False,
+    },
+}
+
 
 TOOLS: list[Tool] = [
     Tool(
@@ -733,6 +768,50 @@ TOOLS: list[Tool] = [
             "additionalProperties": False,
         },
     ),
+    Tool(
+        name="xpst_setup_start",
+        description="Start or return the shared resumable setup transaction",
+        inputSchema={
+            "type": "object",
+            "properties": {"selected_role_capabilities": _SETUP_ROLE_CAPABILITY_SCHEMA},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_setup_status",
+        description="Read the shared setup transaction and pending human actions",
+        inputSchema={
+            "type": "object",
+            "properties": {"transaction_id": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_setup_resume",
+        description="Resume setup with safe step state or caller-verified readiness",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "transaction_id": {"type": "string"},
+                "step_id": {"type": "string"},
+                "step_state": {"type": "string", "enum": ["pending", "in_progress", "waiting_human", "verified", "skipped", "error"]},
+                "step_updates": {"type": "object"},
+                "readiness": {"type": "object"},
+                "finish_later": {"type": "boolean", "default": False},
+                "error": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_setup_reset",
+        description="Reset the shared setup transaction and its recovery copies",
+        inputSchema={
+            "type": "object",
+            "properties": {"transaction_id": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 
@@ -795,6 +874,52 @@ def _guardrail_block(name: str, arguments: dict[str, Any]) -> CallToolResult | N
     return None
 
 
+_SETUP_TOOL_NAMES = {
+    "xpst_setup_start",
+    "xpst_setup_status",
+    "xpst_setup_resume",
+    "xpst_setup_reset",
+}
+
+
+def _setup_tool_result(payload: dict[str, Any], *, is_error: bool = False) -> CallToolResult:
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, indent=2, sort_keys=True))],
+        isError=is_error,
+    )
+
+
+async def _handle_setup_tool(server: XPSTMCPServer, name: str, arguments: dict[str, Any]) -> CallToolResult:
+    """Dispatch setup transaction tools without initializing the posting engine."""
+    service = SetupTransactionService(server.config.config_dir)
+    try:
+        if name == "xpst_setup_start":
+            payload = service.start_json(arguments.get("selected_role_capabilities"), alias="mcp")
+        elif name == "xpst_setup_status":
+            payload = service.status_json(arguments.get("transaction_id"), alias="mcp")
+        elif name == "xpst_setup_resume":
+            resume_args = {
+                key: arguments[key]
+                for key in ("step_id", "step_state", "step_updates", "readiness", "finish_later", "error")
+                if key in arguments
+            }
+            payload = service.resume_json(arguments.get("transaction_id"), alias="mcp", **resume_args)
+        else:
+            payload = service.reset_json(arguments.get("transaction_id"), alias="mcp")
+        return _setup_tool_result(payload)
+    except (SetupTransactionError, SetupTransactionNotFound):
+        payload = {
+            "ok": False,
+            "operation": name.removeprefix("xpst_setup_") or "setup",
+            "error": {
+                "code": "SETUP_REQUEST_INVALID",
+                "message": "The setup request could not be applied to the active transaction.",
+                "action": "Read setup status, correct the non-secret request, and retry.",
+            },
+        }
+        return _setup_tool_result(payload, is_error=True)
+
+
 async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
     """Handle a tool call — with audit logging and retry on transient failures."""
     import time as _time
@@ -812,7 +937,9 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
     server = await get_server(initialize=name in engine_tools)
 
     try:
-        if name == "xpst_run":
+        if name in _SETUP_TOOL_NAMES:
+            result = await _handle_setup_tool(server, name, arguments)
+        elif name == "xpst_run":
             engine = server.get_engine()
             result = await _handle_run(engine, arguments)
         elif name == "xpst_post":

@@ -53,23 +53,37 @@ class InstagramUploader(PlatformUploader):
 
     @property
     def manifest(self) -> ProviderManifest:
-        """Return Instagram destination capabilities."""
+        """Return Instagram video-destination capabilities for active auth mode."""
+        graph_api = (
+            self.config.instagram.auth_mode == "graph_api"
+            and bool(self.config.instagram.graph_access_token)
+        )
         return ProviderManifest(
             name="instagram",
             display_name="Instagram Reels",
-            roles=(ProviderRole.DESTINATION,),
+            roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
             capabilities=(
                 ProviderCapability.UPLOAD,
                 ProviderCapability.DELETE,
                 ProviderCapability.CAROUSEL,
                 ProviderCapability.HEALTH,
-                ProviderCapability.COOKIE_AUTH,
+                ProviderCapability.OFFICIAL_API
+                if graph_api
+                else ProviderCapability.COOKIE_AUTH,
                 ProviderCapability.RATE_LIMITS,
             ),
-            auth_mode=AuthMode.SESSION,
-            is_official_api=False,
-            docs_url="https://github.com/subzeroid/instagrapi",
-            notes="Uses persisted Instagram sessions through instagrapi; not an official Meta publishing API.",
+            auth_mode=AuthMode.GRAPH_API if graph_api else AuthMode.SESSION,
+            is_official_api=graph_api,
+            docs_url=(
+                "https://developers.facebook.com/docs/instagram-api"
+                if graph_api
+                else "https://github.com/subzeroid/instagrapi"
+            ),
+            notes=(
+                "Uses the official Meta Graph API."
+                if graph_api
+                else "Uses persisted Instagram sessions through instagrapi; not an official Meta publishing API."
+            ),
             extra={
                 "content": ("video", "image", "carousel"),
                 "max_caption_length": self.MAX_CAPTION_LENGTH,
@@ -573,12 +587,67 @@ class InstagramUploader(PlatformUploader):
             platform="instagram",
         )
 
+    async def _check_health_graph_api(self) -> PlatformHealth:
+        """Check the configured Instagram Graph API account."""
+        import httpx
+
+        ig_config = self.config.instagram
+        if not ig_config.graph_access_token or not ig_config.graph_ig_user_id:
+            return PlatformHealth(
+                platform="instagram",
+                authenticated=False,
+                session_valid=False,
+                error="IG_GRAPH_API_NOT_CONFIGURED: graph_access_token and graph_ig_user_id are required",
+                details={"auth_mode": "graph_api", "probe": "graph_api"},
+            )
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(
+                    f"https://graph.facebook.com/v21.0/{ig_config.graph_ig_user_id}",
+                    params={
+                        "fields": "id,username,followers_count",
+                        "access_token": ig_config.graph_access_token,
+                    },
+                )
+            response.raise_for_status()
+            data = response.json()
+            if not data.get("id"):
+                return PlatformHealth(
+                    platform="instagram",
+                    authenticated=False,
+                    session_valid=False,
+                    error="Instagram Graph API returned no user data",
+                    details={"auth_mode": "graph_api", "probe": "graph_api"},
+                )
+            return PlatformHealth(
+                platform="instagram",
+                authenticated=True,
+                session_valid=True,
+                details={
+                    "username": data.get("username", ""),
+                    "user_id": str(data.get("id", ig_config.graph_ig_user_id)),
+                    "auth_mode": "graph_api",
+                    "probe": "graph_api",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — health must fail closed
+            return PlatformHealth(
+                platform="instagram",
+                authenticated=False,
+                session_valid=False,
+                error=f"Instagram Graph API health check failed: {str(exc)[:200]}",
+                details={"auth_mode": "graph_api", "probe": "graph_api"},
+            )
+
     async def check_health(self) -> PlatformHealth:
         """Check Instagram authentication health.
 
         Returns:
             PlatformHealth with authentication status
         """
+        if self.config.instagram.auth_mode == "graph_api":
+            return await self._check_health_graph_api()
+
         try:
             client = await self._get_client()
 
