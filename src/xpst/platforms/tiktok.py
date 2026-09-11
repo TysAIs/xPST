@@ -28,7 +28,9 @@ from xpst.platforms.base import (
     PlatformHealth,
     PlatformRegistry,
     PlatformUploader,
+    UploadOutcome,
     UploadResult,
+    normalize_upload_result,
 )
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
@@ -39,6 +41,21 @@ logger = get_logger(__name__)
 TIKTOK_API_BASE = "https://open.tiktokapis.com"
 # TikTok Display API base (user info / follower counts)
 TIKTOK_DISPLAY_BASE = "https://open.tiktokapis.com"
+
+_TIKTOK_PROCESSING_STATUSES = frozenset(
+    {
+        "PROCESSING_UPLOAD",
+        "PROCESSING_DOWNLOAD",
+        "SEND_TO_CDN",
+        "SEND_TO_REVIEW",
+        "PROCESSING",
+        "PENDING",
+        "QUEUED",
+        "PUBLISHING",
+    }
+)
+_TIKTOK_PUBLISHED_STATUSES = frozenset({"SUCCESS", "PUBLISH_COMPLETE", "PUBLISHED", "COMPLETED"})
+_TIKTOK_FAILED_STATUSES = frozenset({"FAIL", "FAILED", "ERROR"})
 
 
 class TikTokUploader(PlatformUploader):
@@ -244,33 +261,88 @@ class TikTokUploader(PlatformUploader):
                     status_resp.raise_for_status()
                     status_data = status_resp.json()
 
-                    status = status_data.get("data", {}).get("status", "")
-                    # Possible statuses: PROCESSING_UPLOAD, PROCESSING_DOWNLOAD,
-                    # SEND_TO_CDN, SUCCESS, FAIL
-                    if status == "FAIL":
-                        fail_reason = status_data.get("data", {}).get("fail_reason", "unknown")
+                    data = status_data.get("data", {})
+                    status = str(data.get("status") or "").strip().upper()
+                    # Possible statuses include PROCESSING_UPLOAD,
+                    # PROCESSING_DOWNLOAD, SEND_TO_CDN, SUCCESS, and FAIL.
+                    # ``publish_id`` identifies the TikTok upload container, not
+                    # a publicly shareable post, so it is never sufficient for
+                    # published success on its own.
+                    result_metadata = {
+                        "publish_id": publish_id,
+                        "status": status,
+                        "caption_length": len(caption),
+                        "sandbox": self._is_sandbox(),
+                    }
+                    processing_statuses = _TIKTOK_PROCESSING_STATUSES
+                    published_statuses = _TIKTOK_PUBLISHED_STATUSES
+                    failed_statuses = _TIKTOK_FAILED_STATUSES
+
+                    if status in failed_statuses:
+                        fail_reason = data.get("fail_reason", "unknown")
                         return UploadResult(
                             success=False,
-                            error=f"TIKTOK_PUBLISH_FAILED: {fail_reason[:200]}",
+                            error=f"TIKTOK_PUBLISH_FAILED: {str(fail_reason)[:200]}",
                             platform="tiktok",
-                            metadata={"publish_id": publish_id, "sandbox": self._is_sandbox()},
+                            metadata=result_metadata,
+                            retryable=False,
                         )
 
-                    # SUCCESS or in-progress; TikTok returns a public URL on SUCCESS
-                    public_url = status_data.get("data", {}).get("publicaly_available_post_url", "") or ""
+                    if status in processing_statuses or status not in published_statuses:
+                        logger.info("TikTok publication pending: publish_id=%s status=%s", publish_id, status)
+                        return UploadResult(
+                            success=False,
+                            outcome=UploadOutcome.PENDING,
+                            error=f"TIKTOK_PUBLISH_PENDING: status={status or 'unknown'}",
+                            platform="tiktok",
+                            metadata=result_metadata,
+                            retryable=True,
+                        )
 
-                    logger.info(f"Posted to TikTok: publish_id={publish_id} status={status}")
-                    return UploadResult(
-                        success=True,
-                        post_id=str(publish_id),
-                        post_url=public_url or "https://www.tiktok.com/",
-                        platform="tiktok",
-                        metadata={
-                            "publish_id": publish_id,
-                            "status": status,
-                            "caption_length": len(caption),
-                            "sandbox": self._is_sandbox(),
-                        },
+                    public_id = (
+                        data.get("publicaly_available_post_id")
+                        or data.get("publicly_available_post_id")
+                        or data.get("share_id")
+                        or data.get("post_id")
+                    )
+                    if isinstance(public_id, (list, tuple)):
+                        public_id = public_id[0] if public_id else None
+                    public_url = (
+                        data.get("publicaly_available_post_url")
+                        or data.get("publicly_available_post_url")
+                        or data.get("share_url")
+                        or data.get("post_url")
+                    )
+                    if not public_id and not public_url:
+                        return UploadResult(
+                            success=False,
+                            error=(
+                                "TIKTOK_PUBLISH_UNVERIFIED: SUCCESS response did not contain "
+                                "a published post ID or public URL"
+                            ),
+                            platform="tiktok",
+                            metadata=result_metadata,
+                            retryable=False,
+                        )
+
+                    logger.info(
+                        "Posted to TikTok: publish_id=%s public_id=%s status=%s",
+                        publish_id,
+                        public_id,
+                        status,
+                    )
+                    return normalize_upload_result(
+                        UploadResult(
+                            success=True,
+                            # Preserve the old publish_id fallback when a valid
+                            # public URL proves publication; a URL-only response
+                            # remains useful to compatibility consumers.
+                            post_id=str(public_id or publish_id),
+                            post_url=public_url,
+                            platform="tiktok",
+                            metadata=result_metadata,
+                        ),
+                        "tiktok",
                     )
 
             except httpx.HTTPStatusError as e:
