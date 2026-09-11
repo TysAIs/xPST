@@ -406,6 +406,23 @@ input,
   animation: xpst-shimmer 1.2s var(--xpst-motion-easing) infinite;
 }
 
+.xpst-skeleton__line--short {
+  width: 64%;
+}
+
+.xpst-skeleton__retry {
+  display: flex;
+  align-items: center;
+  gap: var(--xpst-space-3);
+  flex-wrap: wrap;
+  margin-top: var(--xpst-space-3);
+  color: var(--xpst-color-text-secondary);
+}
+
+.xpst-skeleton__retry p {
+  margin: 0;
+}
+
 @keyframes xpst-shimmer {
   from,
   to {

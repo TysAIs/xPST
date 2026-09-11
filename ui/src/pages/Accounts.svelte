@@ -63,7 +63,7 @@
 </header>
 
 {#if state === "loading"}
-  <LoadingSkeleton rows={6} label="Loading account status" />
+  <LoadingSkeleton rows={6} label="Loading account status" onRetry={load} />
 {:else if state === "error"}
   <ErrorState message={error} retry={load} />
 {:else if authEntries.length === 0}

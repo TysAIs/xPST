@@ -137,6 +137,14 @@ test("dashboard empty action is placed before health and copy does not promise d
   assert.doesNotMatch(dashboard, /platform health will appear here/);
 });
 
+test("loading state exposes a bounded retry path", async () => {
+  const skeleton = await text(join(UI_ROOT, "src/lib/components/LoadingSkeleton.svelte"));
+  assert.match(skeleton, /setTimeout/);
+  assert.match(skeleton, /onRetry/);
+  assert.match(skeleton, /Retry/);
+  assert.match(skeleton, /aria-live/);
+});
+
 test("the icon dependency and license manifest are explicit and offline-safe", async () => {
   const packageJson = JSON.parse(await text(join(UI_ROOT, "package.json")));
   assert.ok(packageJson.dependencies["lucide-svelte"] || packageJson.dependencies["@lucide/svelte"]);

@@ -54,7 +54,7 @@
 </header>
 
 {#if state === "loading"}
-  <LoadingSkeleton rows={5} label="Loading dashboard" />
+  <LoadingSkeleton rows={5} label="Loading dashboard" onRetry={load} />
 {:else if state === "error"}
   <ErrorState message={error} retry={load} />
 {:else}
