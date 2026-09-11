@@ -3,6 +3,7 @@
   import { NAV_ITEMS, currentRoute } from "./lib/api.js";
   import Shell from "./lib/components/Shell.svelte";
   import Dashboard from "./pages/Dashboard.svelte";
+  import Create from "./pages/Create.svelte";
   import Analytics from "./pages/Analytics.svelte";
   import Videos from "./pages/Videos.svelte";
   import Accounts from "./pages/Accounts.svelte";
@@ -11,6 +12,7 @@
   let route = $state(currentRoute());
   const pages = {
     dashboard: Dashboard,
+    create: Create,
     analytics: Analytics,
     videos: Videos,
     accounts: Accounts,
