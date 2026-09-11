@@ -65,9 +65,13 @@ def home(tmp_path, monkeypatch):
         # Legacy CLI tests seed ``home/.xpst`` directly. Point APPDATA at the
         # isolated fixture root so the production resolver maps to that same
         # test-only location without touching the runner profile.
-        appdata = home / ".xpst"
+        appdata = home / "AppData" / "Roaming"
         appdata.mkdir(parents=True, exist_ok=True)
         monkeypatch.setenv("APPDATA", str(appdata))
+        # The legacy CLI-surface tests intentionally seed ``home/.xpst``.
+        # Patch the imported CLI seam to that test root; the platform resolver
+        # itself is covered independently by the Windows fallback contract.
+        monkeypatch.setattr("xpst.cli.get_config_dir", lambda: home / ".xpst")
         monkeypatch.setenv("USERPROFILE", str(home))
         monkeypatch.setenv("HOMEDRIVE", str(home)[:2])
         monkeypatch.setenv("HOMEPATH", str(home)[2:])
