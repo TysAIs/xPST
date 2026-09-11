@@ -10,6 +10,11 @@ on:
       - "v*.*.*"
     paths:
       - "src-tauri/**"
+      - "ui/**"
+      - "build_engine.spec"
+      - "scripts/build-engine.sh"
+      - "scripts/verify_release_version.py"
+      - "pyproject.toml"
       - ".github/workflows/tauri-release.yml"
   workflow_dispatch:
 
@@ -47,18 +52,31 @@ jobs:
         with:
           workspaces: "src-tauri"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Verify release version
+        run: python scripts/verify_release_version.py
+
+      - name: Build Svelte UI
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+
       - name: Install Python engine deps (sidecar build)
         run: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install -e ".[full]" pyinstaller
 
-      - name: Build engine sidecar (PyInstaller onefile)
+      - name: Build engine sidecar (PyInstaller onedir)
         run: |
-          pyinstaller build_engine.spec --noconfirm --distpath src-tauri/binaries
-          # externalBin requires the target-triple suffix
-          mv src-tauri/binaries/xpst-engine \
-             "src-tauri/binaries/xpst-engine-${{ matrix.target }}"
-          chmod +x "src-tauri/binaries/xpst-engine-${{ matrix.target }}"
+          scripts/build-engine.sh
+          test -f ui/dist/index.html
+          test -x src-tauri/binaries/engine/xpst-engine
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
 
@@ -129,7 +147,7 @@ jobs:
             src-tauri/target/release/bundle/macos/*.app.tar.gz
             src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
             src-tauri/target/release/bundle/dmg/*.dmg
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/')
