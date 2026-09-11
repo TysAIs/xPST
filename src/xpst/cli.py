@@ -2656,14 +2656,15 @@ def mcp(ctx):
     """MCP (Model Context Protocol) server commands"""
     if ctx.invoked_subcommand is None:
         from xpst.mcp import cli_main
-        cli_main()
+        cli_main(ctx.obj.get("config_path") if ctx.obj else None)
 
 
 @mcp.command()
-def start():
-    """Start MCP server over stdio"""
+@click.pass_context
+def start(ctx):
+    """Start MCP server over stdio using the selected config."""
     from xpst.mcp import cli_main
-    cli_main()
+    cli_main(ctx.parent.obj.get("config_path") if ctx.parent and ctx.parent.obj else None)
 
 
 @mcp.command(name="list")
