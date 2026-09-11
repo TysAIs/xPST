@@ -111,6 +111,7 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
 
     @router.get("/schedules")
     def api_schedules() -> dict[str, Any]:
+        """Return persisted schedule entries without starting the scheduler."""
         from xpst.schedule_manager import ScheduleManager
 
         schedules = ScheduleManager(config_dir).list()

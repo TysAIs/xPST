@@ -21,6 +21,10 @@ export const api = {
   healthStatus: () => getJSON("/api/health-status"),
   /** Masked config sections for the Settings page. */
   settings: () => getJSON("/api/settings"),
+  /** Persisted schedule entries (read-only; never starts the scheduler). */
+  schedules: () => getJSON("/api/schedules"),
+  /** Recorded posting failures with truthful recovery metadata. */
+  activity: () => getJSON("/api/activity"),
 };
 
 // ── Hash routing ──────────────────────────────────────────────────────
@@ -33,6 +37,8 @@ export const NAV_ITEMS = [
   { id: "analytics", href: "#/analytics", label: "Analytics", icon: "chart-no-axes-combined" },
   { id: "videos", href: "#/videos", label: "Videos", icon: "video" },
   { id: "accounts", href: "#/accounts", label: "Accounts", icon: "users" },
+  { id: "schedule", href: "#/schedule", label: "Schedule", icon: "calendar-clock" },
+  { id: "activity", href: "#/activity", label: "Activity", icon: "triangle-alert" },
   { id: "settings", href: "#/settings", label: "Settings", icon: "settings" },
 ];
 

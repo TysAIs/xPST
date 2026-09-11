@@ -6,6 +6,8 @@
   import Analytics from "./pages/Analytics.svelte";
   import Videos from "./pages/Videos.svelte";
   import Accounts from "./pages/Accounts.svelte";
+  import Schedule from "./pages/Schedule.svelte";
+  import Activity from "./pages/Activity.svelte";
   import Settings from "./pages/Settings.svelte";
 
   let route = $state(currentRoute());
@@ -14,6 +16,8 @@
     analytics: Analytics,
     videos: Videos,
     accounts: Accounts,
+    schedule: Schedule,
+    activity: Activity,
     settings: Settings,
   };
   const Page = $derived(pages[route] ?? Dashboard);
