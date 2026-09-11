@@ -5,6 +5,7 @@
   import Dashboard from "./pages/Dashboard.svelte";
   import Analytics from "./pages/Analytics.svelte";
   import Videos from "./pages/Videos.svelte";
+  import Library from "./pages/Library.svelte";
   import Accounts from "./pages/Accounts.svelte";
   import Settings from "./pages/Settings.svelte";
 
@@ -13,6 +14,7 @@
     dashboard: Dashboard,
     analytics: Analytics,
     videos: Videos,
+    library: Library,
     accounts: Accounts,
     settings: Settings,
   };

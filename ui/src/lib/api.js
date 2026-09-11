@@ -15,6 +15,8 @@ async function getJSON(path) {
 export const api = {
   /** Aggregate summary stats for dashboard cards. */
   summary: () => getJSON("/api/summary"),
+  /** Verified local library items. */
+  library: () => getJSON("/api/library"),
   /** Per-video list for the Videos page. */
   videos: () => getJSON("/api/videos"),
   /** Engine health + live auth liveness per platform. */
@@ -31,6 +33,7 @@ export const api = {
 export const NAV_ITEMS = [
   { id: "dashboard", href: "#/", label: "Dashboard", icon: "layout-dashboard" },
   { id: "analytics", href: "#/analytics", label: "Analytics", icon: "chart-no-axes-combined" },
+  { id: "library", href: "#/library", label: "Library", icon: "library" },
   { id: "videos", href: "#/videos", label: "Videos", icon: "video" },
   { id: "accounts", href: "#/accounts", label: "Accounts", icon: "users" },
   { id: "settings", href: "#/settings", label: "Settings", icon: "settings" },

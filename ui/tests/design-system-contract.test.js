@@ -89,10 +89,18 @@ test("all design-system primitives exist and declare accessible contracts", asyn
   assert.match(await text(join(UI_ROOT, "src/lib/components/BrandMark.svelte")), /assets\/icon\.png/);
 });
 
+test("library route is present and exposes verified results", async () => {
+  const library = await text(join(UI_ROOT, "src/pages/Library.svelte"));
+  assert.match(library, /Verified library items/);
+  assert.match(library, /Open verified result/);
+  assert.match(await text(join(UI_ROOT, "src/lib/api.js")), /api\/library/);
+});
+
 test("navigation uses one local icon family and exposes all foundation routes", () => {
   assert.deepEqual(NAV_ITEMS.map((item) => item.id), [
     "dashboard",
     "analytics",
+    "library",
     "videos",
     "accounts",
     "settings",
