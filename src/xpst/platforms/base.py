@@ -191,7 +191,7 @@ class PlatformUploader(ABC):
         return ProviderManifest(
             name=self.platform_name,
             display_name=self.platform_name.title(),
-            roles=(ProviderRole.DESTINATION,),
+            roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
             capabilities=(
                 ProviderCapability.UPLOAD,
                 ProviderCapability.HEALTH,
