@@ -576,6 +576,24 @@ input,
   gap: var(--xpst-space-2);
 }
 
+.xpst-settings-grid {
+  display: grid;
+  gap: var(--xpst-space-2);
+  margin: 0;
+}
+
+.xpst-settings-grid > div {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.4fr) 1fr;
+  gap: var(--xpst-space-4);
+  padding-block: var(--xpst-space-2);
+  border-bottom: 1px solid var(--xpst-color-border);
+}
+
+.xpst-settings-grid > div:last-child { border-bottom: 0; }
+.xpst-settings-grid dt { color: var(--xpst-color-text-muted); font: var(--xpst-type-label); }
+.xpst-settings-grid dd { margin: 0; color: var(--xpst-color-text-primary); overflow-wrap: anywhere; }
+
 @media (max-width: 760px) {
   .xpst-shell__sidebar { display: none; }
   .xpst-shell__mobile-header {
