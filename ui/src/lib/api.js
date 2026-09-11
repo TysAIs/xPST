@@ -21,7 +21,10 @@ export const api = {
   healthStatus: () => getJSON("/api/health-status"),
   /** Masked config sections for the Settings page. */
   settings: () => getJSON("/api/settings"),
+  /** Role-aware provider catalog from the canonical backend contract. */
+  providers: () => getJSON("/api/providers"),
 };
+
 
 // ── Hash routing ──────────────────────────────────────────────────────
 // Routes mirror the QML desktop page ids so both shells share one set of
@@ -30,6 +33,7 @@ export const api = {
 
 export const NAV_ITEMS = [
   { id: "dashboard", href: "#/", label: "Dashboard", icon: "layout-dashboard" },
+  { id: "create", href: "#/create", label: "Create", icon: "square-pen" },
   { id: "analytics", href: "#/analytics", label: "Analytics", icon: "chart-no-axes-combined" },
   { id: "videos", href: "#/videos", label: "Videos", icon: "video" },
   { id: "accounts", href: "#/accounts", label: "Accounts", icon: "users" },
