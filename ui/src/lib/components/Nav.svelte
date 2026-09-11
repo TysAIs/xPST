@@ -1,10 +1,11 @@
 <script>
-  import { LayoutDashboard, ChartNoAxesCombined, Video, Users, Settings } from "@lucide/svelte";
+  import { LayoutDashboard, ChartNoAxesCombined, Library as LibraryIcon, Video, Users, Settings } from "@lucide/svelte";
   import { NAV_ITEMS } from "../api.js";
 
   const ICONS = {
     "layout-dashboard": LayoutDashboard,
     "chart-no-axes-combined": ChartNoAxesCombined,
+    library: LibraryIcon,
     video: Video,
     users: Users,
     settings: Settings,
