@@ -584,6 +584,23 @@ TOOLS: list[Tool] = [
         inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
     Tool(
+        name="xpst_preflight",
+        description=(
+            "Run the canonical side-effect-free post preflight for local media and targets "
+            "(media, caption, destination readiness); never uploads and never touches the network"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "media_path": {"type": "string"},
+                "platforms": {"type": "array", "items": {"type": "string"}},
+                "caption": {"type": "string", "default": ""},
+            },
+            "required": ["media_path", "platforms"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_readiness",
         description="Return local setup readiness and actionable blockers without starting the posting engine",
         inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
@@ -1013,6 +1030,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             result = await _handle_providers(server.config)
         elif name == "xpst_capabilities":
             result = await _handle_capabilities(server.config)
+        elif name == "xpst_preflight":
+            result = await _handle_preflight(server.config, arguments)
         elif name == "xpst_readiness":
             result = await _handle_readiness(server.config)
         elif name == "xpst_auth_start":
@@ -1129,6 +1148,25 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
     carousel_paths = args.get("carousel_paths", [])
 
     if dry_run:
+        # Same canonical, side-effect-free verdict the CLI and the dashboard use.
+        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+
+        targets = args.get("platforms") or list(engine._platforms.keys())
+        media_paths = [args["video_path"], *carousel_paths]
+        plan_payload: dict[str, Any] | None = None
+        blockers: list[str] = []
+        try:
+            plan_payload = PostPreflightService(engine.config).plan(
+                PostPlanRequest(
+                    media_paths=media_paths,
+                    target_platforms=targets,
+                    base_caption=args["caption"],
+                )
+            ).to_dict()
+            blockers = [issue["message"] for issue in plan_payload["hard_blockers"]]
+        except Exception as exc:  # noqa: BLE001 - report truthfully instead of failing the tool
+            blockers = [f"Preflight could not run: {str(exc)[:200]}"]
+
         return CallToolResult(
             content=[TextContent(
                 type="text",
@@ -1137,7 +1175,11 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                     "video": args["video_path"],
                     "caption": args["caption"][:100],
                     "carousel": len(carousel_paths) > 0,
-                    "targets": args.get("platforms") or list(engine._platforms.keys()),
+                    "targets": targets,
+                    "ready": not blockers and bool(plan_payload and plan_payload["ready"]),
+                    "blockers": blockers,
+                    "plan": plan_payload,
+                    "network_calls": False,
                 }, indent=2),
             )],
         )
@@ -1675,6 +1717,46 @@ async def _handle_providers(config: XPSTConfig) -> CallToolResult:
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(data, indent=2, default=str))],
     )
+
+
+async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> CallToolResult:
+    """Run the same side-effect-free preflight the CLI and dashboard use."""
+    from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+
+    media_path = str(arguments.get("media_path") or "").strip()
+    platforms = [str(item).lower() for item in (arguments.get("platforms") or []) if str(item).strip()]
+    caption = str(arguments.get("caption") or "")
+
+    missing = []
+    if not platforms:
+        # An empty target list would produce an empty plan that reports "ready".
+        missing.append("platforms is required")
+    if missing:
+        payload = {
+            "ok": False,
+            "ready": False,
+            "blockers": missing,
+            "warnings": [],
+            "network_calls": False,
+        }
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
+
+    plan = PostPreflightService(config).plan(
+        PostPlanRequest(
+            media_paths=[media_path] if media_path else [],
+            target_platforms=platforms,
+            base_caption=caption,
+        )
+    ).to_dict()
+    payload = {
+        "ok": plan["ok"],
+        "ready": plan["ready"],
+        "blockers": [issue["message"] for issue in plan["hard_blockers"]],
+        "warnings": [issue["message"] for issue in plan["warnings"]],
+        "plan": plan,
+        "network_calls": False,
+    }
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
 
 
 async def _handle_capabilities(config: XPSTConfig) -> CallToolResult:

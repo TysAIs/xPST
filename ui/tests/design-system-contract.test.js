@@ -170,3 +170,10 @@ test("the icon dependency and license manifest are explicit and offline-safe", a
   assert.match(manifest, /assets\/icon\.png/);
   assert.doesNotMatch(manifest, /https:\/\/fonts\.googleapis\.com/);
 });
+
+test("create route exposes local preflight and no-network copy", async () => {
+  const create = await text(join(UI_ROOT, "src/pages/Create.svelte"));
+  assert.match(create, /Run preflight/);
+  assert.match(create, /never uploads media/);
+  assert.match(await text(join(UI_ROOT, "src/lib/api.js")), /api\/preflight/);
+});
