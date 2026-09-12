@@ -1010,7 +1010,10 @@ class AnalyticsCollector:
             "platform_health": health.get("platforms", {}),
             "last_check": health.get("last_check"),
             "posts_this_week": posts_this_week,
-            "best_platform": best_platform or "—",
+            # None (not a placeholder) when nothing has been posted: a dash is
+            # indistinguishable from a platform actually named "—" and forces
+            # every consumer to guess. Clients render their own empty copy.
+            "best_platform": best_platform,
             "total_platform_posts": total_platform_posts,
             "engagement_by_platform": engagement,
             **freshness,
