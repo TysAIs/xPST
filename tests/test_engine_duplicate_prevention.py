@@ -1,10 +1,11 @@
-"""Duplicate-post prevention for the manual posting path.
+"""Duplicate-post prevention coverage for the manual posting path.
 
-``check_and_post`` checks ``state.is_video_posted(video_id, platform)`` before
-uploading, but ``post_manual`` (the ``xpst post`` / agent path) did not: running
-the same command twice with the same file posted twice to the same platform.
-These tests pin the guarantee that a repeat call is a no-op that reports
-``already_posted`` instead of creating a duplicate post.
+``UploadService.upload_to_platform`` skips a platform that already has a verified
+post for the same video (``state.is_video_posted``), and additionally dedupes on
+content hash (``{"dedup": "content_hash"}``). Nothing exercised that guarantee
+through ``post_manual`` (the ``xpst post`` / agent entry point), so these tests
+pin it: a repeat call is a no-op that reports ``already_posted``, the state
+records the post, and deduping one platform never blocks another destination.
 """
 
 from pathlib import Path
@@ -12,9 +13,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from xpst.engine import CrossPostEngine
-
 from tests.test_engine import _make_config, _make_mock_uploader
+from xpst.engine import CrossPostEngine
 
 
 def _engine_with_platform(tmp_path: Path, platform: str = "youtube"):
