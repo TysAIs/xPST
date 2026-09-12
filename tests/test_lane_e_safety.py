@@ -153,6 +153,73 @@ class TestMcpGuardrails:
         assert not getattr(result, "isError", False)
 
 
+
+class TestMcpMutationConsent:
+    """The MCP surface is driven by any connected agent, so posting must be
+    fail-closed by default: no opt-in, no mutation. XPST_MCP_READONLY must win
+    over an allow flag, and REQUIRE_CONFIRM must demand a per-call confirm."""
+
+    @staticmethod
+    def _clear_env(monkeypatch) -> None:
+        for var in ("XPST_MCP_READONLY", "XPST_MCP_ALLOW_MUTATIONS", "XPST_MCP_REQUIRE_CONFIRM"):
+            monkeypatch.delenv(var, raising=False)
+
+    @pytest.mark.asyncio
+    async def test_mutating_tools_fail_closed_without_opt_in(self, monkeypatch):
+        self._clear_env(monkeypatch)
+        from xpst.mcp.server import _MUTATING_TOOLS, handle_call_tool
+
+        assert _MUTATING_TOOLS, "guardrail list is empty"
+
+        for name in sorted(_MUTATING_TOOLS):
+            result = await handle_call_tool(name, {})
+            assert result.isError, f"{name} was allowed without any opt-in"
+            text = result.content[0].text
+            assert "XPST_MCP_ALLOW_MUTATIONS" in text, name
+            assert "XPST_MCP_REQUIRE_CONFIRM" in text, name
+
+    @pytest.mark.asyncio
+    async def test_readonly_wins_over_allow_mutations(self, monkeypatch):
+        self._clear_env(monkeypatch)
+        monkeypatch.setenv("XPST_MCP_READONLY", "1")
+        monkeypatch.setenv("XPST_MCP_ALLOW_MUTATIONS", "1")
+        from xpst.mcp.server import handle_call_tool
+
+        result = await handle_call_tool("xpst_delete", {"video_id": "v1", "platform": "youtube"})
+
+        assert result.isError
+        assert "XPST_MCP_READONLY" in result.content[0].text
+
+    @pytest.mark.asyncio
+    async def test_explicit_opt_in_clears_the_guardrail(self, monkeypatch):
+        self._clear_env(monkeypatch)
+        monkeypatch.setenv("XPST_MCP_ALLOW_MUTATIONS", "1")
+        from xpst.mcp.server import handle_call_tool
+
+        # With the guardrail satisfied the call proceeds past it; it must not be
+        # rejected with the consent message (the underlying action may still fail
+        # for its own reasons, which is a different contract).
+        result = await handle_call_tool("xpst_post", {"video_path": "/nonexistent/x.mp4", "caption": "c"})
+
+        text = result.content[0].text
+        assert "XPST_MCP_ALLOW_MUTATIONS" not in text
+
+    @pytest.mark.asyncio
+    async def test_require_confirm_needs_confirm_true(self, monkeypatch):
+        self._clear_env(monkeypatch)
+        monkeypatch.setenv("XPST_MCP_REQUIRE_CONFIRM", "1")
+        from xpst.mcp.server import handle_call_tool
+
+        blocked = await handle_call_tool("xpst_post", {"video_path": "/nonexistent/x.mp4", "caption": "c"})
+        assert blocked.isError
+        assert '"confirm": true' in blocked.content[0].text
+
+        with_confirm = await handle_call_tool(
+            "xpst_post", {"video_path": "/nonexistent/x.mp4", "caption": "c", "confirm": True}
+        )
+        assert '"confirm": true' not in with_confirm.content[0].text
+
+
 class TestStateDurability:
     def _seed_state(self, tmp_path) -> Path:
         from xpst.state import StateManager
