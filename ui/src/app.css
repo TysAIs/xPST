@@ -759,3 +759,13 @@ input,
   margin: 0;
   color: var(--xpst-color-text-primary);
 }
+
+.xpst-inline-link {
+  color: var(--xpst-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.xpst-inline-link:hover {
+  color: var(--xpst-accent-hover);
+}
