@@ -42,7 +42,7 @@
           { label: "Tracked source posts", value: summary.total_posts ?? 0 },
           { label: "Platform post records", value: summary.total_platform_posts ?? 0 },
           { label: "Posts this week", value: summary.posts_this_week ?? 0 },
-          { label: "Top platform", value: summary.best_platform || "—" },
+          { label: "Top platform", value: summary.best_platform || "None yet" },
         ]
       : []
   );
@@ -50,6 +50,17 @@
   const hasPosts = $derived(Number(summary?.total_posts ?? 0) > 0);
   const canCreatePost = $derived(Boolean(health?.can_create_post));
   const readinessPending = $derived(Boolean(health?.readiness_pending));
+
+  // "Some roles need attention" is not the same as "you cannot post": a single
+  // ready destination is enough, so the copy must not claim posting is blocked
+  // while a Create-post action is offered.
+  const readinessDescription = $derived(
+    health?.readiness?.ready
+      ? "A destination is available for the next post."
+      : canCreatePost
+        ? "A destination is ready, so posting works. The roles below still need attention."
+        : "Posting stays unavailable until the blocker below is resolved."
+  );
   const nextAction = $derived(health?.next_action ?? { kind: "review", label: "Review readiness", role: "video_destination" });
   const readinessBlockers = $derived(health?.readiness?.blockers ?? []);
 </script>
@@ -77,7 +88,7 @@
         label={readinessPending ? "Checking…" : health?.readiness?.ready ? "Ready" : "Needs attention"}
       />
     </div>
-    <Card description={readinessPending ? "Checking live account readiness — nothing is claimed until the answer is known." : health?.readiness?.ready ? "A destination is available for the next post." : "Posting stays unavailable until the blocker below is resolved."}>
+    <Card description={readinessPending ? "Checking live account readiness — nothing is claimed until the answer is known." : readinessDescription}>
       {#if readinessPending}
         <p class="xpst-card__description">Live account checks are still running.</p>
       {:else if readinessBlockers.length}
@@ -86,7 +97,7 @@
             <li class="xpst-inline-meta">
               <PlatformBadge platform={blocker.platform} size={16} />
               <span>{blocker.state.replaceAll("_", " ")}</span>
-              <a href="#/accounts">Review</a>
+              <a class="xpst-inline-link" href="#/accounts">Review</a>
             </li>
           {/each}
         </ul>
@@ -118,10 +129,10 @@
 
   <section class="xpst-section" aria-labelledby="health-heading">
     <div class="xpst-section__heading">
-      <h2 id="health-heading">Engine health</h2>
+      <h2 id="health-heading">Engine health (last recorded)</h2>
       <StatusBadge status={health?.status ?? "unknown"} />
     </div>
-    <Card description={`Engine reports ${health?.total_processed ?? 0} processed item${health?.total_processed === 1 ? "" : "s"}; processing is not the same as a verified post.`}>
+    <Card description={`Recorded by the engine's last health run, not a live re-check: ${health?.total_processed ?? 0} processed item${health?.total_processed === 1 ? "" : "s"}. Processing is not the same as a verified post, and live readiness is reported above.`}>
       {#if platformHealth.length}
         <div class="xpst-settings-list">
           {#each platformHealth as [name, platform] (name)}
