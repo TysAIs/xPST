@@ -174,6 +174,43 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
         items.sort(key=lambda item: item.get("last_attempt") or "", reverse=True)
         return {"items": items, "count": len(items)}
 
+    @router.post("/preflight")
+    def api_preflight(payload: dict[str, Any]) -> dict[str, Any]:
+        """Validate a post request locally without network or upload side effects."""
+        from pathlib import Path
+
+        media_path = str(payload.get("media_path") or "")
+        caption = str(payload.get("caption") or "")
+        platforms = [str(item).lower() for item in (payload.get("platforms") or []) if str(item).strip()]
+        blockers: list[str] = []
+        warnings: list[str] = []
+        path = Path(media_path).expanduser() if media_path else None
+        exists = bool(path and path.exists() and path.is_file())
+        if not media_path:
+            blockers.append("Choose a media file before posting.")
+        elif not exists:
+            blockers.append(f"Media file not found: {media_path}")
+        if not platforms:
+            blockers.append("Choose at least one destination platform.")
+        if not caption.strip():
+            warnings.append("Caption is empty.")
+        platform_caps = {"youtube": 100, "x": 280, "instagram": 2200, "tiktok": 2200, "threads": 500}
+        for platform in platforms:
+            limit = platform_caps.get(platform)
+            if limit is None:
+                blockers.append(f"Unsupported destination platform: {platform}")
+            elif len(caption) > limit:
+                blockers.append(f"Caption exceeds {platform} limit ({limit} characters).")
+        return {
+            "ready": not blockers,
+            "media": {"path": media_path, "exists": exists, "is_file": bool(path and path.is_file())},
+            "caption": {"length": len(caption), "per_platform": {platform: caption for platform in platforms}},
+            "platforms": platforms,
+            "blockers": blockers,
+            "warnings": warnings,
+            "network_calls": False,
+        }
+
     @router.get("/settings")
     def api_settings() -> dict[str, Any]:
         from xpst.cli import _mask_sensitive_values
