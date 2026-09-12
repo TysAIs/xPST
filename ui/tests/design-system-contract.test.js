@@ -186,3 +186,10 @@ test("home shows a checking state instead of guessing while readiness is pending
   // bounded polling, never an unbounded loop
   assert.match(dashboard, /pendingPolls < 8/);
 });
+
+test("the primary button paints its own background colour pair", async () => {
+  const css = await text(join(UI_ROOT, "src/app.css"));
+  const rule = css.slice(css.indexOf(".xpst-button {"), css.indexOf(".xpst-button:hover"));
+  assert.match(rule, /background: var\(--xpst-color-primary\)/);
+  assert.match(rule, /color: var\(--xpst-color-on-primary\)/);
+});

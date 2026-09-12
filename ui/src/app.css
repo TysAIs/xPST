@@ -224,7 +224,11 @@ input,
   gap: var(--xpst-space-2);
   min-height: 44px;
   padding: 0 var(--xpst-space-4);
+  /* The on-primary foreground only makes sense over the primary surface; without
+     this the button inherited the card background and rendered dark-on-dark in
+     dark mode (measured 1.11:1 with axe, needs 4.5:1). */
   color: var(--xpst-color-on-primary);
+  background: var(--xpst-color-primary);
   font: var(--xpst-type-label);
   text-decoration: none;
   cursor: pointer;
