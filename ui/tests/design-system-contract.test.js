@@ -193,3 +193,24 @@ test("the primary button paints its own background colour pair", async () => {
   assert.match(rule, /background: var\(--xpst-color-primary\)/);
   assert.match(rule, /color: var\(--xpst-color-on-primary\)/);
 });
+
+test("home readiness copy never contradicts an offered Create post action", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+  assert.match(dashboard, /readinessDescription/);
+  assert.match(dashboard, /A destination is ready, so posting works\./);
+  assert.match(dashboard, /: "Posting stays unavailable until the blocker below is resolved\."/);
+});
+
+test("engine health is labelled as a recorded run, not live truth", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+  assert.match(dashboard, /Engine health \(last recorded\)/);
+  assert.match(dashboard, /not a live re-check/);
+});
+
+test("home uses explicit empty-value copy and actionable recovery links", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+  assert.doesNotMatch(dashboard, /best_platform \|\| "—"/);
+  assert.match(dashboard, /best_platform \|\| "None yet"/);
+  assert.match(dashboard, /class="xpst-inline-link" href="#\/accounts"/);
+  assert.match(await text(join(UI_ROOT, "src/app.css")), /\.xpst-inline-link/);
+});
