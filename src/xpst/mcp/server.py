@@ -1148,6 +1148,25 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
     carousel_paths = args.get("carousel_paths", [])
 
     if dry_run:
+        # Same canonical, side-effect-free verdict the CLI and the dashboard use.
+        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+
+        targets = args.get("platforms") or list(engine._platforms.keys())
+        media_paths = [args["video_path"], *carousel_paths]
+        plan_payload: dict[str, Any] | None = None
+        blockers: list[str] = []
+        try:
+            plan_payload = PostPreflightService(engine.config).plan(
+                PostPlanRequest(
+                    media_paths=media_paths,
+                    target_platforms=targets,
+                    base_caption=args["caption"],
+                )
+            ).to_dict()
+            blockers = [issue["message"] for issue in plan_payload["hard_blockers"]]
+        except Exception as exc:  # noqa: BLE001 - report truthfully instead of failing the tool
+            blockers = [f"Preflight could not run: {str(exc)[:200]}"]
+
         return CallToolResult(
             content=[TextContent(
                 type="text",
@@ -1156,7 +1175,11 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                     "video": args["video_path"],
                     "caption": args["caption"][:100],
                     "carousel": len(carousel_paths) > 0,
-                    "targets": args.get("platforms") or list(engine._platforms.keys()),
+                    "targets": targets,
+                    "ready": not blockers and bool(plan_payload and plan_payload["ready"]),
+                    "blockers": blockers,
+                    "plan": plan_payload,
+                    "network_calls": False,
                 }, indent=2),
             )],
         )
