@@ -9,6 +9,7 @@
   import StatusBadge from "../lib/components/StatusBadge.svelte";
 
   let state = $state("loading");
+  let pendingPolls = 0;
   let summary = $state(null);
   let health = $state(null);
   let error = $state("");
@@ -21,6 +22,12 @@
       summary = nextSummary;
       health = nextHealth;
       state = "ready";
+      // The engine answers immediately while its live probe runs in the
+      // background; poll a bounded number of times instead of blocking paint.
+      if (nextHealth?.readiness_pending && pendingPolls < 8) {
+        pendingPolls += 1;
+        setTimeout(load, 1200);
+      }
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
       state = "error";
@@ -42,6 +49,7 @@
   const platformHealth = $derived(Object.entries(health?.platforms ?? {}));
   const hasPosts = $derived(Number(summary?.total_posts ?? 0) > 0);
   const canCreatePost = $derived(Boolean(health?.can_create_post));
+  const readinessPending = $derived(Boolean(health?.readiness_pending));
   const nextAction = $derived(health?.next_action ?? { kind: "review", label: "Review readiness", role: "video_destination" });
   const readinessBlockers = $derived(health?.readiness?.blockers ?? []);
 </script>
@@ -64,10 +72,15 @@
   <section class="xpst-section" aria-labelledby="readiness-heading">
     <div class="xpst-section__heading">
       <h2 id="readiness-heading">Readiness</h2>
-      <StatusBadge status={health?.readiness?.ready ? "healthy" : "degraded"} label={health?.readiness?.ready ? "Ready" : "Needs attention"} />
+      <StatusBadge
+        status={readinessPending ? "unknown" : health?.readiness?.ready ? "healthy" : "degraded"}
+        label={readinessPending ? "Checking…" : health?.readiness?.ready ? "Ready" : "Needs attention"}
+      />
     </div>
-    <Card description={health?.readiness?.ready ? "A destination is available for the next post." : "Posting stays unavailable until the blocker below is resolved."}>
-      {#if readinessBlockers.length}
+    <Card description={readinessPending ? "Checking live account readiness — nothing is claimed until the answer is known." : health?.readiness?.ready ? "A destination is available for the next post." : "Posting stays unavailable until the blocker below is resolved."}>
+      {#if readinessPending}
+        <p class="xpst-card__description">Live account checks are still running.</p>
+      {:else if readinessBlockers.length}
         <ul class="xpst-settings-list" aria-label="Readiness blockers">
           {#each readinessBlockers.slice(0, 5) as blocker (`${blocker.platform}:${blocker.role}`)}
             <li class="xpst-inline-meta">
