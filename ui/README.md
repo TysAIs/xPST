@@ -65,3 +65,24 @@ JSON endpoints (added in `src/xpst/dashboard/api.py`, Basic-auth protected,
 never exempt): `GET /api/summary`, `GET /api/videos`,
 `GET /api/videos/{video_id}`, `GET /api/health-status`, `GET /api/settings`.
 Existing backend tests live in `tests/test_web_ui_qa.py`.
+
+## Accessibility audit
+
+`scripts/a11y_audit.py` runs axe-core against the running UI over the Chrome
+DevTools Protocol (headless Brave) and audits every route in both themes:
+
+```bash
+xpst ui --no-browser --port 8092 &
+uvx --with websockets python scripts/a11y_audit.py --base-url http://127.0.0.1:8092 --theme both
+```
+
+It exits non-zero when any route reports a violation, so it can gate a release
+check on a machine that has the browser. Two traps are already handled: the
+devtools "new tab" endpoint drops a URL fragment (so routing is driven in-page
+and each result reports the rendered `<h1>`), and a theme switch is verified
+against the computed background colour before auditing, so "clean in light mode"
+cannot silently mean "the dark theme twice".
+
+This is not a CI gate — CI has no browser — but it is the check that caught the
+`.xpst-button` contrast regression (1.11:1 for the primary CTA in dark mode).
+
