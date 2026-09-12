@@ -1,115 +1,94 @@
 <script>
   import { onMount } from "svelte";
-  import Button from "../lib/components/Button.svelte";
-  import Card from "../lib/components/Card.svelte";
-  import ErrorState from "../lib/components/ErrorState.svelte";
-  import FormField from "../lib/components/FormField.svelte";
-  import PlatformBadge from "../lib/components/PlatformBadge.svelte";
   import { api } from "../lib/api.js";
+  import Card from "../lib/components/Card.svelte";
+  import EmptyState from "../lib/components/EmptyState.svelte";
+  import ErrorState from "../lib/components/ErrorState.svelte";
+  import LoadingSkeleton from "../lib/components/LoadingSkeleton.svelte";
+  import StatusBadge from "../lib/components/StatusBadge.svelte";
 
-  const platformOrder = ["youtube", "x", "instagram", "tiktok", "threads"];
-  const platformLabels = {
-    youtube: "YouTube Shorts",
-    x: "X",
-    instagram: "Instagram Reels",
-    tiktok: "TikTok",
-    threads: "Threads",
-  };
-
-  let filePath = $state("");
+  let mediaPath = $state("");
   let caption = $state("");
-  let selected = $state(["youtube", "x", "instagram"]);
-  let providers = $state(null);
-  let readiness = $state(null);
+  let platforms = $state(["youtube"]);
+  let state = $state("idle");
+  let report = $state(null);
   let error = $state("");
-  let state = $state("loading");
-  let preview = $state(null);
+  let catalog = $state(null);
 
   onMount(async () => {
     try {
-      [providers, readiness] = await Promise.all([api.providers(), api.healthStatus()]);
+      catalog = await api.providers();
+    } catch {
+      catalog = null;
+    }
+  });
+
+  const destinations = $derived(
+    (catalog?.providers ?? []).filter((provider) => provider.roles?.includes("video_destination"))
+  );
+
+  async function preflight() {
+    state = "loading";
+    error = "";
+    try {
+      report = await api.preflight({ media_path: mediaPath, caption, platforms });
       state = "ready";
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
       state = "error";
     }
-  });
-
-  function toggle(platform) {
-    selected = selected.includes(platform)
-      ? selected.filter((item) => item !== platform)
-      : [...selected, platform];
   }
 
-  function isAvailable(platform) {
-    const entry = providers?.providers?.[platform] ?? providers?.destinations?.find((item) => item.name === platform);
-    return Boolean(entry);
+  function togglePlatform(name) {
+    platforms = platforms.includes(name) ? platforms.filter((item) => item !== name) : [...platforms, name];
   }
-
-  function canPost(platform) {
-    const entry = readiness?.canonical?.providers?.[platform]?.role_status?.video_destination;
-    return entry?.state === "ready" || readiness?.auth?.[platform]?.session_valid === true;
-  }
-
-  function handleSubmit(event) {
-    event.preventDefault();
-    preview = {
-      status: "plan_only",
-      file: filePath,
-      platforms: selected,
-      caption,
-      message: "This foundation prepares the exact post request. Upload execution is intentionally gated until the shared post job API is connected.",
-    };
-  }
-
 </script>
 
 <header class="xpst-page-header">
   <div>
     <h1>Create</h1>
-    <p>Choose one local video, confirm destinations, and review readiness before publishing.</p>
+    <p>Run the same local preflight before any future post flow. This surface never uploads media.</p>
   </div>
 </header>
 
+<Card title="Post preflight" description="Media, targets, caption limits, and local blockers are checked without network calls.">
+  <label class="xpst-form-field">
+    <span>Media path</span>
+    <input bind:value={mediaPath} placeholder="/path/to/video.mp4" autocomplete="off" />
+  </label>
+  <label class="xpst-form-field">
+    <span>Caption</span>
+    <textarea bind:value={caption} rows="4" placeholder="Write the exact caption to validate"></textarea>
+  </label>
+  <fieldset class="xpst-capability-grid">
+    <legend>Destinations</legend>
+    {#each destinations as provider (provider.name)}
+      <label class="xpst-inline-meta">
+        <input type="checkbox" checked={platforms.includes(provider.name)} onchange={() => togglePlatform(provider.name)} />
+        {provider.display_name}
+      </label>
+    {/each}
+  </fieldset>
+  <button class="xpst-button" type="button" onclick={preflight} disabled={state === "loading"}>Run preflight</button>
+</Card>
+
 {#if state === "loading"}
-  <p class="xpst-page-header">Loading creator workspace…</p>
+  <LoadingSkeleton rows={4} label="Running local preflight" />
 {:else if state === "error"}
-  <ErrorState message={error} />
-{:else}
-  <form class="xpst-create-layout" onsubmit={handleSubmit}>
-    <Card title="Content" description="The current foundation never uploads without an explicit execution contract.">
-      <FormField label="Video path" hint="Use a local .mp4 or .mov path. Directory and unsupported-file checks happen in shared preflight.">
-        <input bind:value={filePath} class="xpst-input" placeholder="/path/to/video.mp4" required />
-      </FormField>
-      <FormField label="Caption" hint={`${caption.length} characters`}>
-        <textarea bind:value={caption} class="xpst-input xpst-input--textarea" rows="5" placeholder="Write the caption once; platform-specific overrides come in the execution workflow."></textarea>
-      </FormField>
-      <Button type="submit" disabled={!filePath || selected.length === 0}>Review post plan</Button>
-    </Card>
-
-    <Card title="Destinations" description="Only choose roles the provider catalog exposes. Live readiness is shown before execution.">
-      <div class="xpst-create-platforms">
-        {#each platformOrder as platform}
-          <label class="xpst-create-platform" class:is-selected={selected.includes(platform)}>
-            <input type="checkbox" checked={selected.includes(platform)} onchange={() => toggle(platform)} disabled={!isAvailable(platform)} />
-            <PlatformBadge {platform} />
-            <span>
-              <strong>{platformLabels[platform]}</strong>
-              <small>{canPost(platform) ? "Ready to post" : "Needs review or connection"}</small>
-            </span>
-          </label>
-        {/each}
-      </div>
-    </Card>
-  </form>
-
-  {#if preview}
-    <Card title="Post plan" description={preview.message}>
-      <dl class="xpst-plan-summary">
-        <div><dt>File</dt><dd>{preview.file}</dd></div>
-        <div><dt>Destinations</dt><dd>{preview.platforms.map((item) => platformLabels[item]).join(", ")}</dd></div>
-        <div><dt>Caption</dt><dd>{preview.caption || "—"}</dd></div>
-      </dl>
-    </Card>
-  {/if}
+  <ErrorState message={error} retry={preflight} />
+{:else if state === "ready" && report}
+  <Card title="Preflight result" description={`Network calls: ${report.network_calls ? "yes" : "none"}`}>
+    <div class="xpst-section__heading">
+      <h2>{report.ready ? "Ready for the next step" : "Blocked before posting"}</h2>
+      <StatusBadge status={report.ready ? "healthy" : "degraded"} label={report.ready ? "Ready" : "Blocked"} />
+    </div>
+    {#if report.blockers.length}
+      <ul><li>{report.blockers.join("; ")}</li></ul>
+    {/if}
+    {#if report.warnings.length}
+      <p class="xpst-card__description">Warnings: {report.warnings.join("; ")}</p>
+    {/if}
+  </Card>
+{:else if state === "idle"}
+  <EmptyState title="Nothing preflighted yet" description="Choose media and targets, then run the local checks." />
 {/if}
