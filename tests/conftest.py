@@ -48,3 +48,14 @@ def _disable_anti_bot_time_checks(request, monkeypatch):
 
     monkeypatch.setattr(AntiBotProtection, "should_post_now", lambda self: True)
     monkeypatch.setattr(AntiBotProtection, "can_upload", lambda self, platform: True)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_auth_warm(monkeypatch):
+    """Never warm the dashboard auth cache during tests.
+
+    Creating an app would otherwise start a background thread that probes real
+    platform APIs, making the suite slow and network-dependent. Tests that
+    exercise the warm path remove this variable explicitly.
+    """
+    monkeypatch.setenv("XPST_DISABLE_AUTH_WARM", "1")
