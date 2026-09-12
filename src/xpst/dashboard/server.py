@@ -31,6 +31,7 @@ import hmac
 import importlib.metadata
 import json
 import logging
+import os
 import urllib.parse
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -177,6 +178,18 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
         description="xPST cross-posting analytics and health API",
         version=importlib.metadata.version("xpst"),
     )
+
+    # Prime the live-auth cache in the background so the Home screen's first
+    # render does not wait on platform probes (measured ~5.6s cold). Disabled by
+    # XPST_DISABLE_AUTH_WARM=1, which the test suite sets to stay offline.
+    if not os.environ.get("XPST_DISABLE_AUTH_WARM"):
+        try:
+            from xpst.config import XPSTConfig
+            from xpst.dashboard.api import warm_auth_status_cache
+
+            warm_auth_status_cache(config_dir, XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml")))
+        except Exception as exc:  # noqa: BLE001 - warming is best-effort only
+            logger.debug("Auth cache warm-up skipped: %s", exc)
 
     # ── Health endpoint ─────────────────────────────────────────────────
     @app.get("/health")
