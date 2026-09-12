@@ -23,8 +23,13 @@ def test_post_preflight_reports_media_and_target_blockers_without_network(tmp_pa
     data = response.json()
     assert data["ready"] is False
     assert data["media"]["exists"] is False
-    assert any("not found" in blocker.lower() for blocker in data["blockers"])
     assert data["network_calls"] is False
+
+    # Verdicts come from the canonical service, not a bespoke re-implementation.
+    codes = {issue["code"] for issue in data["plan"]["hard_blockers"]}
+    assert "MEDIA_NOT_FOUND" in codes
+    for issue in data["plan"]["hard_blockers"]:
+        assert issue["message"] in data["blockers"]
 
 
 def test_post_preflight_requires_explicit_targets(tmp_path: Path) -> None:
