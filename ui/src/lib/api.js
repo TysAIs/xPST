@@ -12,6 +12,16 @@ async function getJSON(path) {
   return res.json();
 }
 
+async function postJSON(path, payload) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { ...JSON_HEADERS, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
+  return res.json();
+}
+
 export const api = {
   /** Aggregate summary stats for dashboard cards. */
   summary: () => getJSON("/api/summary"),
@@ -19,6 +29,8 @@ export const api = {
   videos: () => getJSON("/api/videos"),
   /** Engine health + live auth liveness per platform. */
   healthStatus: () => getJSON("/api/health-status"),
+  /** Local no-network post preflight. */
+  preflight: (payload) => postJSON("/api/preflight", payload),
   /** Masked config sections for the Settings page. */
   settings: () => getJSON("/api/settings"),
   /** Persisted schedule entries (read-only; never starts the scheduler). */

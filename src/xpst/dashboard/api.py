@@ -227,6 +227,74 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
         items.sort(key=lambda item: item.get("last_attempt") or "", reverse=True)
         return {"items": items, "count": len(items)}
 
+    @router.post("/preflight")
+    def api_preflight(payload: dict[str, Any]) -> dict[str, Any]:
+        """Run the canonical, side-effect-free post preflight.
+
+        Delegates to ``PostPreflightService`` — the same service the CLI and the
+        MCP tool use — so no surface can disagree about whether a post is ready.
+        Only the request-shape preconditions (missing media or targets) are
+        decided here; every media, caption, and destination verdict is canonical.
+        """
+        from xpst.config import XPSTConfig
+        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+
+        media_path = str(payload.get("media_path") or "").strip()
+        caption = str(payload.get("caption") or "")
+        platforms = [
+            str(item).lower()
+            for item in (payload.get("platforms") or [])
+            if str(item).strip()
+        ]
+
+        request_blockers: list[str] = []
+        if not platforms:
+            # An empty target list would produce an empty plan that reports
+            # "ready", so the request-shape precondition is decided here.
+            request_blockers.append("Choose at least one destination platform.")
+
+        plan: dict[str, Any] | None = None
+        canonical_blockers: list[str] = []
+        canonical_warnings: list[str] = []
+        try:
+            config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+        except Exception as exc:  # noqa: BLE001 - a missing config must not break preflight
+            logger.debug("Preflight config load failed, using defaults: %s", exc)
+            config = XPSTConfig()
+        try:
+            plan = PostPreflightService(config).plan(
+                PostPlanRequest(
+                    media_paths=[media_path] if media_path else [],
+                    target_platforms=platforms,
+                    base_caption=caption,
+                )
+            ).to_dict()
+            canonical_blockers = [issue["message"] for issue in plan["hard_blockers"]]
+            canonical_warnings = [issue["message"] for issue in plan["warnings"]]
+        except Exception as exc:  # noqa: BLE001 - report truthfully instead of 500
+            logger.warning("Preflight could not run: %s", exc)
+            canonical_blockers = [f"Preflight could not run: {str(exc)[:200]}"]
+
+        media = Path(media_path).expanduser() if media_path else None
+        return {
+            "ok": not request_blockers and not canonical_blockers,
+            "ready": not request_blockers and not canonical_blockers,
+            "media": {
+                "path": media_path,
+                "exists": bool(media and media.exists()),
+                "is_file": bool(media and media.is_file()),
+            },
+            "caption": {
+                "length": len(caption),
+                "per_platform": {platform: caption for platform in platforms},
+            },
+            "platforms": platforms,
+            "blockers": request_blockers + canonical_blockers,
+            "warnings": canonical_warnings,
+            "plan": plan,
+            "network_calls": False,
+        }
+
     @router.get("/settings")
     def api_settings() -> dict[str, Any]:
         from xpst.cli import _mask_sensitive_values

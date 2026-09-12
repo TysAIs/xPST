@@ -25,11 +25,14 @@ import calendar
 import json
 import os
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from xpst.utils.atomic import replace_with_retry
 
 try:
     import fcntl  # POSIX advisory locking
@@ -198,7 +201,10 @@ class ScheduleManager:
                 json.dump(self._entries, f, indent=2, ensure_ascii=False, default=str)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_path, self.schedule_file)
+            # Windows can briefly lock the destination (WinError 5) when another
+            # process is reading or replacing the same file; the claim path races
+            # on purpose, so retry instead of crashing the loser.
+            replace_with_retry(tmp_path, self.schedule_file, sleep=time.sleep)
         except Exception:
             try:
                 os.unlink(tmp_path)
