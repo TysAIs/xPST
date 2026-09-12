@@ -176,38 +176,69 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
 
     @router.post("/preflight")
     def api_preflight(payload: dict[str, Any]) -> dict[str, Any]:
-        """Validate a post request locally without network or upload side effects."""
-        from pathlib import Path
+        """Run the canonical, side-effect-free post preflight.
 
-        media_path = str(payload.get("media_path") or "")
+        Delegates to ``PostPreflightService`` — the same service the CLI and the
+        MCP tool use — so no surface can disagree about whether a post is ready.
+        Only the request-shape preconditions (missing media or targets) are
+        decided here; every media, caption, and destination verdict is canonical.
+        """
+        from xpst.config import XPSTConfig
+        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+
+        media_path = str(payload.get("media_path") or "").strip()
         caption = str(payload.get("caption") or "")
-        platforms = [str(item).lower() for item in (payload.get("platforms") or []) if str(item).strip()]
-        blockers: list[str] = []
-        warnings: list[str] = []
-        path = Path(media_path).expanduser() if media_path else None
-        exists = bool(path and path.exists() and path.is_file())
-        if not media_path:
-            blockers.append("Choose a media file before posting.")
-        elif not exists:
-            blockers.append(f"Media file not found: {media_path}")
+        platforms = [
+            str(item).lower()
+            for item in (payload.get("platforms") or [])
+            if str(item).strip()
+        ]
+
+        request_blockers: list[str] = []
         if not platforms:
-            blockers.append("Choose at least one destination platform.")
-        if not caption.strip():
-            warnings.append("Caption is empty.")
-        platform_caps = {"youtube": 100, "x": 280, "instagram": 2200, "tiktok": 2200, "threads": 500}
-        for platform in platforms:
-            limit = platform_caps.get(platform)
-            if limit is None:
-                blockers.append(f"Unsupported destination platform: {platform}")
-            elif len(caption) > limit:
-                blockers.append(f"Caption exceeds {platform} limit ({limit} characters).")
+            # An empty target list would produce an empty plan that reports
+            # "ready", so the request-shape precondition is decided here.
+            request_blockers.append("Choose at least one destination platform.")
+
+        plan: dict[str, Any] | None = None
+        canonical_blockers: list[str] = []
+        canonical_warnings: list[str] = []
+        try:
+            config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+        except Exception as exc:  # noqa: BLE001 - a missing config must not break preflight
+            logger.debug("Preflight config load failed, using defaults: %s", exc)
+            config = XPSTConfig()
+        try:
+            plan = PostPreflightService(config).plan(
+                PostPlanRequest(
+                    media_paths=[media_path] if media_path else [],
+                    target_platforms=platforms,
+                    base_caption=caption,
+                )
+            ).to_dict()
+            canonical_blockers = [issue["message"] for issue in plan["hard_blockers"]]
+            canonical_warnings = [issue["message"] for issue in plan["warnings"]]
+        except Exception as exc:  # noqa: BLE001 - report truthfully instead of 500
+            logger.warning("Preflight could not run: %s", exc)
+            canonical_blockers = [f"Preflight could not run: {str(exc)[:200]}"]
+
+        media = Path(media_path).expanduser() if media_path else None
         return {
-            "ready": not blockers,
-            "media": {"path": media_path, "exists": exists, "is_file": bool(path and path.is_file())},
-            "caption": {"length": len(caption), "per_platform": {platform: caption for platform in platforms}},
+            "ok": not request_blockers and not canonical_blockers,
+            "ready": not request_blockers and not canonical_blockers,
+            "media": {
+                "path": media_path,
+                "exists": bool(media and media.exists()),
+                "is_file": bool(media and media.is_file()),
+            },
+            "caption": {
+                "length": len(caption),
+                "per_platform": {platform: caption for platform in platforms},
+            },
             "platforms": platforms,
-            "blockers": blockers,
-            "warnings": warnings,
+            "blockers": request_blockers + canonical_blockers,
+            "warnings": canonical_warnings,
+            "plan": plan,
             "network_calls": False,
         }
 
