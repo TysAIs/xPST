@@ -3,12 +3,111 @@
 from __future__ import annotations
 
 import logging
+import os
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
 logger = logging.getLogger(__name__)
+
+# Live auth probes hit the network (measured ~5.6s on a real machine), so the
+# Home screen must not pay that cost on every load. Entries are keyed by config
+# dir; the TTL is XPST_AUTH_STATUS_TTL seconds (default 60; 0 disables caching).
+# The response reports whether it was served from cache and how old it is, so a
+# stale-while-revalidate answer can never masquerade as a fresh probe.
+_AUTH_STATUS_CACHE: dict[str, tuple[float, dict[str, Any], dict[str, Any]]] = {}
+_AUTH_STATUS_LOCK = threading.Lock()
+_AUTH_STATUS_REFRESHING: set[str] = set()
+DEFAULT_AUTH_STATUS_TTL_S = 60.0
+
+
+def _auth_status_ttl() -> float:
+    raw = os.environ.get("XPST_AUTH_STATUS_TTL")
+    if raw is None:
+        return DEFAULT_AUTH_STATUS_TTL_S
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_AUTH_STATUS_TTL_S
+
+
+def _probe_and_store(config_dir: str, config: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run the live probe and store the result."""
+    from xpst.auth_status import collect_live_auth_status
+    from xpst.provider_truth import canonical_status_report
+
+    auth = collect_live_auth_status(config)
+    canonical = canonical_status_report(config, auth)
+    with _AUTH_STATUS_LOCK:
+        _AUTH_STATUS_CACHE[str(config_dir)] = (time.monotonic(), auth, canonical)
+    return auth, canonical
+
+
+def _refresh_in_background(config_dir: str, config: Any) -> bool:
+    """Re-probe off the request path. Returns False when one is already running."""
+    key = str(config_dir)
+    with _AUTH_STATUS_LOCK:
+        if key in _AUTH_STATUS_REFRESHING:
+            return False
+        _AUTH_STATUS_REFRESHING.add(key)
+
+    def work() -> None:
+        try:
+            _probe_and_store(config_dir, config)
+        except Exception as exc:  # noqa: BLE001 - a failed refresh keeps the stale value
+            logger.debug("Background auth refresh failed: %s", exc)
+        finally:
+            with _AUTH_STATUS_LOCK:
+                _AUTH_STATUS_REFRESHING.discard(key)
+
+    threading.Thread(target=work, name="xpst-auth-refresh", daemon=True).start()
+    return True
+
+
+def warm_auth_status_cache(config_dir: str, config: Any) -> None:
+    """Prime the cache at startup so the first UI load is not a cold probe."""
+    if _auth_status_ttl() <= 0:
+        return
+    _refresh_in_background(config_dir, config)
+
+
+def _has_cached_auth(config_dir: str) -> bool:
+    with _AUTH_STATUS_LOCK:
+        return str(config_dir) in _AUTH_STATUS_CACHE
+
+
+def _auth_probe_in_flight(config_dir: str) -> bool:
+    with _AUTH_STATUS_LOCK:
+        return str(config_dir) in _AUTH_STATUS_REFRESHING
+
+
+def _live_auth_and_canonical(
+    config_dir: str, config: Any
+) -> tuple[dict[str, Any], dict[str, Any], bool, float, bool]:
+    """Return ``(auth, canonical, from_cache, age_seconds, stale)``.
+
+    An expired entry is served immediately and refreshed behind the request, so
+    the UI never blocks on the network; ``stale`` tells the caller the answer is
+    an older probe rather than a fresh one.
+    """
+    key = str(config_dir)
+    ttl = _auth_status_ttl()
+    now = time.monotonic()
+    with _AUTH_STATUS_LOCK:
+        entry = _AUTH_STATUS_CACHE.get(key)
+
+    if entry is not None and ttl > 0:
+        age = now - entry[0]
+        if age < ttl:
+            return entry[1], entry[2], True, age, False
+        _refresh_in_background(config_dir, config)
+        return entry[1], entry[2], True, age, True
+
+    auth, canonical = _probe_and_store(config_dir, config)
+    return auth, canonical, False, 0.0, False
 
 
 def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
@@ -80,14 +179,45 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
 
         auth: dict[str, Any] = {}
         auth_error: str | None = None
+        auth_cached = False
+        auth_age_seconds: float | None = None
+        auth_stale = False
         try:
-            from xpst.auth_status import collect_live_auth_status
             from xpst.config import XPSTConfig
-            from xpst.provider_truth import canonical_status_report
 
             config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
-            auth = collect_live_auth_status(config)
-            canonical = canonical_status_report(config, auth)
+            if _auth_probe_in_flight(config_dir) and not _has_cached_auth(config_dir):
+                # A probe is already running (startup warm-up) and nothing is
+                # cached yet: answer immediately and say it is still being
+                # checked, instead of blocking the first paint on the network.
+                return {
+                    "status": "pending",
+                    "platforms": platforms,
+                    "total_processed": health.get("total_processed", 0),
+                    "auth": {},
+                    "auth_error": None,
+                    "auth_cached": False,
+                    "auth_age_seconds": None,
+                    "auth_stale": False,
+                    "readiness_pending": True,
+                    "canonical": {"providers": {}, "platforms": {}, "roles": []},
+                    "providers": {},
+                    "readiness": {"ready": False, "blockers": [], "pending": True},
+                    "next_action": {
+                        "kind": "checking",
+                        "label": "Checking live accounts",
+                        "role": "video_destination",
+                    },
+                    "can_create_post": False,
+                }
+
+            (
+                auth,
+                canonical,
+                auth_cached,
+                auth_age_seconds,
+                auth_stale,
+            ) = _live_auth_and_canonical(config_dir, config)
             role_states = [
                 role.get("state")
                 for provider in canonical["providers"].values()
@@ -146,8 +276,12 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
             "total_processed": health.get("total_processed", 0),
             "auth": auth,
             "auth_error": auth_error,
+            "auth_cached": auth_cached,
+            "auth_age_seconds": auth_age_seconds,
+            "auth_stale": auth_stale,
             "canonical": canonical,
             "providers": canonical["providers"],
+            "readiness_pending": False,
             "readiness": {"ready": ready, "blockers": blockers},
             "next_action": next_action,
             "can_create_post": destination_ready,

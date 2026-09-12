@@ -177,3 +177,12 @@ test("create route exposes local preflight and no-network copy", async () => {
   assert.match(create, /never uploads media/);
   assert.match(await text(join(UI_ROOT, "src/lib/api.js")), /api\/preflight/);
 });
+
+test("home shows a checking state instead of guessing while readiness is pending", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+  assert.match(dashboard, /readiness_pending/);
+  assert.match(dashboard, /Checking live account readiness/);
+  assert.match(dashboard, /Live account checks are still running\./);
+  // bounded polling, never an unbounded loop
+  assert.match(dashboard, /pendingPolls < 8/);
+});
