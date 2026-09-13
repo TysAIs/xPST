@@ -26,7 +26,7 @@ YouTube uses Google's official OAuth 2.0 flow. You create a small "OAuth client"
 ## Prerequisites
 
 - A **Google account** with a YouTube channel (the account you'll upload to).
-  - Example: the central account `your-email@gmail.com`.
+  - Example: the central account `YOUR_UPLOADER_ACCOUNT`.
 - Access to **<https://console.cloud.google.com>** (free).
 
 No billing is required — the YouTube Data API v3 has a generous free daily quota (10,000 units; each upload costs ~1600 units, so you can post ~6 videos/day for free).
@@ -61,7 +61,7 @@ No billing is required — the YouTube Data API v3 has a generous free daily quo
    - **User support email:** your email
    - **Developer contact email:** your email
 4. Save and continue through the Scopes page (you can add scopes later — xPST requests them at runtime).
-5. On the **Test users** page, click **Add users** and add the Google account you'll upload with (e.g. `your-email@gmail.com`). This is required while the app is in **Testing** mode.
+5. On the **Test users** page, click **Add users** and add the Google account you'll upload with (e.g. `YOUR_UPLOADER_ACCOUNT`). This is required while the app is in **Testing** mode.
 6. Click **Save and Continue**.
 
 > While the consent screen is in **Testing** mode, only the accounts you add as test users can authorize. **But Testing mode has a hidden cost: Google expires the refresh token ~7 days after consent** (access tokens last ~1 hour and xPST refreshes them silently — the 7-day refresh-token expiry is what makes xPST ask you to log in again every week). **Fix: Step 7 publishes the app to production, which makes the refresh token long-lived. Do Step 7.**

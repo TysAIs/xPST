@@ -242,7 +242,7 @@ Example call:
 {
   "name": "xpst_post",
   "arguments": {
-    "video_path": "/home/user/clips/demo.mp4",
+    "video_path": "/tmp/xpst/clips/demo.mp4",
     "caption": "New demo!",
     "platforms": ["youtube", "x"],
     "dry_run": true
@@ -434,7 +434,7 @@ Generates AI caption suggestions for a video file, optionally tuned for a target
 Example call:
 
 ```json
-{ "name": "xpst_suggest_caption", "arguments": { "video_path": "/home/user/clips/demo.mp4", "platform": "instagram" } }
+{ "name": "xpst_suggest_caption", "arguments": { "video_path": "/tmp/xpst/clips/demo.mp4", "platform": "instagram" } }
 ```
 
 Response shape: one or more suggested captions.
@@ -504,7 +504,7 @@ Example call:
 {
   "name": "xpst_schedule_add",
   "arguments": {
-    "video_path": "/home/user/clips/demo.mp4",
+    "video_path": "/tmp/xpst/clips/demo.mp4",
     "caption": "Scheduled demo!",
     "scheduled_time": "2026-07-01T14:00:00Z",
     "platforms": ["youtube", "instagram", "threads"]

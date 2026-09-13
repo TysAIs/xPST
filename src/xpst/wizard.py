@@ -104,7 +104,7 @@ def youtube_gcp_steps() -> list[WizardStep]:
             "Create (or select) a Google Cloud project: "
             "https://console.cloud.google.com/projectcreate "
             "(pick an existing project: "
-            "https://console.cloud.google.com/projectselector2/home/dashboard)"
+            "https://console.cloud.google.com/projectselector2/YOUR_PROJECT_ID)"
         ),
         WizardStep(
             "Open the OAuth consent screen (Google Auth Platform → "

@@ -352,18 +352,18 @@ class TestConfigLoading:
         config_data = {
             "accounts": {
                 "youtube": {
-                    "client_secrets": "/home/user/.xpst/creds/yt_secrets.json",
-                    "token_file": "/home/user/.xpst/creds/yt_token.json",
+                    "client_secrets": "/tmp/xpst/.xpst/creds/yt_secrets.json",
+                    "token_file": "/tmp/xpst/.xpst/creds/yt_token.json",
                 },
                 "x": {
-                    "cookies_file": "/home/user/.xpst/creds/x_cookies.json",
+                    "cookies_file": "/tmp/xpst/.xpst/creds/x_cookies.json",
                 },
                 "instagram": {
-                    "session_file": "/home/user/.xpst/creds/ig_session.json",
+                    "session_file": "/tmp/xpst/.xpst/creds/ig_session.json",
                 },
             },
             "video": {
-                "download_dir": "/home/user/videos/xpst_downloads",
+                "download_dir": "/tmp/xpst/videos/xpst_downloads",
             },
             "monitoring": {
                 "log_file": "/var/log/xpst/xpst.log",
@@ -373,8 +373,8 @@ class TestConfigLoading:
         config_file.write_text(yaml.dump(config_data))
 
         loaded = XPSTConfig.load(str(config_file))
-        assert loaded.youtube.client_secrets == "/home/user/.xpst/creds/yt_secrets.json"
-        assert loaded.video.download_dir == "/home/user/videos/xpst_downloads"
+        assert loaded.youtube.client_secrets == "/tmp/xpst/.xpst/creds/yt_secrets.json"
+        assert loaded.video.download_dir == "/tmp/xpst/videos/xpst_downloads"
         assert loaded.monitoring.log_file == "/var/log/xpst/xpst.log"
 
     def test_macos_paths_in_config(self, tmp_path):
@@ -382,22 +382,22 @@ class TestConfigLoading:
         config_data = {
             "accounts": {
                 "youtube": {
-                    "client_secrets": "/Users/testuser/.xpst/creds/yt_secrets.json",
+                    "client_secrets": "/tmp/xpst/.xpst/creds/yt_secrets.json",
                 },
             },
             "video": {
-                "download_dir": "/Users/testuser/Movies/xPST",
+                "download_dir": "/tmp/xpst/Movies/xPST",
             },
             "monitoring": {
-                "log_file": "/Users/testuser/Library/Logs/xpst.log",
+                "log_file": "/tmp/xpst/Library/Logs/xpst.log",
             },
         }
         config_file = tmp_path / "config.yaml"
         config_file.write_text(yaml.dump(config_data))
 
         loaded = XPSTConfig.load(str(config_file))
-        assert "/Users/testuser" in loaded.youtube.client_secrets
-        assert "/Users/testuser/Movies" in loaded.video.download_dir
+        assert "/tmp/xpst" in loaded.youtube.client_secrets
+        assert "/tmp/xpst/Movies" in loaded.video.download_dir
 
     def test_windows_paths_in_config(self, tmp_path):
         """Windows-style paths (C:\\Users\\...) load from YAML correctly."""
@@ -442,7 +442,7 @@ class TestConfigLoading:
         config_data = {
             "accounts": {
                 "youtube": {
-                    "client_secrets": "/home/user/yt.json",
+                    "client_secrets": "/tmp/xpst/yt.json",
                     "token_file": "~/.xpst/yt_token.json",
                 },
             },
