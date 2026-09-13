@@ -261,6 +261,7 @@ def generate_release_evidence(dist_dir: Path, output_dir: Path, output: Path, ve
                 "python scripts/public_release_check.py --json",
                 "python scripts/clean_install_smoke.py --dist dist --artifact both",
                 "python scripts/verify_desktop_package.py",
+                "python scripts/verify_desktop_package.py --artifact <built-artifact> --evidence-output RELEASE_EVIDENCE.json",
                 "python scripts/verify_qml_pages.py",
                 "Windows release job: python scripts/verify_windows_exe.py --path dist/xPST.exe --seconds 12 --json --clean-profile, plus --require-signed for tag/public releases",
                 "macOS release job: bash scripts/verify_macos.sh, plus --public for tag releases requiring Developer ID signing and notarization",
@@ -269,6 +270,15 @@ def generate_release_evidence(dist_dir: Path, output_dir: Path, output: Path, ve
                 "Release owner: python scripts/verify_live_platforms.py --require --json > release/live-platforms.json",
             ],
         },
+        "signing": {
+            "signed": False,
+            "notarized": "unknown",
+            "verified_by": "unknown",
+            "reason": "Signing state is never inferred; run verify_desktop_package.py against each desktop artifact.",
+        },
+        "signed": False,
+        "notarized": "unknown",
+        "verified_by": "unknown",
         "artifacts": [
             {
                 "filename": path.name,
