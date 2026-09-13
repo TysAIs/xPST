@@ -86,7 +86,7 @@ Registry size: **38 tools**.
 
 ## xpst_providers
 
-Lists all discovered content sources and posting destinations with auth modes and capabilities. Call this first so the agent adapts to the installed provider set instead of assuming a fixed platform list. Destinations are YouTube Shorts, Instagram Reels, X, TikTok, Threads, and Messenger (messaging/auto-reply); sources are TikTok, YouTube, Instagram, X, and local files. TikTok now appears under both `sources` and `destinations` (posting via the official Content Posting API).
+Lists all discovered content sources and posting destinations with auth modes and capabilities. Call this first so the agent adapts to the installed provider set instead of assuming a fixed platform list. The provider registry includes YouTube Shorts, Instagram Reels, X, TikTok, Threads, and Messenger (messaging/auto-reply), while the current live state is documented in [INSTALL.md](INSTALL.md#capability-truth-table). TikTok is currently source-only; destination publishing awaits external review.
 
 Arguments: none.
 

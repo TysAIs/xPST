@@ -23,12 +23,12 @@ Data leaves the machine only when xPST talks to a platform or service that the u
 
 ## Credential Storage
 
-xPST stores credentials in the OS keychain when available. If the keychain is
-unavailable, xPST falls back to local `.enc` files in the user configuration
-directory and encrypts them with Fernet when the bundled `cryptography`
-dependency is available. If `cryptography` is deliberately removed or
-unavailable, fallback storage relies on operating-system filesystem permissions
-and xPST logs a warning.
+xPST's `CredentialStore` uses Fernet-encrypted `.enc` files by default. An OS
+keychain can be selected explicitly with `XPST_USE_KEYRING=1` when the platform
+keychain is available. If `cryptography` is unavailable, xPST refuses to write a
+credential rather than falling back to plaintext. Platform-specific token,
+cookie, and session files may still be written with owner-only permissions;
+treat the whole `~/.xpst/` directory as sensitive.
 
 ## User Responsibility
 
@@ -37,4 +37,4 @@ Users are responsible for:
 - Keeping local account files private
 - Reviewing platform Terms of Service before enabling integrations
 - Avoiding spam, platform manipulation, and unauthorized scraping
-- Removing credentials with `xpst auth logout` or by deleting local xPST credential files when needed
+- Removing credentials with `xpst disconnect <platform> --yes` or by deleting local xPST credential files when needed

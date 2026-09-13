@@ -1,7 +1,8 @@
 # Packaging xPST desktop apps
 
-xPST ships as a Python package (PyPI) **and** as standalone desktop bundles
-per platform. This document covers building and using the desktop bundles.
+xPST is distributed as a source package and as standalone desktop bundles.
+PyPI publication is not available today; see [INSTALL.md](INSTALL.md) for the
+published release assets and their current status.
 
 > Status: macOS arm64 is the maintained path (built + verified on aarch64,
 > macOS 27 / PyInstaller 6). Linux/Windows specs exist but are only built on
