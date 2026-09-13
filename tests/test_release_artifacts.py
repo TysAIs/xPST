@@ -344,7 +344,7 @@ def test_release_preflight_public_mode_accepts_artifacts_signing_and_live_eviden
     monkeypatch.setenv("WINDOWS_CERTIFICATE_BASE64", "placeholder")
     monkeypatch.setenv("WINDOWS_CERTIFICATE_PASSWORD", "placeholder")
     monkeypatch.setenv("MACOS_CODESIGN_IDENTITY", "Developer ID Application: Example (TEAMID)")
-    monkeypatch.setenv("APPLE_ID", "release@example.com")
+    monkeypatch.setenv("APPLE_ID", "maintainer-account")
     monkeypatch.setenv("APPLE_TEAM_ID", "TEAMID")
     monkeypatch.setenv("APPLE_APP_PASSWORD", "placeholder")
 
@@ -379,7 +379,7 @@ def test_release_preflight_accepts_live_evidence_with_utf8_bom(tmp_path, monkeyp
     monkeypatch.setenv("WINDOWS_CERTIFICATE_BASE64", "placeholder")
     monkeypatch.setenv("WINDOWS_CERTIFICATE_PASSWORD", "placeholder")
     monkeypatch.setenv("MACOS_CODESIGN_IDENTITY", "Developer ID Application: Example (TEAMID)")
-    monkeypatch.setenv("APPLE_ID", "release@example.com")
+    monkeypatch.setenv("APPLE_ID", "maintainer-account")
     monkeypatch.setenv("APPLE_TEAM_ID", "TEAMID")
     monkeypatch.setenv("APPLE_APP_PASSWORD", "placeholder")
 
@@ -409,7 +409,7 @@ def test_public_release_check_writes_live_and_preflight_evidence(tmp_path, monke
     monkeypatch.setenv("WINDOWS_CERTIFICATE_BASE64", "placeholder")
     monkeypatch.setenv("WINDOWS_CERTIFICATE_PASSWORD", "placeholder")
     monkeypatch.setenv("MACOS_CODESIGN_IDENTITY", "Developer ID Application: Example (TEAMID)")
-    monkeypatch.setenv("APPLE_ID", "release@example.com")
+    monkeypatch.setenv("APPLE_ID", "maintainer-account")
     monkeypatch.setenv("APPLE_TEAM_ID", "TEAMID")
     monkeypatch.setenv("APPLE_APP_PASSWORD", "placeholder")
     monkeypatch.setattr("scripts.public_release_check.verify_live_platforms", lambda _config, require: live_result)
