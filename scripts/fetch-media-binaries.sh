@@ -6,20 +6,29 @@
 # Usage: scripts/fetch-media-binaries.sh [macos-arm64|macos-x64|win-x64|linux-x64|linux-arm64]
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FF_DIR="$ROOT/src-tauri/binaries/ffmpeg"
 YTDLP_DIR="$ROOT/src-tauri/binaries/ytdlp"
 mkdir -p "$FF_DIR" "$YTDLP_DIR"
 
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "required command not found: $1" >&2
+    exit 1
+  fi
+}
+
+require_command curl
+
 platform="${1:-}"
 if [[ -z "$platform" ]]; then
-  case "$(uname -s)/$(uname -m)" in
+  case "$(uname -s 2>/dev/null || printf 'unknown')/$(uname -m 2>/dev/null || printf 'unknown')" in
     Darwin/arm64) platform=macos-arm64 ;;
     Darwin/x86_64) platform=macos-x64 ;;
-    MINGW*|MSYS*|CYGWIN*|Windows_NT) platform=win-x64 ;;
-    Linux/x86_64) platform=linux-x64 ;;
-    Linux/aarch64) platform=linux-arm64 ;;
-    *) echo "unsupported platform: $(uname -s)/$(uname -m)" >&2; exit 1 ;;
+    MINGW*/*|MSYS*/*|CYGWIN*/*|Windows_NT/*) platform=win-x64 ;;
+    Linux/x86_64|Linux/amd64) platform=linux-x64 ;;
+    Linux/aarch64|Linux/arm64) platform=linux-arm64 ;;
+    *) echo "unsupported platform: $(uname -s 2>/dev/null || printf 'unknown')/$(uname -m 2>/dev/null || printf 'unknown')" >&2; exit 1 ;;
   esac
 fi
 
@@ -31,6 +40,7 @@ fetch() { # url -> dest
 
 case "$platform" in
   macos-arm64|macos-x64)
+    require_command unzip
     # osxexperts.net static builds (arm64 = ffmpeg6arm.zip, x64 = ffmpeg6intel.zip)
     if [[ "$platform" == macos-arm64 ]]; then
       FF_URL=https://www.osxexperts.net/ffmpeg6arm.zip
@@ -68,7 +78,7 @@ case "$platform" in
     }
     if head -c 2 "$YTDLP_DIR/yt-dlp" | grep -q '#!'; then
       if command -v python3.10 >/dev/null; then
-        fix_ytdlp_shebang "$YTDLP_DIR/yt-dlp" /usr/bin/env\ python3.10
+        fix_ytdlp_shebang "$YTDLP_DIR/yt-dlp" "/usr/bin/env python3.10"
       elif [[ "$(python3 -c 'import sys; print(sys.version_info[:2] >= (3,10))' 2>/dev/null)" == "True" ]]; then
         : # system python3 already >= 3.10
       elif [[ -x /opt/homebrew/bin/python3 ]]; then
@@ -78,20 +88,25 @@ case "$platform" in
     "$YTDLP_DIR/yt-dlp" --version >/dev/null 2>&1 || true
     ;;
   win-x64)
-    if [[ ! -f "$FF_DIR/ffmpeg.exe" ]]; then
+    require_command unzip
+    # gyan.dev provides a Windows x64 archive with ffmpeg/ffprobe under
+    # <release>-essentials_build/bin/. `-j` extracts only those two files,
+    # avoiding shell wildcard path assumptions in Git Bash.
+    if [[ ! -f "$FF_DIR/ffmpeg.exe" || ! -f "$FF_DIR/ffprobe.exe" ]]; then
       fetch https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip "$FF_DIR/ffmpeg-essentials.zip"
-      (cd "$FF_DIR" && unzip -oq ffmpeg-essentials.zip \
-        && cp ffmpeg-*-essentials_build/ffmpeg.exe ffmpeg-*-essentials_build/ffprobe.exe . \
-        && rm -rf ffmpeg-*-essentials_build ffmpeg-essentials.zip)
+      (cd "$FF_DIR" && unzip -oqj ffmpeg-essentials.zip \
+        '*/bin/ffmpeg.exe' '*/bin/ffprobe.exe' \
+        && rm -f ffmpeg-essentials.zip)
     fi
     if [[ ! -f "$YTDLP_DIR/yt-dlp.exe" ]]; then
       fetch https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe "$YTDLP_DIR/yt-dlp.exe"
     fi
     ;;
   linux-x64|linux-arm64)
+    require_command tar
     if [[ "$platform" == linux-x64 ]]; then
       ARCH=amd64; else ARCH=arm64; fi
-    if [[ ! -x "$FF_DIR/ffmpeg" ]]; then
+    if [[ ! -x "$FF_DIR/ffmpeg" || ! -x "$FF_DIR/ffprobe" ]]; then
       fetch "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-$ARCH-static.tar.xz" "$FF_DIR/ffmpeg.tar.xz"
       (cd "$FF_DIR" && tar xJf ffmpeg.tar.xz \
         && cp ffmpeg-*-static/ffmpeg ffmpeg-*-static/ffprobe . \
@@ -101,6 +116,10 @@ case "$platform" in
       fetch https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp "$YTDLP_DIR/yt-dlp"
     fi
     chmod +x "$FF_DIR/ffmpeg" "$FF_DIR/ffprobe" "$YTDLP_DIR/yt-dlp"
+    ;;
+  *)
+    echo "unsupported platform: $platform" >&2
+    exit 1
     ;;
 esac
 

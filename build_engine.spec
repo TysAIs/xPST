@@ -1,11 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec for the xPST engine sidecar (Tauri 2 shell).
 
-Builds a **onedir** macOS bundle named ``xpst-engine`` that runs the
-FastAPI dashboard entrypoint (``scripts/engine_entry.py``).  The whole
-directory is shipped as a Tauri bundle *resource*
+Builds a **onedir** platform-native bundle named ``xpst-engine`` that runs
+the FastAPI dashboard entrypoint (``scripts/engine_entry.py``).  On Windows,
+PyInstaller adds the ``.exe`` suffix to the executable inside the bundle.  The
+whole directory is shipped as a Tauri bundle *resource*
 (``bundle.resources: ["binaries/engine/"]``) and the shell spawns the
-executable from ``resource_dir()/binaries/engine/xpst-engine``.
+platform-native executable from ``resource_dir()/binaries/engine/``.
 
 Why onedir and not onefile: Tauri's ``externalBin`` requires a single
 executable file, but onefile self-extracts ~45MB to a temp dir on EVERY
@@ -29,7 +30,7 @@ Build:
     scripts/build-engine.sh
     # (equivalent to:)
     pyinstaller build_engine.spec --noconfirm --distpath dist/engine
-    cp -R dist/engine/xpst-engine src-tauri/binaries/engine
+    cp -R dist/engine/xpst-engine/. src-tauri/binaries/engine/
 """
 
 from pathlib import Path
@@ -119,9 +120,6 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
 )
 
 coll = COLLECT(
