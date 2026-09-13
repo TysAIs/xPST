@@ -2,8 +2,8 @@
 # build-engine.sh — build the Python engine sidecar for the Tauri shell.
 #
 # Produces src-tauri/binaries/engine/ (PyInstaller ONEDIR bundle). It is
-# shipped as a Tauri bundle resource (bundle.resources) and the shell
-# spawns resource_dir()/binaries/engine/xpst-engine at boot.
+# shipped as a Tauri bundle resource (bundle.resources) and the shell spawns
+# the platform-native executable from resource_dir()/binaries/engine/.
 #
 # Why onedir: Tauri externalBin requires a single file, forcing onefile —
 # but onefile self-extracts ~45MB on every launch (~1.3s), blowing the
@@ -14,7 +14,8 @@
 #
 # Requirements:
 #   - Python >=3.10 with the xpst dependencies + pyinstaller installed
-#     (the project venv works: ~/XPST/.venv)
+#   - Bash (including Git Bash on Windows)
+#   - PyInstaller builds for the host OS; cross-compilation is not supported
 #   - PYTHONPATH does NOT need to point at src/ — this script handles it,
 #     so the sidecar always bundles THIS checkout's code.
 set -euo pipefail
@@ -22,33 +23,83 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="$REPO_ROOT/src-tauri/binaries"
 
-PYTHON="${PYTHON:-python3}"
+PYTHON="${PYTHON:-}"
+if [[ -z "$PYTHON" ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+        PYTHON=python3
+    elif command -v python >/dev/null 2>&1; then
+        PYTHON=python
+    else
+        echo "ERROR: Python >=3.10 was not found (set PYTHON to its executable)." >&2
+        exit 1
+    fi
+fi
+if ! "$PYTHON" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))'; then
+    echo "ERROR: $PYTHON is not Python >=3.10." >&2
+    exit 1
+fi
 
-echo "==> Building engine sidecar (onedir)"
+# PyInstaller appends .exe to EXE(name="xpst-engine") on Windows. The
+# directory name remains xpst-engine on every platform.
+case "$(uname -s 2>/dev/null || printf 'unknown')" in
+    MINGW*|MSYS*|CYGWIN*|Windows_NT) ENGINE_NAME=xpst-engine.exe ;;
+    *) ENGINE_NAME=xpst-engine ;;
+esac
+ENGINE_DIST_DIR="$REPO_ROOT/dist/engine/xpst-engine"
+ENGINE_EXECUTABLE="$OUT_DIR/engine/$ENGINE_NAME"
+CHECK_LOG="${TMPDIR:-/tmp}/xpst-engine-check-$$.log"
+CHECK_CONFIG_DIR="${TMPDIR:-/tmp}/xpst-engine-check-config-$$"
+
+cleanup() {
+    if [[ -n "${CHECK_PID:-}" ]]; then
+        kill "$CHECK_PID" 2>/dev/null || true
+        if [[ "$ENGINE_NAME" == *.exe ]] && command -v taskkill >/dev/null 2>&1; then
+            taskkill //PID "$CHECK_PID" //T //F >/dev/null 2>&1 || true
+        fi
+    fi
+    rm -rf "$CHECK_CONFIG_DIR" "$CHECK_LOG"
+}
+trap cleanup EXIT
+
+echo "==> Building engine sidecar (onedir; executable=$ENGINE_NAME)"
 cd "$REPO_ROOT"
-rm -rf dist/engine build/engine-work "$OUT_DIR/engine"
+rm -rf dist/engine build/engine-work
+mkdir -p "$OUT_DIR/engine"
+# Keep the tracked placeholder in the resource root. It lets a clean checkout
+# satisfy Tauri's resource-path validation before this build replaces artifacts.
+shopt -s dotglob nullglob
+for existing in "$OUT_DIR/engine"/*; do
+    [[ "$existing" == "$OUT_DIR/engine/.gitkeep" ]] || rm -rf "$existing"
+done
+shopt -u dotglob nullglob
 PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -m PyInstaller build_engine.spec \
     --noconfirm --distpath dist/engine --workpath build/engine-work
 
-cp -R dist/engine/xpst-engine "$OUT_DIR/engine"
-echo "==> Wrote $OUT_DIR/engine ($(du -sh "$OUT_DIR/engine" | cut -f1))"
+if [[ ! -f "$ENGINE_DIST_DIR/$ENGINE_NAME" ]]; then
+    echo "ERROR: PyInstaller did not produce $ENGINE_DIST_DIR/$ENGINE_NAME" >&2
+    exit 1
+fi
+cp -R "$ENGINE_DIST_DIR"/. "$OUT_DIR/engine/"
+SIDECAR_SIZE="$("$PYTHON" -c 'from pathlib import Path; import sys; root=Path(sys.argv[1]); total=sum(p.stat().st_size for p in root.rglob("*") if p.is_file()); print(f"{total / 1024 / 1024:.1f} MiB")' "$OUT_DIR/engine")"
+echo "==> Wrote $OUT_DIR/engine ($SIDECAR_SIZE)"
 
 # Sanity check: the onedir engine must honor XPST_DASHBOARD_PORT and
-# report healthy quickly.
-echo "==> Smoke-checking sidecar"
-TEST_PORT="$(jot -r 1 20000 40000 2>/dev/null || shuf -i 20000-40000 -n 1 2>/dev/null || echo 39999)"
-XPST_DASHBOARD_PORT="$TEST_PORT" "$OUT_DIR/engine/xpst-engine" >/tmp/xpst-engine-check.log 2>&1 &
+# report healthy quickly. Use Python for the probe and port selection so this
+# remains usable in Git Bash without jot, shuf, curl, or GNU coreutils.
+TEST_PORT="$("$PYTHON" -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
+mkdir -p "$CHECK_CONFIG_DIR"
+XPST_CONFIG_DIR="$CHECK_CONFIG_DIR" XPST_DASHBOARD_PORT="$TEST_PORT" "$ENGINE_EXECUTABLE" >"$CHECK_LOG" 2>&1 &
 CHECK_PID=$!
-trap 'kill "$CHECK_PID" 2>/dev/null || true' EXIT
-START="$(python3 -c 'import time; print(time.time())')"
-for _ in $(seq 1 60); do
-    if curl -sf -o /dev/null "http://127.0.0.1:$TEST_PORT/health"; then
-        ELAPSED="$(python3 -c "import time; print(f'{time.time()-$START:.2f}')")"
+START="$("$PYTHON" -c 'import time; print(time.monotonic())')"
+for ((attempt=1; attempt<=60; attempt++)); do
+    if "$PYTHON" -c 'import sys, urllib.request; urllib.request.urlopen(sys.argv[1], timeout=1)' \
+        "http://127.0.0.1:$TEST_PORT/health" >/dev/null 2>&1; then
+        ELAPSED="$("$PYTHON" -c 'import sys, time; print(f"{time.monotonic() - float(sys.argv[1]):.2f}")' "$START")"
         echo "PASS: sidecar /health OK on port $TEST_PORT (cold start ${ELAPSED}s)"
         exit 0
     fi
     sleep 0.25
 done
-echo "FAIL: sidecar did not report healthy on port $TEST_PORT"
-tail -20 /tmp/xpst-engine-check.log
+echo "FAIL: sidecar did not report healthy on port $TEST_PORT" >&2
+"$PYTHON" -c 'from pathlib import Path; import sys; path=Path(sys.argv[1]); print("\n".join(path.read_text(errors="replace").splitlines()[-20:]))' "$CHECK_LOG" >&2 || true
 exit 1
