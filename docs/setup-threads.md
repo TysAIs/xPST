@@ -1,10 +1,13 @@
 # Threads Setup
 
-> **Auth method:** Meta Threads API — a long-lived access token (60 days, refreshable) tied to your Threads user ID.
-> **Official API:** Yes — the same sanctioned path as scheduling tools. No ban risk.
-> **Time:** ~10 minutes (one Meta OAuth flow).
+> **Auth method:** Meta Threads API — a long-lived access token tied to your Threads user ID.
+> **Current status:** Threads is **disabled/unauthenticated** in the current live environment. The steps below are opt-in configuration guidance, not proof of readiness.
+> **Official API:** The documented path uses Meta's official API; availability and review requirements remain external.
 
-Threads (the text-and-media network by Meta) has an official **Threads API** that xPST uses to post videos and text. It uses Meta's container-publish model: create a media container, (optionally upload), then publish. Because it's an official API, there's no ban risk and no unofficial session hacking.
+The repository contains an implementation for Meta's official **Threads API**
+(container-publish model), but the integration is currently disabled and
+unauthenticated. A future enabled deployment would still depend on Meta
+availability, account access, and the credentials described below.
 
 Unlike YouTube/Instagram/X which are wired into the interactive `xpst connect` wizard, Threads is configured via your `~/.xpst/config.yaml` file with a long-lived token and your Threads user ID. This guide shows both ends: getting the token from Meta, and pointing xPST at it.
 
@@ -120,18 +123,19 @@ xPST reads `threads.graph_access_token` and `threads.threads_user_id` at runtime
 
 ## Verify
 
+Threads is currently disabled/unauthenticated, so the commands below should
+not be read as a successful live check. Do not attempt a real post until the
+integration has been explicitly enabled and its external prerequisites are
+approved.
+
 ```bash
-# Test all connections, including Threads
-xpst connect --test
-#   ✅ Threads: connected (Graph API)
-
-# Full health check
-xpst health
-
-# Post a test clip (note: Threads media uploads are URL-based;
-# for local files xPST handles the container flow)
-xpst post -v ~/Videos/clip.mp4 -c "Cross-posting to Threads 🧵" -p threads
+# Read the current non-mutating platform state
+xpst health --json
 ```
+
+If the output reports Threads as disabled or unauthenticated, that is the
+expected current state. A configuration file alone is not evidence that
+Threads publishing works.
 
 ### What gets stored
 

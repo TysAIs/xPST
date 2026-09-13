@@ -101,7 +101,7 @@ If running from a source checkout:
 
 ## Tool Reference
 
-xPST exposes 38 MCP tools across five groups: core operations, analytics & insights, content & knowledge, configuration & scheduling, and the knowledge base. All posting destinations — YouTube, Instagram, X/Twitter, TikTok, and Threads — are valid `platforms` values.
+xPST exposes 38 MCP tools across five groups: core operations, analytics & insights, content & knowledge, configuration & scheduling, and the knowledge base. The provider registry includes posting paths for YouTube, Instagram, X/Twitter, TikTok, and Threads, but current availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-table) for the live-verified, source-only, and disabled states.
 
 ### Core Operations (6 tools)
 

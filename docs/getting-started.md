@@ -1,11 +1,12 @@
 # Getting Started with xPST
 
 > **Free · Local-first · Open-source · Cross-platform**
-> Distribute short-form video to YouTube, Instagram, X/Twitter, TikTok, and Threads — from one tool, on your machine. (Plus an opt-in Messenger auto-reply option.)
+> The repository includes paths for YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger, but current capability is not uniform. YouTube, X, and Instagram are live-verified; TikTok is source-only; Threads and Messenger are disabled/unauthenticated. See [INSTALL.md](INSTALL.md#capability-truth-table).
 
-xPST (Cross-Posting Suite) watches your video sources (TikTok, YouTube, Instagram, X, or local files), downloads new videos, re-encodes them per-platform with FFmpeg, and cross-posts to every connected destination. Nothing about your accounts or media ever leaves your computer except the uploads themselves — xPST is a local tool that talks directly to each platform's official API.
-
-This guide gets you from zero to your first cross-post in under 15 minutes.
+xPST (Cross-Posting Suite) watches configured video sources, downloads new
+videos, re-encodes them with FFmpeg, and cross-posts only to destinations that
+are configured and currently available. Nothing about your accounts or media
+leaves your computer except the uploads themselves.
 
 ---
 
@@ -50,15 +51,11 @@ winget install Gyan.FFmpeg
 
 ## Install xPST
 
-### From PyPI (recommended)
+### From PyPI (not available yet)
 
-```bash
-# Create an isolated environment (optional but recommended)
-python3.12 -m venv ~/.venvs/xpst
-source ~/.venvs/xpst/bin/activate
-
-pip install xpst
-```
+`pip install xpst` is not available today: the PyPI JSON endpoint returns HTTP
+404. For a packaged desktop install, use [INSTALL.md](INSTALL.md). For the
+source path, use the checkout instructions below.
 
 ### From source
 
@@ -115,66 +112,70 @@ xpst connect instagram
 xpst connect x
 xpst connect tiktok
 
-# Connect all platforms in one guided session
+# Connect selected/configured platforms in one guided session
 xpst connect
 
-# Test every existing connection (no uploads)
+# Test existing connections (no uploads)
 xpst connect --test
 ```
 
 Each platform has its own setup guide with screenshots-level detail:
 
-| Platform | Auth method | Guide |
-|----------|-------------|-------|
-| **YouTube** | OAuth 2.0 (Google Cloud) | [setup-youtube.md](setup-youtube.md) |
-| **Instagram** | Meta Graph API (recommended) | [setup-instagram.md](setup-instagram.md) |
-| **X / Twitter** | Login via twikit (cookies saved) | [setup-x-twitter.md](setup-x-twitter.md) |
-| **TikTok** | yt-dlp cookies (source) · Content Posting API OAuth (destination) | [setup-tiktok.md](setup-tiktok.md) |
-| **Threads** | Meta Threads API (long-lived token) | [setup-threads.md](setup-threads.md) |
-| **Messenger** | Static Page Access Token (auto-reply) | [setup-messenger.md](setup-messenger.md) |
+| Platform | Current role/status | Auth method | Guide |
+|----------|---------------------|-------------|-------|
+| **YouTube** | Live-verified (account-dependent) | OAuth 2.0 (Google Cloud) | [setup-youtube.md](setup-youtube.md) |
+| **Instagram** | Live-verified (account-dependent) | Meta Graph API (recommended) | [setup-instagram.md](setup-instagram.md) |
+| **X / Twitter** | Live-verified (account-dependent) | Login via twikit (cookies saved) | [setup-x-twitter.md](setup-x-twitter.md) |
+| **TikTok** | Source-only; destination pending external review | yt-dlp source path | [setup-tiktok.md](setup-tiktok.md) |
+| **Threads** | Disabled / unauthenticated; opt-in destination | Meta Threads API | [setup-threads.md](setup-threads.md) |
+| **Messenger** | Disabled / unauthenticated; opt-in messaging/auto-reply | Static Page Access Token | [setup-messenger.md](setup-messenger.md) |
 
-> **Why so many auth methods?** Each platform exposes a different API. xPST always prefers the **official, ban-safe API** when one exists. Instagram in particular defaults to the official Meta Graph API rather than unofficial private-API clients, which historically get accounts banned.
+> **Why so many auth methods?** Each platform exposes a different API. The
+> table reflects the current live state; a setup guide can describe an
+> implementation without proving that the integration is enabled or working
+> today.
 
 ---
 
 ## Where your credentials live
 
-xPST takes credential security seriously. **Your tokens, cookies, and secrets never leave your machine** and are never written in plaintext.
+xPST keeps configuration and state locally under `~/.xpst/`. The
+`CredentialStore` protects credentials with Fernet-encrypted fallback files or
+an OS keychain when explicitly enabled. Some platform flows also write
+owner-only token, cookie, or session files and some credential fields in
+`config.yaml`; the repository does not prove that every such file is encrypted.
+Treat the whole directory as sensitive.
 
 ### Directory layout
 
 ```
 ~/.xpst/
-├── config.yaml                  # Main config (no secrets — only file paths & flags)
-├── credentials/                 # All auth material lives here
-│   ├── youtube_client_secrets.json   # OAuth client ID (from Google Cloud) — 0600
-│   ├── youtube_token.json            # OAuth user token (auto-refreshed) — 0600
-│   ├── x_cookies.json                # X/Twitter session cookies — 0600
-│   ├── instagram_session.json        # instagrapi session (fallback only) — 0600
-│   ├── *.enc                         # Encrypted secrets (Fernet)
+├── config.yaml                  # Main config and provider settings
+├── credentials/                 # Credential-store data and session files
+│   ├── *.enc                         # Encrypted credential-store values
 │   ├── .fallback_secret              # Per-install random key — 0600
 │   └── .fallback_salt                # scrypt salt — 0600
 ├── downloads/                   # Cached source videos
 ├── logs/xpst.log                # Structured logs
-└── state.json                   # Cross-post history (what's been posted where)
+└── state.json                   # Cross-post history
 ```
 
 ### Encryption model
 
-- **Primary store:** every secret is encrypted with **Fernet** (AES-128-CBC + HMAC). The Fernet key is derived from a per-install random secret using the **scrypt** KDF (RFC 7914 cost factors). The secret and salt are generated on first use and stored with `0600` (owner-only) permissions.
-- **Encrypted files:** secrets are written to `~/.xpst/credentials/<key>.enc`. Files you can read (like `youtube_token.json` and `x_cookies.json`) are also locked to `0600`.
-- **OS keychain (opt-in):** on macOS the non-code-signed CLI would trigger a Keychain password prompt on *every* access, so the encrypted file fallback is the **default**. To use the macOS Keychain / Windows Credential Locker / Linux Secret Service instead, set `XPST_USE_KEYRING=1`. To force-disable keyring, set `XPST_NO_KEYRING=1`.
-- **No plaintext, ever:** if neither the OS keychain nor the `cryptography` package is available, xPST **refuses to store** the credential and raises `PlaintextStorageError` rather than silently writing it in the clear.
+- **Fallback store:** credentials written by `CredentialStore` are encrypted
+  with Fernet; the key is derived with scrypt from per-install random material.
+- **OS keychain (opt-in):** set `XPST_USE_KEYRING=1` to use the macOS Keychain,
+  Windows Credential Locker, or Linux Secret Service when available.
+- **No plaintext fallback:** if encrypted fallback storage is needed but the
+  `cryptography` package is unavailable, xPST refuses to write the credential.
+- **Owner-only files:** platform-specific token/session files are chmodded or
+  otherwise restricted where the platform supports it, but they are not all
+  encrypted by the repository. Do not share `~/.xpst/`.
+
+To inspect the current auth state without posting, use:
 
 ```bash
-# See what's stored and how
-xpst auth status
-# Credential Storage: File Storage (fallback)
-# Stored Credentials: 4
-#   🔑 instagram_graph_token
-#   🔑 instagram_graph_user_id
-#   🔑 x_cookies
-#   🔑 youtube_token
+xpst auth status --json
 ```
 
 ---
@@ -184,7 +185,7 @@ xpst auth status
 ### Manual post (quickest way to verify everything works)
 
 ```bash
-# Post a single local video to all enabled destinations
+# Post a single local video to all configured, available destinations
 xpst post -v ~/Videos/my_clip.mp4 -c "First cross-post with xPST 🚀"
 
 # Post to specific platforms only
@@ -216,7 +217,7 @@ xpst watch --interval 300
 ### Check health
 
 ```bash
-# Full health check — tests every platform's auth, no uploads
+# Health check — tests configured platform auth, without uploads
 xpst health
 
 # Machine-readable
@@ -245,9 +246,9 @@ xpst diagnostics          # Export a REDACTED support bundle (secrets stripped)
 - 📺 [YouTube setup](setup-youtube.md) — Google Cloud OAuth, one-time
 - 📸 [Instagram setup](setup-instagram.md) — Meta Graph API (ban-safe)
 - 🐦 [X/Twitter setup](setup-x-twitter.md) — login-based, no cookie export
-- 🎵 [TikTok setup](setup-tiktok.md) — source (browser cookies) and destination (Content Posting API)
-- 🧵 [Threads setup](setup-threads.md) — Meta Threads API
-- 💬 [Messenger setup](setup-messenger.md) — Messenger Platform auto-reply (opt-in)
+- 🎵 [TikTok setup](setup-tiktok.md) — source-only today; destination publishing awaits external review
+- 🧵 [Threads setup](setup-threads.md) — opt-in, currently disabled/unauthenticated
+- 💬 [Messenger setup](setup-messenger.md) — opt-in auto-reply, currently disabled/unauthenticated
 - 🛠️ [Troubleshooting](troubleshooting.md) — common errors and fixes
 - 🚀 [Quickstart](QUICKSTART.md) — install and first run
 
