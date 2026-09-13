@@ -96,30 +96,29 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
 
       - name: Install Tauri CLI
-        run: cargo install tauri-cli --version 2.11.4 --locked
+        run: |
+          cargo install tauri-cli --version 2.11.4 --locked
+          test -x "$HOME/.cargo/bin/cargo-tauri"
+          "$HOME/.cargo/bin/cargo-tauri" --version
 
-      - name: Build Tauri app + updater artifacts
+      - name: Build Tauri app + DMG
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
-          export TAURI_SIGNING_PRIVATE_KEY="${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
-          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            # CI key present → signed updater artifacts
-            cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          else
-            # No key → build without updater signature (artifact still uploaded for smoke)
-            cargo tauri build --target ${{ matrix.target }} --bundles app
-          fi
+          cargo tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Verify bundle size gate (≤200MB)
+      - name: Verify bundle size and resources
         run: |
-          APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" | head -1)
-          SIZE_MB=$(du -sm "$APP_PATH" | cut -f1)
+          set -euo pipefail
+          APP_PATH="$(find src-tauri/target -type d -path '*/release/bundle/macos/xPST.app' -print -quit)"
+          test -n "$APP_PATH"
+          test -f "$APP_PATH/Contents/Resources/ui/index.html"
+          test -x "$APP_PATH/Contents/Resources/binaries/engine/xpst-engine"
+          SIZE_MB="$(du -sm "$APP_PATH" | cut -f1)"
           echo "xPST.app size: ${SIZE_MB}MB"
           if [ "$SIZE_MB" -gt 200 ]; then
             echo "::error::Bundle ${SIZE_MB}MB exceeds 200MB gate"
@@ -129,27 +128,47 @@ jobs:
       - name: Smoke boot (app launches, engine healthy)
         if: runner.os == 'macOS'
         run: |
-          APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" | head -1)
-          set -e
-          # headless-safe boot with a bounded watchdog
-          timeout 60 "$APP_PATH/Contents/MacOS/"* &
+          set -euo pipefail
+          APP_PATH="$(find src-tauri/target -type d -path '*/release/bundle/macos/xPST.app' -print -quit)"
+          APP_EXEC="$APP_PATH/Contents/MacOS/xPST"
+          test -x "$APP_EXEC"
+          "$APP_EXEC" >"$RUNNER_TEMP/xpst-app.log" 2>&1 &
           APP_PID=$!
-          sleep 15
-          if ! kill -0 $APP_PID 2>/dev/null; then
-            echo "::error::App exited during smoke boot"
-            exit 1
-          fi
-          kill $APP_PID 2>/dev/null || true
+          cleanup() {
+            kill "$APP_PID" 2>/dev/null || true
+            wait "$APP_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          for _ in $(seq 1 15); do
+            if ! kill -0 "$APP_PID" 2>/dev/null; then
+              echo "::error::App exited during smoke boot"
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "PASS: xPST.app stayed alive for 15s"
 
-      - name: Upload app bundle
+      - name: Stage macOS DMG artifacts
+        run: |
+          set -euo pipefail
+          APP_PATH="$(find src-tauri/target -type d -path '*/release/bundle/macos/xPST.app' -print -quit)"
+          DMG_PATH="$(find src-tauri/target -type f -path '*/release/bundle/dmg/*.dmg' -print -quit)"
+          test -n "$APP_PATH"
+          test -n "$DMG_PATH"
+          hdiutil verify "$DMG_PATH"
+          rm -rf release-artifacts
+          mkdir -p release-artifacts
+          cp "$DMG_PATH" release-artifacts/xPST.dmg
+          (cd release-artifacts && shasum -a 256 xPST.dmg > SHA256SUMS)
+          shasum -a 256 -c release-artifacts/SHA256SUMS
+
+      - name: Upload macOS DMG artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: xPST-${{ matrix.target }}
+          name: xPST-${{ matrix.target }}-dmg
           path: |
-            src-tauri/target/release/bundle/macos/xPST.app
-            src-tauri/target/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/release/bundle/dmg/*.dmg
+            release-artifacts/xPST.dmg
+            release-artifacts/SHA256SUMS
           if-no-files-found: error
 
       - name: Release (tag builds only)
@@ -157,8 +176,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            src-tauri/target/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/release/bundle/dmg/*.dmg
+            release-artifacts/xPST.dmg
+            release-artifacts/SHA256SUMS
           generate_release_notes: true
           draft: false
