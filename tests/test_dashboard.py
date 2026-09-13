@@ -158,7 +158,7 @@ def test_bio_page_renders_social_and_custom_links(tmp_path):
             "threads": {"enabled": False, "threads_user_id": "12345"},
         },
         bio={
-            "handle": "Tyler AI",
+            "handle": "Maintainer AI",
             "links": [{"label": "Website", "url": "https://tysais.com"}],
         },
     )
@@ -166,7 +166,7 @@ def test_bio_page_renders_social_and_custom_links(tmp_path):
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
     html = resp.text
-    assert "Tyler AI" in html
+    assert "Maintainer AI" in html
     assert "https://youtube.com/@tysais" in html
     assert "https://x.com/sample_user" in html
     assert "https://tiktok.com/@tys.ais" in html
@@ -233,14 +233,14 @@ def test_bio_edit_adds_link_and_persists(tmp_path):
     cfg_dir = _make_config(
         tmp_path,
         auth=("admin", pwd_hash),
-        bio={"handle": "Tyler", "links": [{"label": "Old", "url": "https://old.com"}]},
+        bio={"handle": "Maintainer", "links": [{"label": "Old", "url": "https://old.com"}]},
     )
     client = TestClient(_create_app(cfg_dir))
 
     resp = client.post(
         "/bio/edit",
         data={
-            "handle": "Tyler AI",
+            "handle": "Maintainer AI",
             "label_0": "Old",
             "url_0": "https://old.com",
             "new_label": "Newsletter",
@@ -252,14 +252,14 @@ def test_bio_edit_adds_link_and_persists(tmp_path):
     assert resp.status_code == 303
 
     config = XPSTConfig.load(str(Path(cfg_dir) / "config.yaml"))
-    assert config.bio.handle == "Tyler AI"
+    assert config.bio.handle == "Maintainer AI"
     assert config.bio.links == [
         {"label": "Old", "url": "https://old.com"},
         {"label": "Newsletter", "url": "https://news.example.com"},
     ]
 
     html = client.get("/bio").text
-    assert "Tyler AI" in html
+    assert "Maintainer AI" in html
     assert "https://news.example.com" in html
 
 
@@ -269,7 +269,7 @@ def test_bio_edit_removes_link(tmp_path):
     cfg_dir = _make_config(
         tmp_path,
         auth=("admin", pwd_hash),
-        bio={"handle": "Tyler", "links": [
+        bio={"handle": "Maintainer", "links": [
             {"label": "Keep", "url": "https://keep.com"},
             {"label": "Drop", "url": "https://drop.com"},
         ]},
@@ -278,7 +278,7 @@ def test_bio_edit_removes_link(tmp_path):
     client.post(
         "/bio/edit",
         data={
-            "handle": "Tyler",
+            "handle": "Maintainer",
             "label_0": "Keep",
             "url_0": "https://keep.com",
             "label_1": "Drop",

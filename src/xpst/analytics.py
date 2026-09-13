@@ -241,7 +241,7 @@ class AnalyticsCollector:
 
     # ── Ownership verification ──────────────────────────────────────────
     # Root-cause hardening for skewed analytics: every post id that enters
-    # metric_snapshots must be attributable to Tyler's own account before
+    # metric_snapshots must be attributable to the maintainer's own account before
     # it is persisted. YouTube is verified against the authenticated
     # channel's uploads playlist (authoritative, covers uploads made
     # outside xPST too); X/Instagram are checked against state.json, which

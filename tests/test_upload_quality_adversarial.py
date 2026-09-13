@@ -1,6 +1,6 @@
 """Adversarial upload-quality fidelity QA (branch qa/upload-quality-adversarial).
 
-Tyler's #1 requirement: EXTREME upload quality — full fidelity, never
+The maintainer's #1 requirement: EXTREME upload quality — full fidelity, never
 silently degraded. This suite verifies, with REAL generated media:
 
 (a) is_platform_compliant verdicts are correct vs an independent ffprobe
