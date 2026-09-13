@@ -495,7 +495,7 @@ def health_and_ui(
             if status == 200:
                 health_url = base
                 break
-        if health_url:
+        if health_url and visible:
             break
         if process.poll() is not None:
             break
