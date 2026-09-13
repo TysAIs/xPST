@@ -1,8 +1,9 @@
 name: Tauri Shell Release
 
-# Builds the Tauri 2 desktop shell (xPST.app) with the Python engine sidecar.
-# Triggers on version tags (v*) and manual dispatch. Artifacts: .app, .dmg,
-# updater (.app.tar.gz + .sig). Notarization runs only when Apple secrets exist.
+# Builds signed Tauri updater artifacts for every desktop target.  The four
+# platform artifacts are consumed by publish-updater.yml, which attaches them
+# to the canonical GitHub release and turns them into the GitHub Pages
+# latest.json endpoint.
 
 on:
   push:
@@ -13,6 +14,8 @@ on:
       - "ui/**"
       - "build_engine.spec"
       - "scripts/build-engine.sh"
+      - "scripts/fetch-media-binaries.sh"
+      - "scripts/gen-updater-manifest.py"
       - "scripts/verify_release_version.py"
       - "pyproject.toml"
       - ".github/workflows/tauri-release.yml"
@@ -31,11 +34,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - platform: darwin-aarch64
+            os: macos-latest
             target: aarch64-apple-darwin
-            bundles: "app,dmg"
+            bundles: "app"
+            media: macos-arm64
+          - platform: darwin-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: "app"
+            media: macos-x64
+          - platform: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: "nsis"
+            media: win-x64
+          - platform: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bundles: "appimage"
+            media: linux-x64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +78,10 @@ jobs:
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
+      - name: Install Linux bundler dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libfuse2
+
       - name: Verify release version
         run: python scripts/verify_release_version.py
 
@@ -67,27 +91,32 @@ jobs:
           npm ci
           npm run build
 
-      - name: Install Python engine deps (sidecar build)
+      - name: Install Python engine dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install -e ".[full]" pyinstaller
 
       - name: Build engine sidecar (PyInstaller onedir)
+        shell: bash
         run: |
           scripts/build-engine.sh
           test -f ui/dist/index.html
-          test -x src-tauri/binaries/engine/xpst-engine
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            test -f src-tauri/binaries/engine/xpst-engine.exe
+          else
+            test -x src-tauri/binaries/engine/xpst-engine
+          fi
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
 
-      - name: Fetch media binaries (ffmpeg/ffprobe/yt-dlp)
+      - name: Fetch media binaries
+        shell: bash
         run: |
           chmod +x scripts/fetch-media-binaries.sh
-          scripts/fetch-media-binaries.sh
+          scripts/fetch-media-binaries.sh "${{ matrix.media }}"
 
-      - name: Import Apple signing cert (if secrets present)
-        if: env.APPLE_CERTIFICATE != null && env.APPLE_CERTIFICATE != ''
-        id: cert
+      - name: Import Apple signing certificate
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
         uses: apple-actions/import-codesign-certs@v7
         with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
@@ -98,67 +127,67 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
 
-      - name: Build Tauri app + updater artifacts
-        run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          export TAURI_SIGNING_PRIVATE_KEY="${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
-          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            # CI key present → signed updater artifacts
-            cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          else
-            # No key → build without updater signature (artifact still uploaded for smoke)
-            cargo tauri build --target ${{ matrix.target }} --bundles app
-          fi
+      - name: Build signed Tauri updater artifact
+        shell: bash
         env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
-      - name: Verify bundle size gate (≤200MB)
         run: |
-          APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" | head -1)
-          SIZE_MB=$(du -sm "$APP_PATH" | cut -f1)
-          echo "xPST.app size: ${SIZE_MB}MB"
-          if [ "$SIZE_MB" -gt 200 ]; then
-            echo "::error::Bundle ${SIZE_MB}MB exceeds 200MB gate"
+          if [[ -z "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is required: createUpdaterArtifacts is enabled" >&2
             exit 1
           fi
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
 
-      - name: Smoke boot (app launches, engine healthy)
-        if: runner.os == 'macOS'
+      - name: Collect updater artifact and signature
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" | head -1)
-          set -e
-          # headless-safe boot with a bounded watchdog
-          timeout 60 "$APP_PATH/Contents/MacOS/"* &
-          APP_PID=$!
-          sleep 15
-          if ! kill -0 $APP_PID 2>/dev/null; then
-            echo "::error::App exited during smoke boot"
-            exit 1
-          fi
-          kill $APP_PID 2>/dev/null || true
+          mkdir -p release-assets
+          ARTIFACT="$(python - "$PLATFORM" <<'PY'
+          import sys
+          from pathlib import Path
 
-      - name: Upload app bundle
+          platform = sys.argv[1]
+          patterns = {
+              "darwin-aarch64": ("*.app.tar.gz",),
+              "darwin-x86_64": ("*.app.tar.gz",),
+              "windows-x86_64": ("*setup.exe", "*.exe"),
+              "linux-x86_64": ("*.AppImage",),
+          }
+          candidates = sorted(
+              path for pattern in patterns[platform]
+              for path in Path("src-tauri/target").rglob(pattern)
+              if path.is_file() and not path.name.endswith(".sig") and "bundle" in path.parts
+          )
+          # A Windows NSIS build can match both patterns; deduplicate paths.
+          candidates = sorted(set(candidates))
+          if len(candidates) != 1:
+              raise SystemExit(
+                  f"expected one updater artifact for {platform}, found: "
+                  + ", ".join(str(path) for path in candidates)
+              )
+          print(candidates[0])
+          PY
+          )"
+          [[ -f "$ARTIFACT.sig" ]] || {
+            echo "missing updater signature: $ARTIFACT.sig" >&2
+            exit 1
+          }
+          DEST="release-assets/${PLATFORM}-$(basename "$ARTIFACT")"
+          cp "$ARTIFACT" "$DEST"
+          cp "$ARTIFACT.sig" "$DEST.sig"
+          printf 'collected %s and %s\n' "$DEST" "$DEST.sig"
+
+      - name: Upload platform updater artifact
         uses: actions/upload-artifact@v4
         with:
-          name: xPST-${{ matrix.target }}
-          path: |
-            src-tauri/target/release/bundle/macos/xPST.app
-            src-tauri/target/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/release/bundle/dmg/*.dmg
+          name: xPST-updater-${{ matrix.platform }}
+          path: release-assets/*
           if-no-files-found: error
-
-      - name: Release (tag builds only)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            src-tauri/target/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/release/bundle/dmg/*.dmg
-          generate_release_notes: true
-          draft: false

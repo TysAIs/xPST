@@ -1,0 +1,161 @@
+name: Publish Tauri updater manifest
+
+# Tauri's build workflow uploads four signed artifact pairs.  This workflow
+# attaches those artifacts to the corresponding GitHub Release, generates the
+# static latest.json, and deploys it to the Pages endpoint in tauri.conf.json.
+# It deliberately runs after the build workflow instead of creating a second
+# competing GitHub Release.
+
+on:
+  workflow_run:
+    workflows: ["Tauri Shell Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing GitHub release tag, for example v1.2.3"
+        required: true
+        type: string
+      tauri_run_id:
+        description: "Successful Tauri Shell Release run ID containing the four updater artifacts"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: updater-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      RELEASE_TAG: ${{ github.event.workflow_run.head_branch || inputs.release_tag }}
+      TAURI_RUN_ID: ${{ github.event.workflow_run.id || inputs.tauri_run_id }}
+      ASSET_DIR: ${{ runner.temp }}/xpst-updater-assets
+      MANIFEST: ${{ runner.temp }}/latest.json
+      PAGES_DIR: ${{ runner.temp }}/xpst-pages
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Download signed Tauri artifacts
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ env.TAURI_RUN_ID }}
+          pattern: xPST-updater-*
+          path: ${{ env.ASSET_DIR }}
+          merge-multiple: true
+
+      - name: Wait for the canonical GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          found=0
+          for attempt in $(seq 1 60); do
+            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              found=1
+              break
+            fi
+            sleep 10
+          done
+          if [[ "$found" != 1 ]]; then
+            echo "GitHub Release $RELEASE_TAG was not available after waiting" >&2
+            exit 1
+          fi
+
+      - name: Attach Tauri artifacts to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" "$ASSET_DIR"/* --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Select exactly one updater artifact per platform
+        run: |
+          artifact_for() {
+            python3 - "$ASSET_DIR" "$1" <<'PY'
+          import sys
+          from pathlib import Path
+
+          root, platform = Path(sys.argv[1]), sys.argv[2]
+          candidates = sorted(
+              path for path in root.iterdir()
+              if path.is_file()
+              and path.name.startswith(platform + "-")
+              and not path.name.endswith(".sig")
+              and path.name != "latest.json"
+          )
+          if len(candidates) != 1:
+              raise SystemExit(
+                  f"expected exactly one {platform} updater artifact, found: "
+                  + ", ".join(path.name for path in candidates)
+              )
+          artifact = candidates[0]
+          signature = artifact.with_name(artifact.name + ".sig")
+          if not signature.is_file():
+              raise SystemExit(f"missing signature for {platform}: {signature}")
+          print(artifact)
+          PY
+          }
+          DARWIN_AARCH64="$(artifact_for darwin-aarch64)"
+          DARWIN_X86_64="$(artifact_for darwin-x86_64)"
+          WINDOWS_X86_64="$(artifact_for windows-x86_64)"
+          LINUX_X86_64="$(artifact_for linux-x86_64)"
+          printf 'DARWIN_AARCH64=%s\n' "$DARWIN_AARCH64" >> "$GITHUB_ENV"
+          printf 'DARWIN_X86_64=%s\n' "$DARWIN_X86_64" >> "$GITHUB_ENV"
+          printf 'WINDOWS_X86_64=%s\n' "$WINDOWS_X86_64" >> "$GITHUB_ENV"
+          printf 'LINUX_X86_64=%s\n' "$LINUX_X86_64" >> "$GITHUB_ENV"
+
+      - name: Read release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/release-notes.md"
+
+      - name: Generate latest.json
+        run: |
+          version="${RELEASE_TAG#v}"
+          python scripts/gen-updater-manifest.py \
+            --version "$version" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG" \
+            --output "$MANIFEST" \
+            --artifact "darwin-aarch64=$DARWIN_AARCH64" \
+            --artifact "darwin-x86_64=$DARWIN_X86_64" \
+            --artifact "windows-x86_64=$WINDOWS_X86_64" \
+            --artifact "linux-x86_64=$LINUX_X86_64"
+
+      - name: Stage Pages payload
+        run: |
+          rm -rf "$PAGES_DIR"
+          scripts/publish-updater.sh --manifest "$MANIFEST" --site-dir "$PAGES_DIR"
+          test -s "$PAGES_DIR/updates/latest.json"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ env.PAGES_DIR }}
+
+      - name: Deploy updater endpoint
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Keep a copy on the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" "$MANIFEST#latest.json" --repo "$GITHUB_REPOSITORY" --clobber

@@ -50,6 +50,15 @@ def test_release_version_verification_path_passes() -> None:
     assert "python-runtime" in result.stdout
 
 
+def test_tauri_config_enables_signed_updater_artifacts() -> None:
+    config = _json("src-tauri/tauri.conf.json")
+    assert config["bundle"]["createUpdaterArtifacts"] is True
+    assert config["plugins"]["updater"]["endpoints"] == [
+        "https://tysais.github.io/xPST/updates/latest.json"
+    ]
+    assert config["plugins"]["updater"]["pubkey"]
+
+
 def test_tauri_builds_ui_and_maps_packaged_resources() -> None:
     config = _json("src-tauri/tauri.conf.json")
     build = config["build"]

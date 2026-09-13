@@ -3,12 +3,11 @@
 `src-tauri/tauri.conf.json` keeps the **production-facing** updater settings
 (endpoint `https://tysais.github.io/xPST/updates/latest.json`, release pubkey
 slot). The local E2E (`scripts/updater-e2e.sh`) does **not** mutate that file:
-it injects the local endpoint, a throwaway pubkey, `createUpdaterArtifacts` and
-the test version via a Tauri config overlay (`cargo tauri build --config`), so
-switching to production is a one-line config change (below) and CI workflows
-that build the shell are unaffected.
+it injects the local endpoint, a throwaway pubkey and the test version via a
+Tauri config overlay (`cargo tauri build --config`), so the production config is
+never mutated by the test.
 
-## Production config (the one-line switch)
+## Production config
 
 In `src-tauri/tauri.conf.json` → `plugins.updater`:
 
@@ -19,21 +18,22 @@ In `src-tauri/tauri.conf.json` → `plugins.updater`:
 }
 ```
 
-and set `"bundle.createUpdaterArtifacts": true` for release builds.
+and `bundle.createUpdaterArtifacts` is already `true` for release builds.
 
 Notes:
 
-- The committed config has `createUpdaterArtifacts: false` so plain
-  `cargo tauri build` never requires signing keys; the release workflow
-  (`.github/workflows/tauri-release.yml`) exports `TAURI_SIGNING_PRIVATE_KEY`
-  from CI secrets and enables updater artifacts when the key is present.
+- The committed config has `createUpdaterArtifacts: true`. Release builds fail
+  closed unless `TAURI_SIGNING_PRIVATE_KEY` is present; the release workflow
+  exports the owner-managed key from CI secrets.
 - Never commit `dangerousInsecureTransportProtocol: true` — that flag exists
   only in the E2E overlay because the local endpoint is plain
   `http://127.0.0.1:9555`. The production endpoint is HTTPS.
-- The endpoint serves a static manifest (GitHub Pages works well):
-  `{ "version", "notes", "pub_date", "platforms": { "darwin-aarch64": { "signature", "url" } } }`.
-  `signature` = the contents of the `.sig` file produced at build time; `url` =
-  absolute URL of the `xPST.app.tar.gz` artifact.
+- The endpoint serves a static manifest (GitHub Pages is deployed by
+  `.github/workflows/publish-updater.yml`):
+  `{ "version", "notes", "pub_date", "platforms": { "darwin-aarch64": { "signature", "sha512", "url" } } }`.
+  `signature` = the contents of the `.sig` file produced at build time; `sha512`
+  = the digest of the exact payload bytes; `url` = the absolute GitHub Release
+  asset URL.
 
 ## Release signing keypair
 
@@ -52,11 +52,18 @@ Notes:
 
 ## Release build & publish flow
 
+The release workflow builds the four platform artifacts and their `.sig`
+sidecars. After the canonical GitHub Release exists,
+`.github/workflows/publish-updater.yml` downloads those artifacts, runs
+`scripts/gen-updater-manifest.py`, stages the exact
+`updates/latest.json` path, and deploys it with the GitHub Pages Actions
+publisher. See `docs/RELEASE.md` for the owner runbook and live endpoint
+verification commands.
+
 ```bash
 # CI or local, with TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) exported:
-cargo tauri build --bundles app          # produces xPST.app + xPST.app.tar.gz + .sig
-# upload xPST.app.tar.gz (e.g. to the GitHub Pages repo / a release asset)
-# update latest.json with the new version + .sig contents
+cargo tauri build --bundles app          # xPST.app + xPST.app.tar.gz + .sig on macOS
+python scripts/gen-updater-manifest.py --help
 ```
 
 On this host the DMG bundler step (`bundle_dmg.sh`) hits an AppleScript
@@ -92,9 +99,9 @@ script header):
 3. Rebuilds as v0.2.0 via the same overlay, replaces artifact + manifest.
 4. Launches the v0.1.0 bundle with `XPST_UPDATER_CHECK=1` (the opt-in trigger
    in `src-tauri/src/lib.rs` — normal boots never auto-update).
-5. Asserts the v0.1.0 process checks, downloads (~2.1 MB over HTTP), verifies
-   the minisign signature, installs, restarts, and that a `started-0.2.0.txt`
-   marker — written by `lib.rs` **inside the relaunched process** — appears in
+5. Asserts the version-A process checks, downloads, verifies the minisign
+   signature, installs, restarts, and that a `started-0.2.0.txt` marker — written
+   by `lib.rs` **inside the relaunched process** — appears in
    `/private/tmp/xpst-updater-e2e/`.
 
 Known pitfalls baked into the script:

@@ -31,19 +31,24 @@ PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -m PyInstaller build_engine.spec \
     --noconfirm --distpath dist/engine --workpath build/engine-work
 
 cp -R dist/engine/xpst-engine "$OUT_DIR/engine"
+if [[ -f "$OUT_DIR/engine/xpst-engine.exe" ]]; then
+  ENGINE_PATH="$OUT_DIR/engine/xpst-engine.exe"
+else
+  ENGINE_PATH="$OUT_DIR/engine/xpst-engine"
+fi
 echo "==> Wrote $OUT_DIR/engine ($(du -sh "$OUT_DIR/engine" | cut -f1))"
 
 # Sanity check: the onedir engine must honor XPST_DASHBOARD_PORT and
 # report healthy quickly.
 echo "==> Smoke-checking sidecar"
 TEST_PORT="$(jot -r 1 20000 40000 2>/dev/null || shuf -i 20000-40000 -n 1 2>/dev/null || echo 39999)"
-XPST_DASHBOARD_PORT="$TEST_PORT" "$OUT_DIR/engine/xpst-engine" >/tmp/xpst-engine-check.log 2>&1 &
+XPST_DASHBOARD_PORT="$TEST_PORT" "$ENGINE_PATH" >/tmp/xpst-engine-check.log 2>&1 &
 CHECK_PID=$!
 trap 'kill "$CHECK_PID" 2>/dev/null || true' EXIT
-START="$(python3 -c 'import time; print(time.time())')"
+START="$($PYTHON -c 'import time; print(time.time())')"
 for _ in $(seq 1 60); do
     if curl -sf -o /dev/null "http://127.0.0.1:$TEST_PORT/health"; then
-        ELAPSED="$(python3 -c "import time; print(f'{time.time()-$START:.2f}')")"
+        ELAPSED="$($PYTHON -c "import time; print(f'{time.time()-$START:.2f}')")"
         echo "PASS: sidecar /health OK on port $TEST_PORT (cold start ${ELAPSED}s)"
         exit 0
     fi
