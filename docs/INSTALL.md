@@ -1,472 +1,278 @@
-﻿# xPST Installation Guide
+﻿# Download and install xPST
 
-Complete installation instructions for all platforms and use cases.
+This guide covers the standalone desktop artifacts published on the
+[GitHub Releases page](https://github.com/TysAIs/xPST/releases). Do not construct
+asset download URLs: open the release, expand **Assets**, and download the exact
+filename shown there.
 
----
+## Read this before downloading
 
-## Prerequisites
+The latest published release currently visible is **v1.1.0**. Its desktop
+artifacts were built from an older tag than the current `main` branch. Treat the
+release as a published build, not as proof that the current branch is packaged.
+The macOS signing and notarization status is **not proven**. Verify the checksum
+before opening any downloaded artifact.
 
-### Required
+There is no proven automatic-update channel today. Use the Releases page to
+install a newer build manually; do not rely on an in-app update check.
 
-- **Python 3.10+** (3.10, 3.11, 3.12, or 3.13)
-- **FFmpeg** — video encoding and processing
-- **pip** or **uv** — Python package manager
+## Choose the release asset
 
-### Optional
+These are the v1.1.0 asset names verified on the Releases page:
 
-- **Git** — for development installation
-- **Docker** — for containerized deployment
-- **PySide6** — for native desktop app (QML UI)
+| Operating system | Download this asset | Download this checksum manifest | Notes |
+|---|---|---|---|
+| macOS | `xPST.dmg` | `macos-SHA256SUMS` | Apple Silicon/arm64 desktop build. An Intel x86_64 build is not published here. |
+| Windows | `xPST.exe` | `windows-SHA256SUMS` | Standalone Windows desktop executable produced by the repository's PyInstaller spec; it is not an MSI or NSIS installer. |
+| Linux | `xPST` | `linux-SHA256SUMS` | Standalone Linux desktop executable. v1.1.0 does **not** publish an AppImage or `.deb`. |
 
----
+The release also contains an aggregate `SHA256SUMS`. The platform-specific
+manifest is more convenient when you have downloaded only one platform asset.
+The manifest is the source of truth; never substitute a hash copied from a
+third-party page.
 
-## Platform-Specific Prerequisites
+The commands use the platform-specific manifest to avoid false failures from
+missing assets. If you downloaded the aggregate release file named
+`SHA256SUMS` instead, substitute `SHA256SUMS` for the platform manifest in the
+macOS or Windows target-only command. On Linux, `sha256sum -c SHA256SUMS`
+is appropriate only when every file named by that aggregate manifest is present
+locally; otherwise select the exact asset line as above.
+
+## FFmpeg prerequisite
+
+The standalone app can open without FFmpeg, but xPST's video processing and
+encoding paths resolve an external `ffmpeg` executable. Install FFmpeg with your
+OS package manager and make sure it is available on `PATH` before posting:
+
+- macOS: `brew install ffmpeg`
+- Windows: install an FFmpeg build and add its directory containing
+  `ffmpeg.exe` to `PATH`
+- Debian/Ubuntu: `sudo apt install ffmpeg`
+
+If your distribution uses another package manager, use its FFmpeg package.
+
+## Verify SHA256
+
+From the directory containing the downloaded artifact, download the matching
+platform manifest from the same release. The commands below select the named
+asset from that manifest, so they do not fail because other release assets are
+not present locally.
 
 ### macOS
 
 ```bash
-# Install Python (if not already installed)
-brew install python@3.12
-
-# Install FFmpeg
-brew install ffmpeg
-
-# Verify
-python3 --version   # Should be 3.10+
-ffmpeg -version
+cd ~/Downloads
+expected="$(awk '$2 == "xPST.dmg" { print $1 }' macos-SHA256SUMS)"
+actual="$(shasum -a 256 xPST.dmg | awk '{ print $1 }')"
+if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+  printf '%s\n' 'SHA256 mismatch — do not open xPST.dmg.' >&2
+  exit 1
+fi
+printf 'SHA256 OK: %s\n' "$actual"
 ```
 
-### Ubuntu / Debian
+### Windows PowerShell
+
+```powershell
+$line = Get-Content .\windows-SHA256SUMS | Where-Object { $_ -match '\s+xPST\.exe$' }
+$expected = ($line -split '\s+')[0].ToLowerInvariant()
+$actual = (Get-FileHash .\xPST.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+if ([string]::IsNullOrEmpty($expected) -or $actual -ne $expected) {
+    throw "SHA256 mismatch — do not run xPST.exe."
+}
+"SHA256 OK: $actual"
+```
+
+### Linux
+
+For the v1.1.0 Linux asset, the platform manifest contains the one executable,
+so the normal checksum-file check is sufficient:
 
 ```bash
-# Install Python and FFmpeg
-sudo apt update
-sudo apt install python3 python3-pip python3-venv ffmpeg
-
-# Verify
-python3 --version
-ffmpeg -version
+sha256sum -c linux-SHA256SUMS
 ```
 
-### Fedora / RHEL
+If a later release's Linux manifest contains several assets and you downloaded
+only one, use the same target-only pattern as the macOS command: extract the
+line for the exact filename shown on that release page, hash that local file
+with `sha256sum`, and compare the two values.
 
-```bash
-sudo dnf install python3 python3-pip ffmpeg
+## Install on macOS
 
-# Verify
-python3 --version
-ffmpeg -version
-```
+1. Download `xPST.dmg` and `macos-SHA256SUMS` from the same release.
+2. Verify the DMG using the macOS command above.
+3. Double-click `xPST.dmg` in Finder.
+4. Drag `xPST.app` into the **Applications** folder.
+5. Eject the mounted DMG.
 
-### Windows
+### Gatekeeper and an unsigned build
 
-1. Install Python 3.10+ from [python.org](https://www.python.org/downloads/)
-   - Check "Add Python to PATH" during installation
-2. Install FFmpeg:
-   - Download from [ffmpeg.org](https://ffmpeg.org/download.html)
-   - Extract and add `bin/` to your system PATH
-   - Or use: `winget install ffmpeg`
-3. Verify:
+The public macOS signing and notarization status is not proven. Gatekeeper checks
+an app downloaded from the internet; an unsigned or unnotarized build may warn
+that macOS cannot verify the developer or may prevent the first launch. Approve
+this one application; do **not** disable Gatekeeper globally:
+
+1. In Finder, open **Applications**.
+2. Control-click (or right-click) `xPST.app` and choose **Open**.
+3. Read the warning and choose **Open** in that dialog.
+4. If macOS still blocks the launch, try opening the app once, then open
+   **System Settings → Privacy & Security**, find the blocked xPST notice, click
+   **Open Anyway**, and confirm **Open**.
+
+Only use this approval after verifying the checksum and only for the copy you
+intend to run. Do not use a global Gatekeeper bypass.
+
+### Uninstall on macOS
+
+1. Quit xPST.
+2. In Finder, move `/Applications/xPST.app` to the Trash. If you ran the app
+   from another folder, remove that copy instead.
+3. Empty the Trash if you want the application binary removed immediately.
+
+Removing the app does not remove your xPST data. See [Configuration and
+state](#configuration-and-state) if you also want to remove credentials and
+local history.
+
+## Install on Windows
+
+1. Download `xPST.exe` and `windows-SHA256SUMS` from the same release.
+2. Verify the executable with the PowerShell command above.
+3. Double-click `xPST.exe` to run it, or start it from PowerShell in its download
+   directory:
+
    ```powershell
-   python --version
-   ffmpeg -version
+   .\xPST.exe
    ```
 
----
+The v1.1.0 asset is a standalone executable, not a conventional installer.
+It does not create an MSI/NSIS installation entry or a separate uninstaller.
+If a future release publishes a real installer, use the exact installer asset
+listed on that release and its own uninstall entry.
 
-## Installation Methods
+### Uninstall on Windows
 
-### Method 1: From PyPI (Recommended)
+1. Quit xPST.
+2. Delete the downloaded `xPST.exe` (and any shortcut you created).
+3. If a later release was installed through a Windows installer, remove that
+   version from **Settings → Apps → Installed apps** instead.
 
-```bash
-pip install xpst
+Removing the executable does not remove `%USERPROFILE%\.xpst`. See
+[Configuration and state](#configuration-and-state) before deleting that data.
 
-# With MCP server support (for AI agents)
-pip install "xpst[mcp]"
+## Install on Linux
 
-# With desktop app support
-pip install "xpst[desktop]"
+### The currently published v1.1.0 binary
 
-# With Windows-specific extras
-pip install "xpst[windows]"
-
-# Everything
-pip install "xpst[mcp,desktop]"
-```
-
-### Method 2: From Source (Development)
-
-```bash
-# Clone the repository
-git clone https://github.com/TysAIs/xPST.git
-cd xPST
-
-# Create a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate   # macOS/Linux
-# .venv\Scripts\activate    # Windows
-
-# Install in editable mode with dev dependencies
-pip install -e ".[dev,mcp]"
-
-# Run tests to verify
-pytest
-```
-
-### Method 3: Using uv (Faster)
+The verified v1.1.0 Linux desktop asset is the standalone file `xPST`. No
+`.AppImage` or `.deb` is attached to that release, so there is no package
+filename to guess and no package-manager install to perform:
 
 ```bash
-# Install uv if not already installed
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Clone and install
-git clone https://github.com/TysAIs/xPST.git
-cd xPST
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev,mcp]"
+chmod +x ./xPST
+./xPST
 ```
 
----
+Keep the executable wherever you want to launch it from, or create your own
+desktop shortcut after confirming it works.
 
-## Docker Setup
+### AppImage releases
 
-### Build the Image
+When a future Releases page lists an AppImage, download the exact filename
+shown there and its Linux SHA256 manifest. Replace the variable value below
+with that exact filename; do not invent a filename or URL:
 
 ```bash
-git clone https://github.com/TysAIs/xPST.git
-cd xPST
-docker build -t xpst .
+APPIMAGE_FILE='paste-the-exact-AppImage-filename-from-the-release-page'
+chmod +x "./$APPIMAGE_FILE"
+"./$APPIMAGE_FILE"
 ```
 
-### Run
+An AppImage is portable. Uninstalling it normally means quitting xPST and
+deleting that AppImage file (plus any shortcut you created).
+
+### Debian package releases
+
+When a future Releases page lists a `.deb`, download the exact filename shown
+there and its Linux SHA256 manifest. Verify it, then install it with `apt`:
 
 ```bash
-# Run a one-shot cross-post check
-docker run --rm \
-  -v ~/.xpst:/root/.xpst \
-  xpst run
-
-# Run with config file
-docker run --rm \
-  -v ~/.xpst:/root/.xpst \
-  -v ~/Videos:/videos \
-  xpst post --video /videos/clip.mp4 --caption "Hello!"
-
-# Interactive shell
-docker run --rm -it \
-  -v ~/.xpst:/root/.xpst \
-  xpst bash
+DEB_FILE='paste-the-exact-.deb-filename-from-the-release-page'
+sudo apt install "./$DEB_FILE"
 ```
 
-### Docker Compose
-
-```yaml
-# docker-compose.yml
-services:
-  xpst:
-    build: .
-    volumes:
-      - ~/.xpst:/root/.xpst
-      - ~/Videos:/videos:ro
-    command: watch --interval 900
-    restart: unless-stopped
-```
+To uninstall without guessing the Debian package name, read the package name
+from the same file and pass that value to `apt`:
 
 ```bash
-docker compose up -d
+PACKAGE_NAME="$(dpkg-deb -f "./$DEB_FILE" Package)"
+sudo apt remove "$PACKAGE_NAME"
 ```
 
----
+Removing a Debian package does not remove `~/.xpst`.
 
-## First-Time Setup
+## Configuration and state
 
-### 1. Run the Setup Wizard
+xPST keeps its local configuration and state below `~/.xpst/` on macOS and
+Linux. On Windows, `~` means the current user's home directory, so the
+corresponding path is `%USERPROFILE%\.xpst`. Depending on what you use, this
+directory can contain:
+
+- `config.yaml` — configuration;
+- `state.json` — posting state;
+- `analytics.db` — local analytics history; and
+- `credentials/` — credential-store data and platform-specific session files.
+
+The `CredentialStore` uses an OS keychain when explicitly enabled with
+`XPST_USE_KEYRING=1`, or a Fernet-encrypted `.enc` file fallback by default.
+The fallback refuses to write a credential as plaintext if the cryptography
+dependency is unavailable. Some platform flows also write owner-only token,
+cookie, or session files and configuration fields under this directory; those
+files are not all encrypted by the repository. Treat the entire directory as
+sensitive, do not share it, and do not assume that an `.enc` copy makes every
+other file encrypted.
+
+To remove all local configuration, credentials, state, and analytics, first
+make any backup you need, then delete `~/.xpst` (on Windows,
+`%USERPROFILE%\.xpst`) using your file manager or OS-appropriate command. This
+is destructive and is separate from uninstalling the application.
+
+## First launch and CLI verification
+
+The standalone desktop assets launch the graphical app. A source installation
+can be checked without posting anything by running the module help command
+from the repository or installed environment:
 
 ```bash
-xpst setup
+python -m xpst --help
 ```
 
-The wizard walks you through:
-
-1. **Choose platforms** — enable YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger
-2. **Authenticate each platform** — guided instructions for each
-3. **Set rate limits** — defaults to 5 uploads/day per platform
-4. **Configure notifications** — optional Discord/Telegram webhooks
-5. **Create config file** — saves to `~/.xpst/config.yaml`
-
-### 2. Connect Platforms
+The CLI's non-mutating health check is also available after a source install:
 
 ```bash
-# Connect all platforms (interactive wizard)
-xpst connect
-
-# Connect a specific platform
-xpst connect youtube
-xpst connect instagram
-xpst connect x
-
-# Test existing connections
-xpst connect --test
+python -m xpst health --json
 ```
 
-### 3. Verify Setup
-
-```bash
-# Check all platform connections
-xpst health
-
-# Validate configuration
-xpst config validate
-
-# View current config
-xpst config show
-```
-
-### 4. First Run
-
-```bash
-# Dry run — see what would happen without posting
-xpst run --dry-run
-
-# Actual first run
-xpst run
-
-# Or start watching
-xpst watch
-```
-
----
-
-## MCP Server Setup (for AI Agents)
-
-### Install with MCP support
-
-```bash
-pip install "xpst[mcp]"
-```
-
-### Configure your AI assistant
-
-**Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "xpst": {
-      "command": "xpst-mcp"
-    }
-  }
-}
-```
-
-**Cursor / Windsurf** (MCP settings):
-
-```json
-{
-  "xpst": {
-    "command": "xpst-mcp",
-    "transport": "stdio"
-  }
-}
-```
-
-### Verify
-
-```bash
-# Test MCP server starts
-xpst-mcp  # Should start and wait for stdio input
-
-# Or via CLI
-xpst mcp
-```
-
----
-
-## Desktop App Setup
-
-### Native App (PySide6 — Recommended)
-
-```bash
-pip install PySide6
-xpst app
-```
-
-### Browser Fallback
-
-```bash
-pip install "xpst[desktop]"
-xpst app
-
-# Or launch in browser directly
-xpst dashboard
-xpst dashboard --port 9090
-```
-
----
-
-## OS Scheduler Setup
-
-Automatically run `xpst schedule run` on a timer:
-
-```bash
-# Install OS-level scheduler (every 15 minutes)
-xpst schedule install
-
-# Custom interval (every 30 minutes)
-xpst schedule install --interval 30
-
-# Remove scheduler
-xpst schedule install --remove
-```
-
-- **macOS:** Creates a LaunchAgent in `~/Library/LaunchAgents/`
-- **Linux:** Adds a crontab entry
-- **Windows:** Creates a Scheduled Task
-
----
-
-## Troubleshooting
-
-### "FFmpeg not found"
-
-```bash
-# Verify FFmpeg is installed and in PATH
-ffmpeg -version
-
-# macOS
-brew install ffmpeg
-
-# Linux
-sudo apt install ffmpeg
-```
-
-### "Permission denied" on credentials
-
-```bash
-# Fix permissions on credentials directory
-chmod 700 ~/.xpst/credentials
-chmod 600 ~/.xpst/credentials/*
-```
-
-### "Module not found: xpst"
-
-```bash
-# Make sure xPST is installed
-pip install -e .
-
-# Or check if virtual environment is activated
-source .venv/bin/activate
-which xpst  # Should point to .venv/bin/xpst
-```
-
-### "Config file not found"
-
-```bash
-# Run the setup wizard to create config
-xpst setup
-
-# Or manually create
-mkdir -p ~/.xpst
-# Edit ~/.xpst/config.yaml (see README for full config)
-```
-
-### YouTube "OAuth" errors
-
-```bash
-# Delete cached token and re-authenticate
-rm ~/.xpst/credentials/youtube_token.json
-xpst auth youtube
-```
-
-### Instagram "Session expired"
-
-```bash
-# Re-export cookies from browser
-# See docs/X_AUTH_GUIDE.md for cookie instructions
-xpst auth instagram
-```
-
-### X/Twitter "Cookie expired"
-
-```bash
-# Re-export cookies from browser
-# See docs/X_AUTH_GUIDE.md for cookie instructions
-xpst auth x
-```
-
-### "Keyring" errors on Linux
-
-```bash
-# Install secret service support
-sudo apt install gnome-keyring
-
-# Or use file-based fallback (automatic if keyring unavailable)
-```
-
-### "yt-dlp" errors
-
-```bash
-# Update yt-dlp to latest version
-pip install --upgrade yt-dlp
-
-# Or update all xPST dependencies
-xpst update
-```
-
-### Port already in use (dashboard)
-
-```bash
-# Use a different port
-xpst dashboard --port 9090
-```
-
-### Tests failing
-
-```bash
-# Run with verbose output
-pytest -x --tb=long -v
-
-# Run specific test file
-pytest tests/test_engine.py -v
-
-# Check for missing dependencies
-pip install -e ".[dev]"
-```
-
----
-
-## Updating
-
-```bash
-# Check for updates
-xpst update --check
-
-# Update all dependencies
-xpst update
-
-# Or manually
-pip install --upgrade xpst
-```
-
----
-
-## Uninstalling
-
-```bash
-# Remove xPST package
-pip uninstall xpst
-
-# Remove configuration and credentials (optional)
-rm -rf ~/.xpst
-
-# Remove OS scheduler (if installed)
-xpst schedule install --remove
-```
-
----
-
-## See Also
-
-- [MCP Tools Reference](MCP_TOOLS.md) — AI integration
-- [Quickstart](QUICKSTART.md) — Cookie-based authentication
+A successful help command proves that the Python package is importable; it does
+not authenticate accounts or prove that a social-platform upload will work.
+See the capability table below for the current verified scope.
+
+## Capability truth table
+
+This is an honest status snapshot, not a guarantee that a platform will keep
+its API or session behavior unchanged. Platform authentication and health are
+account-dependent; use the non-mutating health check after your own setup.
+
+| Capability | Status | What that means today |
+|---|---|---|
+| YouTube | **Live-verified** | Current account authentication and live health were verified. Publishing still requires your own Google OAuth project/account and remains subject to YouTube limits. |
+| X | **Live-verified** | Current account authentication and live health were verified. The path depends on your own account and chosen API/session method and remains subject to X enforcement and limits. |
+| Instagram | **Live-verified** | Current account authentication and live health were verified. The official Graph API path requires your own Meta app and an eligible Creator/Business account; session-based modes have separate risks. |
+| TikTok as a source | **Source-only (live-verified)** | TikTok source fetching through the downloader/cookie path was live-checked. Use it to source content for other destinations. |
+| TikTok as a destination | **Not available yet** | Destination publishing awaits external TikTok developer review and approved app credentials. Do not present TikTok destination publishing as ready. |
+| Threads | **Disabled / unauthenticated** | Threads is an opt-in integration and is currently disabled. It is not a live-verified destination. |
+| Messenger | **Disabled / unauthenticated** | Messenger is an opt-in messaging/auto-reply integration and is currently disabled. It is not a video-posting destination. |
+| `pip install xpst` | **Not yet** | The PyPI JSON endpoint currently returns HTTP 404, so the package is not published on PyPI. Use a GitHub release desktop asset or install from source instead. |
+
+The repository also contains setup guides for integrations that are not in the
+live-verified state above. Their existence documents code paths, not current
+availability.

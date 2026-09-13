@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Post once, publish everywhere. Enterprise-grade, local-first, open-source cross-posting for short-form video.</strong>
+  <strong>Post once, publish to connected destinations. Enterprise-grade, local-first, open-source cross-posting for short-form video.</strong>
 </p>
 
 <p align="center">
@@ -22,6 +22,7 @@
 
 - [What is xPST](#what-is-xpst)
 - [Features](#features)
+- [Download](#download)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [CLI Reference](#cli-reference)
@@ -41,9 +42,9 @@
 
 ## What is xPST
 
-**xPST** (Cross-Posting Suite) is a local-first, open-source automation tool that takes a creator's short-form video from one source platform and republishes it — at full native fidelity — to every other platform they own. It tracks per-post performance across all of them in one place, and feeds the creator's published content into a personal knowledge base that any connected AI agent can semantically query.
+**xPST** (Cross-Posting Suite) is a local-first, open-source automation tool that takes a creator's short-form video from one source platform and republishes it to connected destinations. It tracks per-post performance across configured platforms in one place, and feeds the creator's published content into a personal knowledge base that any connected AI agent can semantically query.
 
-xPST works across **six platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, and (opt-in) Facebook Messenger — and every one of them is supported end-to-end: in the posting engine, the desktop UI, the analytics layer, and the connection wizard.
+xPST includes integrations for **six platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, and (opt-in) Facebook Messenger — but their current availability is not uniform. YouTube, X, and Instagram are live-verified; TikTok is currently source-only; Threads and Messenger are disabled/unauthenticated. See the [capability truth table](docs/INSTALL.md#capability-truth-table) before treating an integration as ready.
 
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
@@ -55,8 +56,9 @@ No subscriptions, no cloud servers, no vendor lock-in. Your content and credenti
 **Privacy: zero personal data in the distributable tools.** xPST ships no
 telemetry, analytics endpoint, or hosted account. Everything — videos,
 captions, upload state, cookies, OAuth tokens — lives on your machine under
-`~/.xpst/` (credentials in the OS keychain, encrypted-file fallback). The only
-network traffic is the platform API calls you configure. See
+`~/.xpst/` (the credential store uses encrypted files by default and can use
+an OS keychain when explicitly enabled). The only network traffic is the
+platform API calls you configure. See
 [docs/PRIVACY.md](docs/PRIVACY.md) for the full model.
 
 ---
@@ -64,15 +66,16 @@ network traffic is the platform API calls you configure. See
 ## Features
 
 ### Core Cross-Posting
-- **Five video platforms + Messenger** — YouTube, Instagram, X/Twitter, TikTok, Threads as posting destinations, plus opt-in Facebook Messenger auto-reply
-- **Full-fidelity fan-out** — One source video downloads once and uploads to every connected destination, with orientation-aware encoding that never degrades quality
-- **Bidirectional cross-posting** — Monitor ALL connected sources for new content and distribute to every connected destination (not just one direction)
+- **Live-verified integrations** — YouTube, Instagram, and X/Twitter are authenticated and live-checked; publishing still depends on your accounts and API/session state
+- **TikTok source support** — TikTok can currently be used as a source; destination publishing is pending external developer review
+- **Explicitly disabled integrations** — Threads and Messenger remain opt-in and currently unauthenticated/disabled
+- **Connected-provider fan-out** — One source video can be sent to destinations that are actually configured and available; see the [capability truth table](docs/INSTALL.md#capability-truth-table)
 - **Smart passthrough** — A probe checks whether the source already satisfies the platform profile and skips the re-encode entirely, saving a generation loss
 - **Circuit breakers** — One platform failing never blocks the others; repeat offenders are disabled and recover automatically
 - **Crash recovery** — Partially-completed uploads are detected and queued for retry on next launch
 
 ### Unified Analytics
-- **5-platform coverage** — Engagement metrics normalized into one schema across YouTube, Instagram, X, TikTok, and Threads
+- **Analytics adapters** — per-platform collectors for YouTube, Instagram, X, TikTok, and Threads; live availability depends on the capability status and your credentials
 - **Per-post engagement metrics** — Views, likes, comments, shares, and platform-specific signals in one normalized schema
 - **Follower tracking** — Per-platform follower counts with growth history (`xpst followers`)
 - **Best-time recommendations** — Suggested posting windows derived from your own engagement history (`xpst best-time`)
@@ -95,7 +98,7 @@ network traffic is the platform API calls you configure. See
 - **MCP server** — 38 tools (32 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 ### Enterprise Hardening
-- **Encrypted credentials** — OS keychain storage (macOS Keychain, Linux Secret Service, Windows Credential Manager) with encrypted `.enc` file fallback (Fernet + scrypt)
+- **Encrypted credential-store values** — Fernet/scrypt `.enc` fallback by default, with optional OS keychain storage; platform-specific token/session files remain owner-only and the whole `~/.xpst/` directory is sensitive
 - **Atomic state writes** — Write-then-rename and pidfile locking prevent corruption
 - **Anti-bot pacing** — Randomized delays, time-of-day awareness, rate limits, User-Agent rotation
 - **Quota management** — Configurable daily upload limits per platform (`xpst quota`)
@@ -106,6 +109,14 @@ network traffic is the platform API calls you configure. See
 - **Config validation** — Detect and auto-fix common configuration issues
 - **Plugin system** — Extend with custom uploaders and sources
 - **i18n** — Translations supported via `~/.xpst/translations/`
+
+---
+
+## Download
+
+Download desktop artifacts from the [GitHub Releases page](https://github.com/TysAIs/xPST/releases). The per-platform asset names, SHA256 verification steps, Gatekeeper guidance, uninstall steps, and current capability status are in [docs/INSTALL.md](docs/INSTALL.md).
+
+**Current limitation:** the newest published installers were built from an older tag than `main`, and macOS signing/notarization is not proven. Verify the release's `SHA256SUMS` before opening an artifact. There is no proven automatic-update channel today, so install newer builds manually from Releases.
 
 ---
 
@@ -125,7 +136,7 @@ xpst onboard
 xpst run
 ```
 
-That's it. Your videos are now cross-posted to every connected platform.
+That's it. After you connect a live-verified source and destination, use `xpst run` to process content. The actual destinations available to your installation depend on account credentials and the capability status in [docs/INSTALL.md](docs/INSTALL.md).
 
 Other entry points:
 
@@ -138,14 +149,10 @@ xpst auth status  # check which platforms are connected
 
 ### The onboarding flow
 
-`xpst onboard` is the effortless first-run path: it checks which platforms
-are already connected, then walks you through the rest one at a time —
-clear copy about what will happen, browser opens for the OAuth approval
-(2–3 clicks), the connection is verified immediately, and progress is
-remembered so you can stop and resume anytime.
+`xpst onboard` is the first-run path: it checks which platforms are already connected, then walks you through the configured setup steps one at a time. Some integrations are currently disabled or source-only; consult the [capability truth table](docs/INSTALL.md#capability-truth-table) before enabling a destination.
 
 ```bash
-xpst onboard             # guided first-run: connect every platform
+xpst onboard             # guided first-run setup
 xpst onboard --dry-run   # preview the plan, no side effects
 xpst connect youtube     # re-link one platform later (e.g. after token expiry)
 xpst doctor              # something not posting? auth health + quota + fix-it checklist
@@ -158,9 +165,9 @@ exceeded → `xpst quota`) instead of just the raw error.
 Client secrets: xPST never ships platform client secrets. YouTube, X,
 Instagram and Threads use your own developer app/keys with a guided
 copy-paste setup wizard (BYO app) — sharing a secret in an open-source
-repo would let anyone burn your API quota. TikTok uses xPST's public
-client key (no secret); until TikTok's app audit completes, API posts
-are restricted to private visibility.
+repo would let anyone burn your API quota. TikTok can be used as a source;
+destination publishing is pending external developer review and approved app
+credentials.
 
 ---
 
@@ -211,15 +218,13 @@ pip install -e .
 | `dev` | pytest, ruff, mypy, import-linter |
 | `full` | Everything (`mcp,desktop,dashboard,windows,knowledge`) |
 
-### PyPI (v1.0.0 and later)
+### PyPI status
 
-```bash
-pip install "xpst[full]"
-xpst setup
-```
-
-The wheel is a pure-Python `py3-none-any` package; the `xpst` and `xpst-mcp`
-console scripts are installed with it.
+`pip install xpst` is **not available yet**: the PyPI JSON endpoint currently
+returns HTTP 404. Use the GitHub release desktop assets described in
+[docs/INSTALL.md](docs/INSTALL.md), or install from a source checkout with the
+source-install steps above. Do not treat the wheel attached to a GitHub Release
+as proof that the package is published on PyPI.
 
 ### Docker
 
@@ -249,7 +254,7 @@ xPST provides 38 top-level commands. Run `xpst --help` for the full list. Most c
 | Command | Description |
 |---------|-------------|
 | `xpst setup` | Interactive first-time setup wizard (connects platforms, writes config) |
-| `xpst onboard` | Guided first-run onboarding: connect every platform in one pass (`--dry-run` previews) |
+| `xpst onboard` | Guided first-run onboarding for configured platforms (`--dry-run` previews) |
 | `xpst doctor` | Diagnose auth health, quotas and environment; prints a prioritized fix-it checklist |
 | `xpst connect [PLATFORM]` | Streamlined account connection wizard; use `--test` to test existing |
 | `xpst auth [PLATFORM]` | Authenticate with a specific platform (youtube/x/instagram/tiktok/threads) |
@@ -399,7 +404,7 @@ xpst app --no-splash  # skip the splash screen
 | **Compose** | Compose a new post: select a video file, write a caption, choose target platforms, and submit |
 | **Content** | Browse your content library of posted videos with thumbnails, captions, and per-platform status |
 | **Analytics** | View cross-platform engagement metrics (views, likes, comments, shares) with trend history |
-| **Connect** | Connect and manage your social accounts across all five platforms (YouTube, Instagram, X/Twitter, TikTok, Threads) |
+| **Connect** | Connect and manage configured social accounts; current live status is in the [capability table](docs/INSTALL.md#capability-truth-table) |
 | **Schedule** | Manage scheduled posts: create, view, and remove upcoming and recurring posts |
 | **Settings** | Customize xPST settings: encoding profiles, rate limits, notifications, and preferences |
 | **About** | Version info, dependency versions, links to docs and source, acknowledgments |
@@ -454,9 +459,10 @@ xPST is designed to be driven end-to-end by AI agents over the [Model Context Pr
 
 ### Setup
 
-```bash
-pip install "xpst[mcp]"
-```
+Install xPST from a source checkout using the installation steps above, then
+use the MCP extra from that checkout. PyPI publication is not available yet;
+see [docs/INSTALL.md](docs/INSTALL.md#capability-truth-table) for the current
+status.
 
 Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 
@@ -542,16 +548,16 @@ See [docs/TUTORIAL_MCP.md](docs/TUTORIAL_MCP.md) for a full MCP walkthrough with
 
 ## Platform Setup Guides
 
-xPST supports six platforms. Each setup guide lives in `docs/`:
+xPST includes six platform integrations, but the live status is not uniform. The current capability snapshot is in the [truth table](docs/INSTALL.md#capability-truth-table). Each setup guide documents the configuration path and platform-specific prerequisites:
 
-| Platform | Role | Auth method | Guide |
-|----------|------|-------------|-------|
-| YouTube | Source + Destination | OAuth 2.0 (official Data API v3) | [docs/setup-youtube.md](docs/setup-youtube.md) |
-| Instagram | Source + Destination | Meta Graph API (official, default) | [docs/setup-instagram.md](docs/setup-instagram.md) |
-| X / Twitter | Source + Destination | Cookies (twikit), optional API v2 | [docs/setup-x-twitter.md](docs/setup-x-twitter.md) |
-| TikTok | Source + Destination | yt-dlp (source) / Content Posting API (destination) | [docs/setup-tiktok.md](docs/setup-tiktok.md) |
-| Threads | Destination | Meta Threads API (official) | [docs/setup-threads.md](docs/setup-threads.md) |
-| Messenger | Destination (opt-in) | Facebook Page Access Token + appsecret | [docs/setup-messenger.md](docs/setup-messenger.md) |
+| Platform | Current role/status | Auth method | Guide |
+|----------|---------------------|-------------|-------|
+| YouTube | Live-verified (account-dependent) | OAuth 2.0 (official Data API v3) | [docs/setup-youtube.md](docs/setup-youtube.md) |
+| Instagram | Live-verified (account-dependent) | Meta Graph API (official, default) | [docs/setup-instagram.md](docs/setup-instagram.md) |
+| X / Twitter | Live-verified (account-dependent) | Cookies (twikit) or API v2 | [docs/setup-x-twitter.md](docs/setup-x-twitter.md) |
+| TikTok | Source-only; destination pending external review | yt-dlp (source) / Content Posting API (not currently available) | [docs/setup-tiktok.md](docs/setup-tiktok.md) |
+| Threads | Disabled / unauthenticated; opt-in destination | Meta Threads API (official) | [docs/setup-threads.md](docs/setup-threads.md) |
+| Messenger | Disabled / unauthenticated; opt-in messaging/auto-reply | Facebook Page Access Token + app secret | [docs/setup-messenger.md](docs/setup-messenger.md) |
 
 ### YouTube (OAuth 2.0 — official API)
 
@@ -609,35 +615,32 @@ Then run `xpst auth x`. An official **API v2** mode (`auth_mode: api_v2`) is als
 
 `xpst connect x` now supports the official OAuth flow (ban-safe).
 
-### TikTok (source + destination)
+### TikTok (source-only today)
 
-TikTok works both ways in xPST.
-
-**As a source** (downloading your content to cross-post elsewhere) — no authentication required:
+TikTok is currently supported as a **source** for downloading content to
+cross-post elsewhere. Source fetching uses `yt-dlp`, with browser cookies
+available for HD downloads when configured:
 
 ```bash
 xpst connect tiktok   # asks for the username to watch + optional browser cookies
 ```
 
-Enabling browser cookies (`cookies_from_browser: true`) unlocks HD, watermark-free downloads via `yt-dlp`.
+Enabling browser cookies (`cookies_from_browser: true`) can unlock HD,
+watermark-free downloads via `yt-dlp`.
 
-**As a destination** (posting *to* TikTok) — supported via the official **Content Posting API v2 (Direct Post)** with full video encoding. This requires a TikTok developer app:
+TikTok **destination publishing is not available yet**. It awaits external
+TikTok developer review and approved app credentials. Do not enable or document
+it as a ready publishing destination until that review is complete.
 
-```yaml
-accounts:
-  tiktok:
-    enabled: true
-    client_key: "your_tiktok_client_key"
-    client_secret: "your_tiktok_client_secret"
-```
+See [docs/setup-tiktok.md](docs/setup-tiktok.md) for the source configuration
+and the pending destination requirements.
 
-See [docs/setup-tiktok.md](docs/setup-tiktok.md) and TikTok's [Direct Post docs](https://developers.tiktok.com/doc/content-posting-api-direct-post) for app registration and obtaining a user access token.
+### Threads (Meta Threads API — opt-in, currently disabled)
 
-`xpst connect tiktok` now supports the official OAuth flow (ban-safe).
-
-### Threads (Meta Threads API — official)
-
-Threads uses Meta's official **Threads API** (container-publish model) with a long-lived access token (60 days, refreshable) — no ban risk:
+Threads is implemented as an official Meta API destination, but it is currently
+**disabled and unauthenticated**. The configuration below describes the
+opt-in requirements only; it is not a claim that Threads is ready in the
+current live environment.
 
 1. Create a Meta app and add the **Threads API** product at [developers.facebook.com/apps](https://developers.facebook.com/apps)
 2. Add your Threads account as a tester and accept the invite
@@ -652,14 +655,16 @@ accounts:
     threads_user_id: "9000123456789012"
 ```
 
-Limits: 250 posts/24h, ≤300s video, ≤1 GB, ≤500-char captions. xPST refreshes the token automatically while it is still valid. See [docs/setup-threads.md](docs/setup-threads.md).
+The configured Threads path has platform limits (including post frequency,
+video duration/size, and caption length) and may refresh a still-valid token.
+See [docs/setup-threads.md](docs/setup-threads.md) for the opt-in requirements.
 
-### Messenger (opt-in — ManyChat-lite auto-reply)
+### Messenger (opt-in — currently disabled)
 
-Messenger is **disabled by default**. It turns a Facebook Page into a keyword
-auto-responder: xPST receives Page webhooks (verified with
-`X-Hub-Signature-256`), matches incoming messages against your `reply_rules`,
-and answers through the Graph API with `appsecret_proof` on every outbound call.
+Messenger is an **opt-in messaging/auto-reply** integration, not a video-posting
+target. It is currently disabled and unauthenticated. The configuration below
+is a future opt-in path, not a live-readiness claim. When enabled, xPST can
+receive Page webhooks and match incoming messages against your `reply_rules`.
 
 1. Create a Meta app + a Facebook Page you manage
 2. Generate a **Page Access Token** with `pages_messaging` + `pages_manage_metadata`
@@ -865,8 +870,14 @@ Contributions are welcome. The codebase enforces import boundaries (surfaces mus
 
 ## Security Practices
 
-- **Credentials never leave your machine.** Tokens and cookies are stored in the OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager) with an encrypted file fallback (Fernet + scrypt).
-- **Official APIs by default.** Instagram (Graph API), Threads, YouTube, and TikTok destination posting all use sanctioned APIs. Unofficial modes exist only as explicit, documented fallbacks.
+- **Credentials stay local.** The `CredentialStore` uses Fernet-encrypted files
+  (scrypt-derived keys) by default and can use the OS keychain when explicitly
+  enabled with `XPST_USE_KEYRING=1`. Some platform flows also maintain
+  owner-only token/session files; treat `~/.xpst/` as sensitive.
+- **Official APIs where live and configured.** YouTube, Instagram's Graph API,
+  and the live-verified paths use sanctioned APIs or user-owned sessions as
+  documented. TikTok destination publishing is not currently available;
+  Threads and Messenger are disabled/unauthenticated.
 - **Secrets are masked** in `xpst config show`, redacted in `xpst diagnostics` bundles, and never written to logs.
 - **MCP guardrails** (`XPST_MCP_READONLY`, `XPST_MCP_REQUIRE_CONFIRM`) gate every mutating tool so agents cannot post without explicit authorization.
 - **Self-audit** your installation with `xpst security-audit`, which checks credential file permissions and configuration hygiene.

@@ -116,24 +116,24 @@ The **primary** Instagram auth is the official Meta Graph API (`auth_mode: graph
 
 > **Note:** X destination uses twikit cookies (community/unofficial mode). Max caption 280 chars, video up to 140s. Carousels post as threads.
 
-### TikTok (Source + Destination)
+### TikTok (source-only today)
 
-TikTok works as both a **source** (xPST monitors it for new videos to cross-post) and a **destination** — TikTok now supports posting via the official **Content Posting API (Direct Post)**.
+TikTok is currently a **source-only** path for monitoring and downloading
+content to cross-post elsewhere. Destination publishing awaits external
+TikTok developer review and approved app credentials.
 
 1. Log into [tiktok.com](https://tiktok.com) in your browser to enable cookie-based source downloads (HD / no-watermark)
 2. Export cookies to `~/.xpst/credentials/tiktok_cookies.txt`, or run `xpst auth tiktok` in terminal
-3. To post TO TikTok, configure the official Content Posting API (OAuth 2.0 with `client_key` / `client_secret` / `access_token`)
+3. Do not configure TikTok as a destination until the external review is complete
 
-> **Note:** TikTok destination max caption 2200 chars, 6 posts/min.
+### Threads (currently disabled)
 
-### Threads (OAuth)
+Threads is an opt-in destination implementation using Meta's Threads API, but
+it is currently disabled/unauthenticated. Do not treat the configuration path
+as proof that posting is ready.
 
-Threads is a **destination** using the official Meta Threads API (container-publish model).
-
-1. Configure OAuth credentials for the Meta Threads API
-2. Run `xpst auth threads` or set credentials in `~/.xpst/config.yaml`
-
-> **Note:** Max caption 500 chars, video up to 300s, 250 posts/day.
+1. Configure OAuth credentials only after explicit enablement
+2. Run `xpst auth threads` or set credentials in `~/.xpst/config.yaml` when enabled
 
 ---
 
@@ -146,8 +146,8 @@ The **Compose** page is where you create new posts from local video files.
 1. **Select a video folder** — Click "Browse" to pick a folder containing your videos
 2. **Choose a video** — The grid shows thumbnails of all video files in the folder
 3. **Write a caption** — Enter your post caption in the text area (character count shown)
-4. **Select platforms** — Check the boxes for which platforms to post to (YouTube, Instagram, X/Twitter, TikTok, Threads)
-5. **Click "Post Now"** — The upload begins
+4. **Select platforms** — Check the boxes for platforms that are configured and currently available (YouTube, Instagram, and X are live-verified; TikTok is source-only; Threads is disabled)
+5. **Click "Post Now"** — The upload begins for the selected available destinations
 
 ### Upload Progress
 
