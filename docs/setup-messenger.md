@@ -1,13 +1,17 @@
 # Messenger Setup
 
-> **Auth method:** Facebook Messenger Platform — a static Page Access Token (long-lived, no refresh) plus an App Secret for webhook signature verification.
-> **Official API:** Yes — the sanctioned Messenger Platform Graph API. No ban risk.
-> **Time:** ~10 minutes (one Meta app + token generation).
-> **Opt-in:** Messenger is **disabled by default**. Nothing runs until you set `accounts.messenger.enabled: true` and provide a Page Access Token.
+> **Auth method:** Facebook Messenger Platform — a static Page Access Token plus an App Secret for webhook signature verification.
+> **Current status:** Messenger is **disabled/unauthenticated** in the current live environment. The steps below are opt-in configuration guidance, not proof of readiness.
+> **Official API:** The documented path uses Meta's Messenger Platform API; external account/app requirements still apply.
+> **Opt-in:** Messenger is disabled by default. Nothing runs until you explicitly enable it and provide a Page Access Token.
 
 Messenger is xPST's **auto-reply / chatbot** option (ManyChat-lite). Instead of posting video, it replies to incoming messages on your Facebook Page using keyword rules you define. It reuses the same platform-adapter + SessionManager architecture as every other xPST destination, and it's driven by a webhook that Meta calls when someone messages your Page.
 
-Because it's an official API, there's no ban risk and no session hacking. The auth model is simpler than OAuth: a **static Page Access Token** (page tokens don't expire while the page remains valid — no refresh flow) plus an **App Secret** used to sign outbound calls and verify inbound webhooks.
+The documented path uses Meta's Messenger Platform API. Messenger is a
+messaging/auto-reply integration, not a video-posting target, and its current
+live state remains disabled/unauthenticated. The auth model is a static Page
+Access Token plus an App Secret used to sign outbound calls and verify inbound
+webhooks.
 
 ---
 

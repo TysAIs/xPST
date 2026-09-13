@@ -59,7 +59,7 @@ This will:
 1. Check system requirements (Python, FFmpeg, yt-dlp)
 2. **Automatically install yt-dlp if missing** — no manual `pip install` needed
 3. Ask for your TikTok username
-4. Ask which platforms to enable (YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger)
+4. Ask which platforms to configure; current live status is YouTube/X/Instagram live-verified, TikTok source-only, and Threads/Messenger disabled or unauthenticated
 5. Create configuration file at `~/.xpst/config.yaml`
 6. Create credentials directory at `~/.xpst/credentials/`
 
@@ -126,33 +126,26 @@ Set `graph_access_token` and `graph_ig_user_id` in `~/.xpst/config.yaml` under t
 
 > **Note:** Instagram max caption 2200 chars, carousels up to 10 items.
 
-#### TikTok (Source + Destination)
+#### TikTok (source-only today)
 
-TikTok is both a **source** (xPST pulls videos from it) and now a **destination** — it supports posting via the official **Content Posting API (Direct Post)**.
+TikTok is currently a **source-only** path: xPST can pull videos from it for
+cross-posting elsewhere. Destination publishing awaits external TikTok
+developer review and approved app credentials.
 
 1. **Source:** log into [tiktok.com](https://tiktok.com) in your browser for HD / no-watermark downloads, or run `xpst auth tiktok`
-2. **Destination (posting):** configure OAuth 2.0 with `client_key` / `client_secret` / `access_token` (+ `refresh_token`) in `~/.xpst/config.yaml`
+2. **Destination:** do not enable or present as ready until the external review is complete
 
-> **Note:** TikTok destination max caption 2200 chars, 6 posts/min.
+#### Threads (currently disabled)
 
-#### Threads
+Threads is an opt-in destination implementation using Meta's Threads API, but
+it is currently disabled/unauthenticated. Configure it only after explicit
+enablement and external prerequisites are complete.
 
-Threads is a **destination** using the official **Meta Threads API** (OAuth, container-publish model).
+#### Messenger (currently disabled)
 
-1. Configure the Threads OAuth credentials in `~/.xpst/config.yaml`
-2. Run `xpst auth threads` if guided setup is available
-
-> **Note:** Max caption 500 chars, video up to 300s, 250 posts/day.
-
-#### Messenger
-
-Messenger is an **opt-in auto-reply/chatbot** destination (ManyChat-lite) using the official **Messenger Platform** (static Page Access Token).
-
-1. Run `xpst auth messenger` and paste your Page Access Token + App Secret
-2. Set up the webhook (see [setup-messenger.md](setup-messenger.md))
-3. Configure `auto_reply` + `reply_rules` for keyword auto-replies
-
-> **Note:** Max 640 chars/message, 24h standard messaging window. Disabled by default.
+Messenger is an opt-in messaging/auto-reply integration, not a video-posting
+target. It is currently disabled/unauthenticated. The setup steps below are
+future opt-in guidance only.
 
 ### Step 3: Verify Setup
 
