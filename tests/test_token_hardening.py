@@ -308,7 +308,7 @@ class TestSessionManagerInstagramSession:
         so the flat format actually written to disk (and supported by
         instagram.py _get_client_direct) was invisible and the session was
         declared "expired or invalid" without ever attempting auth — even
-        though the sessionid was live and valid (verified against tys.ais).
+        though the sessionid was live and valid (verified against the live account).
         """
 
         from xpst.utils.sessions import SessionManager

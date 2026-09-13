@@ -1,6 +1,6 @@
 CRITICAL PROCESS RULE — READ BEFORE TOUCHING ~/xPST (posted 2026-08-27 after a shared-checkout race destroyed work twice in one day):
 
-The ~/xPST checkout is SHARED. Multiple bots and subagents have worked in it concurrently, switched branches under each other, and built stale code into dist/. Result: Maintainer lost a shipped UI fix TWICE and saw an old splash icon. NEVER do any of the following directly in ~/xPST again:
+The ~/xPST checkout is SHARED. Multiple bots and subagents have worked in it concurrently, switched branches under each other, and built stale code into dist/. Result: a shipped UI fix was lost TWICE and an old splash icon was seen. NEVER do any of the following directly in ~/xPST again:
 
 1. Do NOT `git checkout` to another branch in ~/xPST.
 2. Do NOT `git reset/restore/clean` in ~/xPST.
