@@ -97,7 +97,7 @@ with this measured result:
 checksum: PASS
 asset bytes: 126968730
 sha256: 1ceac2ba9568e6bd4283d38c45728674dddefafe0fb06da6be7bc7b87234efa1
-boot-to-visible: PASS (3.727117 seconds <= 15 seconds)
+boot-to-visible: PASS (5.432298 seconds <= 15 seconds)
 engine /health: FAIL (no loopback URL observed; no HTTP 200 within 60 seconds)
 packaged HTTP UI: FAIL (no HTTP UI root)
 xpst-engine processes after shutdown: 0
