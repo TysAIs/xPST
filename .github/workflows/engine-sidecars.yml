@@ -88,6 +88,7 @@ jobs:
         with:
           name: xpst-engine-${{ matrix.platform }}
           path: src-tauri/binaries/engine
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
 
