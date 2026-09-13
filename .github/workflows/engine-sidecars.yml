@@ -3,6 +3,11 @@ name: Engine sidecars
 # Build the standalone PyInstaller engine resource on each supported host.
 # This workflow intentionally does not build or bundle the Tauri shell.
 on:
+  # Keep release branches self-testing before the workflow is present on main;
+  # workflow_dispatch remains the normal manual trigger after merge.
+  push:
+    branches:
+      - "release/**"
   workflow_dispatch:
 
 permissions:
