@@ -104,7 +104,11 @@ jobs:
       - name: Build Tauri app + DMG
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
-          cargo tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
+          if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            cargo tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}"
+          else
+            cargo tauri build --target "${{ matrix.target }}" --bundles "${{ matrix.bundles }}" --no-sign
+          fi
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
