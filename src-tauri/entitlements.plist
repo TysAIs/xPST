@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Hardened-runtime entitlements for the xPST desktop app.
+
+	     Why each one is here:
+	     - allow-jit / allow-unsigned-executable-memory: the WKWebView engine and the
+	       bundled CPython runtime both generate executable memory at runtime.
+	     - disable-library-validation: the app loads the bundled Python engine and its
+	       native extension modules from Resources; without this, hardened runtime refuses
+	       to load them even when they are signed by the same team.
+	     - allow-dyld-environment-variables: the launcher passes PYTHONPATH/DYLD-style
+	       variables to the engine process it spawns.
+	     - network.client: the engine talks to the platform APIs (YouTube, X, Instagram,
+	       TikTok sources) and to localhost for its own dashboard. Ignored when the app is
+	       not sandboxed, kept so a future sandboxed build does not silently lose network. -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
+	<true/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>
