@@ -11,9 +11,20 @@ from __future__ import annotations
 import plistlib
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+# The script itself is macOS-only, and running it needs a real POSIX shell. On Windows
+# runners `bash` is WSL's stub, which exits 1 printing
+# "Windows Subsystem for Linux has no installed distributions" in UTF-16 — so the
+# execution tests are gated to POSIX hosts. The content assertions (flags, entitlements,
+# personal-data scan) still run everywhere.
+POSIX_ONLY = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="macOS-only script; Windows CI only has WSL's bash stub",
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "macos-sign-and-notarize.sh"
@@ -36,6 +47,7 @@ def _script_text() -> str:
     return SCRIPT.read_text(encoding="utf-8")
 
 
+@POSIX_ONLY
 def test_script_is_syntactically_valid_bash() -> None:
     proc = subprocess.run(["bash", "-n", str(SCRIPT)], capture_output=True, text=True, check=False)
     assert proc.returncode == 0, proc.stderr
@@ -66,6 +78,7 @@ def test_script_detects_nested_binaries_by_content_not_filename() -> None:
     assert "Resources/binaries/engine" in text, "the engine sidecar needs its own entitlements"
 
 
+@POSIX_ONLY
 def test_script_refuses_to_pretend_it_can_sign_without_an_identity() -> None:
     """Run it with no identity: it must fail loudly and list what is available."""
     proc = subprocess.run(
