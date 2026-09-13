@@ -10,14 +10,14 @@ from xpst.utils import platform as plat
 
 def test_posix_uses_dot_xpst_in_home(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/home/tester")))
-    assert plat.get_config_dir() == Path("/home/tester/.xpst")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/tmp/xpst")))
+    assert plat.get_config_dir() == Path("/tmp/xpst/.xpst")
 
 
 def test_macos_uses_dot_xpst_in_home(monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/Users/tester")))
-    assert plat.get_config_dir() == Path("/Users/tester/.xpst")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/tmp/xpst")))
+    assert plat.get_config_dir() == Path("/tmp/xpst/.xpst")
 
 
 def test_windows_uses_appdata(monkeypatch):

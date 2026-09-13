@@ -24,7 +24,7 @@ xpst connect youtube --guide --json    # machine-readable (agents)
 
 1. **Create or select a project**
    <https://console.cloud.google.com/projectcreate>
-   (existing projects: <https://console.cloud.google.com/projectselector2/home/dashboard>)
+   (existing projects: <https://console.cloud.google.com/projectselector2/YOUR_PROJECT_ID>)
 
 2. **Open the OAuth consent screen** — Google Auth Platform → Audience:
    <https://console.cloud.google.com/auth/audience>
