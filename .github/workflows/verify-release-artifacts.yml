@@ -1,0 +1,122 @@
+name: Verify release artifacts
+
+# Verify published installers after a release is created. This is deliberately
+# separate from tauri-release.yml so the build lane keeps a single owner.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to download and verify (for example v1.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the release sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Verify release version sources
+        run: python scripts/verify_release_version.py --expected "${RELEASE_TAG#v}"
+
+      - name: Download published assets
+        run: |
+          set -euo pipefail
+          rm -rf release-download release-evidence
+          mkdir -p release-download release-evidence
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release-download --clobber
+          if ! compgen -G 'release-download/*' > /dev/null; then
+            echo 'No files were downloaded from the release' >&2
+            exit 1
+          fi
+
+      - name: Hash every published asset
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          assets = []
+          for path in sorted(Path("release-download").iterdir()):
+              if not path.is_file():
+                  continue
+              digests = {}
+              for algorithm in ("sha256", "sha512"):
+                  hasher = hashlib.new(algorithm)
+                  with path.open("rb") as source:
+                      for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                          hasher.update(chunk)
+                  digests[algorithm] = hasher.hexdigest()
+              assets.append({"filename": path.name, "size": path.stat().st_size, "hashes": digests})
+          if not assets:
+              raise SystemExit("No files were downloaded from the release")
+          Path("release-evidence/RELEASE_ARTIFACT_HASHES.json").write_text(
+              json.dumps({"release": os.environ["RELEASE_TAG"], "artifacts": assets}, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Verify every published desktop installer and archive
+        run: |
+          set -euo pipefail
+          checked=0
+          for artifact in release-download/*; do
+            [ -f "$artifact" ] || continue
+            case "$artifact" in
+              *.app|*.dmg|*.zip|*.pkg|*.exe|*.msi|*.deb|*.AppImage|*.appimage)
+                ;;
+              *.tar.gz)
+                case "$(basename "$artifact")" in
+                  xpst-*.tar.gz) continue ;;
+                esac
+                ;;
+              *)
+                continue
+                ;;
+            esac
+            name=$(basename "$artifact")
+            python scripts/verify_desktop_package.py \
+              --artifact "$artifact" \
+              --root "$GITHUB_WORKSPACE" \
+              --expected-version "${RELEASE_TAG#v}" \
+              --evidence-output "release-evidence/${name}.RELEASE_EVIDENCE.json" \
+              --json
+            checked=$((checked + 1))
+          done
+          printf 'Desktop artifacts verified: %s\n' "$checked"
+
+      - name: Smoke-test published Python distributions
+        run: |
+          set -euo pipefail
+          if compgen -G 'release-download/*.whl' > /dev/null; then
+            python scripts/clean_install_smoke.py --dist release-download --artifact wheel --json
+          fi
+          if compgen -G 'release-download/xpst-*.tar.gz' > /dev/null; then
+            python scripts/clean_install_smoke.py --dist release-download --artifact sdist --json
+          fi
+
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-verification-${{ env.RELEASE_TAG }}
+          path: release-evidence/*
+          if-no-files-found: error

@@ -180,6 +180,15 @@ def test_generate_release_evidence_includes_artifacts_and_manual_gates(tmp_path)
     assert data["schema_version"] == 1
     assert data["version"] == "0.1.0"
     assert data["quality_checks"]["run_by_release_script"] is False
+    assert data["signing"] == {
+        "signed": False,
+        "notarized": "unknown",
+        "verified_by": "unknown",
+        "reason": "Signing state is never inferred; run verify_desktop_package.py against each desktop artifact.",
+    }
+    assert data["signed"] is False
+    assert data["notarized"] == "unknown"
+    assert data["verified_by"] == "unknown"
     artifact_names = {artifact["filename"] for artifact in data["artifacts"]}
     assert artifact_names == {"xpst-0.1.0-py3-none-any.whl", "xpst-0.1.0.tar.gz"}
     assert all("sha256" in artifact["hashes"] for artifact in data["artifacts"])

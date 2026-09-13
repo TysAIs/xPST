@@ -43,6 +43,24 @@ def _read_cargo_version(root: Path) -> str:
     return match.group(1)
 
 
+def _read_cargo_lock_version(root: Path) -> str:
+    """Read the locked version for xPST's own Rust package."""
+    text = (root / "src-tauri" / "Cargo.lock").read_text(encoding="utf-8")
+    try:
+        import tomllib
+
+        packages = tomllib.loads(text).get("package", [])
+        versions = [str(package["version"]) for package in packages if package.get("name") == "xpst-shell"]
+    except (ImportError, KeyError, TypeError):
+        versions = re.findall(
+            r'(?ms)^\[\[package\]\]\s*\nname\s*=\s*"xpst-shell"\s*\nversion\s*=\s*"([^"]+)"',
+            text,
+        )
+    if len(versions) != 1:
+        raise ValueError("src-tauri/Cargo.lock has no unique xpst-shell package version")
+    return versions[0]
+
+
 def _read_json_version(root: Path, relative_path: str) -> str:
     data: dict[str, Any] = json.loads((root / relative_path).read_text(encoding="utf-8"))
     return str(data["version"])
@@ -54,6 +72,7 @@ def release_versions(root: Path = ROOT) -> dict[str, str]:
         "python": _read_python_version(root),
         "python-runtime": _read_python_runtime_version(root),
         "cargo": _read_cargo_version(root),
+        "cargo-lock": _read_cargo_lock_version(root),
         "tauri": _read_json_version(root, "src-tauri/tauri.conf.json"),
         "ui": _read_json_version(root, "ui/package.json"),
         "ui-lock": str(
@@ -62,9 +81,14 @@ def release_versions(root: Path = ROOT) -> dict[str, str]:
     }
 
 
-def verify_release_version(expected: str = REQUIRED_RELEASE_VERSION, root: Path = ROOT) -> dict[str, str]:
-    """Raise ``ValueError`` unless all release surfaces match ``expected``."""
+def verify_release_version(expected: str | None = None, root: Path = ROOT) -> dict[str, str]:
+    """Raise ``ValueError`` unless all release surfaces match ``expected``.
+
+    When no expected version is supplied, the version in ``pyproject.toml`` is
+    the source of truth and every other release surface must match it.
+    """
     versions = release_versions(root)
+    expected = expected or versions["python"]
     mismatches = {name: version for name, version in versions.items() if version != expected}
     if mismatches:
         details = ", ".join(f"{name}={version}" for name, version in sorted(mismatches.items()))
@@ -74,14 +98,15 @@ def verify_release_version(expected: str = REQUIRED_RELEASE_VERSION, root: Path 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--expected", default=REQUIRED_RELEASE_VERSION)
+    parser.add_argument("--expected", default=None, help="Expected version (defaults to pyproject.toml)")
     args = parser.parse_args()
     try:
         versions = verify_release_version(args.expected)
+        expected = args.expected or versions["python"]
     except (OSError, KeyError, TypeError, ValueError) as exc:
         print(f"release version verification failed: {exc}", file=sys.stderr)
         return 1
-    print(f"release version {args.expected} verified: {', '.join(sorted(versions))}")
+    print(f"release version {expected} verified: {', '.join(sorted(versions))}")
     return 0
 
 
