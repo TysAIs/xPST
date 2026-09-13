@@ -4,7 +4,11 @@ This document describes the high-level architecture of xPST, designed for enterp
 
 ## Overview
 
-xPST is a modular, plugin-based system for cross-posting video content across social media platforms. It supports multiple sources (TikTok, Instagram Reels, YouTube, local files) and distributes to multiple destinations (YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger for messaging/auto-reply).
+xPST is a modular, plugin-based system for cross-posting video content across
+configured social-media providers. It includes source paths (TikTok, Instagram
+Reels, YouTube, local files) and destination code paths (YouTube, Instagram,
+X/Twitter, TikTok, Threads, and Messenger for messaging/auto-reply), but current
+live availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-table).
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -311,9 +315,14 @@ video:
 
 ## Deployment Options
 
-### Local (Recommended)
+### Local source checkout
+
+PyPI is not published yet. Install from a source checkout instead:
+
 ```bash
-pip install xpst
+git clone https://github.com/TysAIs/xPST.git
+cd xPST
+pip install -e .
 xpst setup
 xpst watch
 ```
@@ -362,10 +371,10 @@ WantedBy=multi-user.target
 
 ## Future Roadmap
 
-### Shipped
-- [x] Threads support (official Meta Threads API)
-- [x] Messenger support (official Messenger Platform, opt-in auto-reply)
-- [x] TikTok posting (official Content Posting API)
+### Implemented code paths (not a live-readiness claim)
+- [x] Threads provider implementation (currently disabled/unauthenticated)
+- [x] Messenger provider implementation (opt-in auto-reply; currently disabled/unauthenticated)
+- [x] TikTok destination code path (currently source-only pending external review)
 - [x] Web dashboard (FastAPI)
 
 ### Phase 2

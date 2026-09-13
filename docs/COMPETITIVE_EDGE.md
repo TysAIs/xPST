@@ -7,7 +7,7 @@ the README and docs can speak to a "beat the incumbents" story with facts, not h
 
 | Product | Price | Open source? | Platforms | Auth | Agent/API surface |
 |---|---|---|---|---|---|
-| **xPST** | **Free, MIT OR Apache-2.0** | **Yes** | YT, X, IG, TikTok, Threads, Messenger | **Official OAuth** (ban-safe) | **CLI + MCP (38 tools) + FastAPI dashboard + desktop (optional)** |
+| **xPST** | **Free, MIT OR Apache-2.0** | **Yes** | YT, X, IG, TikTok, Threads, Messenger | Mixed: official APIs and user-owned sessions; current status varies | **CLI + MCP (38 tools) + FastAPI dashboard + desktop (optional)** |
 | **Content360** | $67 lifetime / "$47/mo soon" | No | ~15 (mostly via Zapier-style) | Closed SaaS OAuth | None (web app only) |
 | **Postiz** | Free self-host / cloud | AGPL | 9-15 | Official OAuth | Web UI, API |
 | **Repurpose.io** | $35/mo | No | 4-5 | Closed SaaS | None |
@@ -18,14 +18,23 @@ the README and docs can speak to a "beat the incumbents" story with facts, not h
 
 1. **Truly open + free.** Content360 is $67 lifetime (one-time price anchors the value of what we give away), Postiz is AGPL, Repurpose/Buffer are subscriptions. xPST is MIT OR Apache-2.0 — you own it, fork it, sell services around it.
 2. **AI-agent-native.** 38 MCP tools (`xpst_post`, `xpst_suggest_caption`, `xpst_health`, `xpst_analytics`, scheduling, KB, transcripts, search). **No competitor ships an MCP server** — this is the "for AI agents" moat.
-3. **Official OAuth by default** (X API v2, IG Graph API, TikTok Content Posting, YouTube, Threads). Ban-safe. Content360/Postiz rely on the same official APIs but as a black box; ours is auditable + self-hosted so tokens never leave your machine (encrypted CredentialStore).
-4. **Encrypted-at-rest credentials + OS keychain.** Paid SaaS hold your tokens server-side; xPST keeps them in a Fernet/scrypt `.enc` (or macOS Keychain) on your own box.
-5. **Cross-platform packaging** (macOS/Windows/Linux, Docker, PyInstaller) — runs anywhere, including on a local LLM box with no monthly fee.
+3. **Auditable local credentials.** The live-verified paths use sanctioned APIs
+   or user-owned sessions as documented. TikTok destination publishing is
+   pending external review, and Threads/Messenger are disabled/unauthenticated;
+   see [INSTALL.md](INSTALL.md#capability-truth-table) rather than assuming all
+   listed integrations are ready.
+4. **Encrypted credential-store values + optional OS keychain.** xPST keeps
+   credential-store values locally in Fernet/scrypt `.enc` files by default or
+   in the OS keychain when enabled; platform-specific token/session files remain
+   owner-only and the whole `~/.xpst/` directory is sensitive.
+5. **Cross-platform packaging paths** (macOS/Windows/Linux, Docker, PyInstaller)
+   exist, but each published artifact and platform lane still needs its own
+   verification; see [INSTALL.md](INSTALL.md).
 6. **1524 tests, enterprise-hardened** — thread-safe state, circuit breakers, anti-bot jitter, rate-limit calendars, MCP security hardening.
 
 ## Features where we're now parity-or-better (built 2026-08-24)
 
-- **OEM OAuth connect wizards** — `xpst connect x/instagram/tiktok` open the real authorize pages and auto-verify; no paste-token dance.
+- **Provider-specific connect paths** — `xpst connect x/instagram/tiktok` cover the documented account/source flows; TikTok destination setup remains pending external review.
 - **Messenger auto-reply** (ManyChat-lite) — keyword `reply_rules` + auto_reply flag on IG/FB Messenger DMs.
 - **Comment auto-reply** — IG/FB comment fetching + keyword reply via Graph API (`xpst messenger check-comments`).
 - **Link-in-Bio builder** — self-hosted `/bio` page from enabled accounts + custom links (`xpst bio`).

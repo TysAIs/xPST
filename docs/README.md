@@ -2,7 +2,7 @@
 
 **Free, local-first, provider-agnostic cross-posting for short-form video**
 
-Automatically distribute short-form video from configured sources to connected destinations. xPST supports 6 platforms — YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger (messaging/auto-reply) — as sources and destinations, with local file support for manual posting and carousels.
+Automatically distribute short-form video from configured sources to connected destinations. xPST includes integrations for six platforms — YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger (messaging/auto-reply) — but current availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-table) for the live-verified, source-only, and disabled states.
 
 ---
 
@@ -25,14 +25,19 @@ Automatically distribute short-form video from configured sources to connected d
 
 ## Quick Start
 
+For a packaged desktop install, start with [INSTALL.md](INSTALL.md). PyPI is not
+published yet; the source-install path is:
+
 ```bash
-# Install
-pip install xpst
+# Clone and install from source
+git clone https://github.com/TysAIs/xPST.git
+cd xPST
+pip install -e .
 
 # Run interactive setup wizard
 xpst setup
 
-# Check for new videos and cross-post
+# Check for new videos and cross-post to configured destinations
 xpst run
 
 # Or watch continuously
@@ -43,11 +48,11 @@ xpst watch
 
 ## Installation
 
-### From PyPI (recommended)
+### From PyPI (not available yet)
 
-```bash
-pip install xpst
-```
+`pip install xpst` currently returns a package-not-found error because the
+PyPI JSON endpoint is HTTP 404. Use the source path above or a desktop asset
+from [INSTALL.md](INSTALL.md).
 
 ### From source
 
@@ -231,23 +236,27 @@ xpst auth instagram
 
 ### Threads
 
-Meta Threads API:
+Threads is an opt-in destination integration, but its current live state is
+disabled/unauthenticated. The setup path below is configuration guidance only:
 
 ```bash
 xpst auth threads
-# Enter Threads API token + user ID
+# Enter Threads API token + user ID when the integration is enabled
 ```
 
 ### Messenger
 
-Facebook Messenger Platform (static Page Access Token):
+Messenger is an opt-in messaging/auto-reply integration, not a video-posting
+target. Its current live state is disabled/unauthenticated:
 
 ```bash
 xpst auth messenger
-# Enter Page Access Token + App Secret + verify token
+# Enter Page Access Token + App Secret + verify token when enabled
 ```
 
-Messenger is an **opt-in auto-reply/chatbot** option (ManyChat-lite), not a video-posting target. See [setup-messenger.md](setup-messenger.md).
+See [INSTALL.md](INSTALL.md#capability-truth-table) before enabling either
+integration. Messenger is an **opt-in auto-reply/chatbot** option (ManyChat-lite),
+not a video-posting target. See [setup-messenger.md](setup-messenger.md).
 
 ---
 
@@ -256,10 +265,10 @@ Messenger is an **opt-in auto-reply/chatbot** option (ManyChat-lite), not a vide
 ### One-time run
 
 ```bash
-# Standard TikTok → YouTube/Instagram/X
+# Standard TikTok source → live-verified YouTube/Instagram/X destinations
 xpst run
 
-# Bidirectional (all sources to all platforms)
+# Bidirectional mode, limited to providers that are configured and available
 xpst run --bidirectional
 
 # Dry run (show what would happen)
@@ -578,15 +587,12 @@ This enables:
 
 ### Credential Storage
 
-1. **OS Keychain** (default)
+1. **Encrypted file fallback** (default)
+   - Fernet-encrypted `.enc` values with scrypt-derived keys
+2. **OS Keychain** (opt-in with `XPST_USE_KEYRING=1`)
    - macOS: Keychain
    - Windows: Credential Locker
-   - Linux: Secret Service (libsecret)
-
-2. **Encrypted Fallback** (when keyring unavailable)
-   - Fernet encryption with argon2id key derivation
-   - `.enc` files in `~/.xpst/credentials/`
-   - Per-file encryption keys
+   - Linux: Secret Service
 
 ### Dashboard Authentication
 
