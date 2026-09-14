@@ -47,6 +47,8 @@ def render(platform: str, evidence_path: Path) -> str:
     block = evidence_block(data)
     release = block.get("release") or {}
     checks = block.get("checks") or data.get("checks") or {}
+    boot_seconds = block.get("boot_to_visible_seconds")
+    release_label = release.get("tag") or release.get("name") or "not resolved"
     lines = [
         f"### {platform}",
         "",
@@ -54,14 +56,15 @@ def render(platform: str, evidence_path: Path) -> str:
         f"- artifact: `{block.get('artifact_name')}` ({block.get('artifact_bytes')} bytes,"
         f" type `{block.get('artifact_type')}`)",
         f"- sha256: `{block.get('artifact_sha256')}`",
-        f"- release: {release.get('tag') or data.get('release_tag')} asset id {release.get('id')}"
+        f"- release: {release_label} asset {release.get('name')} id {release.get('id')}"
         f" created {release.get('created_at')}",
         f"- source kind: `{block.get('source_kind')}`"
         f" (published required: `{block.get('published_required')}`)",
         f"- http_status: `{block.get('http_status')}`",
         f"- engine health ok: `{block.get('health_ok')}`"
-        f" (url `{block.get('health_url')}`, boot ok `{block.get('boot_ok')}`"
-        f" in {block.get('boot_to_visible_seconds')}s)",
+        f" (url `{block.get('health_url')}`, packaged UI ok `{block.get('packaged_ui_ok')}`)",
+        f"- boot ok: `{block.get('boot_ok')}`"
+        + (f" ({boot_seconds:.3f}s to visible)" if isinstance(boot_seconds, (int, float)) else " (no window assertion)"),
         f"- window assertion required: `{block.get('window_assertion_required')}`",
         f"- running process: {block.get('running_process')}",
         f"- shutdown exit code: `{block.get('shutdown_exit_code')}`",
