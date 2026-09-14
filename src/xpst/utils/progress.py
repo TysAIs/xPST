@@ -93,6 +93,20 @@ class ProgressTracker:
                 f"{self.operation}: 100% complete ({elapsed:.1f}s total)"
             )
 
+    def fail(self, reason: str = "failed") -> None:
+        """Mark the operation as finished without success.
+
+        A failed operation must never report "100% complete": the tracker is
+        finished, but the work did not publish. Callers use the explicit
+        verdict to decide state, so the progress line has to agree with it.
+        """
+        if not self._completed:
+            self._completed = True
+            elapsed = time.time() - self._start_time
+            logger.error(
+                f"{self.operation}: FAILED after {elapsed:.1f}s ({reason})"
+            )
+
     def _log_progress(self, pct: int) -> None:
         """Log progress with ETA estimation"""
         elapsed = time.time() - self._start_time
