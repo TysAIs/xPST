@@ -566,6 +566,7 @@ class CrossPostEngine:
         video_path: Path,
         caption: str,
         platforms: list[str] | None = None,
+        visibility: str | None = None,
     ) -> CrossPostResult:
         """Manually post a single video to specified platforms.
 
@@ -576,6 +577,8 @@ class CrossPostEngine:
             video_path: Path to the video file on disk.
             caption: Caption/title for the post.
             platforms: Target platform names. None means all enabled platforms.
+            visibility: Optional target visibility (YouTube: ``public``,
+                ``unlisted``, ``private``). Honoured by YouTube only.
 
         Returns:
             CrossPostResult with per-platform outcomes.
@@ -615,6 +618,7 @@ class CrossPostEngine:
                 platform_name=platform_name,
                 video_id=video_id,
                 source_platform="local",
+                visibility=visibility,
             )
 
             result.results[platform_name] = upload_result
@@ -812,7 +816,10 @@ class CrossPostEngine:
           nothing is changed silently.
 
         Args:
-            video_id: Video identifier in state.
+            video_id: xPST's internal video id, OR the platform-side post id,
+                OR a full post URL (e.g.
+                ``https://youtube.com/shorts/RZ6i-0HM5dM``). A platform id or
+                URL is resolved to the internal record before deleting.
             platform: Platform name to delete from.
             soft: Request a reversible unpublish instead of a hard delete
                 where the platform supports it (YouTube only today).
@@ -823,6 +830,30 @@ class CrossPostEngine:
             DeleteResult with an explicit outcome and UI-facing message.
         """
         post_data = self.state.get_post_data(video_id, platform)
+        if not post_data:
+            # Accept a platform-side post id or a full post URL, not just the
+            # internal id: a real user copy-pastes what the platform shows them
+            # (e.g. "RZ6i-0HM5dM" or its /shorts/ URL), never xPST's key.
+            from xpst.utils.post_refs import extract_post_id
+
+            candidate = extract_post_id(video_id)
+            try:
+                internal_id = (
+                    self.state.find_video_id_by_platform_post(platform, candidate)
+                    if candidate else None
+                )
+            except AttributeError:  # state double without the resolver
+                internal_id = None
+            if internal_id and internal_id != video_id:
+                logger.info(
+                    "Resolved delete reference %r to internal id %r on %s",
+                    video_id,
+                    internal_id,
+                    platform,
+                )
+                video_id = internal_id
+                post_data = self.state.get_post_data(video_id, platform)
+
         if not post_data:
             logger.error(f"No post data found for {video_id} on {platform}")
             return DeleteResult(
