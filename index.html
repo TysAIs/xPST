@@ -1,12 +1,157 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>xPST — Cross-Posting Suite</title><style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:760px;margin:60px auto;padding:0 24px;color:#111;line-height:1.6}
-h1{font-size:1.9rem}a{color:#169b62}pre{background:#f5f5f5;padding:14px;border-radius:8px;overflow:auto}</style></head>
-<body><h1>xPST</h1><p><strong>Cross-post short-form video to YouTube, X, Instagram and TikTok from one command.</strong>
-xPST is an open-source, MIT/Apache-2.0 licensed CLI and desktop app for automated video distribution. Manage captions, captions library, analytics, scheduling and cross-posting from a single tool.</p>
-<h2>Getting started</h2><pre>pip install xpst
-xpst wizard
-xpst connect youtube
-xpst post -v PATH</pre>
-<h2>Links</h2><ul><li><a href="https://github.com/TysAIs/xPST">Source on GitHub</a></li>
-<li><a href="privacy.html">Privacy Policy</a></li><li><a href="terms.html">Terms of Service</a></li></ul>
-<p>Built for creators and AI agents.</p></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xPST — Cross-Posting Suite for Creators and AI Agents</title>
+<meta name="description" content="xPST is an open-source, local-first desktop and command-line tool that publishes one short video to YouTube Shorts, X, Instagram Reels and TikTok — from your own machine, with your own accounts.">
+<meta name="tiktok-developers-site-verification" content="H5LJ7htLuZUf7F8WChFfCvLuMRklJEns">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/xPST/">x<span>PST</span></a>
+    <nav class="site">
+      <a href="#how">How it works</a>
+      <a href="#platforms">Platforms</a>
+      <a href="#install">Install</a>
+      <a href="#agents">For agents</a>
+      <a href="privacy/">Privacy</a>
+      <a href="terms/">Terms</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+
+  <h1>Cross-post short video to every platform, from your own machine.</h1>
+  <p class="lede">xPST is an open-source desktop app and command-line tool that takes one short video and
+  publishes it to YouTube Shorts, X, Instagram Reels and TikTok — using only your own accounts, storing
+  everything locally, and never uploading anything until you confirm it.</p>
+
+  <p>
+    <span class="pill ok">Open source</span>
+    <span class="pill">MIT OR Apache-2.0</span>
+    <span class="pill">Local-first</span>
+    <span class="pill">No telemetry</span>
+    <span class="pill">44 CLI commands</span>
+  </p>
+
+  <div class="card">
+    <strong>What xPST is not:</strong> it is not a hosted service, it does not post on behalf of other
+    people, and it does not operate an account you cannot see. It is a tool you run.
+  </div>
+
+  <h2 id="how">How it works</h2>
+  <p>The whole flow is four steps, and nothing leaves your machine until the last one:</p>
+  <ol>
+    <li><strong>Connect your accounts once.</strong> xPST runs its own OAuth flow for each platform and
+      stores the resulting credentials encrypted on your device.</li>
+    <li><strong>Pick a video.</strong> Choose a local file, or pull one in from a connected source.</li>
+    <li><strong>Preflight.</strong> xPST checks the file against each destination's real limits —
+      resolution, aspect ratio, duration, codec, file size — and shows you exactly what will be
+      uploaded before anything is sent.</li>
+    <li><strong>Confirm and publish.</strong> Captions are adapted per platform, uploads are queued and
+      tracked, and results come back with a real status and a real post URL per platform.</li>
+  </ol>
+
+  <h2 id="platforms">Platform support, stated honestly</h2>
+  <p>xPST separates what a platform can do for you, because "connected" means different things:</p>
+  <table>
+    <thead><tr><th>Platform</th><th>Pull videos in</th><th>Publish out</th><th>Analytics</th></tr></thead>
+    <tbody>
+      <tr><td>YouTube Shorts</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>X</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>Instagram Reels</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+      <tr><td>TikTok</td><td>Yes</td><td>Requires TikTok app approval</td><td>Yes</td></tr>
+    </tbody>
+  </table>
+  <p class="muted">TikTok is fully supported for pulling content in and for analytics. Publishing to
+  TikTok requires an approved developer application with TikTok's Content Posting API; until an
+  application is approved, xPST reports that capability as blocked rather than pretending it works.
+  Threads and Messenger exist in the product but stay switched off unless deliberately enabled.</p>
+
+  <h2 id="install">Install</h2>
+  <p>From source today — the package index release is pending:</p>
+  <pre><code>git clone https://github.com/TysAIs/xPST.git
+cd xPST
+python -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install -e ".[full,dev]"
+xpst readiness      # tells you what is missing, if anything</code></pre>
+  <p>Desktop builds for macOS, Windows and Linux are published as release artifacts on the
+  <a href="https://github.com/TysAIs/xPST/releases">releases page</a>. Builds are currently unsigned,
+  so macOS shows a Gatekeeper prompt on first launch: right-click the app and choose Open.</p>
+
+  <h3>First run</h3>
+  <pre><code>xpst wizard              # guided setup: connect every platform, resumable
+xpst auth status         # show exactly what is connected and verified
+xpst post -v clip.mp4 -c "My caption" -p youtube,x,instagram
+xpst schedule install    # let xPST fire scheduled posts automatically</code></pre>
+
+  <h2 id="agents">Built for AI agents too</h2>
+  <p>xPST exposes the same capabilities to agents that it exposes to you, with the same safety rules:
+  non-interactive commands emit JSON automatically, every mutating action supports a dry run, and exit
+  codes are stable and documented. A Model Context Protocol server ships in the box, so an agent gets
+  typed tools for posting, scheduling, analytics, health and failure recovery rather than scraping a UI.</p>
+  <pre><code>xpst post --dry-run --json     # show the exact plan, send nothing
+xpst health --json             # live connectivity per platform
+xpst mcp serve                 # expose tools to an MCP client</code></pre>
+  <p>Agents get capability and readiness endpoints that report per-role truth — a platform can be ready
+  to pull content while its publishing role is explicitly blocked. Nothing in the agent surface can
+  bypass the same confirmation rules a human goes through.</p>
+
+  <h2>Why local-first</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Your credentials stay yours</h3>
+      <p class="muted">Session data is encrypted at rest on your device. No plaintext credential is
+      written to disk, and no credential is transmitted to us — there is no "us" server to transmit to.</p>
+    </div>
+    <div class="card">
+      <h3>No personal data in the project</h3>
+      <p class="muted">The public repository contains no personal identifiers, no accounts and no
+      secrets — verified by automated scans that run against the whole git history, not just the
+      current files.</p>
+    </div>
+    <div class="card">
+      <h3>Read the code</h3>
+      <p class="muted">Every claim on this page maps to source you can inspect at
+      <a href="https://github.com/TysAIs/xPST">github.com/TysAIs/xPST</a>.</p>
+    </div>
+    <div class="card">
+      <h3>Failures are reported as failures</h3>
+      <p class="muted">When a platform rejects an upload, xPST records the platform's own error and
+      marks the post failed. There are no placeholder URLs and no silent successes.</p>
+    </div>
+  </div>
+
+  <h2>Documentation</h2>
+  <ul>
+    <li><a href="https://github.com/TysAIs/xPST/blob/main/docs/QUICKSTART.md">Quickstart</a> — first post in a few minutes</li>
+    <li><a href="https://github.com/TysAIs/xPST/blob/main/docs/TUTORIAL_CLI.md">CLI tutorial</a> — every command, with examples</li>
+    <li><a href="https://github.com/TysAIs/xPST/blob/main/docs/TUTORIAL_MCP.md">MCP tutorial</a> — driving xPST from an agent</li>
+    <li><a href="https://github.com/TysAIs/xPST/blob/main/docs/ARCHITECTURE.md">Architecture</a> — how the pieces fit together</li>
+    <li><a href="https://github.com/TysAIs/xPST/blob/main/docs/INSTALL.md">Install guide</a> — per-platform details</li>
+  </ul>
+
+  <hr>
+  <p class="muted">xPST is dual-licensed under MIT or Apache-2.0, at your option. It is built for
+  creators who would rather own their tooling, and for agents that need a reliable way to publish.</p>
+
+</div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>© 2026 xPST contributors · MIT OR Apache-2.0</span>
+    <span>
+      <a href="https://github.com/TysAIs/xPST">GitHub</a> ·
+      <a href="privacy/">Privacy Policy</a> ·
+      <a href="terms/">Terms of Service</a>
+    </span>
+  </div>
+</footer>
+</body>
+</html>

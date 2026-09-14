@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — xPST</title>
+<meta name="description" content="How xPST handles data: local-first storage, encrypted credentials, no telemetry, and no collection of your content.">
+<link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="/xPST/">x<span>PST</span></a>
+    <nav class="site">
+      <a href="../">Home</a>
+      <a href="../terms/">Terms</a>
+      <a href="https://github.com/TysAIs/xPST">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+
+  <h1>Privacy Policy</h1>
+  <p class="muted">Last updated: 14 September 2026 · Applies to the xPST application and this website.</p>
+
+  <p class="lede">xPST is a local-first application. It runs on your computer, uses your own accounts,
+  and stores your data on your device. We do not operate a service that receives your content, and we
+  do not collect analytics or telemetry from the application.</p>
+
+  <h2>1. Who we are</h2>
+  <p>xPST is an open-source project distributed under the MIT or Apache-2.0 licence. The source code,
+  issue tracker and documentation are hosted at
+  <a href="https://github.com/TysAIs/xPST">github.com/TysAIs/xPST</a>. There is no company operating a
+  hosted xPST service, and no account is required to use the software.</p>
+
+  <h2>2. What the application stores, and where</h2>
+  <p>All application data stays on the device you install it on:</p>
+  <ul>
+    <li><strong>Platform credentials.</strong> When you connect a social account, xPST performs the
+      platform's own authorisation flow and stores the resulting session or token in a local
+      configuration directory (<code>~/.xpst/</code> on macOS and Linux). Credentials are encrypted at
+      rest; no plaintext credential is written to disk.</li>
+    <li><strong>Posting history and state.</strong> A local record of what was posted, where, and what
+      the platform returned, so the tool can avoid duplicate posts and retry failures.</li>
+    <li><strong>Configuration and logs.</strong> Your settings, and logs used for troubleshooting. Logs
+      are designed to exclude personal data and credentials.</li>
+  </ul>
+  <p>We have no access to any of this. It never leaves your machine except in the direct API calls you
+  initiate to the platforms you have connected.</p>
+
+  <h2>3. What we do not collect</h2>
+  <ul>
+    <li>No analytics or usage telemetry is sent to us.</li>
+    <li>No crash reports are uploaded automatically.</li>
+    <li>No personal identifiers are embedded in the software or its repository.</li>
+    <li>We do not collect, store, sell or share your video content, captions, or account data.</li>
+  </ul>
+
+  <h2>4. What is sent to third parties</h2>
+  <p>When you publish, xPST sends data <strong>directly from your device to the platform you chose</strong>
+  using that platform's official API. That is the only transfer that happens, and it is initiated by you.
+  For example, publishing to TikTok sends the video and caption you selected to TikTok, using your own
+  authorised TikTok account.</p>
+  <p>The data each platform receives, and how that platform uses it, is governed by that platform's own
+  privacy policy. xPST does not act as an intermediary and never receives a copy.</p>
+
+  <h2>5. Permissions xPST requests, and why</h2>
+  <p>When you connect a platform, xPST asks only for the permissions needed to do the job you asked for:</p>
+  <table>
+    <thead><tr><th>Platform and scope</th><th>Why it is requested</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>TikTok — <code>user.info.basic</code></td>
+        <td>Read the authorised user's basic profile (open id, display name, avatar) so the application
+          can confirm which TikTok account is connected and label it in the interface. Stored only in
+          local configuration.</td>
+      </tr>
+      <tr>
+        <td>TikTok — <code>user.info.stats</code></td>
+        <td>Display the connected account's own follower, like and video counts in the application's
+          local analytics view, so the creator can see their own performance. Read-only, own account
+          only.</td>
+      </tr>
+      <tr>
+        <td>TikTok — <code>video.publish</code></td>
+        <td>Upload and publish the user's own video to their own TikTok account, only after an explicit
+          confirmation in the application.</td>
+      </tr>
+      <tr>
+        <td>TikTok — <code>video.upload</code></td>
+        <td>Upload the user's own video as a draft to the account's inbox so the creator can finish
+          captions or edits inside the TikTok application.</td>
+      </tr>
+      <tr>
+        <td>YouTube, X, Instagram</td>
+        <td>The equivalent posting, reading and analytics permissions for your own accounts on those
+          platforms, requested through each platform's own authorisation flow.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>You can revoke any of these at any time from the platform's own settings, or with
+  <code>xpst disconnect &lt;platform&gt;</code>, which removes the stored credentials from your device.</p>
+
+  <h2>6. Data retention and deletion</h2>
+  <p>Because data is stored locally, retention is yours to control. Removing the application's
+  configuration directory deletes the credentials, posting history and logs. The command
+  <code>xpst disconnect &lt;platform&gt;</code> removes a single platform's stored credentials without
+  touching the rest. There is no server-side copy for us to delete.</p>
+
+  <h2>7. This website</h2>
+  <p>This website is served by GitHub Pages as static files. It sets no cookies, runs no analytics and
+  performs no tracking. GitHub's own logging as the hosting provider is described in GitHub's privacy
+  statement.</p>
+
+  <h2>8. Children</h2>
+  <p>xPST is not directed at children and is not intended for use by anyone below the minimum age
+  required to hold an account on the platforms it connects to.</p>
+
+  <h2>9. Changes to this policy</h2>
+  <p>Material changes will be published on this page with an updated date, and recorded in the
+  repository's history at
+  <a href="https://github.com/TysAIs/xPST/commits/main/privacy/index.html">github.com/TysAIs/xPST</a>.</p>
+
+  <h2>10. Contact</h2>
+  <p>Questions about this policy can be raised as an issue at
+  <a href="https://github.com/TysAIs/xPST/issues">github.com/TysAIs/xPST/issues</a>.</p>
+
+</div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <span>© 2026 xPST contributors · MIT OR Apache-2.0</span>
+    <span>
+      <a href="../">Home</a> ·
+      <a href="../terms/">Terms of Service</a> ·
+      <a href="https://github.com/TysAIs/xPST">GitHub</a>
+    </span>
+  </div>
+</footer>
+</body>
+</html>
