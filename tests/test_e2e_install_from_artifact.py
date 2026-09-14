@@ -635,3 +635,146 @@ def test_linux_proc_cmdlines_is_empty_off_linux():
 
     if not sys.platform.startswith("linux"):
         assert linux_proc_cmdlines() == []
+
+
+# ---------------------------------------------------------------------------
+# --require-published: the run can only ever test something a stranger can
+# download. A local file is a hard failure; a URL run records that it was
+# enforced.
+# ---------------------------------------------------------------------------
+
+def test_require_published_rejects_a_local_artifact(tmp_path, capsys):
+    artifact, checksums = build_fake_published_artifact(tmp_path)
+
+    code = main(
+        [
+            str(artifact),
+            "--checksums",
+            str(checksums),
+            "--require-published",
+            "--no-require-visible-window",
+        ]
+    )
+    summary = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+
+    assert code == 1
+    assert summary["status"] == "failed"
+    assert any("require-published" in failure for failure in summary["failures"])
+    assert summary.get("install") is None
+
+
+def test_require_published_records_that_a_url_run_was_enforced(tmp_path, capsys):
+    import http.server
+    import threading
+
+    artifact, checksums = build_fake_published_artifact(tmp_path)
+    evidence = tmp_path / "evidence.json"
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - stdlib handler name
+            payload = artifact.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/{artifact.name}"
+        code = main(
+            [
+                url,
+                "--checksums",
+                str(checksums),
+                "--require-published",
+                "--no-require-visible-window",
+                "--evidence-out",
+                str(evidence),
+            ]
+        )
+    finally:
+        server.shutdown()
+        thread.join()
+
+    summary = json.loads(evidence.read_text(encoding="utf-8"))
+    assert code == 0, summary["failures"]
+    assert summary["evidence"]["source_kind"] == "url"
+    assert summary["evidence"]["published_required"] is True
+    assert summary["evidence"]["artifact_sha256"] == _sha256(artifact)
+
+
+# ---------------------------------------------------------------------------
+# Evidence renderer used by the CI step summary
+# ---------------------------------------------------------------------------
+
+def test_evidence_summary_reports_a_missing_evidence_file(tmp_path):
+    from scripts.e2e_evidence_summary import render
+
+    assert "No evidence JSON was recorded" in render("macos", tmp_path / "absent.json")
+
+
+def test_evidence_summary_renders_the_harness_evidence_block(tmp_path):
+    from scripts.e2e_evidence_summary import render
+
+    evidence = tmp_path / "macos.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "evidence": {
+                    "artifact_name": "xPST.dmg",
+                    "artifact_bytes": 126490269,
+                    "artifact_sha256": SHA_A,
+                    "artifact_type": "dmg",
+                    "release": {"tag": "v1.1.0", "id": 562855127, "created_at": "t"},
+                    "source_kind": "url",
+                    "published_required": True,
+                    "http_status": None,
+                    "health_ok": False,
+                    "health_url": None,
+                    "boot_ok": True,
+                    "boot_to_visible_seconds": 3.71,
+                    "window_assertion_required": True,
+                    "running_process": {"app_pid": 42, "app_process_alive_after_boot": True},
+                    "shutdown_exit_code": -15,
+                    "engine_processes_after_shutdown": [],
+                    "cleanup_ok": True,
+                    "uninstall_ok": True,
+                    "checks": {"engine_health_200": False},
+                    "failures": ["engine /health did not return HTTP 200 within 60.0s"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    markdown = render("macos", evidence)
+
+    assert "verdict: **failed**" in markdown
+    assert SHA_A in markdown
+    assert "engine health ok: `False`" in markdown
+    assert "engine /health did not return HTTP 200" in markdown
+    assert "published required: `True`" in markdown
+
+
+# ---------------------------------------------------------------------------
+# CI wiring guard: the automated run must install a published artifact
+# ---------------------------------------------------------------------------
+
+def test_ci_workflow_install_tests_a_published_artifact():
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "published-artifact-install-e2e.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "e2e_install_from_artifact.py" in workflow
+    assert "--release" in workflow
+    assert "--require-published" in workflow
+    assert "--evidence-out" in workflow
+    assert "upload-artifact" in workflow
