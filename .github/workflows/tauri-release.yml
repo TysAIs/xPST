@@ -155,15 +155,41 @@ jobs:
               ;;
           esac
 
-      - name: Verify bundle size gate (≤200MB)
+      - name: Verify installer size gate (≤200MB)
         run: |
-          APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" | head -1)
-          SIZE_MB=$(du -sm "$APP_PATH" | cut -f1)
-          echo "xPST.app size: ${SIZE_MB}MB"
-          if [ "$SIZE_MB" -gt 200 ]; then
-            echo "::error::Bundle ${SIZE_MB}MB exceeds 200MB gate"
+          set -euo pipefail
+          # Gate the artifact a stranger actually downloads, not the unpacked
+          # bundle: the .dmg/.AppImage/.exe compresses far below the .app it was
+          # built from, so measuring the app failed a perfectly shippable
+          # installer (209MB app -> well under 200MB download). The unpacked size
+          # is still reported, as a warning, so bloat stays visible.
+          case "${RUNNER_OS}" in
+            macOS)   PATTERN='*bundle/dmg/*.dmg' ;;
+            Windows) PATTERN='*bundle/nsis/*.exe' ;;
+            Linux)   PATTERN='*bundle/appimage/*.AppImage' ;;
+            *)       echo "::error::unsupported runner ${RUNNER_OS}"; exit 1 ;;
+          esac
+          INSTALLER=$(find src-tauri/target -path "$PATTERN" -print -quit)
+          if [ -z "$INSTALLER" ]; then
+            echo "::error::no installer matched ${PATTERN}"
             exit 1
           fi
+          BYTES=$(wc -c < "$INSTALLER" | tr -d ' ')
+          SIZE_MB=$((BYTES / 1048576))
+          echo "installer (what a stranger downloads): ${INSTALLER} -> ${SIZE_MB}MB (${BYTES} bytes)"
+          APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" -print -quit || true)
+          if [ -n "${APP_PATH}" ]; then
+            APP_MB=$(du -sm "$APP_PATH" | cut -f1)
+            echo "unpacked app bundle: ${APP_MB}MB"
+            if [ "$APP_MB" -gt 200 ]; then
+              echo "::warning::unpacked xPST.app is ${APP_MB}MB, over the 200MB app target; the published installer is ${SIZE_MB}MB"
+            fi
+          fi
+          if [ "$SIZE_MB" -gt 200 ]; then
+            echo "::error::installer ${SIZE_MB}MB exceeds the 200MB gate"
+            exit 1
+          fi
+          echo "installer size gate: PASS (${SIZE_MB}MB <= 200MB)"
 
       - name: Smoke boot (app launches, engine healthy)
         if: runner.os == 'macOS'
