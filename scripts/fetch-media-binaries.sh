@@ -358,22 +358,20 @@ case "$platform" in
     fi
     ;;
   linux-x64|linux-arm64)
-    if [[ "$platform" == linux-x64 ]]; then ARCH=amd64; else ARCH=arm64; fi
-    require_binary ffmpeg "$FF_DIR" \
-      "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-$ARCH-static.tar.xz" || true
-    if [[ ! -x "$FF_DIR/ffprobe" ]]; then
-      # ffprobe ships inside the same johnvansickle release tarball.
-      tmp_txz="$FF_DIR/.ffmpeg-probe.tar.xz"
-      rm -f "$tmp_txz"
-      if download "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-$ARCH-static.tar.xz" "$tmp_txz" \
-         && install_tarxz ffprobe "$FF_DIR" "$tmp_txz"; then
-        log "ok: ffprobe via johnvansickle.com"
-      else
-        warn "could not obtain ffprobe from johnvansickle.com"
-        FAILED+=("ffprobe")
-      fi
-      rm -f "$tmp_txz"
+    if [[ "$platform" == linux-x64 ]]; then
+      ARCH=amd64; BTBN_ARCH=linux64
+    else
+      ARCH=arm64; BTBN_ARCH=linuxarm64
     fi
+    # Two independent upstreams. johnvansickle.com intermittently answers a CI
+    # request with an HTML error page and HTTP 200, which install_tarxz rejects
+    # as `rejected truncated/corrupt tar.xz`; the GitHub-hosted BtbN build is the
+    # fallback, so one flaky mirror cannot fail the Linux lane. Both archives
+    # carry ffmpeg and ffprobe (nested at the top level and in bin/).
+    JVS_TARBALL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-$ARCH-static.tar.xz"
+    BTBN_TARBALL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-$BTBN_ARCH-gpl.tar.xz"
+    require_binary ffmpeg "$FF_DIR" "$JVS_TARBALL" "$BTBN_TARBALL" || true
+    require_binary ffprobe "$FF_DIR" "$JVS_TARBALL" "$BTBN_TARBALL" || true
     if [[ ! -x "$YTDLP_DIR/yt-dlp" ]]; then
       fetch_ytdlp "$YTDLP_DIR/yt-dlp" \
         "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp" || {
