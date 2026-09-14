@@ -107,6 +107,47 @@ def test_port_in_use_detects_a_live_listener():
     assert ee.port_in_use("127.0.0.1", port) is False
 
 
+def test_port_in_use_uses_exclusive_bind_on_windows(monkeypatch):
+    """Windows needs SO_EXCLUSIVEADDRUSE; SO_REUSEADDR there lets a second
+    bind succeed (port hijacking), which would make the pre-flight blind."""
+    captured = []
+    exclusive_flag = 54321  # stands in for Windows' SO_EXCLUSIVEADDRUSE
+    real_socket = socket.socket
+
+    class _Recorder:
+        def __init__(self, *a, **kw):
+            self._sock = real_socket(*a, **kw)
+
+        def setsockopt(self, level, opt, value):
+            captured.append((opt, value))
+
+        def bind(self, addr):
+            raise OSError("in use")
+
+        def close(self):
+            self._sock.close()
+
+    class _FakeSocketModule:
+        SOL_SOCKET = socket.SOL_SOCKET
+        SO_REUSEADDR = socket.SO_REUSEADDR
+        SO_EXCLUSIVEADDRUSE = exclusive_flag
+        AF_INET = socket.AF_INET
+        AF_INET6 = socket.AF_INET6
+        SOCK_STREAM = socket.SOCK_STREAM
+
+        @staticmethod
+        def socket(*a, **kw):
+            return _Recorder(*a, **kw)
+
+    monkeypatch.setattr(ee, "_is_windows", lambda: True)
+    monkeypatch.setattr(ee, "socket", _FakeSocketModule)
+
+    assert ee.port_in_use("127.0.0.1", 9) is True
+    opts = [o for o, _ in captured]
+    assert exclusive_flag in opts, "SO_EXCLUSIVEADDRUSE was not applied"
+    assert socket.SO_REUSEADDR not in opts
+
+
 # ── subprocess: packaged-entrypoint behaviour ────────────────────────────
 
 

@@ -141,6 +141,11 @@ def resolve_host(
     return env.get("XPST_DASHBOARD_HOST") or default
 
 
+def _is_windows() -> bool:
+    """Indirection so tests can exercise the Windows bind path on any OS."""
+    return os.name == "nt"
+
+
 def _address_family(host: str) -> int:
     return socket.AF_INET6 if ":" in host else socket.AF_INET
 
@@ -148,12 +153,18 @@ def _address_family(host: str) -> int:
 def port_in_use(host: str, port: int) -> bool:
     """Return True when ``host:port`` is already bound by a listener.
 
-    ``SO_REUSEADDR`` is set so a socket in ``TIME_WAIT`` (a fresh restart) is
-    NOT reported as in use — only a live listener is.
+    POSIX: ``SO_REUSEADDR`` lets a socket in ``TIME_WAIT`` (a fresh restart)
+    rebind while a live listener still raises ``EADDRINUSE``.
+    Windows: ``SO_REUSEADDR`` instead lets a second bind *succeed*
+    (port hijacking), so ``SO_EXCLUSIVEADDRUSE`` is required to get a real
+    exclusivity error there.
     """
     sock = socket.socket(_address_family(host), socket.SOCK_STREAM)
     try:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if _is_windows():  # attribute only exists (and is only read) on Windows
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)  # noqa: B009
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((host, port))
         return False
     except OSError:
@@ -212,8 +223,8 @@ def start_engine(host: str, port: int, config_dir: str) -> None:
         code = exc.code if isinstance(exc.code, int) else 1
         if code:
             _fatal(
-                f"failed to bind {host}:{port} (the port may have been taken "
-                f"between the check and startup): {exc}",
+                f"port {host}:{port} is already in use (it may have been "
+                f"taken between the check and startup): {exc}",
                 EXIT_BIND_FAILED,
             )
         raise
