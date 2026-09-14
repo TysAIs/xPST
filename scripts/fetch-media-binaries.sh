@@ -26,7 +26,14 @@ fi
 fetch() { # url -> dest
   local url="$1" dest="$2"
   echo "fetching $url"
-  curl -fsSL --retry 3 -o "$dest" "$url"
+  # --retry-all-errors also covers curl exit 18 ("Transferred a partial file"),
+  # which --retry alone does not: a truncated download from a flaky mirror
+  # otherwise fails the whole release lane with an unzip error.
+  if ! curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o "$dest" "$url"; then
+    rm -f "$dest"
+    echo "fetch failed: $url" >&2
+    return 1
+  fi
 }
 
 case "$platform" in

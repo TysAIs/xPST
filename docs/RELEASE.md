@@ -4,9 +4,15 @@
 
 `scripts/e2e_install_from_artifact.sh` exercises one desktop artifact from the
 same perspective as a new user. It accepts a local `.dmg`, `.zip`, `.exe`, or
-`.AppImage`, or a GitHub release asset URL:
+`.AppImage`, a GitHub release asset URL, or a **published release tag**:
 
 ```bash
+# Published release: resolves the platform asset and its SHA256SUMS from the
+# GitHub release API and refuses to proceed unless it is a real published asset
+scripts/e2e_install_from_artifact.sh \
+  --release v1.1.0 --require-published \
+  --evidence-out evidence/macos.json
+
 # URL: the release directory and macos-SHA256SUMS are inferred
 scripts/e2e_install_from_artifact.sh \
   https://github.com/TysAIs/xPST/releases/download/v1.1.0/xPST.dmg
@@ -16,6 +22,16 @@ scripts/e2e_install_from_artifact.sh \
   --checksums https://github.com/TysAIs/xPST/releases/download/v1.1.0/macos-SHA256SUMS \
   /path/to/xPST.dmg
 ```
+
+`--release <tag>` asks the GitHub release API for the tag's assets and scores
+them per platform (macOS `.dmg`, Windows `.exe`/`.msi`, Linux
+`.AppImage`/`.deb`/`.rpm` or the extensionless PyInstaller binary the Linux lane
+publishes), so the harness always tests something that is actually published
+and records the asset id, byte size and creation time it resolved. `--asset`
+overrides that choice. `--require-published` turns "tested a local build" into
+a failure. `--evidence-out <path>` writes the full machine-readable summary to
+disk (it is printed to stdout too). Extensionless artifacts are identified by
+magic bytes, not only by filename.
 
 For a local asset without a checksum URL, pass both `--release-tag` and (when
 needed) `--platform macos|windows|linux`; the default repository is
@@ -75,45 +91,54 @@ quarantined app, the run records the attribute and the user-facing remedy is
 to use Finder's contextual **Open** approval (or **Open Anyway** in System
 Settings → Privacy & Security), subject to the user's own security decision.
 
-## Published v1.1.0 record
+## Published v1.1.0 record (macOS arm64)
 
-Run command:
+Run command (published-asset resolution, not a hand-copied URL):
 
 ```bash
 scripts/e2e_install_from_artifact.sh \
-  https://github.com/TysAIs/xPST/releases/download/v1.1.0/xPST.dmg
+  --release v1.1.0 --require-published \
+  --evidence-out evidence/macos.json
 ```
 
-Release checksum source:
-
-```text
-https://github.com/TysAIs/xPST/releases/download/v1.1.0/macos-SHA256SUMS
-```
-
-The macOS run was executed against the URL above. It returned exit status 1,
-with this measured result:
+The harness resolved `xPST.dmg` (asset id `562855127`, created
+`2026-09-14T07:32:46Z`) out of 34 published assets, against
+`https://github.com/TysAIs/xPST/releases/download/v1.1.0/macos-SHA256SUMS`.
+It returned exit status **1**, with this measured result:
 
 ```text
 checksum: PASS
-asset bytes: 126968730
-sha256: 1ceac2ba9568e6bd4283d38c45728674dddefafe0fb06da6be7bc7b87234efa1
-boot-to-visible: PASS (5.432298 seconds <= 15 seconds)
+asset bytes: 126490269
+sha256: a03e6bb2a3f8f8e744597c619cfe4ee705885bd46bfac5af049407ff8c805ea2
+boot-to-visible: PASS (3.714 seconds <= 15 seconds, CoreGraphics window count)
 engine /health: FAIL (no loopback URL observed; no HTTP 200 within 60 seconds)
+http_status: null
 packaged HTTP UI: FAIL (no HTTP UI root)
+process: pid alive at probe; shutdown exit code -15
 xpst-engine processes after shutdown: 0
-throwaway install/config cleanup: PASS (work directory removed)
+throwaway install/config cleanup: PASS (work directory removed, uninstalled)
 XPST_CONFIG_DIR override: NOT HONORED (config directory stayed empty)
 ```
 
 The installed bundle identifies itself as version `1.1.0`, bundle identifier
 `com.tysais.xpst`, executable `xPST`, and
-`XPSTSourceCommit=d42e8602d08137ce87da4768e9da08b3426aa7d6`. Its resource
-markers are `Contents/Resources/xpst/desktop_app/qml/main.qml` and PySide6;
-`Contents/Resources/ui/index.html` and
+`XPSTSourceCommit=28250c863b0ce03e66d04fb912584d49055df57a` (current `main`).
+Its resource markers are `Contents/Resources/xpst/desktop_app/qml/main.qml` and
+PySide6; `Contents/Resources/ui/index.html` and
 `Contents/Resources/binaries/engine/xpst-engine` are absent. The published
-asset is therefore the **legacy PySide6/QML app, not the Tauri build**. A native
-window appeared, but this artifact cannot satisfy the Tauri engine/HTTP UI
-contract.
+macOS asset is therefore the **legacy PySide6/QML app, not the Tauri build**. A
+native window appeared and the process stayed up, but this artifact cannot
+serve `/health` or the packaged HTTP UI, so the Tauri engine contract is
+**unproven for the published macOS artifact**.
+
+Why: the Tauri shell lane (`Tauri Shell Release` on tag `v1.1.0`) has failed on
+every run so far — a truncated download from a third-party media mirror
+(`curl: (18) Transferred a partial file` while fetching ffprobe) aborts the
+build before any `.dmg` is produced, so no Tauri macOS installer has ever been
+published. `scripts/fetch-media-binaries.sh` now retries that class of failure
+(`--retry-all-errors`); until the lane goes green and a Tauri `.dmg` is
+published, this E2E is expected to fail the health assertion on macOS and that
+failure is the honest signal, not a harness bug.
 
 The isolated first-run profile created state under `HOME/.xpst` instead of the
 requested `XPST_CONFIG_DIR`, including `config.yaml`, `analytics.db`,
@@ -124,42 +149,49 @@ is expected. The harness removed the whole isolated profile afterward.
 Signing evidence from the app copied out of the mounted DMG:
 
 ```text
-$ codesign -dv --verbose=4 /Volumes/xPST/xPST.app
-Executable=/Volumes/xPST/xPST.app/Contents/MacOS/xPST
+$ codesign -dv --verbose=4 <installed>/xPST.app
+Executable=.../xPST.app/Contents/MacOS/xPST
 Identifier=com.tysais.xpst
 Format=app bundle with Mach-O thin (arm64)
-CodeDirectory v=20400 size=48232 flags=0x2(adhoc) hashes=1501+3 location=embedded
-VersionPlatform=1
-VersionMin=720896
-VersionSDK=786688
-Hash type=sha256 size=32
-CandidateCDHash sha256=b3bf6010281401c999ba588b837cb270ddb1be53
-CandidateCDHashFull sha256=b3bf6010281401c999ba588b837cb270ddb1be53662d9fb930016f4459ef3465
-Hash choices=sha256
-CMSDigest=b3bf6010281401c999ba588b837cb270ddb1be53662d9fb930016f4459ef3465
-CMSDigestType=2
-Executable Segment base=0
-Executable Segment limit=49152
-Executable Segment flags=0x1
-Page size=16384
-CDHash=b3bf6010281401c999ba588b837cb270ddb1be53
+CodeDirectory v=20400 size=48456 flags=0x2(adhoc) hashes=1508+3 location=embedded
 Signature=adhoc
-Info.plist entries=13
 TeamIdentifier=not set
-Sealed Resources version=2 rules=13 files=3393
-Internal requirements count=0 size=12
-Total signatures=1
-Chosen signature=1
+Sealed Resources version=2 rules=13 files=3394
 
-$ spctl -a -vv /Volumes/xPST/xPST.app
-/Volumes/xPST/xPST.app: rejected
+$ spctl -a -vv <installed>/xPST.app
+<installed>/xPST.app: rejected
 ```
 
 The verdict is **ad-hoc code signature only** (no Team ID,
 not Developer ID); Gatekeeper assessment was **rejected**. Notarization is **not
 proven**; the release's `macos-RELEASE_EVIDENCE.json` has no signing or
-notarization fields. The curl download had no `com.apple.quarantine` attribute,
-so this run did not hit a quarantine launch block. It did not disable
-Gatekeeper or strip quarantine. If a browser-downloaded copy is blocked, the
-user-facing workaround is Finder's contextual **Open**, or **Open Anyway** in
-System Settings → Privacy & Security, subject to the user's security decision.
+notarization fields. The curl download carried no `com.apple.quarantine`
+attribute, so no Gatekeeper prompt appeared in this run; the evidence JSON
+records the attribute, `spctl` acceptance, ad-hoc status and whether a launch
+was actually blocked, plus the user-facing remedy. The harness never removes
+quarantine, disables Gatekeeper, or changes signing. A browser-downloaded copy
+does carry quarantine and shows the standard "unidentified developer" prompt;
+the user-facing workaround is Finder's contextual **Open**, or **Open Anyway**
+in System Settings → Privacy & Security, subject to the user's own security
+decision.
+
+## Automated run
+
+`.github/workflows/published-artifact-install-e2e.yml` runs this harness against
+the assets a release actually published, on macOS, Linux and Windows, when a
+release is published (and on manual dispatch with a tag). It passes
+`--require-published` so a local build can never substitute for a published
+asset, uploads the evidence JSON per platform, and writes a Markdown summary to
+the run's step summary. It does not gate pull requests. A red run is a real
+finding about the published artifact.
+
+`--require-visible auto` (the default) asserts an on-screen window only when a
+GUI session exists (`launchctl managername` reports `Aqua` on macOS), so a
+headless CI runner records the visibility probe instead of failing a healthy
+bundle. `--require-visible yes` forces the assertion; the evidence records
+`boot.visible_required` either way.
+
+`tests/test_e2e_install_from_artifact.py` covers the asset ranking, magic-byte
+classification, checksum parsing/verification, install safety, the health/UI
+probe against a real loopback server, Gatekeeper reporting, evidence writing and
+the summary renderer.

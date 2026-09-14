@@ -1,0 +1,97 @@
+name: Published Artifact Install E2E
+
+# The project's release critical path requires an automated clean-profile E2E:
+# download a PUBLISHED release artifact, install it like a stranger would into a
+# throwaway profile, boot it, assert the engine is healthy, assert no stray
+# processes remain, and perform a clean uninstall — with machine-readable
+# evidence attached.
+#
+# This workflow runs that harness against the assets the release actually
+# published (resolved from the GitHub release API, never a local build). It
+# triggers when a release is published and on manual dispatch, so it never
+# gates pull requests. A red run is a real finding about the published
+# artifact, not a CI flake: the evidence JSON is uploaded either way.
+#
+# Known state as of v1.1.0: the published macOS asset is the legacy
+# PySide6/QML app, so the engine-health assertion cannot pass until the Tauri
+# shell lane successfully publishes. The run reports that truthfully instead of
+# being skipped.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to install-test (for example v1.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: published-artifact-install-e2e-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  install-published-artifact:
+    name: Install and smoke a published artifact (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos
+          - os: ubuntu-latest
+            platform: linux
+          - os: windows-latest
+            platform: windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Resolve the release tag under test
+        id: tag
+        shell: bash
+        run: |
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            echo "::error::no release tag resolved"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "install-testing published release $TAG on ${{ matrix.platform }}"
+
+      - name: Install a published artifact in a clean profile and smoke it
+        id: e2e
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p evidence
+          python scripts/e2e_install_from_artifact.py \
+            --release "${{ steps.tag.outputs.tag }}" \
+            --platform ${{ matrix.platform }} \
+            --require-published \
+            --require-visible auto \
+            --health-timeout-seconds 90 \
+            --evidence-out "evidence/${{ matrix.platform }}.json" \
+            | tee "evidence/${{ matrix.platform }}.log"
+
+      - name: Summarise the evidence
+        if: always()
+        shell: bash
+        run: |
+          python scripts/e2e_evidence_summary.py "${{ matrix.platform }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach the machine-readable evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: published-artifact-install-evidence-${{ matrix.platform }}
+          path: evidence/
+          if-no-files-found: warn

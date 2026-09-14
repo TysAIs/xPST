@@ -4,6 +4,17 @@
 This helper is intentionally dependency-free.  The shell entry point owns the
 public interface; this module owns the platform-specific install and launch
 logic so failures can be reported in one machine-readable summary.
+
+Two inputs are supported:
+
+* an explicit artifact path or URL (``positional``), or
+* ``--release <tag>``, which resolves the artifact a stranger would actually
+  download from a published GitHub release for the requested platform.
+
+Published macOS assets are ad-hoc signed, so Gatekeeper refusing the app is
+expected behaviour.  The harness only *reads* signing and quarantine state; it
+never removes quarantine, disables Gatekeeper, or claims an approval it did not
+observe.
 """
 
 from __future__ import annotations
@@ -27,6 +38,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any
+
+GITHUB_API = "https://api.github.com"
 
 
 class E2EError(RuntimeError):
@@ -134,6 +147,171 @@ def artifact_name(source: str) -> str:
     if not name:
         raise E2EError(f"cannot determine artifact filename from {source!r}")
     return name
+
+
+# ---------------------------------------------------------------------------
+# Published-release resolution
+#
+# A stranger does not know which asset name the release picked; they open the
+# releases page and download the one for their platform.  These helpers do the
+# same thing from the GitHub release API so the harness always tests something
+# that is actually published (asset id/size/created_at come from the API, not
+# from the caller's string).
+# ---------------------------------------------------------------------------
+
+def github_api_json(url: str) -> Any:
+    """GET a GitHub API URL and decode JSON, reporting the real HTTP failure."""
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "xPST-stranger-install-e2e",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = response.read()
+    except urllib.error.HTTPError as exc:
+        raise E2EError(f"GitHub API {url} returned HTTP {exc.code}") from exc
+    except (OSError, urllib.error.URLError) as exc:
+        raise E2EError(f"GitHub API {url} is unreachable: {exc}") from exc
+    try:
+        return json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise E2EError(f"GitHub API {url} did not return JSON: {exc}") from exc
+
+
+def release_asset_candidates(repo: str, tag: str) -> list[dict[str, Any]]:
+    """Return the published release assets with their API metadata."""
+    url = f"{GITHUB_API}/repos/{repo}/releases/tags/{tag}"
+    release = github_api_json(url)
+    assets = release.get("assets") if isinstance(release, dict) else None
+    if not isinstance(assets, list) or not assets:
+        raise E2EError(f"release {tag} in {repo} publishes no assets")
+    return [
+        {
+            "name": str(asset.get("name", "")),
+            "size": int(asset.get("size", 0) or 0),
+            "id": asset.get("id"),
+            "created_at": asset.get("created_at"),
+            "url": str(asset.get("browser_download_url", "")),
+            "content_type": asset.get("content_type"),
+        }
+        for asset in assets
+        if isinstance(asset, dict) and asset.get("name")
+    ]
+
+
+def platform_asset_score(asset_name: str, platform: str) -> int:
+    """Rank a published asset for one platform; 0 means 'not a candidate'.
+
+    macOS publishes the legacy `.dmg` and the Tauri updater `.app.tar.gz`;
+    Linux publishes an extensionless PyInstaller binary; Windows publishes
+    `.exe`/`.msi`.  Keyword and extension rules are ranked so the most
+    installable artifact wins rather than the alphabetically first one.
+    """
+    lower = asset_name.lower()
+    if lower.endswith(("sha256sums", "sha512sums", ".json", ".md", ".cdx.json", ".sig")):
+        return 0
+    if platform == "macos":
+        if lower.endswith(".dmg") and "macos" not in lower:
+            return 100
+        if lower.endswith(".zip") and "macos" not in lower:
+            return 60
+        if lower.endswith((".pkg",)):
+            return 55
+        return 0
+    if platform == "windows":
+        if lower.endswith(".exe"):
+            return 100
+        if lower.endswith(".msi"):
+            return 90
+        return 0
+    if platform == "linux":
+        if lower.endswith((".appimage", ".deb", ".rpm")):
+            return 100
+        if lower.endswith(".tar.gz") and "linux" in lower:
+            return 70
+        # The published linux lane uploads an extensionless ELF named `xPST`.
+        if "." not in lower and "xpst" in lower:
+            return 80
+        return 0
+    raise E2EError(f"unknown platform for asset ranking: {platform}")
+
+
+def choose_release_asset(assets: list[dict[str, Any]], platform: str) -> dict[str, Any]:
+    """Pick the best published asset for a platform, failing closed when empty."""
+    ranked = sorted(
+        ((platform_asset_score(asset["name"], platform), asset) for asset in assets),
+        key=lambda pair: pair[0],
+        reverse=True,
+    )
+    for score, asset in ranked:
+        if score > 0:
+            return asset
+    names = ", ".join(asset["name"] for asset in assets)
+    raise E2EError(f"no published {platform} artifact among release assets: {names}")
+
+
+def default_platform() -> str:
+    """Map the running host to a release asset family."""
+    if sys.platform == "darwin":
+        return "macos"
+    if os.name == "nt":
+        return "windows"
+    return "linux"
+
+
+def resolve_release_artifact(
+    repo: str,
+    tag: str,
+    platform: str,
+    requested_asset: str | None,
+) -> dict[str, Any]:
+    """Resolve a published release asset to a download URL plus provenance."""
+    if not tag:
+        raise E2EError("--release requires a tag such as v1.1.0")
+    assets = release_asset_candidates(repo, tag)
+    if requested_asset:
+        chosen = next((asset for asset in assets if asset["name"] == requested_asset), None)
+        if chosen is None:
+            names = ", ".join(asset["name"] for asset in assets)
+            raise E2EError(f"{requested_asset} is not a published asset of {tag}; published: {names}")
+    else:
+        chosen = choose_release_asset(assets, platform)
+    if not chosen["url"]:
+        raise E2EError(f"published asset {chosen['name']} has no download URL")
+    return {**chosen, "tag": tag, "repo": repo, "asset_count": len(assets)}
+
+
+def sniff_artifact_kind(path: Path) -> str | None:
+    """Identify a downloaded artifact by magic bytes, not only by filename.
+
+    The published Linux lane uploads an extensionless PyInstaller binary, so a
+    stranger cannot tell from the name alone; a name-only classifier rejects it.
+    """
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(4)
+            handle.seek(0)
+            tail = b""
+            size = path.stat().st_size
+            if size >= 512:
+                handle.seek(-512, os.SEEK_END)
+                tail = handle.read(512)
+    except OSError:
+        return None
+    if head.startswith(b"\x7fELF"):
+        return "binary"
+    if head.startswith(b"MZ"):
+        return "exe"
+    if head[:4] in (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe", b"\xfe\xed\xfa\xcf", b"\xce\xfa\xed\xfe"):
+        return "binary"
+    if head.startswith(b"PK\x03\x04"):
+        return "zip"
+    if tail[:4] in (b"koly",):
+        return "dmg"
+    return None
 
 
 def platform_key(asset_name: str, explicit: str | None) -> str:
@@ -463,6 +641,21 @@ def http_get(url: str, timeout: float = 2.0) -> tuple[int | None, bytes, str | N
         return None, b"", str(exc)
 
 
+def gui_session_available() -> bool:
+    """Return True when a window server session can show a real window.
+
+    A CI/ssh runner has no Aqua session, so asserting an on-screen window there
+    would fail a healthy bundle.  This is a measured pre-condition, not an
+    assumption: the launchd management domain is reported by the OS itself.
+    """
+    if sys.platform != "darwin":
+        return os.environ.get("DISPLAY") is not None or os.environ.get("WAYLAND_DISPLAY") is not None
+    if shutil.which("launchctl") is None:
+        return False
+    result = command_result(["launchctl", "managername"], timeout=5)
+    return str(result.get("stdout", "")).strip() == "Aqua"
+
+
 def health_and_ui(
     log_path: Path,
     process: subprocess.Popen[Any],
@@ -470,6 +663,7 @@ def health_and_ui(
     health_timeout: float,
     visible_budget: float,
     probe: Path | None,
+    require_visible: bool = True,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[str]]:
     """Poll visibility and /health, then assert the HTML UI at the same root."""
     visible = False
@@ -524,17 +718,15 @@ def health_and_ui(
         )
 
     visible_ok = visible and visible_seconds is not None and visible_seconds <= visible_budget
-    visible_reason = (
-        visible_reason
-        if visible_ok
-        else (
-            f"visible after {visible_seconds:.3f}s, over budget {visible_budget:.3f}s"
-            if visible and visible_seconds is not None
-            else visible_reason
-        )
-    )
+    if not require_visible and not visible_ok:
+        # No window server session: record the measured result, do not fail on it.
+        visible_reason = f"not required in this session ({visible_reason})"
+        visible_ok = True
+    elif visible and visible_seconds is not None and not visible_ok:
+        visible_reason = f"visible after {visible_seconds:.3f}s, over budget {visible_budget:.3f}s"
     boot = {
         "ok": visible_ok,
+        "visible_required": require_visible,
         "boot_to_visible_seconds": visible_seconds,
         "budget_seconds": visible_budget,
         "window_probe": visible_reason,
@@ -546,6 +738,7 @@ def health_and_ui(
         "observed_loopback_urls": observed_urls,
         "timeout_seconds": health_timeout,
         "process_exit_code_during_poll": process.poll(),
+        "process_alive_at_probe": process.poll() is None,
     }
     ui = {
         "ok": ui_ok,
@@ -683,17 +876,17 @@ def install_artifact(artifact: Path, artifact_type: str, work: Path) -> tuple[Pa
         shutil.copy2(source, destination)
         destination.chmod(destination.stat().st_mode | stat.S_IXUSR)
         return destination, {"method": "zip extraction + executable copy", "path": str(destination)}
-    if artifact_type in {"exe", "appimage"}:
+    if artifact_type in {"exe", "appimage", "binary"}:
         destination = install_root / artifact.name
         shutil.copy2(artifact, destination)
-        if artifact_type == "appimage":
+        if artifact_type in {"appimage", "binary"}:
             destination.chmod(destination.stat().st_mode | stat.S_IXUSR)
         return destination, {"method": "throwaway executable copy", "path": str(destination)}
     raise E2EError(f"unsupported artifact type: {artifact_type}")
 
 
-def artifact_type(name: str) -> str:
-    """Return the supported installer kind."""
+def artifact_type(name: str, artifact: Path | None = None) -> str:
+    """Return the supported installer kind, sniffing extensionless assets."""
     lower = name.lower()
     if lower.endswith(".dmg"):
         return "dmg"
@@ -703,7 +896,11 @@ def artifact_type(name: str) -> str:
         return "exe"
     if lower.endswith(".appimage"):
         return "appimage"
-    raise E2EError("artifact must end in .dmg, .zip, .exe, or .AppImage")
+    if artifact is not None:
+        sniffed = sniff_artifact_kind(artifact)
+        if sniffed:
+            return sniffed
+    raise E2EError("artifact must end in .dmg, .zip, .exe, or .AppImage (or be a recognized binary)")
 
 
 def launch_environment(work: Path, config_dir: Path, home_dir: Path) -> dict[str, str]:
@@ -774,11 +971,63 @@ def first_run_findings(
     return findings
 
 
+def write_evidence(path: Path, summary: dict[str, Any]) -> None:
+    """Persist the machine-readable evidence JSON, creating parent directories."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(summary, indent=2, sort_keys=True, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def gatekeeper_report(
+    signature: dict[str, Any],
+    quarantine: str | None,
+    launch_alive: bool | None,
+) -> dict[str, Any]:
+    """Describe the macOS Gatekeeper situation without changing it.
+
+    macOS desktop artifacts are unsigned (ad-hoc only), so a browser-downloaded
+    copy carries com.apple.quarantine and shows the standard "unidentified
+    developer" prompt.  The harness never strips quarantine or disables
+    Gatekeeper; it records the measured attribute and the exact user-facing
+    remedy instead of faking an acceptance.
+    """
+    if not signature.get("checked"):
+        return {"applicable": False, "reason": "macOS-only assessment"}
+    accepted = bool(signature.get("gatekeeper_accepted"))
+    blocked = (not accepted) and bool(quarantine) and launch_alive is False
+    return {
+        "applicable": True,
+        "download_transport": "curl (does not apply the LaunchServices quarantine attribute)",
+        "quarantine_attribute": quarantine,
+        "spctl_accepted": accepted,
+        "ad_hoc_signature_only": bool(signature.get("ad_hoc")),
+        "developer_id_signed": not bool(signature.get("ad_hoc")) and accepted,
+        "notarization_proven": False,
+        "blocked_launch_detected": blocked,
+        "remediation": (
+            "Unsigned/not-notarized build: approve the app once via Finder's contextual "
+            "Open, or System Settings > Privacy & Security > Open Anyway. This is a "
+            "user security decision; the harness does not remove quarantine or weaken Gatekeeper."
+        ),
+    }
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Install a local or GitHub release xPST desktop artifact in a throwaway profile and smoke it."
+        description="Install a local or GitHub-published xPST desktop artifact in a throwaway profile and smoke it."
     )
-    parser.add_argument("artifact", help="local .dmg/.zip/.exe/.AppImage path or GitHub release asset URL")
+    parser.add_argument(
+        "artifact",
+        nargs="?",
+        help="local .dmg/.zip/.exe/.AppImage path or GitHub release asset URL (omit when using --release)",
+    )
+    parser.add_argument(
+        "--release",
+        help="published release tag (for example v1.1.0); resolves the platform asset from the release API",
+    )
+    parser.add_argument(
+        "--asset",
+        help="exact published asset name to test with --release (default: best asset for --platform)",
+    )
     parser.add_argument(
         "--checksums",
         help="local or URL SHA256SUMS file; otherwise derive <platform>-SHA256SUMS from a GitHub release URL",
@@ -790,6 +1039,21 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--repo", default="TysAIs/xPST", help="GitHub owner/repository for a local artifact")
     parser.add_argument("--release-tag", help="release tag for a local artifact, for example v1.1.0")
     parser.add_argument("--platform", choices=["macos", "windows", "linux"], help="checksum family when it cannot be inferred")
+    parser.add_argument(
+        "--require-published",
+        action="store_true",
+        help="fail unless the artifact came from a published GitHub release (never a local file)",
+    )
+    parser.add_argument(
+        "--evidence-out",
+        help="path to write the machine-readable evidence JSON (a copy of the final summary line)",
+    )
+    parser.add_argument(
+        "--require-visible",
+        choices=["auto", "yes", "no"],
+        default="auto",
+        help="assert an on-screen window; auto asserts it only when a GUI session exists (default: auto)",
+    )
     parser.add_argument(
         "--boot-budget-seconds",
         type=float,
@@ -804,7 +1068,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--work-dir", help="empty directory to use instead of an automatically deleted temp directory")
     parser.add_argument("--keep-work", action="store_true", help="keep the temp directory for debugging (cleanup is then not asserted)")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if not args.artifact and not args.release:
+        parser.error("provide an artifact path/URL or --release <tag>")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -813,7 +1080,7 @@ def main(argv: list[str] | None = None) -> int:
         "ok": False,
         "status": "failed",
         "artifact_source": args.artifact,
-        "artifact": artifact_name(args.artifact),
+        "artifact": None,
         "checks": {},
         "findings": [],
         "failures": [],
@@ -821,30 +1088,58 @@ def main(argv: list[str] | None = None) -> int:
     work: WorkDir | None = None
     process: subprocess.Popen[Any] | None = None
     try:
+        # Resolve a published release asset first, so a stranger-scale run tests
+        # whatever the release actually published rather than a hand-copied URL.
+        release: dict[str, Any] | None = None
+        artifact_source = args.artifact
+        if args.release:
+            release = resolve_release_artifact(
+                args.repo, args.release, args.platform or default_platform(), args.asset
+            )
+            artifact_source = release["url"]
+            print(
+                f"[e2e] published {release['tag']} asset '{release['name']}' "
+                f"({release['size']} bytes, id={release['id']}, created={release['created_at']}) "
+                f"of {release['asset_count']} release assets",
+                flush=True,
+            )
+        summary["artifact_source"] = artifact_source
+        summary["artifact"] = artifact_name(artifact_source)
+        summary["published"] = {
+            "is_published": release is not None,
+            "tag": release["tag"] if release else None,
+            "asset_id": release["id"] if release else None,
+            "asset_created_at": release["created_at"] if release else None,
+            "release_asset_count": release["asset_count"] if release else None,
+        }
         work = WorkDir(args.work_dir)
         work_path = work.path
         log_path = work_path / "launch.log"
         download_dir = work_path / "download"
         download_dir.mkdir()
-        source_name = artifact_name(args.artifact)
+        source_name = artifact_name(artifact_source)
         artifact = download_dir / source_name
-        parsed = urllib.parse.urlparse(args.artifact)
+        parsed = urllib.parse.urlparse(artifact_source)
         if parsed.scheme in {"http", "https"}:
             print(f"[e2e] downloading {source_name} with curl -L", flush=True)
-            fetch_url(args.artifact, artifact)
+            fetch_url(artifact_source, artifact)
             source_kind = "url"
         else:
-            local = Path(args.artifact).expanduser().resolve()
+            if args.require_published:
+                raise E2EError("--require-published rejects a local artifact; use URL or --release")
+            local = Path(artifact_source).expanduser().resolve()
             if not local.is_file():
                 raise E2EError(f"artifact does not exist: {local}")
             shutil.copy2(local, artifact)
             source_kind = "local"
         if artifact.stat().st_size == 0:
             raise E2EError(f"artifact is empty: {artifact.name}")
-        kind = artifact_type(source_name)
-        family = platform_key(source_name, args.platform)
+        kind = artifact_type(source_name, artifact)
+        if release and kind == "binary" and os.name == "nt":
+            raise E2EError("a published ELF/Mach-O binary cannot be installed on this host")
+        family = args.platform or (default_platform() if release else platform_key(source_name, args.platform))
         checksum_source = args.checksums or derive_checksum_source(
-            args.artifact, source_name, family, args.repo, args.release_tag
+            artifact_source, source_name, family, args.repo, args.release_tag or (release["tag"] if release else None)
         )
         checksum_text, checksum_provenance = load_checksum_source(
             checksum_source, download_dir / f"{family}-SHA256SUMS"
@@ -883,6 +1178,12 @@ def main(argv: list[str] | None = None) -> int:
         home_dir.mkdir(parents=True)
         env = launch_environment(work_path, config_dir, home_dir)
         probe = prepare_window_probe(work_path)
+        gui_available = gui_session_available()
+        require_visible = args.require_visible == "yes" or (args.require_visible == "auto" and gui_available)
+        print(
+            f"[e2e] gui_session={gui_available} require_visible={require_visible}",
+            flush=True,
+        )
         with log_path.open("w", encoding="utf-8") as log_handle:
             start = time.monotonic()
             try:
@@ -897,6 +1198,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             except OSError as exc:
                 raise E2EError(f"launch failed for {executable.name}: {exc}") from exc
+            launch_pid = process.pid
             boot, health, ui, poll_failures = health_and_ui(
                 log_path,
                 process,
@@ -904,6 +1206,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.health_timeout_seconds,
                 args.boot_budget_seconds,
                 probe,
+                require_visible,
             )
         stop = terminate_process(process)
         print(
@@ -932,6 +1235,10 @@ def main(argv: list[str] | None = None) -> int:
             failures.append("launched process did not provide an exit code after shutdown")
         if kind == "dmg" and not app:
             failures.append("mounted DMG did not yield an installed .app")
+        if args.require_published and source_kind != "url":
+            failures.append("--require-published: the artifact was not a published download")
+        if args.require_visible == "yes" and not gui_available:
+            findings.append("--require-visible=yes forced a window assertion with no GUI session present")
         if not args.keep_work:
             cleanup_ok = work.cleanup(False)
         else:
@@ -939,13 +1246,16 @@ def main(argv: list[str] | None = None) -> int:
             findings.append("work directory retained by --keep-work; uninstall cleanup was not asserted")
         if not cleanup_ok:
             failures.append("throwaway install/config cleanup did not remove the work directory")
+        gatekeeper = gatekeeper_report(signature, quarantine, health.get("process_alive_at_probe"))
         summary.update(
             {
                 "ok": not failures,
                 "status": "passed" if not failures else "failed",
                 "source_kind": source_kind,
                 "artifact_type": kind,
+                "http_status": health["status"],
                 "checks": {
+                    "downloaded_published_artifact": source_kind == "url",
                     "checksum": checksum["ok"],
                     "install": True,
                     "boot_to_visible": boot["ok"],
@@ -953,6 +1263,13 @@ def main(argv: list[str] | None = None) -> int:
                     "packaged_ui_served": ui["ok"],
                     "zero_xpst_engine_processes": not leftovers,
                     "cleanup": cleanup_ok,
+                },
+                "artifact": {
+                    "name": artifact.name,
+                    "bytes": checksum["bytes"],
+                    "sha256": checksum["actual_sha256"],
+                    "type": kind,
+                    "source": artifact_source,
                 },
                 "checksum": checksum,
                 "install": {"ok": True, **install},
@@ -964,7 +1281,13 @@ def main(argv: list[str] | None = None) -> int:
                     "markers": markers,
                 },
                 "signature": signature,
+                "gatekeeper": gatekeeper,
                 "artifact_quarantine": quarantine,
+                "process": {
+                    "pid": launch_pid,
+                    "alive_at_health_probe": health.get("process_alive_at_probe"),
+                    "shutdown_exit_code": stop["exit_code"],
+                },
                 "boot": boot,
                 "health": health,
                 "ui": ui,
@@ -972,6 +1295,7 @@ def main(argv: list[str] | None = None) -> int:
                 "engine_processes_after_shutdown": leftovers,
                 "cleanup": {
                     "ok": cleanup_ok,
+                    "uninstalled": cleanup_ok,
                     "work_directory_removed": cleanup_ok,
                     "config_override_honored": cleanup_before["config_override_honored"],
                     "config_files_before_cleanup": cleanup_before["config_files"],
@@ -984,17 +1308,23 @@ def main(argv: list[str] | None = None) -> int:
     except (E2EError, OSError, ValueError, subprocess.SubprocessError) as exc:
         summary["failures"] = [str(exc)]
         summary["findings"] = [str(exc)]
+        summary["status"] = "failed"
+        summary["ok"] = False
         if process is not None:
             terminate_process(process)
         if work is not None:
-            summary["cleanup"] = {"ok": work.cleanup(args.keep_work), "work_directory_removed": not args.keep_work}
+            summary["cleanup"] = {"ok": work.cleanup(args.keep_work), "uninstalled": not args.keep_work, "work_directory_removed": not args.keep_work}
     except Exception as exc:  # pragma: no cover - defensive boundary for a release gate
         summary["failures"] = [f"unexpected harness error: {type(exc).__name__}: {exc}"]
         summary["findings"] = summary["failures"]
+        summary["status"] = "error"
+        summary["ok"] = False
         if process is not None:
             terminate_process(process)
         if work is not None:
-            summary["cleanup"] = {"ok": work.cleanup(args.keep_work), "work_directory_removed": not args.keep_work}
+            summary["cleanup"] = {"ok": work.cleanup(args.keep_work), "uninstalled": not args.keep_work, "work_directory_removed": not args.keep_work}
+    if args.evidence_out:
+        write_evidence(Path(args.evidence_out).expanduser(), summary)
     print(json.dumps(summary, sort_keys=True, ensure_ascii=False))
     return 0 if summary.get("ok") else 1
 
