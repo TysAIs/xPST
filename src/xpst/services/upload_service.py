@@ -359,9 +359,8 @@ class UploadService:
             # this single chokepoint before any state, quota, or success path.
             upload_result = normalize_upload_result(raw_upload_result, platform_name)
 
-            tracker.complete()
-
             if upload_result.is_published:
+                tracker.complete()
                 upload_result.metadata.setdefault("quality", quality_report)
                 self.crash_recovery_clear(video_id, platform_name)
                 self.state.mark_video_posted(
@@ -381,6 +380,7 @@ class UploadService:
                 if self.anti_bot:
                     self.anti_bot.record_upload(platform_name)
             else:
+                tracker.fail(upload_result.error or "upload did not publish")
                 # Check for auth expiry in error
                 if self._is_auth_expired(upload_result.error):
                     logger.error(
@@ -611,9 +611,8 @@ class UploadService:
             )
             upload_result = normalize_upload_result(raw_upload_result, platform_name)
 
-            tracker.complete()
-
             if upload_result.is_published:
+                tracker.complete()
                 self.state.mark_video_posted(
                     video_id,
                     platform_name,
@@ -631,6 +630,7 @@ class UploadService:
                     post_url=upload_result.post_url or "",
                 )
             else:
+                tracker.fail(upload_result.error or "upload did not publish")
                 self.circuit_breakers.record_failure(
                     platform_name,
                     upload_result.error,
