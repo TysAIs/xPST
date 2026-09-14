@@ -1112,6 +1112,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--release-tag", help="release tag for a local artifact, for example v1.1.0")
     parser.add_argument("--platform", choices=["macos", "windows", "linux"], help="checksum family when it cannot be inferred")
     parser.add_argument(
+        "--require-published",
+        action="store_true",
+        help=(
+            "fail unless the artifact is a published GitHub release download; a local file is "
+            "rejected so a smoke of an unbuilt working tree can never be reported as a "
+            "stranger-install pass"
+        ),
+    )
+    parser.add_argument(
         "--boot-budget-seconds",
         type=float,
         default=15.0,
@@ -1203,6 +1212,11 @@ def main(argv: list[str] | None = None) -> int:
                 raise E2EError(f"artifact does not exist: {local}")
             shutil.copy2(local, artifact)
             source_kind = "local"
+        if args.require_published and source_kind != "url":
+            raise E2EError(
+                "--require-published rejects a local artifact: pass a GitHub release asset URL or "
+                "--release <tag> so the run can only ever test something a stranger can download"
+            )
         if artifact.stat().st_size == 0:
             raise E2EError(f"artifact is empty: {artifact.name}")
         if release_info and release_info.get("size") is not None:
@@ -1471,6 +1485,8 @@ def main(argv: list[str] | None = None) -> int:
             "cleanup_ok": cleanup_ok,
             "uninstall_ok": uninstall["ok"],
             "gatekeeper": gatekeeper,
+            "source_kind": source_kind,
+            "published_required": bool(args.require_published),
             "checks": checks,
             "findings": findings,
             "failures": failures,

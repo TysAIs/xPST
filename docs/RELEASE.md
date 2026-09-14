@@ -90,6 +90,25 @@ was not asserted; it must not be used as release evidence. Likewise
 `window_assertion_required: false` and a finding, and its output is not a
 clean-profile pass.
 
+### Automated run
+
+`.github/workflows/published-artifact-install-e2e.yml` runs this harness against
+the assets a release actually published, on macOS, Linux and Windows, when a
+release is published (and on manual dispatch with a tag). It never gates pull
+requests. Each job uploads the evidence JSON and writes a Markdown summary of it
+to the run's step summary via `scripts/e2e_evidence_summary.py`, which reports a
+missing or failed evidence file as such instead of implying a pass.
+
+The workflow passes `--require-published`, which fails the run unless the
+artifact came from a published GitHub release: a local file is rejected outright,
+so a smoke of an unbuilt working tree can never be reported as a stranger-install
+pass. The evidence records `source_kind` and `published_required`.
+
+Hosted runners have no logged-in window server, so the workflow also passes
+`--no-require-visible-window`: that run is engine/process/cleanup evidence and
+explicitly not the full clean-profile pass, which still has to be taken on a real
+desktop. A red workflow run is a real finding about the published artifact.
+
 ### Stack detection
 
 The stack detector reports `tauri` only when both
