@@ -305,6 +305,10 @@ class StateManager:
             return None
         return video.get("posted_to", {}).get(platform)
 
+    def find_video_id_by_platform_post(self, platform: str, post_id: str) -> str | None:
+        """Resolve xPST's internal video id from a platform-side post id."""
+        return self._new_manager.find_video_id_by_platform_post(platform, post_id)
+
     def find_duplicate_by_hash(self, content_hash: str, exclude_platform: str | None = None) -> dict[str, Any] | None:
         """Legacy method - find video with matching content hash."""
         # Check if hash exists
