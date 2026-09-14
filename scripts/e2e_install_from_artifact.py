@@ -963,6 +963,7 @@ def resolve_published_artifact(
         "tag": tag,
         "platform": platform,
         "name": name,
+        "id": asset.get("id"),
         "url": url,
         "size": asset.get("size"),
         "digest": asset.get("digest"),
