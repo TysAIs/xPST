@@ -372,6 +372,14 @@ fn boot_engine(app: tauri::AppHandle) {
     command = command.env("XPST_DASHBOARD_PORT", port.to_string());
     command = command.env("XPST_ENGINE_MODE", "tauri");
     command = command.env("XPST_UI_DIST", ui_dir);
+    // Also pass the port as an explicit argv flag. The env var alone was a
+    // single point of failure: an engine build that ignored argv kept the
+    // env path working, but every hand-run/smoke invocation
+    // (`xpst-engine serve --port N`) silently bound 8080, and a leftover
+    // listener there broke startup. Passing both means the port survives
+    // regardless of which path the frozen entrypoint reads. The engine's
+    // entrypoint treats an already-taken port as a loud non-zero exit.
+    command = command.arg("--port").arg(port.to_string());
     // Bundle-resolution: point the engine at the ffmpeg/ffprobe/yt-dlp
     // binaries shipped as bundle resources (see tauri.conf.json
     // bundle.resources). The engine honors XPST_FFMPEG_PATH,
@@ -487,6 +495,10 @@ fn boot_engine(app: tauri::AppHandle) {
                 "ENGINE_HEALTH_WAIT_SECS={:.3}",
                 health_wait.as_secs_f64()
             ));
+            // The health poll above only succeeds if the engine actually
+            // bound THIS port; a build that ignored the port/argv would fail
+            // here instead of leaving the webview on a dead 8080 page.
+            log(&format!("ENGINE_PORT_VERIFIED port={port}"));
 
             if let Some(window) = app.get_webview_window("main") {
                 let url = tauri::Url::parse(&format!("http://127.0.0.1:{port}/"))
@@ -513,7 +525,9 @@ fn boot_engine(app: tauri::AppHandle) {
             }
         }
         None => {
-            log("FATAL: engine did not become healthy within timeout");
+            log(&format!(
+                "FATAL: engine did not become healthy on 127.0.0.1:{port} within timeout"
+            ));
             if let Some(w) = app.get_webview_window("main") {
                 show_engine_error(&w);
             }

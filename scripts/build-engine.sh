@@ -33,22 +33,38 @@ PYTHONPATH="$REPO_ROOT/src" "$PYTHON" -m PyInstaller build_engine.spec \
 cp -R dist/engine/xpst-engine "$OUT_DIR/engine"
 echo "==> Wrote $OUT_DIR/engine ($(du -sh "$OUT_DIR/engine" | cut -f1))"
 
-# Sanity check: the onedir engine must honor XPST_DASHBOARD_PORT and
-# report healthy quickly.
-echo "==> Smoke-checking sidecar"
+# Sanity check: the onedir engine must honor the port BOTH ways the shell
+# may pass it — the XPST_DASHBOARD_PORT env var AND an explicit --port argv
+# flag. The argv path was silently ignored by an earlier frozen entrypoint
+# (it always bound 8080), so both are smoke-tested here.
+echo "==> Smoke-checking sidecar (env var + --port argv)"
 TEST_PORT="$(jot -r 1 20000 40000 2>/dev/null || shuf -i 20000-40000 -n 1 2>/dev/null || echo 39999)"
-XPST_DASHBOARD_PORT="$TEST_PORT" "$OUT_DIR/engine/xpst-engine" >/tmp/xpst-engine-check.log 2>&1 &
-CHECK_PID=$!
-trap 'kill "$CHECK_PID" 2>/dev/null || true' EXIT
-START="$(python3 -c 'import time; print(time.time())')"
-for _ in $(seq 1 60); do
-    if curl -sf -o /dev/null "http://127.0.0.1:$TEST_PORT/health"; then
-        ELAPSED="$(python3 -c "import time; print(f'{time.time()-$START:.2f}')")"
-        echo "PASS: sidecar /health OK on port $TEST_PORT (cold start ${ELAPSED}s)"
-        exit 0
-    fi
-    sleep 0.25
-done
-echo "FAIL: sidecar did not report healthy on port $TEST_PORT"
-tail -20 /tmp/xpst-engine-check.log
-exit 1
+ARGV_PORT="$(jot -r 1 20001 40001 2>/dev/null || shuf -i 20001-40001 -n 1 2>/dev/null || echo 39998)"
+
+check_port() {
+    local mode="$1" port="$2"; shift 2
+    "$@" >/tmp/xpst-engine-check.log 2>&1 &
+    local pid=$!
+    local start; start="$(python3 -c 'import time; print(time.time())')"
+    for _ in $(seq 1 60); do
+        if curl -sf -o /dev/null "http://127.0.0.1:$port/health"; then
+            local elapsed; elapsed="$(python3 -c "import time; print(f'{time.time()-$start:.2f}')")"
+            echo "PASS: sidecar /health OK via $mode on port $port (cold start ${elapsed}s)"
+            kill "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+            return 0
+        fi
+        sleep 0.25
+    done
+    echo "FAIL: sidecar did not report healthy via $mode on port $port"
+    tail -20 /tmp/xpst-engine-check.log
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    return 1
+}
+
+check_port "XPST_DASHBOARD_PORT env" "$TEST_PORT" \
+    env "XPST_DASHBOARD_PORT=$TEST_PORT" "$OUT_DIR/engine/xpst-engine"
+check_port "--port argv flag" "$ARGV_PORT" \
+    "$OUT_DIR/engine/xpst-engine" --port "$ARGV_PORT"
+echo "PASS: sidecar honors both the env var and --port"
