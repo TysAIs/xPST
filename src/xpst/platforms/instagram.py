@@ -16,8 +16,9 @@ Upload specs:
 from __future__ import annotations
 
 import contextlib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from xpst.anti_bot import AntiBotProtection
 
@@ -37,6 +38,21 @@ from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, Provi
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+# instagrapi publishes the Reel and *then* calls `qe/expose/` — an experiment
+# telemetry ping (see instagrapi/mixins/clip.py) — before it returns the created
+# Media. When that unrelated call fails, the Reel is already live but no id is
+# ever returned to us. Such an error must be reconciled against the account
+# instead of being reported as a plain failure: otherwise the post exists with
+# no recorded id and `delete` can never remove it.
+_POST_PUBLISH_ERROR_MARKERS = ("qe/expose", "expose/")
+_RECONCILE_WINDOW = timedelta(minutes=30)
+
+
+def _normalize_caption(text: str | None) -> str:
+    """Collapse whitespace and case so a caption can match the published media."""
+    return " ".join((text or "").split()).strip().lower()
 
 
 class InstagramUploader(PlatformUploader):
@@ -457,6 +473,45 @@ class InstagramUploader(PlatformUploader):
         jitter = random.uniform(-0.5, 0.5)
         return max(1.0, delay + jitter)
 
+    async def _reconcile_published_media(
+        self, caption: str, *, within: timedelta = _RECONCILE_WINDOW
+    ) -> Any | None:
+        """Read-only: find a just-published media whose caption matches.
+
+        Used when the upload raised *after* publication (see
+        ``_POST_PUBLISH_ERROR_MARKERS``). Only read methods are called — no
+        upload, publish or delete — so reconciliation can never double-post.
+
+        Returns the matching media object, or ``None`` when the account does not
+        show it (in which case the caller must not claim success).
+        """
+        import asyncio
+
+        try:
+            client = await self._get_client()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Instagram reconciliation could not authenticate: %s", exc)
+            return None
+
+        try:
+            # user_medias is a read-only feed listing; instagrapi is sync.
+            media = await asyncio.to_thread(client.user_medias, client.user_id, 6)
+        except Exception as exc:
+            logger.warning("Instagram reconciliation listing failed: %s", exc)
+            return None
+
+        target = _normalize_caption(caption)
+        cutoff = datetime.now(timezone.utc) - within
+        for item in media or []:
+            taken_at = getattr(item, "taken_at", None)
+            if isinstance(taken_at, datetime):
+                taken_at = taken_at if taken_at.tzinfo else taken_at.replace(tzinfo=timezone.utc)
+                if taken_at < cutoff:
+                    continue
+            if _normalize_caption(getattr(item, "caption_text", "")) == target:
+                return item
+        return None
+
     async def _upload_instagrapi(self, video_path: Path, caption: str) -> UploadResult:
         """Upload via instagrapi (session-based, unofficial path).
 
@@ -541,6 +596,45 @@ class InstagramUploader(PlatformUploader):
                 error_msg = str(e).lower()
                 last_error = e
                 logger.error(f"Instagram upload failed (attempt {attempt + 1}/{max_retries + 1}): {e}")
+
+                # The Reel may already be live: instagrapi configures/publishes
+                # the media and only then calls `qe/expose/` (an experiment ping)
+                # before returning the created Media. A failure after
+                # publication must be reconciled, never reported as a plain
+                # failure — otherwise the post exists with no recorded id and
+                # `delete` cannot remove it.
+                if any(marker in error_msg for marker in _POST_PUBLISH_ERROR_MARKERS):
+                    reconciled = await self._reconcile_published_media(caption)
+                    if reconciled is not None:
+                        reel_url = f"https://www.instagram.com/reel/{reconciled.code}/"
+                        logger.warning(
+                            "Instagram upload raised '%s' after publication, but the reel is live: "
+                            "reconciled it as %s so it can be deleted",
+                            e,
+                            reel_url,
+                        )
+                        return UploadResult(
+                            success=True,
+                            post_id=str(reconciled.pk),
+                            post_url=reel_url,
+                            platform="instagram",
+                            metadata={
+                                "code": reconciled.code,
+                                "caption_length": len(caption),
+                                "auth_mode": "session",
+                                "attempts": attempt + 1,
+                                "reconciled": True,
+                                "original_error": str(e)[:200],
+                            },
+                        )
+                    return UploadResult(
+                        success=False,
+                        error=(
+                            "IG_UNCONFIRMED: the upload failed after publication and the reel was "
+                            "not found on the account — check the Instagram profile before retrying"
+                        ),
+                        platform="instagram",
+                    )
 
                 # Check for specific errors
                 if "login" in error_msg or "unauthorized" in error_msg or "required" in error_msg:
