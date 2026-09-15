@@ -8,6 +8,7 @@ code now uses.
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -126,7 +127,23 @@ class TestMediaDefaults:
 
     def test_tmpdir_is_a_root(self):
         roots = default_media_roots("~/.xpst")
-        assert any(r == Path(os.environ.get("TMPDIR", "/tmp")) for r in roots)
+        # Mirror the platform truth: TMPDIR on POSIX, TEMP/TMP on Windows.
+        override = os.environ.get("TMPDIR") or os.environ.get("TEMP") or os.environ.get("TMP")
+        expected = Path(override) if override else Path(tempfile.gettempdir())
+        assert any(r.resolve() == expected.resolve() for r in roots)
+
+    def test_windows_temp_env_is_honoured(self, monkeypatch, tmp_path):
+        """``TEMP``/``TMP`` (never ``TMPDIR``) is the Windows temp contract."""
+        monkeypatch.delenv("TMPDIR", raising=False)
+        monkeypatch.setenv("TEMP", str(tmp_path))
+        monkeypatch.delenv("TMP", raising=False)
+        assert any(r.resolve() == tmp_path.resolve() for r in default_media_roots("~/.xpst"))
+
+    def test_tmp_env_is_read_when_temp_is_unset(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("TMPDIR", raising=False)
+        monkeypatch.delenv("TEMP", raising=False)
+        monkeypatch.setenv("TMP", str(tmp_path))
+        assert any(r.resolve() == tmp_path.resolve() for r in default_media_roots("~/.xpst"))
 
     def test_confine_media_path_rejects_a_walk_up(self, tmp_path):
         with pytest.raises(PathConfinementError):
