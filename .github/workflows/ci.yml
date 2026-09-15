@@ -61,6 +61,13 @@ jobs:
       - name: Public safety scan
         run: python scripts/scan_public_safety.py --json
 
+      # Published counts must describe the shipped surfaces; both scripts fail
+      # when docs drift from the code (README surface counts + MCP tool index).
+      - name: Docs drift (surface counts, MCP tool index)
+        run: |
+          python scripts/generate_counts.py --check
+          python scripts/generate_mcp_docs.py --check
+
       - name: Build package
         run: |
           python scripts/build_package.py
