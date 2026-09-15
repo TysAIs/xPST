@@ -1,0 +1,40 @@
+# gitleaks configuration for xPST.
+#
+# Extends the upstream default ruleset and adds an allowlist for values that are
+# deliberately fake or public in this repository. Everything allowlisted here
+# must be verifiably non-secret — the allowlist is not a place to hide findings.
+#
+# The two historical matches this covers (both checked by hand against the raw
+# bytes, not assumed):
+#   * docs/setup-linkedin.md@a499403 line 53 — `Authorization: Bearer ***`,
+#     a three-asterisk documentation placeholder. The file is not in HEAD.
+#   * tests/test_diagnostics.py line 13 — `token="abc123456789abcdef"`, a
+#     synthetic fixture for the log-redaction helper.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """Synthetic fixtures, documentation placeholders and public key material.
+
+  * SYNTHETIC_* / do_not_use / notreal — token fixtures used by the redaction,
+    SSRF, path-confinement and secret-scanner tests. None of these are real.
+  * your_* / YOUR_* / *** — placeholder values in docs/ and example configs.
+  * ${{ secrets.X }} — a GitHub Actions secret *reference*, not a value.
+  * 13F290B1316626E2 — a minisign PUBLIC key id (public by definition; it is
+    the identity of the update-signing key, published in tauri.conf.json).
+"""
+regexes = [
+  '''(?i)SYNTHETIC''',
+  '''(?i)do[_-]?not[_-]?use''',
+  '''(?i)not[_-]?real''',
+  '''(?i)your[_-][A-Za-z0-9_]+''',
+  '''(?i)(placeholder|changeme|replace[_-]?me)''',
+  '''\$\{\{\s*secrets\.[A-Z0-9_]+\s*\}\}''',
+  '''13F290B1316626E2''',
+  '''\*\*\*''',
+  '''abc123456789abcdef''',
+]
+paths = [
+  '''^tests/''',
+]

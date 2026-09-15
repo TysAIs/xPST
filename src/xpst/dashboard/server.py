@@ -129,7 +129,9 @@ def _load_dashboard_auth(config_dir: str) -> tuple[str, str]:
     """Load dashboard credentials from config.
 
     Returns:
-        Tuple of (username, password_hash). Both empty strings if not configured.
+        Tuple of (username, password_hash). Both empty strings if not configured
+        OR if the config could not be read — callers that must distinguish those
+        two cases use :func:`_auth_config_unreadable`.
     """
     try:
         from xpst.config import XPSTConfig
@@ -139,6 +141,33 @@ def _load_dashboard_auth(config_dir: str) -> tuple[str, str]:
         return config.monitoring.dashboard_username, config.monitoring.dashboard_password_hash
     except Exception:
         return "", ""
+
+
+def _auth_config_unreadable(config_dir: str) -> bool:
+    """Whether an existing config file could not be read.
+
+    This is the fail-open hole this helper closes: when ``config.yaml`` exists
+    but raises on load, ``_load_dashboard_auth`` returns ``("", "")`` and the
+    dashboard used to treat that as "auth not configured" and serve every
+    route publicly. An unreadable config means we *do not know* whether auth
+    is required, so the answer must be to refuse, not to open up.
+
+    A *missing* config file (fresh install, auth genuinely unconfigured) is
+    not an error and returns ``False``.
+    """
+    config_path = Path(config_dir).expanduser() / "config.yaml"
+    try:
+        if not config_path.is_file():
+            return False
+    except OSError:  # pragma: no cover - defensive
+        return True
+    try:
+        from xpst.config import XPSTConfig
+
+        XPSTConfig.load(str(config_path))
+    except Exception:
+        return True
+    return False
 
 
 def _ui_dist_dir() -> Path | None:
@@ -230,9 +259,16 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
         content_length = request.headers.get("content-length")
         if content_length and content_length.isdigit() and int(content_length) > _OAUTH_CALLBACK_MAX_BODY:
             return JSONResponse({"detail": "Payload too large"}, status_code=413)
-        body = await request.body()
-        if len(body) > _OAUTH_CALLBACK_MAX_BODY:
-            return JSONResponse({"detail": "Payload too large"}, status_code=413)
+        # A chunked request has no content-length, and `await request.body()`
+        # would buffer the whole thing before the length check below could run
+        # (memory exhaustion on a public route). Read incrementally instead and
+        # stop the moment the cap is exceeded.
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > _OAUTH_CALLBACK_MAX_BODY:
+                return JSONResponse({"detail": "Payload too large"}, status_code=413)
+            body.extend(chunk)
+        body = bytes(body)
         try:
             payload = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError):
@@ -345,7 +381,24 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
             return response
 
-    app.add_middleware(CSPHeaderMiddleware)
+    class DenyAllMiddleware(_CSPBase):
+        """Fail-closed middleware: refuse every request with 503.
+
+        Installed only when the dashboard auth config exists but cannot be read,
+        so xPST cannot tell whether auth is required. Serving nothing is the
+        only safe answer.
+        """
+
+        async def dispatch(self, request: Request, call_next):
+            return JSONResponse(
+                {"detail": "Dashboard authentication configuration is unreadable; refusing requests."},
+                status_code=503,
+            )
+
+    # NOTE: the CSP / security-header middleware is registered at the END of
+    # this function, i.e. OUTERMOST in Starlette's middleware stack. The auth
+    # middleware below short-circuits unauthenticated requests with a bare 401,
+    # and only an outer layer can add security headers to that response.
 
     username, password_hash = _load_dashboard_auth(config_dir)
     if username and password_hash:
@@ -392,7 +445,12 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
                 except Exception:
                     password_ok = False
 
-                if user != username or not password_ok:
+                # Constant-time username comparison too: `user != username` on a
+                # short-circuit leaks which field was wrong and how much of the
+                # user name matched.
+                user_ok = hmac.compare_digest(user.encode("utf-8"), username.encode("utf-8"))
+
+                if not user_ok or not password_ok:
                     return JSONResponse(
                         {"detail": "Invalid credentials"},
                         status_code=401,
@@ -403,6 +461,20 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
 
         app.add_middleware(BasicAuthMiddleware)
         logger.info("Dashboard auth enabled for user: %s", username)
+    elif _auth_config_unreadable(config_dir):
+        # FAIL CLOSED. config.yaml exists but raised on load, so we cannot know
+        # whether dashboard auth is configured. Previously this silently
+        # disabled auth for every route; now it refuses everything.
+        logger.error(
+            "Dashboard config could not be read; refusing all requests (fail closed) "
+            "until %s is fixed or removed.",
+            Path(config_dir).expanduser() / "config.yaml",
+        )
+        app.add_middleware(DenyAllMiddleware)
+
+    # Registered last → outermost, so the security headers land on the 401/503
+    # short-circuits produced by the middleware above as well.
+    app.add_middleware(CSPHeaderMiddleware)
 
     _setup_messenger_webhook(app, config_dir)
     _setup_bio_routes(app, config_dir)
@@ -499,6 +571,38 @@ def _setup_bio_routes(app: FastAPI, config_dir: str) -> None:
         return RedirectResponse("/bio/edit?saved=1", status_code=303)
 
 
+def _safe_webhook_path(raw: str) -> str | None:
+    """Validate a config-supplied webhook path before registering it as a route.
+
+    ``messenger.webhook_path`` comes from config and is used verbatim as a
+    FastAPI route path. A value like ``"/"`` would shadow the mounted web UI
+    (registered later, so it loses), and a value containing ``..`` or a scheme
+    is not a path at all. Only a simple absolute path segment list is allowed.
+
+    Returns the path, or ``None`` when it must be refused (caller falls back to
+    the default and logs).
+    """
+    if not isinstance(raw, str):
+        return None
+    candidate = raw.strip()
+    if not candidate or len(candidate) > 200:
+        return None
+    if not candidate.startswith("/") or candidate == "/":
+        return None
+    if any(ch.isspace() for ch in candidate):
+        return None
+    if ".." in candidate or "?" in candidate or "#" in candidate or "\\" in candidate:
+        return None
+    if "://" in candidate:
+        return None
+    # Reserved: registering a handler here would shadow a real route.
+    if candidate in ("/", "/health", "/metrics", "/state", "/bio", "/oauth/callback"):
+        return None
+    if candidate.startswith("/api") or candidate.startswith("/bio"):
+        return None
+    return candidate
+
+
 def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
     """Register the opt-in Messenger webhook routes.
 
@@ -514,7 +618,17 @@ def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
         from xpst.config import XPSTConfig
 
         config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
-        path = config.messenger.webhook_path or path
+        configured = config.messenger.webhook_path or path
+        if configured != path:
+            safe = _safe_webhook_path(configured)
+            if safe is None:
+                logger.warning(
+                    "Refusing unsafe messenger.webhook_path %r; using %s instead",
+                    configured,
+                    path,
+                )
+            else:
+                path = safe
     except Exception:
         pass
 
@@ -578,12 +692,20 @@ def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
                 if secrets:
                     logger.warning("Messenger webhook signature mismatch")
                     return JSONResponse({"detail": "Invalid signature"}, status_code=403)
-                logger.warning(
-                    "Messenger webhook carries X-Hub-Signature-256 but no app secret "
-                    "is configured — body accepted unverified"
+                # FAIL CLOSED. A signed payload with no configured app secret
+                # cannot be verified, and the previous behaviour ("body accepted
+                # unverified") let an unauthenticated caller drive the adapter.
+                logger.error(
+                    "Messenger webhook carries X-Hub-Signature-256 but no app secret is "
+                    "configured; rejecting the payload (cannot verify it)."
+                )
+                return JSONResponse(
+                    {"detail": "Signature present but no app secret is configured to verify it"},
+                    status_code=403,
                 )
         elif secrets:
             logger.warning("Messenger webhook missing X-Hub-Signature-256 header")
+            return JSONResponse({"detail": "Missing X-Hub-Signature-256"}, status_code=403)
         try:
             payload = json.loads(raw) if raw else {}
         except json.JSONDecodeError:
