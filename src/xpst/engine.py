@@ -28,6 +28,13 @@ from typing import Any
 
 from xpst.anti_bot import AntiBotProtection
 from xpst.config import XPSTConfig
+from xpst.content import (
+    UNIMPLEMENTED_PUBLISH_ERROR,
+    ContentIssue,
+    ContentRequest,
+    ContentType,
+    validate_content_request,
+)
 from xpst.crash_recovery import CrashRecoveryManager
 from xpst.monitor import NewPost, PostMonitor
 from xpst.platforms.base import (
@@ -717,6 +724,75 @@ class CrossPostEngine:
 
         result.update_status()
         self.state.save()
+        return result
+
+    # ── Typed content requests (the content_type contract) ──────────────
+
+    async def post_request(self, request: ContentRequest) -> CrossPostResult:
+        """Publish one typed content request from the content-type contract.
+
+        This is the contract-complete entry point: the request says
+        ``{content_type, media, text, platforms, overrides}`` and the content
+        type is validated against every destination's *implemented* capability
+        before any uploader is touched. An unsupported content type produces an
+        explicit failure naming the destination and nothing is uploaded.
+
+        Args:
+            request: the typed publish request.
+
+        Returns:
+            CrossPostResult with one row per requested destination — including
+            rows for a refused request, which is how the caller learns that no
+            upload happened.
+        """
+        content_type = request.effective_content_type
+        platforms = [str(item).strip().lower() for item in request.platforms if str(item).strip()]
+
+        issues = list(validate_content_request(request))
+        if not platforms:
+            issues.append(
+                ContentIssue(
+                    code="content_type.no_destinations",
+                    message="Choose at least one destination platform.",
+                    severity="error",
+                )
+            )
+
+        result = CrossPostResult(video_id=f"{content_type.value}-request", caption=request.text)
+
+        blockers = [issue for issue in issues if issue.is_error]
+        if blockers:
+            # Refused before any upload: every requested destination is
+            # reported, none of them is reported as a success.
+            for platform in platforms:
+                messages = [issue.message for issue in blockers if issue.platform in (None, platform)]
+                result.results[platform] = UploadResult(
+                    success=False,
+                    error=" ".join(messages) or blockers[0].message,
+                    platform=platform,
+                    metadata={"content_type": content_type.value, "blocked": True},
+                    retryable=False,
+                )
+            result.update_status()
+            return result
+
+        media = list(request.resolved_media)
+        if content_type is ContentType.VIDEO and len(media) == 1:
+            return await self.post_manual(media[0], request.text, platforms)
+        if content_type is ContentType.CAROUSEL and len(media) >= 2:
+            return await self.post_manual_carousel(media, request.text, platforms)
+
+        # Validated for this destination (an undeclared/plugin destination) but
+        # there is no publishing path for the content type yet.
+        for platform in platforms:
+            result.results[platform] = UploadResult(
+                success=False,
+                error=UNIMPLEMENTED_PUBLISH_ERROR.format(platform=platform, content_type=content_type.value),
+                platform=platform,
+                metadata={"content_type": content_type.value},
+                retryable=False,
+            )
+        result.update_status()
         return result
 
     async def backfill(
