@@ -2076,15 +2076,23 @@ class AppController(QObject):
 
     @Slot(str, result=str)
     def getLocalVideos(self, folder_path: str = "") -> str:
-        """List local video/media files in a folder for the Compose page.
+        """List postable local media in a folder for the Compose page.
+
+        Only files a destination can actually publish are returned in
+        ``videos``. Anything else (an image, today — no adapter has an image
+        publish path) is reported under ``skipped`` with the canonical reason,
+        so the picker never offers a file the post preflight hard-rejects.
 
         Args:
             folder_path: Directory to scan. If empty, uses config local_path
                 or the user's Movies folder.
 
         Returns:
-            JSON string with list of {path, name, size, thumbnail, type} objects.
+            JSON string with list of {path, name, size, thumbnail, type} objects
+            plus ``skipped``/``skipped_count``/``hint`` when files were left out.
         """
+        from xpst.media.modality import detect_modality
+        from xpst.media.specs import destinations_for_modality, modality_unsupported_message
         from xpst.sources.local import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 
         if not folder_path:
@@ -2105,19 +2113,34 @@ class AppController(QObject):
         files = sorted(set(files), key=lambda f: f.stat().st_mtime, reverse=True)
 
         videos = []
+        skipped = []
         for f in files[:50]:  # cap at 50
             ext = f.suffix.lower()
-            is_video = ext in VIDEO_EXTENSIONS
+            modality = detect_modality(f)
+            if not modality or not destinations_for_modality(modality):
+                skipped.append({
+                    "path": str(f),
+                    "name": f.name,
+                    "size": f.stat().st_size,
+                    "type": modality or ext.lstrip(".") or "unknown",
+                    "reason": modality_unsupported_message(modality or "unknown", suffix=ext),
+                })
+                continue
             thumb = self.getThumbnail(str(f))
             videos.append({
                 "path": str(f),
                 "name": f.name,
                 "size": f.stat().st_size,
                 "thumbnail": thumb,
-                "type": "video" if is_video else "image",
+                "type": modality,
             })
 
-        return json.dumps({"ok": True, "folder": str(scan_path), "videos": videos})
+        payload: dict[str, Any] = {"ok": True, "folder": str(scan_path), "videos": videos}
+        if skipped:
+            payload["skipped"] = skipped
+            payload["skipped_count"] = len(skipped)
+            payload["hint"] = skipped[0]["reason"]
+        return json.dumps(payload)
 
     @Slot(result=str)
     def browseForFolder(self) -> str:

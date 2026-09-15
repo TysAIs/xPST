@@ -320,8 +320,19 @@ def create_api_router(
         The folder comes from the caller or from the configured content folder.
         No folder is guessed from the user's home directory, and nothing is
         scanned recursively.
+
+        Only files that at least one destination can actually publish are
+        returned in ``items``. A file whose modality no destination accepts
+        (an image, today) is moved to ``skipped`` with the plain-language reason
+        from the canonical media spec, so the UI never offers something the
+        preflight would hard-reject and nothing is dropped without a trace.
         """
-        from xpst.sources.local import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+        from xpst.media.modality import (
+            IMAGE_EXTENSIONS,
+            VIDEO_EXTENSIONS,
+            detect_modality,
+        )
+        from xpst.media.specs import destinations_for_modality, modality_unsupported_message
 
         config = _load_ui_config()
         configured = str(getattr(getattr(config, "local", None), "path", "") or "")
@@ -335,6 +346,8 @@ def create_api_router(
                 "exists": False,
                 "items": [],
                 "count": 0,
+                "skipped": [],
+                "skipped_count": 0,
                 "hint": "No content folder is configured yet. Choose one during setup.",
             }
 
@@ -346,6 +359,8 @@ def create_api_router(
                 "exists": False,
                 "items": [],
                 "count": 0,
+                "skipped": [],
+                "skipped_count": 0,
                 "error": f"Folder not found: {path}",
             }
 
@@ -357,22 +372,51 @@ def create_api_router(
         unique = sorted(set(files), key=lambda item: item.name.lower())[:cap]
 
         items: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
         for item in unique:
             try:
                 stat = item.stat()
             except OSError:
                 continue
             suffix = item.suffix.lower()
-            items.append(
-                {
-                    "path": str(item),
-                    "name": item.name,
-                    "size_bytes": stat.st_size,
-                    "type": "video" if suffix in VIDEO_EXTENSIONS else "image",
-                    "modified": stat.st_mtime,
-                }
-            )
-        return {"ok": True, "folder": str(path), "exists": True, "items": items, "count": len(items)}
+            modality = detect_modality(item)
+            # The same capability answer the preflight uses: a modality no
+            # destination accepts is not offered, and it is never offered "with
+            # a warning" that the post path would then turn into a hard refusal.
+            # No destination list is emitted on purpose — "where can I post
+            # this" is a readiness question the canonical preflight answers
+            # (auth, quota, destination-specific limits), and guessing it here
+            # would recreate the same offer-then-refuse defect.
+            postable = bool(destinations_for_modality(modality)) if modality else False
+            entry = {
+                "path": str(item),
+                "name": item.name,
+                "size_bytes": stat.st_size,
+                "type": modality or suffix.lstrip(".") or "unknown",
+                "modified": stat.st_mtime,
+                "postable": postable,
+            }
+            if postable:
+                items.append(entry)
+            else:
+                entry["reason"] = modality_unsupported_message(
+                    modality or "unknown",
+                    suffix=suffix,
+                )
+                skipped.append(entry)
+
+        payload: dict[str, Any] = {
+            "ok": True,
+            "folder": str(path),
+            "exists": True,
+            "items": items,
+            "count": len(items),
+            "skipped": skipped,
+            "skipped_count": len(skipped),
+        }
+        if skipped:
+            payload["hint"] = skipped[0]["reason"]
+        return payload
 
     @router.post("/connect/{platform}")
     def api_connect(platform: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
