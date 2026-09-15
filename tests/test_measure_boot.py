@@ -66,6 +66,20 @@ def test_parse_markers_takes_the_first_occurrence():
     assert mb.parse_markers(text)["BOOT_TO_READY_SECS"] == 2.0
 
 
+def test_early_exit_hint_names_the_single_instance_case():
+    hint = mb.early_exit_hint("[xpst-shell] SINGLE_INSTANCE_RACE_LOSER exiting\n")
+    assert "another xPST instance" in hint
+
+
+def test_early_exit_hint_names_an_unhealthy_engine():
+    hint = mb.early_exit_hint("FATAL: engine did not become healthy within timeout\n")
+    assert "never answered /health" in hint
+
+
+def test_early_exit_hint_is_empty_for_unknown_exits():
+    assert mb.early_exit_hint("") == ""
+
+
 # --------------------------------------------------------------------------
 # statistics + budget verdict
 # --------------------------------------------------------------------------
@@ -135,10 +149,35 @@ def test_resolve_binary_finds_the_executable_inside_a_bundle(tmp_path: Path):
     assert mb.resolve_binary(tmp_path / "xPST.app") == exe
 
 
+def test_resolve_binary_returns_an_absolute_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # The harness launches the app with a temporary cwd, so a relative --app
+    # path (what the CI step passes, via `find`) must be resolved up front.
+    macos = tmp_path / "xPST.app" / "Contents" / "MacOS"
+    macos.mkdir(parents=True)
+    exe = macos / "xPST"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    monkeypatch.chdir(tmp_path)
+    resolved = mb.resolve_binary(Path("xPST.app"))
+    assert resolved.is_absolute()
+    assert resolved == exe
+
+
 def test_resolve_binary_refuses_a_bundle_without_an_executable(tmp_path: Path):
     (tmp_path / "xPST.app" / "Contents" / "MacOS").mkdir(parents=True)
     with pytest.raises(mb.HarnessError):
         mb.resolve_binary(tmp_path / "xPST.app")
+
+
+def test_measure_once_reports_an_unlaunchable_binary_as_a_harness_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Not a budget verdict, and not a traceback: a bad bundle is a harness error.
+    # Stub the residency probe so the test does not depend on whether the
+    # developer happens to have xPST open.
+    monkeypatch.setattr(mb, "engine_pids", lambda scope=None: [])
+    with pytest.raises(mb.HarnessError, match="could not launch"):
+        mb.measure_once(tmp_path, timeout=5, purge=False, index=1, scope=str(tmp_path))
 
 
 def test_host_class_is_derived_from_the_ci_runner_env(monkeypatch: pytest.MonkeyPatch):
