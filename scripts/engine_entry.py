@@ -257,6 +257,13 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         _fatal(str(exc), EXIT_USAGE)
 
     config_dir = resolved_env.get("XPST_CONFIG_DIR", "~/.xpst")
+    # TEMPORARY PROOF BRANCH ONLY — this commit must never reach main. It makes
+    # the packaged sidecar objectively slower to become healthy (+8s, above the
+    # CI runner's noise band) so the boot-budget gate can be shown to fail on a
+    # regression instead of being taken on faith.
+    import time as _time
+
+    _time.sleep(8.0)
     start_engine(host=host, port=port, config_dir=config_dir)
     return EXIT_OK
 
