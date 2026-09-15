@@ -326,6 +326,18 @@ async def audit(args: argparse.Namespace) -> int:
     if not (pathlib.Path(ui_dist) / "index.html").is_file():
         raise SystemExit(f"no UI build at {ui_dist} (run `npm run build` in ui/)")
 
+    # Redirect HOME for THIS process (the engine lives in it). Parts of the
+    # engine still resolve default paths against ~/ (notably AnalyticsStore's
+    # default ~/.xpst/analytics.db when a post is recorded), so without this the
+    # audit would write into the user's real ~/.xpst. The browser gets the
+    # original HOME back: with an empty one it never commits a navigation
+    # (verified: the page target stays about:blank), and its own writes are
+    # confined to the throwaway --user-data-dir.
+    real_home = os.environ.get("HOME") or str(pathlib.Path.home())
+    audit_home = pathlib.Path(tempfile.mkdtemp(prefix="xpst-audit-home."))
+    os.environ["HOME"] = str(audit_home)
+    os.environ.setdefault("XPST_DISABLE_AUTH_WARM", "1")
+
     platform_enabled = args.engine == "fake"
     config_dir, media_dir = make_config_dir(platform_enabled)
     port = args.port or free_port()
@@ -335,9 +347,13 @@ async def audit(args: argparse.Namespace) -> int:
     server, thread, base_url = start_server(ui_dist, config_dir, port, args.engine, args.platform, args.fake_outcome == "ok")
     print(f"engine={args.engine} serving {ui_dist} at {base_url} (config {os.path.basename(config_dir)})")
     print(f"media folder: {media_dir} · platform={args.platform} enabled={platform_enabled}")
+    print(f"engine HOME redirected to {audit_home} (no writes to the real ~/.xpst)")
+    print(f"browser HOME kept at {real_home} (it must be able to commit a navigation)")
 
     profile = tempfile.mkdtemp(prefix="xpst-audit-brave.")
     devtools = f"http://127.0.0.1:{args.cdp_port}"
+    browser_env = dict(os.environ)
+    browser_env["HOME"] = real_home
     browser = subprocess.Popen(
         [
             browser_path(),
@@ -353,6 +369,7 @@ async def audit(args: argparse.Namespace) -> int:
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=browser_env,
     )
 
     report: dict = {
@@ -374,10 +391,10 @@ async def audit(args: argparse.Namespace) -> int:
         else:
             raise SystemExit("devtools endpoint never came up")
 
+        pages = [item for item in requests.get(f"{devtools}/json/list", timeout=5).json() if item["type"] == "page"]
         target = next(
-            item
-            for item in requests.get(f"{devtools}/json/list", timeout=5).json()
-            if item["type"] == "page"
+            (item for item in pages if "127.0.0.1" in str(item.get("url", ""))),
+            pages[0],
         )
         async with websockets.connect(target["webSocketDebuggerUrl"], max_size=64 * 1024 * 1024) as ws:
             cdp = Cdp(ws)
