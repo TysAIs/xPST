@@ -190,27 +190,15 @@ jobs:
         run: |
           set -euo pipefail
           # scripts/fetch-media-binaries.sh verifies every download against the
-          # SHA-256 in scripts/media-binaries.lock and writes this record. A
-          # release must be able to state exactly which bytes it ships, and an
-          # UNPINNED entry (XPST_ALLOW_UNPINNED_MEDIA=1 dev escape hatch) must
-          # never reach a published installer.
-          PROV="src-tauri/binaries/PROVENANCE.txt"
-          test -s "$PROV" || { echo "::error::no media-binary provenance record at $PROV"; exit 1; }
-          echo "--- media binary provenance (${{ matrix.target }}) ---"
-          cat "$PROV"
-          if grep -q '^UNPINNED' "$PROV"; then
-            echo "::error::media binaries include an UNPINNED local fallback; the release lane ships checksum-verified pinned binaries only"
-            exit 1
-          fi
-          for artifact in ffmpeg ffprobe yt-dlp; do
-            awk -F'\t' -v a="$artifact" '$2 == a { found = 1 } END { exit !found }' "$PROV" \
-              || { echo "::error::$artifact has no pinned provenance entry"; exit 1; }
-          done
-          cp "$PROV" "$RUNNER_TEMP/media-binaries-PROVENANCE-${{ matrix.target }}.txt"
+          # SHA-256 in scripts/media-binaries.lock and writes this record; the
+          # checker fails on a missing record, a missing artifact, or an
+          # UNPINNED entry (XPST_ALLOW_UNPINNED_MEDIA=1 dev escape hatch).
+          scripts/verify-media-binaries-provenance.sh src-tauri/binaries/PROVENANCE.txt
+          cp src-tauri/binaries/PROVENANCE.txt "$RUNNER_TEMP/media-binaries-PROVENANCE-${{ matrix.target }}.txt"
           {
             echo "### Media binary provenance (${{ matrix.target }})"
             echo '```'
-            cat "$PROV"
+            cat src-tauri/binaries/PROVENANCE.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 

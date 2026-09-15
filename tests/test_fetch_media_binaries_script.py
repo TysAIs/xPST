@@ -276,10 +276,72 @@ def test_lock_file_is_pinned_and_checksummed() -> None:
 
 def test_workflow_asserts_a_fully_pinned_build() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
-    assert "PROVENANCE" in workflow or "PROVENANCE.txt" in workflow, (
-        "release lane does not surface the media-binary provenance record"
+    assert "verify-media-binaries-provenance.sh" in workflow, (
+        "release lane does not check the media-binary provenance record"
     )
-    assert "UNPINNED" in workflow, "release lane does not assert the build is fully pinned"
+    assert "media-binaries-PROVENANCE-${{ matrix.target }}.txt" in workflow, (
+        "release lane does not attach the provenance record to the release"
+    )
+    checker = (REPO_ROOT / "scripts" / "verify-media-binaries-provenance.sh").read_text(encoding="utf-8")
+    assert "UNPINNED" in checker, "checker does not reject an unpinned build"
+    for artifact in ("ffmpeg", "ffprobe", "yt-dlp"):
+        assert artifact in checker, f"checker does not require {artifact}"
+
+
+PINNED_ROW = "pinned\t{platform}\t{artifact}\tsha256={sha}\tinstalled_sha256={sha}\tbytes=1\turl=https://example.invalid/{artifact}\n"
+
+
+def _provenance_file(tmp_path: Path, rows: str) -> Path:
+    path = tmp_path / "PROVENANCE.txt"
+    path.write_text(rows, encoding="utf-8")
+    return path
+
+
+def _run_checker(tmp_path: Path, path: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", "scripts/verify-media-binaries-provenance.sh", str(path)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_provenance_checker_accepts_a_fully_pinned_build(tmp_path: Path) -> None:
+    rows = "".join(
+        PINNED_ROW.format(platform="macos-arm64", artifact=artifact, sha="a" * 64)
+        for artifact in ("ffmpeg", "ffprobe", "yt-dlp")
+    )
+    proc = _run_checker(tmp_path, _provenance_file(tmp_path, rows))
+    assert proc.returncode == 0, proc.stderr
+    assert "PASS: every bundled media binary" in proc.stdout
+
+
+def test_provenance_checker_rejects_an_unpinned_build(tmp_path: Path) -> None:
+    rows = "UNPINNED\tmacos-arm64\tffmpeg\tpath=/usr/local/bin/ffmpeg\n"
+    rows += "".join(
+        PINNED_ROW.format(platform="macos-arm64", artifact=artifact, sha="a" * 64)
+        for artifact in ("ffprobe", "yt-dlp")
+    )
+    proc = _run_checker(tmp_path, _provenance_file(tmp_path, rows))
+    assert proc.returncode == 1
+    assert "UNPINNED" in proc.stderr
+
+
+def test_provenance_checker_rejects_a_missing_artifact(tmp_path: Path) -> None:
+    rows = "".join(
+        PINNED_ROW.format(platform="macos-arm64", artifact=artifact, sha="a" * 64)
+        for artifact in ("ffmpeg", "ffprobe")
+    )
+    proc = _run_checker(tmp_path, _provenance_file(tmp_path, rows))
+    assert proc.returncode == 1
+    assert "yt-dlp has no pinned provenance entry" in proc.stderr
+
+
+def test_provenance_checker_rejects_a_missing_record(tmp_path: Path) -> None:
+    proc = _run_checker(tmp_path, tmp_path / "absent.txt")
+    assert proc.returncode == 1
+    assert "no media-binary provenance record" in proc.stderr
 
 
 # --- behaviour ---------------------------------------------------------------
