@@ -108,4 +108,10 @@ def test_both_surfaces_require_explicit_targets(tmp_path: Path) -> None:
     config.config_dir = str(tmp_path)
     mcp = _mcp_preflight(config, payload)
     assert mcp["ready"] is False
-    assert "platforms is required" in mcp["blockers"]
+    # The zero-destination refusal is one error across surfaces: same message
+    # and the same stable code, not a surface-specific rewording.
+    assert "Choose at least one destination platform." in mcp["blockers"]
+    assert api["error"] == mcp["error"] == {
+        "code": "NO_DESTINATIONS",
+        "message": "Choose at least one destination platform.",
+    }

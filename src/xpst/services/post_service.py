@@ -234,14 +234,16 @@ class PostService:
     # ── Planning ────────────────────────────────────────────────────────
 
     def preflight(self, request: PostRequest) -> dict[str, Any]:
-        """Run the canonical, side-effect-free preflight for a request."""
+        """Run the canonical, side-effect-free preflight for a request.
+
+        The zero-destination refusal is NOT decided here: it comes from
+        :class:`PostPreflightService`, so the CLI, the MCP server and this
+        service all return the same ``NO_DESTINATIONS`` error instead of three
+        hand-written sentences that can drift apart.
+        """
         from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
 
         blockers: list[str] = []
-        if not request.platforms:
-            # An empty target list would produce an empty plan that reports
-            # "ready", so the request-shape precondition is decided here.
-            blockers.append("Choose at least one destination platform.")
         if not request.media_paths:
             blockers.append("Choose a video file before posting.")
 
@@ -262,6 +264,7 @@ class PostService:
         return {
             "ready": not blockers,
             "blockers": blockers,
+            "error": (plan or {}).get("error"),
             "plan": plan,
             "network_calls": False,
         }
@@ -275,7 +278,12 @@ class PostService:
             caption=request.caption,
             dry_run=True,
             blockers=verdict["blockers"],
-        ) | {"plan": verdict["plan"], "network_calls": False, "ready": verdict["ready"]}
+        ) | {
+            "plan": verdict["plan"],
+            "network_calls": False,
+            "ready": verdict["ready"],
+            "error": verdict["error"],
+        }
 
     # ── Execution ───────────────────────────────────────────────────────
 
@@ -296,7 +304,12 @@ class PostService:
                 caption=request.caption,
                 dry_run=False,
                 blockers=verdict["blockers"],
-            ) | {"plan": verdict["plan"], "ready": False, "blocked": True}
+            ) | {
+                "plan": verdict["plan"],
+                "ready": False,
+                "blocked": True,
+                "error": verdict["error"],
+            }
 
         try:
             engine = self._build_engine()
