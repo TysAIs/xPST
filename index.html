@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>xPST — Cross-Posting Suite for Creators and AI Agents</title>
-<meta name="description" content="xPST is an open-source, local-first desktop and command-line tool that publishes one short video to YouTube Shorts, X, Instagram Reels and TikTok — from your own machine, with your own accounts.">
+<meta name="description" content="xPST is an open-source, local-first desktop and command-line tool that publishes one short video to YouTube Shorts, X and Instagram Reels from your own machine with your own accounts. TikTok is supported as a source, not as a publish destination.">
 <meta name="tiktok-developers-site-verification" content="H5LJ7htLuZUf7F8WChFfCvLuMRklJEns">
 <link rel="stylesheet" href="assets/site.css">
 </head>
@@ -26,10 +26,11 @@
 <main>
 <div class="wrap">
 
-  <h1>Cross-post short video to every platform, from your own machine.</h1>
+  <h1>Cross-post short video to your own accounts, from your own machine.</h1>
   <p class="lede">xPST is an open-source desktop app and command-line tool that takes one short video and
-  publishes it to YouTube Shorts, X, Instagram Reels and TikTok — using only your own accounts, storing
-  everything locally, and never uploading anything until you confirm it.</p>
+  publishes it to YouTube Shorts, X and Instagram Reels — using only your own accounts, storing
+  everything locally, and never uploading anything until you confirm it. Videos can also be pulled in
+  from TikTok as a source and cross-posted to those destinations; xPST does not publish to TikTok.</p>
 
   <p>
     <span class="pill ok">Open source</span>
@@ -65,13 +66,17 @@
       <tr><td>YouTube Shorts</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
       <tr><td>X</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
       <tr><td>Instagram Reels</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
-      <tr><td>TikTok</td><td>Yes</td><td>Requires TikTok app approval</td><td>Yes</td></tr>
+      <tr><td>TikTok</td><td>Yes (source)</td><td>No — not offered</td><td>No</td></tr>
     </tbody>
   </table>
-  <p class="muted">TikTok is fully supported for pulling content in and for analytics. Publishing to
-  TikTok requires an approved developer application with TikTok's Content Posting API; until an
-  application is approved, xPST reports that capability as blocked rather than pretending it works.
-  Threads and Messenger exist in the product but stay switched off unless deliberately enabled.</p>
+  <p class="muted">TikTok is a source, not a destination. xPST can pull videos in from a TikTok account
+  and cross-post them to the destinations above; it does not publish to TikTok. TikTok's Content Posting
+  API guidelines list this use case — a utility that uploads content to the account(s) you or your team
+  manage — as not acceptable, and an application that has not passed TikTok's audit can only post
+  privately: self-only visibility, at most 5 users per 24 hours. Until an audited app exists, xPST
+  reports TikTok publishing as blocked pending external review and does not advertise it, and TikTok
+  analytics are unavailable for the same unapproved-app reason. Threads and Messenger exist in the
+  product but stay switched off unless deliberately enabled.</p>
 
   <h2 id="install">Install</h2>
   <p>From source today — the package index release is pending:</p>
