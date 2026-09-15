@@ -510,9 +510,54 @@ def test_webhook_post_bad_signature_rejected(tmp_path: Path) -> None:
 
 
 def test_webhook_post_invalid_json(tmp_path: Path) -> None:
+    """A signed but malformed body is a 400, not a 403 (signature passes first)."""
     client = _make_client(tmp_path)
-    resp = client.post("/webhook/messenger", content=b"{not json", headers={"Content-Type": "application/json"})
+    body = b"{not json"
+    signature = "sha256=" + hmac.new(APP_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    resp = client.post(
+        "/webhook/messenger",
+        content=body,
+        headers={"Content-Type": "application/json", "X-Hub-Signature-256": signature},
+    )
     assert resp.status_code == 400
+
+
+def test_webhook_post_without_signature_while_a_secret_is_configured_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """Fail closed: a configured app_secret means every payload must be signed.
+
+    Previously an unsigned body was accepted with only a warning, which let an
+    unauthenticated caller drive the adapter.
+    """
+    client = _make_client(tmp_path)
+    resp = client.post(
+        "/webhook/messenger",
+        content=json.dumps({"entry": []}),
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status_code == 403
+
+
+def test_webhook_post_signed_but_no_secret_configured_is_rejected(tmp_path: Path) -> None:
+    """Fail closed: a signature we cannot verify is not a pass."""
+    from fastapi.testclient import TestClient
+
+    from xpst.dashboard.server import _create_app
+
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(
+        yaml.dump({"accounts": {"messenger": {"enabled": True, "verify_token": "verify_me"}}}),
+        encoding="utf-8",
+    )
+    client = TestClient(_create_app(str(tmp_path)))
+    resp = client.post(
+        "/webhook/messenger",
+        content=json.dumps({"entry": []}),
+        headers={"X-Hub-Signature-256": "sha256=" + "a" * 64},
+    )
+    assert resp.status_code == 403
+    assert "no app secret" in resp.json()["detail"].lower()
 
 
 def test_webhook_post_when_disabled_returns_ok(tmp_path: Path) -> None:
