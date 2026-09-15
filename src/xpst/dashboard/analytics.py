@@ -233,7 +233,6 @@ class AnalyticsCollector:
             config_dir: Path to xPST config directory.
         """
         self.config_dir = config_dir
-        self._yt_service = None  # Cached YouTube Analytics service
         self._ig_client = None  # Cached instagrapi Client
         self._x_client = None  # Cached twikit Client
         self._cred_store = None
@@ -261,30 +260,6 @@ class AnalyticsCollector:
                 self.config = yaml.safe_load(f) or {}
         else:
             self.config = {}
-
-    def _get_youtube_service(self):
-        """Get authenticated YouTube Analytics API service.
-
-        Returns:
-            YouTube Analytics API service or None if unavailable.
-        """
-
-        if self._yt_service is not None:
-            return self._yt_service
-        try:
-            from google.oauth2.credentials import Credentials
-            from googleapiclient.discovery import build
-
-            token_path = Path(self.config_dir).expanduser() / "credentials" / "youtube_token.json"
-            if not token_path.exists():
-                return None
-
-            creds = Credentials.from_authorized_user_file(str(token_path))
-            self._yt_service = build("youtubeAnalytics", "v2", credentials=creds)
-            return self._yt_service
-        except Exception as exc:
-            logger.debug("YouTube analytics service unavailable: %s", exc)
-            return None
 
     def _get_youtube_data_service(self):
         """Get authenticated YouTube Data API v3 service.
