@@ -14,6 +14,12 @@ def get_config_dir() -> Path:
     """
     Get the platform-appropriate config directory.
 
+    - ``XPST_CONFIG_DIR`` override wins when set (absolute or ``~``-relative).
+      This is the isolation hook used by installers, smoke tests and the
+      published app: without it an isolated profile silently scattered state
+      into the real ``HOME/.xpst`` (regression: the macOS bundle created
+      ``config.yaml``, ``analytics.db``, ``quotas.json`` and lock files under
+      ``HOME/.xpst`` while a stranger-supplied ``XPST_CONFIG_DIR`` stayed empty).
     - macOS: ~/.xpst/
     - Linux: ~/.xpst/
     - Windows: %APPDATA%\\xPST\\ or ~/.xpst/
@@ -45,6 +51,10 @@ def get_config_dir() -> Path:
         These are tracked here so the migration state is explicit rather than
         ambiguous; finishing them is a separate, lower-risk follow-up.
     """
+    override = os.environ.get("XPST_CONFIG_DIR")
+    if override and override.strip():
+        # expanduser/expandvars so "~/profile" and "$TMPDIR/xpst" both work.
+        return Path(os.path.expandvars(os.path.expanduser(override.strip())))
     if sys.platform == "win32":
         appdata = os.environ.get("APPDATA")
         if appdata:
