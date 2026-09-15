@@ -18,10 +18,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import pytest
+
 from xpst.drafts import DRAFT_FILE_NAME
 
+from .test_dashboard import _auth_headers
 from .test_dashboard_first_run_api import (
     FakeEngine,
+    _authed_app,
     _engine_factory,
     _media_file,
     _open_app,
@@ -286,3 +290,29 @@ def test_a_post_without_a_draft_still_works(tmp_path: Path) -> None:
     assert response.json()["ok"] is True
     assert "draft_id" not in response.json()
     assert not Path(config_dir, DRAFT_FILE_NAME).exists(), "an unbound post must not create a draft"
+
+
+# ── Auth: drafts are not an open local write surface ─────────────────────
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/api/drafts"),
+        ("POST", "/api/drafts"),
+        ("GET", "/api/drafts/draft_x"),
+        ("DELETE", "/api/drafts/draft_x"),
+    ],
+)
+def test_draft_routes_are_behind_the_dashboard_auth(tmp_path: Path, method: str, path: str) -> None:
+    """Drafts are the user's unpublished work: never readable without auth."""
+    client, _config_dir = _authed_app(tmp_path)
+
+    anonymous = client.request(method, path, json={} if method == "POST" else None)
+    assert anonymous.status_code == 401, f"{method} {path} answered {anonymous.status_code} anonymously"
+    assert anonymous.headers.get("WWW-Authenticate", "").startswith("Basic")
+
+    # Authenticated, the route answers on its own terms (a missing draft is a
+    # 404, not an auth failure) — the point here is that auth is required.
+    authenticated = client.request(method, path, headers=_auth_headers(), json={} if method == "POST" else None)
+    assert authenticated.status_code in (200, 404, 413), authenticated.text
