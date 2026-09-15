@@ -663,7 +663,16 @@ def test_require_published_rejects_a_local_artifact(tmp_path, capsys):
     assert summary.get("install") is None
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the synthetic bundle is a macOS .app; Windows cannot launch it (WinError 193)",
+)
 def test_require_published_records_that_a_url_run_was_enforced(tmp_path, capsys):
+    """--require-published must allow a URL run and record that it was enforced.
+
+    The end-to-end launch is POSIX-only for the same reason the other synthetic
+    tests are: the fake published artifact is a macOS bundle.
+    """
     import http.server
     import threading
 
