@@ -63,6 +63,13 @@ class TikTokUploader(PlatformUploader):
 
     # TikTok limits
     MAX_CAPTION_LENGTH = 2200
+    # Direct Post duration ceiling in seconds. This must equal
+    # media.specs.PLATFORM_SPECS["tiktok"].duration_cap_s: the upload duration
+    # preflight reads THIS manifest value, while the media spec table keeps its
+    # own copy, and the two had drifted apart (specs said 600, the manifest said
+    # nothing, so the duration check never fired for TikTok). A regression test
+    # pins the two together.
+    MAX_VIDEO_DURATION_SECONDS = 600
     # Rate limit: 6 req/min per user (enforced server-side)
     RATE_LIMIT_PER_MIN = 6
 
@@ -93,6 +100,7 @@ class TikTokUploader(PlatformUploader):
             extra={
                 "content": ("video",),
                 "max_caption_length": self.MAX_CAPTION_LENGTH,
+                "max_video_duration_seconds": self.MAX_VIDEO_DURATION_SECONDS,
                 "rate_limit_per_min": self.RATE_LIMIT_PER_MIN,
             },
         )
