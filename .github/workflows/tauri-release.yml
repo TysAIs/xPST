@@ -27,15 +27,16 @@ on:
   push:
     tags:
       - "v*.*.*"
-    paths:
-      - "src-tauri/**"
-      - "ui/**"
-      - "build_engine.spec"
-      - "scripts/build-engine.sh"
-      - "scripts/fetch-media-binaries.sh"
-      - "scripts/verify_release_version.py"
-      - "pyproject.toml"
-      - ".github/workflows/tauri-release.yml"
+      # Documented dry-run tag lane: pushing e.g. `dryrun-tauri-1` builds and
+      # smoke-tests exactly what a real tag builds, uploads the assets into a
+      # DRAFT release (nothing is published, no watcher is notified) and is
+      # ignored by the legacy release.yml lane. Used to prove the tag path
+      # without publishing a release - see docs/tauri-release-lane.md.
+      - "dryrun-tauri-*"
+    # NOTE: no `paths:` filter here on purpose. GitHub does not evaluate path
+    # filters for tag pushes, and on this workflow a filter would also be
+    # misleading: the lane must run for EVERY version tag or a tag can silently
+    # produce no artifact at all.
   workflow_dispatch:
 
 permissions:
@@ -185,6 +186,26 @@ jobs:
           fi
           echo "media binaries present"
 
+      - name: Assert the bundled media binaries are pinned and checksummed
+        run: |
+          set -euo pipefail
+          # scripts/fetch-media-binaries.sh verifies every download against the
+          # SHA-256 in scripts/media-binaries.lock and writes this record; the
+          # checker fails on a missing record, a missing artifact, or an
+          # UNPINNED entry (XPST_ALLOW_UNPINNED_MEDIA=1 dev escape hatch).
+          scripts/verify-media-binaries-provenance.sh src-tauri/binaries/PROVENANCE.txt
+          # Keep a per-target copy where the artifact upload can pick it up, so
+          # the provenance record travels to the release with this lane's
+          # installers (src-tauri/target is a build dir and is gitignored).
+          mkdir -p src-tauri/target
+          cp src-tauri/binaries/PROVENANCE.txt "src-tauri/target/media-binaries-PROVENANCE-${{ matrix.target }}.txt"
+          {
+            echo "### Media binary provenance (${{ matrix.target }})"
+            echo '```'
+            cat src-tauri/binaries/PROVENANCE.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Import Apple signing cert (if secrets present)
         if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != null && env.APPLE_CERTIFICATE != ''
         id: cert
@@ -332,6 +353,7 @@ jobs:
             src-tauri/target/**/bundle/msi/*.msi
             src-tauri/target/**/bundle/deb/*.deb
             src-tauri/target/**/bundle/appimage/*.AppImage
+            src-tauri/target/media-binaries-PROVENANCE-*.txt
           if-no-files-found: error
 
       - name: "Smoke boot (macOS) — app launches and stays up"
@@ -442,18 +464,84 @@ jobs:
           Stop-Process -Name 'xpst-engine' -ErrorAction SilentlyContinue
           Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue
 
-      - name: Release (tag builds only)
-        if: startsWith(github.ref, 'refs/tags/')
+  # Tag builds only: ONE job owns the GitHub release.
+  #
+  # Previously each of the three lanes uploaded straight to the release, so all
+  # three raced to create it and a tag build could die on the API's 5xx during
+  # that race (observed on dryrun-tauri-1: "Creating new GitHub release ... 500 /
+  # Too many retries"). Collecting the per-lane artifacts here means the release
+  # is created once, the published asset set is asserted before anything is
+  # published, and the aggregate checksums cover every lane's installer.
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-tauri]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the per-lane artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Resolve and assert the release asset set
+        id: assets
+        run: |
+          set -euo pipefail
+          echo "--- artifacts collected from every lane ---"
+          find release-artifacts -type f | sort
+          # A tag that publishes zero files is worse than a red lane: it looks
+          # shipped. Require the file a stranger installs for every platform
+          # this workflow claims to support, plus each lane's provenance record.
+          FILES=()
+          while IFS= read -r f; do [ -n "$f" ] && FILES+=("$f"); done < <(find release-artifacts -type f \
+            \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' -o -name '*.deb' \
+               -o -name '*.AppImage' -o -name '*.app.tar.gz' -o -name '*.sig' \
+               -o -name 'media-binaries-PROVENANCE-*.txt' \) | sort)
+          require() {  # $1 = description, rest = acceptable shell globs
+            local desc="$1"; shift
+            local f pattern
+            for f in "${FILES[@]}"; do
+              for pattern in "$@"; do
+                # shellcheck disable=SC2053 - the glob is intended on the right
+                if [[ "$f" == $pattern ]]; then
+                  echo "ok: $desc -> $f"
+                  return 0
+                fi
+              done
+            done
+            echo "::error::tag $GITHUB_REF_NAME would publish no $desc"
+            exit 1
+          }
+          require "macOS installer (.dmg)" '*.dmg'
+          require "Windows installer (.exe or .msi)" '*.exe' '*.msi'
+          require "Linux installer (.AppImage or .deb)" '*.AppImage' '*.deb'
+          require "media binary provenance record" '*media-binaries-PROVENANCE-*.txt'
+          # Checksums for exactly the assets being published. Asset names are
+          # flattened to their basename because that is the name GitHub gives
+          # them, so `sha256sum -c SHA256SUMS` works on a downloaded set.
+          ( cd release-artifacts && for rel in $(printf '%s\n' "${FILES[@]}" | sed 's#^release-artifacts/##' | sort); do
+              printf '%s  %s\n' "$(sha256sum "$rel" | cut -d' ' -f1)" "$(basename "$rel")"
+            done ) > release-artifacts/SHA256SUMS
+          echo "--- SHA256SUMS ---"
+          cat release-artifacts/SHA256SUMS
+          FILES+=(release-artifacts/SHA256SUMS)
+          {
+            echo 'files<<RELEASE_ASSETS_EOF'
+            printf '%s\n' "${FILES[@]}"
+            echo 'RELEASE_ASSETS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            src-tauri/target/**/bundle/macos/*.app.tar.gz
-            src-tauri/target/**/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/**/bundle/dmg/*.dmg
-            src-tauri/target/**/bundle/nsis/*.exe
-            src-tauri/target/**/bundle/msi/*.msi
-            src-tauri/target/**/bundle/deb/*.deb
-            src-tauri/target/**/bundle/appimage/*.AppImage
-          fail_on_unmatched_files: false
+          # The asset list was resolved and asserted in the step above: no glob
+          # here can quietly match zero files.
+          files: ${{ steps.assets.outputs.files }}
+          fail_on_unmatched_files: true
           generate_release_notes: true
-          draft: false
+          # Version tags (vX.Y.Z) publish; a documented dry-run tag
+          # (dryrun-tauri-*) exercises the exact same build, smoke, assert and
+          # upload path into a DRAFT release, so the tag lane can be proven
+          # without publishing anything.
+          draft: ${{ !startsWith(github.ref_name, 'v') }}
+          prerelease: false
