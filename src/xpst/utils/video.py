@@ -281,7 +281,9 @@ class FFmpegNotFoundError(RuntimeError):
         super().__init__(
             f"FFmpeg not found at '{ffmpeg_path}'. "
             "FFmpeg is required for video encoding. "
-            f"{self.hint} or see https://ffmpeg.org/download.html"
+            f"{self.hint}, set XPST_FFMPEG_PATH to the ffmpeg binary "
+            f"(or point it at a directory containing one), or see "
+            f"https://ffmpeg.org/download.html"
         )
 
 
