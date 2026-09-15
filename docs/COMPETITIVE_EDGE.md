@@ -7,7 +7,7 @@ the README and docs can speak to a "beat the incumbents" story with facts, not h
 
 | Product | Price | Open source? | Platforms | Auth | Agent/API surface |
 |---|---|---|---|---|---|
-| **xPST** | **Free, MIT OR Apache-2.0** | **Yes** | YT, X, IG, TikTok, Threads, Messenger | Mixed: official APIs and user-owned sessions; current status varies | **CLI + MCP (38 tools) + FastAPI dashboard + desktop (optional)** |
+| **xPST** | **Free, MIT OR Apache-2.0** | **Yes** | YT, X, IG, TikTok, Threads, Messenger | Mixed: official APIs and user-owned sessions; current status varies | **CLI + MCP (40 tools) + FastAPI dashboard + desktop (optional)** |
 | **Content360** | $67 lifetime / "$47/mo soon" | No | ~15 (mostly via Zapier-style) | Closed SaaS OAuth | None (web app only) |
 | **Postiz** | Free self-host / cloud | AGPL | 9-15 | Official OAuth | Web UI, API |
 | **Repurpose.io** | $35/mo | No | 4-5 | Closed SaaS | None |
@@ -17,7 +17,7 @@ the README and docs can speak to a "beat the incumbents" story with facts, not h
 ## Where xPST wins outright
 
 1. **Truly open + free.** Content360 is $67 lifetime (one-time price anchors the value of what we give away), Postiz is AGPL, Repurpose/Buffer are subscriptions. xPST is MIT OR Apache-2.0 — you own it, fork it, sell services around it.
-2. **AI-agent-native.** 38 MCP tools (`xpst_post`, `xpst_suggest_caption`, `xpst_health`, `xpst_analytics`, scheduling, KB, transcripts, search). **No competitor ships an MCP server** — this is the "for AI agents" moat.
+2. **AI-agent-native.** 40 MCP tools (`xpst_post`, `xpst_suggest_caption`, `xpst_health`, `xpst_analytics`, scheduling incl. cancel, targeted failure retry, KB, transcripts, search). **No competitor ships an MCP server** — this is the "for AI agents" moat.
 3. **Auditable local credentials.** The live-verified paths use sanctioned APIs
    or user-owned sessions as documented. TikTok destination publishing is
    pending external review, and Threads/Messenger are disabled/unauthenticated;
