@@ -103,12 +103,25 @@ jobs:
           export PATH="$HOME/.cargo/bin:$PATH"
           export TAURI_SIGNING_PRIVATE_KEY="${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"
           export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}"
+          # An empty Apple signing/notarization variable is NOT the same as an
+          # absent one: Tauri treats a set-but-empty APPLE_SIGNING_IDENTITY as an
+          # identity named "" and every bundle fails with
+          # `codesign: no identity found`. The repository has no Apple secrets,
+          # so drop the variables instead of passing empty strings.
+          for var in APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_CERTIFICATE; do
+            if [ -z "${!var:-}" ]; then
+              unset "$var" || true
+            fi
+          done
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             # CI key present → signed updater artifacts
             cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           else
-            # No key → build without updater signature (artifact still uploaded for smoke)
-            cargo tauri build --target ${{ matrix.target }} --bundles app
+            # No updater key → still build every configured bundle (the .dmg a
+            # stranger downloads) with Tauri's default ad-hoc signing. Building
+            # `app` only here silently produced no installer at all.
+            echo "no TAURI_SIGNING_PRIVATE_KEY: building ${{ matrix.bundles }} with ad-hoc signing"
+            cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           fi
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -116,40 +129,109 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
-      - name: Verify bundle size gate (≤200MB)
+      - name: Assert the installer bundles exist
         run: |
-          APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" | head -1)
-          SIZE_MB=$(du -sm "$APP_PATH" | cut -f1)
-          echo "xPST.app size: ${SIZE_MB}MB"
-          if [ "$SIZE_MB" -gt 200 ]; then
-            echo "::error::Bundle ${SIZE_MB}MB exceeds 200MB gate"
+          set -euo pipefail
+          echo "--- bundles under src-tauri/target ---"
+          find src-tauri/target -path '*bundle*' \( -name '*.dmg' -o -name '*.app' -o -name '*.exe' -o -name '*.msi' -o -name '*.deb' -o -name '*.AppImage' \) -print
+          case "${RUNNER_OS}" in
+            macOS)
+              if [ -z "$(find src-tauri/target -path '*bundle/dmg*' -name '*.dmg' -print -quit)" ]; then
+                echo "::error::no .dmg was produced; the macOS lane cannot publish a stranger installer"
+                exit 1
+              fi
+              ;;
+            Windows)
+              if [ -z "$(find src-tauri/target -path '*bundle*' \( -name '*.exe' -o -name '*.msi' \) -print -quit)" ]; then
+                echo "::error::no Windows installer was produced"
+                exit 1
+              fi
+              ;;
+            Linux)
+              if [ -z "$(find src-tauri/target -path '*bundle*' \( -name '*.deb' -o -name '*.AppImage' \) -print -quit)" ]; then
+                echo "::error::no Linux package was produced"
+                exit 1
+              fi
+              ;;
+          esac
+
+      - name: Verify installer size gate (≤200MB)
+        run: |
+          set -euo pipefail
+          # Gate the artifact a stranger actually downloads, not the unpacked
+          # bundle: the .dmg/.AppImage/.exe compresses far below the .app it was
+          # built from, so measuring the app failed a perfectly shippable
+          # installer (209MB app -> well under 200MB download). The unpacked size
+          # is still reported, as a warning, so bloat stays visible.
+          case "${RUNNER_OS}" in
+            macOS)   PATTERN='*bundle/dmg/*.dmg' ;;
+            Windows) PATTERN='*bundle/nsis/*.exe' ;;
+            Linux)   PATTERN='*bundle/appimage/*.AppImage' ;;
+            *)       echo "::error::unsupported runner ${RUNNER_OS}"; exit 1 ;;
+          esac
+          INSTALLER=$(find src-tauri/target -path "$PATTERN" -print -quit)
+          if [ -z "$INSTALLER" ]; then
+            echo "::error::no installer matched ${PATTERN}"
             exit 1
           fi
+          BYTES=$(wc -c < "$INSTALLER" | tr -d ' ')
+          SIZE_MB=$((BYTES / 1048576))
+          echo "installer (what a stranger downloads): ${INSTALLER} -> ${SIZE_MB}MB (${BYTES} bytes)"
+          APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" -print -quit || true)
+          if [ -n "${APP_PATH}" ]; then
+            APP_MB=$(du -sm "$APP_PATH" | cut -f1)
+            echo "unpacked app bundle: ${APP_MB}MB"
+            if [ "$APP_MB" -gt 200 ]; then
+              echo "::warning::unpacked xPST.app is ${APP_MB}MB, over the 200MB app target; the published installer is ${SIZE_MB}MB"
+            fi
+          fi
+          if [ "$SIZE_MB" -gt 200 ]; then
+            echo "::error::installer ${SIZE_MB}MB exceeds the 200MB gate"
+            exit 1
+          fi
+          echo "installer size gate: PASS (${SIZE_MB}MB <= 200MB)"
 
       - name: Smoke boot (app launches, engine healthy)
         if: runner.os == 'macOS'
         run: |
           APP_PATH=$(find src-tauri/target -name "xPST.app" -path "*release*" | head -1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::no xPST.app bundle to smoke"
+            exit 1
+          fi
           set -e
-          # headless-safe boot with a bounded watchdog
-          timeout 60 "$APP_PATH/Contents/MacOS/"* &
+          # macOS ships no GNU `timeout`, so bound the wait with a watchdog
+          # instead of `timeout 60 ...`.
+          BIN=$(ls "$APP_PATH/Contents/MacOS/"*)
+          LOG="$RUNNER_TEMP/xpst-smoke-boot.log"
+          "$BIN" > "$LOG" 2>&1 &
           APP_PID=$!
           sleep 15
           if ! kill -0 $APP_PID 2>/dev/null; then
             echo "::error::App exited during smoke boot"
+            cat "$LOG"
             exit 1
           fi
           kill $APP_PID 2>/dev/null || true
+          echo "--- smoke boot log (first 40 lines) ---"
+          head -40 "$LOG" || true
 
       - name: Upload app bundle
         uses: actions/upload-artifact@v4
         with:
           name: xPST-${{ matrix.target }}
+          # A --target build lands under target/<triple>/release/bundle, so the
+          # old literal target/release/bundle paths matched nothing and the
+          # upload failed with "no files found" even for a successful build.
           path: |
-            src-tauri/target/release/bundle/macos/xPST.app
-            src-tauri/target/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/**/bundle/macos/xPST.app
+            src-tauri/target/**/bundle/macos/*.app.tar.gz
+            src-tauri/target/**/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/**/bundle/dmg/*.dmg
+            src-tauri/target/**/bundle/nsis/*.exe
+            src-tauri/target/**/bundle/msi/*.msi
+            src-tauri/target/**/bundle/deb/*.deb
+            src-tauri/target/**/bundle/appimage/*.AppImage
           if-no-files-found: error
 
       - name: Release (tag builds only)
@@ -157,8 +239,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            src-tauri/target/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/**/bundle/macos/*.app.tar.gz
+            src-tauri/target/**/bundle/macos/*.app.tar.gz.sig
+            src-tauri/target/**/bundle/dmg/*.dmg
+            src-tauri/target/**/bundle/nsis/*.exe
+            src-tauri/target/**/bundle/msi/*.msi
+            src-tauri/target/**/bundle/deb/*.deb
+            src-tauri/target/**/bundle/appimage/*.AppImage
           generate_release_notes: true
           draft: false

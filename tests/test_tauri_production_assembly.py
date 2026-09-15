@@ -113,3 +113,71 @@ def test_build_script_writes_the_exact_rust_resource_path() -> None:
     assert '"$OUT_DIR/engine"' in script
     assert 'dist/engine/xpst-engine' in script
     assert "onedir" in script
+
+
+def test_tauri_workflow_passes_no_empty_apple_identity() -> None:
+    """An empty APPLE_SIGNING_IDENTITY is not an absent one.
+
+    The repository has no Apple secrets, so the workflow exported
+    APPLE_SIGNING_IDENTITY="" and Tauri ran `codesign --sign ""`, failing every
+    bundle with "no identity found" after a successful Rust build.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
+
+    assert 'unset "$var"' in workflow
+    for variable in ("APPLE_SIGNING_IDENTITY", "APPLE_ID", "APPLE_PASSWORD", "APPLE_TEAM_ID"):
+        assert variable in workflow
+
+
+def test_tauri_workflow_builds_the_installer_without_an_updater_key() -> None:
+    """No updater key must not downgrade the bundle set to `app` only.
+
+    The old else-branch built `--bundles app`, so the macOS lane produced no
+    .dmg at all and the subsequent upload had nothing to publish.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
+
+    assert "--bundles app" not in workflow
+    assert "no TAURI_SIGNING_PRIVATE_KEY" in workflow
+    # The configured bundle set is used on both branches.
+    assert workflow.count("--bundles ${{ matrix.bundles }}") == 2
+
+
+def test_tauri_workflow_uploads_from_the_target_specific_bundle_dir() -> None:
+    """`--target <triple>` writes target/<triple>/release/bundle.
+
+    The literal `src-tauri/target/release/bundle/...` upload and release paths
+    matched nothing for a targeted build, so a successful build still failed the
+    upload step with if-no-files-found: error.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
+
+    assert "src-tauri/target/release/bundle" not in workflow
+    assert "src-tauri/target/**/bundle/dmg/*.dmg" in workflow
+    assert "src-tauri/target/**/bundle/macos/xPST.app" in workflow
+
+
+def test_tauri_workflow_asserts_an_installer_exists_and_avoids_gnu_timeout() -> None:
+    """The lane must fail loudly when it built no installer, and macOS has no GNU timeout."""
+    workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
+
+    assert "no .dmg was produced" in workflow
+    assert 'timeout 60 "' not in workflow
+    assert "if-no-files-found: error" in workflow
+
+
+def test_tauri_workflow_gates_the_installer_a_stranger_downloads() -> None:
+    """The 200MB gate must measure the download, not the unpacked bundle.
+
+    Measuring `du -sm xPST.app` failed a 209MB app whose .dmg — the artifact a
+    stranger actually downloads — is smaller, so a shippable installer was
+    blocked. The app size is still reported as a warning so bloat stays visible.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
+
+    assert "Verify installer size gate" in workflow
+    assert "du -sm \"$APP_PATH\"" in workflow
+    assert 'INSTALLER=$(find src-tauri/target -path "$PATTERN" -print -quit)' in workflow
+    # The app-size check is a warning, the installer check is the failure.
+    assert "::warning::unpacked xPST.app is" in workflow
+    assert "::error::installer ${SIZE_MB}MB exceeds the 200MB gate" in workflow
