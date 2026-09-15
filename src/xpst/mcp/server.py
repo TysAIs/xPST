@@ -1797,7 +1797,9 @@ async def _handle_capabilities(config: XPSTConfig) -> CallToolResult:
 
     catalog = canonical_provider_catalog(config)
     payload = {
-        "ok": True,
+        # Derived from the catalog it describes, not a constant: an empty
+        # catalog must not report ok.
+        "ok": bool(catalog.get("providers")),
         "contract_version": 1,
         "roles": catalog["roles"],
         "providers": [
