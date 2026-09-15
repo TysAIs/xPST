@@ -47,6 +47,43 @@ def _probe_and_store(config_dir: str, config: Any) -> tuple[dict[str, Any], dict
     return auth, canonical
 
 
+# The outcome report verifies post ownership, which for YouTube is a real API
+# round trip (channel uploads playlist). The Analytics page must not pay that
+# on every load, so recorded-mode reports are memoized per config dir for
+# XPST_ANALYTICS_OUTCOME_TTL seconds (default 60; 0 disables caching).
+_OUTCOME_REPORT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_OUTCOME_REPORT_LOCK = threading.Lock()
+DEFAULT_OUTCOME_TTL_S = 60.0
+
+
+def _outcome_ttl() -> float:
+    raw = os.environ.get("XPST_ANALYTICS_OUTCOME_TTL")
+    if raw is None:
+        return DEFAULT_OUTCOME_TTL_S
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_OUTCOME_TTL_S
+
+
+def _cached_outcome_report(config_dir: str) -> dict[str, Any]:
+    """Recorded-mode outcome report, memoized for a short TTL."""
+    from xpst.analytics import AnalyticsCollector
+
+    ttl = _outcome_ttl()
+    key = str(config_dir)
+    now = time.monotonic()
+    if ttl > 0:
+        with _OUTCOME_REPORT_LOCK:
+            hit = _OUTCOME_REPORT_CACHE.get(key)
+            if hit is not None and (now - hit[0]) < ttl:
+                return hit[1]
+    report = AnalyticsCollector(config_dir).outcome_report()
+    with _OUTCOME_REPORT_LOCK:
+        _OUTCOME_REPORT_CACHE[key] = (time.monotonic(), report)
+    return report
+
+
 def _refresh_in_background(config_dir: str, config: Any) -> bool:
     """Re-probe off the request path. Returns False when one is already running."""
     key = str(config_dir)
@@ -498,6 +535,29 @@ def create_api_router(
         from xpst.dashboard.analytics import cached_summary_stats
 
         return cached_summary_stats(config_dir)
+
+    @router.get("/analytics/outcomes")
+    def api_analytics_outcomes(live: int = 0) -> dict[str, Any]:
+        """Per-post/per-platform outcomes, labelled recorded vs live.
+
+        ``live=0`` (default) reads the persisted snapshot store plus the
+        verified ownership set — no metric network calls. ``live=1`` runs a
+        real collection first (platform APIs, seconds, API quota) and labels
+        the rows it fetched as ``live``; posts whose collection failed keep
+        their recorded snapshot and stay labelled ``recorded``.
+
+        Every number traces to a post in the verified ownership set. A
+        platform with no metric-bearing owned post returns ``totals: null``
+        so the UI renders "no data" instead of a zero.
+        """
+        from xpst.analytics import AnalyticsCollector
+
+        if live:
+            import asyncio
+
+            collector = AnalyticsCollector(config_dir)
+            return asyncio.run(collector.collect_outcome_report())
+        return _cached_outcome_report(config_dir)
 
     @router.get("/videos")
     def api_videos() -> dict[str, Any]:
