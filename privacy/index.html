@@ -61,8 +61,10 @@
   <h2>4. What is sent to third parties</h2>
   <p>When you publish, xPST sends data <strong>directly from your device to the platform you chose</strong>
   using that platform's official API. That is the only transfer that happens, and it is initiated by you.
-  For example, publishing to TikTok sends the video and caption you selected to TikTok, using your own
-  authorised TikTok account.</p>
+  For example, publishing to YouTube or Instagram sends the video and caption you selected to that
+  platform, using your own authorised account. When xPST downloads a video from TikTok as a source, the
+  transfer runs the other way: content is read from TikTok onto your machine, and xPST does not upload
+  anything back to TikTok.</p>
   <p>The data each platform receives, and how that platform uses it, is governed by that platform's own
   privacy policy. xPST does not act as an intermediary and never receives a copy.</p>
 
@@ -85,13 +87,17 @@
       </tr>
       <tr>
         <td>TikTok — <code>video.publish</code></td>
-        <td>Upload and publish the user's own video to their own TikTok account, only after an explicit
-          confirmation in the application.</td>
+        <td>Requested by the TikTok app registration for the pending destination path. xPST does not
+          offer TikTok publishing today: until TikTok approves an audited application, that API only
+          permits private (self-only) posts for at most 5 users per 24 hours, and xPST reports the
+          capability as blocked rather than advertising it. The permission is not exercised by the
+          current release.</td>
       </tr>
       <tr>
         <td>TikTok — <code>video.upload</code></td>
-        <td>Upload the user's own video as a draft to the account's inbox so the creator can finish
-          captions or edits inside the TikTok application.</td>
+        <td>Requested for the same pending destination path, to upload the user's own video as a draft
+          to the account's inbox so the creator can finish captions or edits inside the TikTok
+          application. It is not used by the current release.</td>
       </tr>
       <tr>
         <td>YouTube — <code>youtube.upload</code></td>
