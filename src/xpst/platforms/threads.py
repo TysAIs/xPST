@@ -74,9 +74,14 @@ class ThreadsUploader(PlatformUploader):
             auth_mode=AuthMode.OAUTH,
             is_official_api=True,
             docs_url="https://developers.facebook.com/docs/threads",
-            notes="Uploads media and text via the Meta Threads API container publish model.",
+            notes="Uploads video via the Meta Threads API container publish model.",
             extra={
-                "content": ("video", "text"),
+                # Only the video container path is implemented (the container
+                # call hard-codes media_type=VIDEO). The Threads API also
+                # supports text and image containers, but xPST cannot publish
+                # them yet, and an agent that reads this capability list would
+                # otherwise attempt an operation that cannot work.
+                "content": ("video",),
                 "max_caption_length": self.MAX_CAPTION_LENGTH,
                 "max_video_duration_seconds": self.MAX_VIDEO_DURATION_SECONDS,
                 "rate_limit_per_day": self.RATE_LIMIT_PER_DAY,

@@ -1109,16 +1109,29 @@ async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallTool
     results = await engine.check_and_post(
         catch_up=catch_up, source=source, max_posts=max_posts
     )
-    # G28: agents need the per-video outcomes and post URLs, not a bare
-    # success string.
-    payload = {
-        "ok": True,
-        "processed": len(results),
-        "results": [_serialize_result(r) for r in results],
-    }
+    payload = _run_payload(results)
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, default=str))],
     )
+
+
+def _run_payload(results: list[CrossPostResult]) -> dict[str, Any]:
+    """Build the ``xpst_run`` result envelope from real per-video outcomes.
+
+    ``ok`` used to be hard-coded ``True``, so an agent that trusted it reported
+    success for a run that published nothing, or failed on every platform. It
+    now reflects the per-video outcomes, and the counts are explicit so a caller
+    can tell "nothing to do" apart from "everything failed".
+    """
+    serialized = [_serialize_result(item) for item in results]
+    failed = [item for item in serialized if not item["all_success"]]
+    return {
+        "ok": not failed,
+        "processed": len(serialized),
+        "succeeded": len(serialized) - len(failed),
+        "failed": len(failed),
+        "results": serialized,
+    }
 
 
 def _serialize_result(result: CrossPostResult) -> dict[str, Any]:

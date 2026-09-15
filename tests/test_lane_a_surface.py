@@ -183,6 +183,11 @@ class TestRunResults:
             success=True, post_id="p1",
             post_url="https://youtube.com/watch?v=p1", platform="youtube",
         )
+        # The engine calls update_status() immediately before returning a
+        # result (engine.py:550 in _process_video), so a real result carries
+        # accurate success flags. This fixture must do the same, otherwise it
+        # only passes because xpst_run used to hard-code ok=True.
+        fake_result.update_status()
         engine = MagicMock()
         engine.check_and_post = AsyncMock(return_value=[fake_result])
 
@@ -190,6 +195,8 @@ class TestRunResults:
         payload = json.loads(result.content[0].text)
         assert payload["ok"] is True
         assert payload["processed"] == 1
+        assert payload["succeeded"] == 1
+        assert payload["failed"] == 0
         assert payload["results"][0]["video_id"] == "v1"
         text = result.content[0].text
         assert "https://youtube.com/watch?v=p1" in text

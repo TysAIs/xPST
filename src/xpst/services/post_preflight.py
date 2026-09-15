@@ -24,7 +24,17 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 _SUPPORTED_PLATFORMS = tuple(PLATFORM_SPECS)
-_CAPTION_LIMITS = {"threads": 500}
+# Per-platform caption ceilings: {platform: (limit, severity)}.
+#
+# Severity is the point. Threads rejects an over-length caption outright, so it
+# is a hard blocker. X does NOT reject one - platforms/x.py silently truncates
+# to 277 characters plus an ellipsis - which meant an over-length caption was
+# previously posted mutilated with no signal anywhere in the plan. A warning
+# surfaces the truncation without refusing a post that would otherwise work.
+_CAPTION_LIMITS: dict[str, tuple[int, str]] = {
+    "threads": (500, "blocker"),
+    "x": (280, "warning"),
+}
 
 
 @dataclass(frozen=True)
@@ -372,17 +382,26 @@ class PostPreflightService:
         if not request.media_paths:
             platform_issues.append(PreflightIssue("MEDIA_REQUIRED", "At least one media path is required.", "blocker"))
 
-        limit = _CAPTION_LIMITS.get(platform)
-        if limit is not None and len(caption) > limit:
-            platform_issues.append(
-                PreflightIssue(
-                    "CAPTION_TOO_LONG",
-                    f"Caption is {len(caption)} characters; {platform} allows {limit}.",
-                    "blocker",
-                )
+        platform_warnings: list[PreflightIssue] = []
+        caption_limit = _CAPTION_LIMITS.get(platform)
+        if caption_limit is not None and len(caption) > caption_limit[0]:
+            limit, severity = caption_limit
+            message = f"Caption is {len(caption)} characters; {platform} allows {limit}."
+            issue = PreflightIssue(
+                "CAPTION_TOO_LONG",
+                f"{message} This caption will be truncated to {limit} characters."
+                if severity == "warning"
+                else message,
+                severity,
             )
+            if severity == "warning":
+                platform_warnings.append(issue)
+            else:
+                platform_issues.append(issue)
 
-        warnings = tuple(issue for item in media_plans for issue in item.warnings)
+        warnings = tuple(issue for item in media_plans for issue in item.warnings) + tuple(
+            platform_warnings
+        )
         constraints = self._constraints(platform, media_plans, caption)
         return PlatformPlan(
             platform=platform,
@@ -583,7 +602,7 @@ class PostPreflightService:
             "containers": list(spec.containers),
             "caption": {
                 "observed_characters": len(caption),
-                "max_characters": _CAPTION_LIMITS.get(platform),
+                "max_characters": (_CAPTION_LIMITS.get(platform) or (None, None))[0],
             },
         }
 
