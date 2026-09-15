@@ -260,11 +260,19 @@ def check_updates() -> list[PackageInfo]:
 
 def check_helper_tools() -> list[UpdateComponent]:
     """Check local helper tools without installing or reaching the network."""
+    from xpst.setup import check_yt_dlp
     from xpst.utils.platform import resolve_ffmpeg_path
 
     helpers: list[UpdateComponent] = []
 
-    ytdlp_version = get_installed_version("yt-dlp")
+    # ONE implementation of "the installed yt-dlp version": the binary xPST
+    # will actually invoke (XPST_YTDLP_PATH → PATH → venv → platform
+    # fallback), which is what ``xpst readiness`` reports too.  Reading the pip
+    # package metadata here instead made a single readiness payload report two
+    # different yt-dlp versions (2026.08.19 from the binary, 2026.8.19 from
+    # importlib.metadata) and made the helper row disagree with the check above
+    # it.
+    ytdlp_version = check_yt_dlp()
     helpers.append(
         _annotate_component(
             UpdateComponent(

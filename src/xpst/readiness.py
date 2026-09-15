@@ -268,7 +268,16 @@ def _destination_checks(
                     label=f"{name.title()} connection",
                     ok=True,
                     message=f"{name.title()} is disabled.",
-                    details={"enabled": False, "state": state},
+                    details={
+                        "role": "video_destination",
+                        "enabled": False,
+                        "state": state,
+                        # Disabled is not a probe result: the live facts are
+                        # unknown, not False.
+                        "session_valid": None,
+                        "live_checked": None,
+                        "error": role["error"],
+                    },
                 )
             )
             continue
@@ -312,6 +321,10 @@ def _destination_checks(
                 message=message,
                 action=action,
                 details={
+                    # This check is the video-destination role's verdict; the
+                    # platform-level entry in `xpst auth status` aggregates
+                    # roles, so name the role here to keep the two comparable.
+                    "role": "video_destination",
                     "enabled": role["enabled"],
                     "state": state,
                     "session_valid": session_valid,
