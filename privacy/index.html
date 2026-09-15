@@ -94,7 +94,23 @@
           captions or edits inside the TikTok application.</td>
       </tr>
       <tr>
-        <td>YouTube, X, Instagram</td>
+        <td>YouTube — <code>youtube.upload</code></td>
+        <td>Upload the video you selected to your own YouTube channel, after an explicit confirmation
+          in the application.</td>
+      </tr>
+      <tr>
+        <td>YouTube — <code>youtube.readonly</code></td>
+        <td>Read your own channel's name, id and uploads playlist, and the view/like/comment counts of
+          videos on that channel, so the application can label the connected account and show your
+          own performance. Read-only, own channel only.</td>
+      </tr>
+      <tr>
+        <td>YouTube — <code>youtube.force-ssl</code></td>
+        <td>Delete, or change the visibility of, a video on your own channel when you ask xPST to
+          remove a post.</td>
+      </tr>
+      <tr>
+        <td>X, Instagram</td>
         <td>The equivalent posting, reading and analytics permissions for your own accounts on those
           platforms, requested through each platform's own authorisation flow.</td>
       </tr>
@@ -103,27 +119,53 @@
   <p>You can revoke any of these at any time from the platform's own settings, or with
   <code>xpst disconnect &lt;platform&gt;</code>, which removes the stored credentials from your device.</p>
 
-  <h2>6. Data retention and deletion</h2>
+  <h2>6. YouTube API Services (Google)</h2>
+  <p>xPST uses <strong>YouTube API Services</strong>. When you connect a YouTube account, xPST asks
+  Google for only the three permissions listed in section 5 above, through Google's own OAuth 2.0
+  authorisation flow, and uses them only on the channel you authorised.</p>
+  <ul>
+    <li><code>https://www.googleapis.com/auth/youtube.upload</code> — upload the video file you
+      selected to your own channel, after you confirm the post in the application.</li>
+    <li><code>https://www.googleapis.com/auth/youtube.readonly</code> — read your own channel's
+      name, id and uploads playlist, and the view/like/comment counts of videos on that channel.</li>
+    <li><code>https://www.googleapis.com/auth/youtube.force-ssl</code> — delete, or change the
+      visibility of, a video on your own channel when you ask xPST to remove a post.</li>
+  </ul>
+  <p>The video file and the caption you write are sent directly from your device to Google's YouTube
+  API. xPST operates no server: nothing is proxied through us, and we never receive a copy of your
+  media, your channel data or your metrics. How Google handles the data it receives is described in
+  <a href="https://policies.google.com/privacy">Google's Privacy Policy</a>.</p>
+  <p>YouTube data (such as video titles, view/like/comment counts and post dates) is stored only on
+  your device, in the local xPST configuration directory, and only for as long as you keep it.
+  Deleting that directory, or running <code>xpst disconnect youtube</code>, removes the stored
+  credentials and the local copies of that data. There is no server-side copy for us to delete.</p>
+  <p>You can revoke xPST's access to your Google account at any time from
+  <a href="https://myaccount.google.com/permissions">Google's security settings</a>, or with
+  <code>xpst disconnect youtube</code>, which deletes the stored credentials from your device.</p>
+  <p>By using xPST's YouTube integration, you agree to be bound by the
+  <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>.</p>
+
+  <h2>7. Data retention and deletion</h2>
   <p>Because data is stored locally, retention is yours to control. Removing the application's
   configuration directory deletes the credentials, posting history and logs. The command
   <code>xpst disconnect &lt;platform&gt;</code> removes a single platform's stored credentials without
   touching the rest. There is no server-side copy for us to delete.</p>
 
-  <h2>7. This website</h2>
+  <h2>8. This website</h2>
   <p>This website is served by GitHub Pages as static files. It sets no cookies, runs no analytics and
   performs no tracking. GitHub's own logging as the hosting provider is described in GitHub's privacy
   statement.</p>
 
-  <h2>8. Children</h2>
+  <h2>9. Children</h2>
   <p>xPST is not directed at children and is not intended for use by anyone below the minimum age
   required to hold an account on the platforms it connects to.</p>
 
-  <h2>9. Changes to this policy</h2>
+  <h2>10. Changes to this policy</h2>
   <p>Material changes will be published on this page with an updated date, and recorded in the
   repository's history at
   <a href="https://github.com/TysAIs/xPST/commits/main/privacy/index.html">github.com/TysAIs/xPST</a>.</p>
 
-  <h2>10. Contact</h2>
+  <h2>11. Contact</h2>
   <p>Questions about this policy can be raised as an issue at
   <a href="https://github.com/TysAIs/xPST/issues">github.com/TysAIs/xPST/issues</a>.</p>
 
