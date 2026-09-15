@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import socket
 import stat
 import subprocess
@@ -232,7 +233,32 @@ def test_missing_config_dir_is_created(tmp_path, monkeypatch):
     assert stat.S_IMODE((config_dir / "config.yaml").stat().st_mode) == 0o600
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def _posix_perms_enforced() -> bool:
+    """Whether chmod-based permission tests can mean anything on this host.
+
+    ``os.geteuid`` does not exist on Windows (referencing it in a skipif marker
+    raised ``AttributeError`` at collection time), Windows does not enforce POSIX
+    directory modes the same way, and root bypasses them entirely.
+    """
+    if os.name == "nt" or not hasattr(os, "geteuid"):
+        return False
+    return os.geteuid() != 0
+
+
+def _flat(text: str) -> str:
+    """Collapse whitespace in CLI output.
+
+    Click's CliRunner wraps long lines, so a longer temporary path can split an
+    expected phrase across a newline (this failed on Linux CI where pytest's
+    tmp path is longer than on macOS) - assert against the unwrapped text.
+    """
+    return re.sub(r"\s+", " ", text)
+
+
+@pytest.mark.skipif(
+    not _posix_perms_enforced(),
+    reason="POSIX directory permissions are not enforced here (Windows or root)",
+)
 def test_read_only_config_dir_errors_actionably_without_traceback(tmp_path, monkeypatch):
     home, config_dir = _profile(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
@@ -247,15 +273,18 @@ def test_read_only_config_dir_errors_actionably_without_traceback(tmp_path, monk
 
         result = CliRunner().invoke(main, ["status"])
         assert result.exit_code == 2
-        assert "Configuration error" in result.output
-        assert "not writable" in result.output
-        assert "Traceback" not in result.output
-        assert "Errno" not in result.output
+        assert "Configuration error" in _flat(result.output)
+        assert "not writable" in _flat(result.output)
+        assert "Traceback" not in _flat(result.output)
+        assert "Errno" not in _flat(result.output)
     finally:
         config_dir.chmod(0o700)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+@pytest.mark.skipif(
+    not _posix_perms_enforced(),
+    reason="POSIX directory permissions are not enforced here (Windows or root)",
+)
 def test_read_only_config_dir_with_existing_config_errors_actionably(tmp_path, monkeypatch):
     """A read-only dir holding a valid config reports the directory, not a raw
     '[Errno 13] Permission denied: .../backups' from the migrator."""
@@ -273,9 +302,9 @@ def test_read_only_config_dir_with_existing_config_errors_actionably(tmp_path, m
 
         result = CliRunner().invoke(main, ["status"])
         assert result.exit_code == 2
-        assert "not writable" in result.output
-        assert "backups" not in result.output
-        assert "Traceback" not in result.output
+        assert "not writable" in _flat(result.output)
+        assert "backups" not in _flat(result.output)
+        assert "Traceback" not in _flat(result.output)
     finally:
         config_dir.chmod(0o700)
 
@@ -290,11 +319,14 @@ def test_config_dir_that_is_a_file_errors_clearly(tmp_path, monkeypatch):
 
     result = CliRunner().invoke(main, ["status"])
     assert result.exit_code == 2
-    assert "is not a directory" in result.output
-    assert "Traceback" not in result.output
+    assert "is not a directory" in _flat(result.output)
+    assert "Traceback" not in _flat(result.output)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+@pytest.mark.skipif(
+    not _posix_perms_enforced(),
+    reason="POSIX directory permissions are not enforced here (Windows or root)",
+)
 def test_unwritable_parent_for_missing_config_dir_errors_clearly(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
@@ -400,7 +432,7 @@ def test_missing_engine_binary_style_extra_is_reported(monkeypatch):
     assert result.exit_code == 1
     assert "Desktop app not installed" in result.output
     assert "pip install" in result.output
-    assert "Traceback" not in result.output
+    assert "Traceback" not in _flat(result.output)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
