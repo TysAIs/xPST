@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Generate the MCP tool index in docs/MCP_TOOLS.md from the live registry.
+"""Generate the MCP tool index in docs/MCP_TOOLS.md and README.md from the live registry.
 
 The published index drifted from the served registry (7 tools were missing), so
 it is now generated between markers and verified in CI:
 
     python scripts/generate_mcp_docs.py --check   # non-zero when stale
-    python scripts/generate_mcp_docs.py --write   # rewrite the block
+    python scripts/generate_mcp_docs.py --write   # rewrite the blocks
+
+Two surfaces are owned here: the full index in ``docs/MCP_TOOLS.md`` and the
+compact tool list in ``README.md`` (whose hand-written list said "23 Tools" while
+the registry served 38).
 
 Columns are derived from code, never hand-asserted:
   * *Mutates real accounts* comes from ``xpst.mcp.server._MUTATING_TOOLS``
@@ -18,11 +22,19 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOC_PATH = REPO_ROOT / "docs" / "MCP_TOOLS.md"
 BEGIN = "<!-- BEGIN GENERATED TOOL INDEX -->"
 END = "<!-- END GENERATED TOOL INDEX -->"
+
+README_PATH = REPO_ROOT / "README.md"
+README_BEGIN = "<!-- BEGIN GENERATED README TOOL INDEX -->"
+README_END = "<!-- END GENERATED README TOOL INDEX -->"
 
 
 def _purpose(description: str, limit: int = 78) -> str:
@@ -81,38 +93,79 @@ def render_block() -> str:
     return "\n".join(rows)
 
 
-def _replace_block(text: str, block: str) -> str:
-    start = text.index(BEGIN) + len(BEGIN)
-    end = text.index(END)
-    return text[:start] + "\n\n" + block + "\n" + text[end:]
+def render_readme_block() -> str:
+    """Compact README tool list: the served registry, in registration order."""
+    from xpst.mcp.server import _MUTATING_TOOLS
+
+    rows = [
+        f"### {len(_registry())} Tools",
+        "",
+        "Generated from the live registry — full schemas, consent gates, and per-tool "
+        "notes live in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).",
+        "",
+        "| Tool | Purpose | Mutates real accounts |",
+        "|------|---------|-----------------------|",
+    ]
+    for name, description in _registry():
+        rows.append(
+            "| `{name}` | {purpose} | {mutates} |".format(
+                name=name,
+                purpose=_purpose(description, limit=96),
+                mutates="**Yes**" if name in _MUTATING_TOOLS else "No",
+            )
+        )
+    rows.append("")
+    return "\n".join(rows)
+
+
+def _replace_block(text: str, block: str, begin: str = BEGIN, end: str = END) -> str:
+    start = text.index(begin) + len(begin)
+    stop = text.index(end)
+    return text[:start] + "\n\n" + block + "\n" + text[stop:]
+
+
+def _targets() -> tuple[tuple[Path, str, Callable[[], str]], ...]:
+    return (
+        (DOC_PATH, "docs/MCP_TOOLS.md", render_block),
+        (README_PATH, "README.md", render_readme_block),
+    )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--check", action="store_true", help="fail if the committed block is stale")
-    group.add_argument("--write", action="store_true", help="rewrite the committed block")
+    group.add_argument("--check", action="store_true", help="fail if a committed block is stale")
+    group.add_argument("--write", action="store_true", help="rewrite the committed blocks")
     args = parser.parse_args()
 
-    original = DOC_PATH.read_text(encoding="utf-8")
-    if BEGIN not in original or END not in original:
-        print(f"FAIL: marker block not found in {DOC_PATH}", file=sys.stderr)
-        return 2
+    stale: list[str] = []
+    pending: list[tuple[Path, str]] = []
 
-    updated = _replace_block(original, render_block())
-    if args.check:
+    for path, label, render in _targets():
+        original = path.read_text(encoding="utf-8")
+        begin, end = (README_BEGIN, README_END) if path == README_PATH else (BEGIN, END)
+        if begin not in original or end not in original:
+            print(f"FAIL: marker block not found in {path}", file=sys.stderr)
+            return 2
+        updated = _replace_block(original, render(), begin, end)
         if updated != original:
+            stale.append(label)
+            pending.append((path, updated))
+
+    if args.check:
+        if stale:
             print(
-                "FAIL: docs/MCP_TOOLS.md tool index is stale; "
-                "run `python scripts/generate_mcp_docs.py --write`",
+                "FAIL: stale MCP tool index in " + ", ".join(stale) + "; run "
+                "`python scripts/generate_mcp_docs.py --write`",
                 file=sys.stderr,
             )
             return 1
-        print("PASS: MCP tool index matches the live registry")
+        print("PASS: MCP tool index matches the live registry (docs/MCP_TOOLS.md, README.md)")
         return 0
 
-    DOC_PATH.write_text(updated, encoding="utf-8")
-    print(f"wrote {DOC_PATH.relative_to(REPO_ROOT)}")
+    for path, updated in pending:
+        path.write_text(updated, encoding="utf-8")
+    print("updated: " + (", ".join(stale) if stale else "nothing (already current)"))
     return 0
 
 
