@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { api } from "../lib/api.js";
   import { destinationRows, formatBytes, postRequestSummary, targetSummary } from "../lib/firstRun.js";
+  import { composePostLabel, composePostState } from "../lib/firstRun.js";
   import { setLastPost } from "../lib/session.js";
   import Card from "../lib/components/Card.svelte";
   import EmptyState from "../lib/components/EmptyState.svelte";
@@ -78,7 +79,12 @@
   const items = $derived(media?.items ?? []);
   const chosen = $derived(destinations.filter((row) => selected[row.name] && row.ready));
   const summary = $derived(targetSummary(destinations));
-  const canPost = $derived(Boolean(selectedMedia) && !posting);
+  // The post control is disabled with a visible reason when nothing would be
+  // published. The engine refuses the same request with the same error; the UI
+  // exists to explain the rule, not to discover it after the fact.
+  const postState = $derived(composePostState({ mediaPath: selectedMedia, chosen, busy: posting }));
+  const canPost = $derived(postState.canPost);
+  const postLabel = $derived(composePostLabel({ dryRun, count: postState.count }));
 
   function toggleDestination(row) {
     if (!row.ready) return;
@@ -229,10 +235,23 @@
       <button class="xpst-button" data-variant="secondary" type="button" onclick={runPreflight} disabled={preflighting || posting} aria-busy={preflighting ? "true" : undefined}>
         {preflighting ? "Checking…" : "Check without posting"}
       </button>
-      <button class="xpst-button" type="button" onclick={post} disabled={!canPost} aria-busy={posting ? "true" : undefined}>
-        {posting ? "Posting…" : dryRun ? "Run dry run" : `Post to ${chosen.length} destination${chosen.length === 1 ? "" : "s"}`}
+      <button
+        class="xpst-button"
+        type="button"
+        onclick={post}
+        disabled={!canPost}
+        aria-busy={posting ? "true" : undefined}
+        aria-describedby={postState.reason ? "compose-post-blocked-reason" : undefined}
+      >
+        {posting ? "Posting…" : postLabel}
       </button>
     </div>
+
+    {#if postState.reason}
+      <p class="xpst-field__error" id="compose-post-blocked-reason" role="status">
+        Posting is disabled: {postState.reason}
+      </p>
+    {/if}
 
     {#if postError}
       <p class="xpst-field__error" role="status">{postError}</p>

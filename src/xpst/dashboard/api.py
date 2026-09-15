@@ -744,8 +744,9 @@ def create_api_router(
 
         Delegates to ``PostPreflightService`` — the same service the CLI and the
         MCP tool use — so no surface can disagree about whether a post is ready.
-        Only the request-shape preconditions (missing media or targets) are
-        decided here; every media, caption, and destination verdict is canonical.
+        Every blocker, including the zero-destination ``NO_DESTINATIONS``
+        refusal, is decided by that service and returned as the same
+        ``{code, message}`` error object here, in the MCP server and in the UI.
         """
         from xpst.config import XPSTConfig
         from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
@@ -757,12 +758,6 @@ def create_api_router(
             for item in (payload.get("platforms") or [])
             if str(item).strip()
         ]
-
-        request_blockers: list[str] = []
-        if not platforms:
-            # An empty target list would produce an empty plan that reports
-            # "ready", so the request-shape precondition is decided here.
-            request_blockers.append("Choose at least one destination platform.")
 
         plan: dict[str, Any] | None = None
         canonical_blockers: list[str] = []
@@ -788,8 +783,8 @@ def create_api_router(
 
         media = Path(media_path).expanduser() if media_path else None
         return {
-            "ok": not request_blockers and not canonical_blockers,
-            "ready": not request_blockers and not canonical_blockers,
+            "ok": not canonical_blockers,
+            "ready": not canonical_blockers,
             "media": {
                 "path": media_path,
                 "exists": bool(media and media.exists()),
@@ -800,8 +795,9 @@ def create_api_router(
                 "per_platform": {platform: caption for platform in platforms},
             },
             "platforms": platforms,
-            "blockers": request_blockers + canonical_blockers,
+            "blockers": list(canonical_blockers),
             "warnings": canonical_warnings,
+            "error": (plan or {}).get("error"),
             "plan": plan,
             "network_calls": False,
         }
