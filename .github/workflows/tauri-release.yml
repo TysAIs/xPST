@@ -27,15 +27,16 @@ on:
   push:
     tags:
       - "v*.*.*"
-    paths:
-      - "src-tauri/**"
-      - "ui/**"
-      - "build_engine.spec"
-      - "scripts/build-engine.sh"
-      - "scripts/fetch-media-binaries.sh"
-      - "scripts/verify_release_version.py"
-      - "pyproject.toml"
-      - ".github/workflows/tauri-release.yml"
+      # Documented dry-run tag lane: pushing e.g. `dryrun-tauri-1` builds and
+      # smoke-tests exactly what a real tag builds, uploads the assets into a
+      # DRAFT release (nothing is published, no watcher is notified) and is
+      # ignored by the legacy release.yml lane. Used to prove the tag path
+      # without publishing a release - see docs/tauri-release-lane.md.
+      - "dryrun-tauri-*"
+    # NOTE: no `paths:` filter here on purpose. GitHub does not evaluate path
+    # filters for tag pushes, and on this workflow a filter would also be
+    # misleading: the lane must run for EVERY version tag or a tag can silently
+    # produce no artifact at all.
   workflow_dispatch:
 
 permissions:
@@ -184,6 +185,34 @@ jobs:
             test -x src-tauri/binaries/ytdlp/yt-dlp
           fi
           echo "media binaries present"
+
+      - name: Assert the bundled media binaries are pinned and checksummed
+        run: |
+          set -euo pipefail
+          # scripts/fetch-media-binaries.sh verifies every download against the
+          # SHA-256 in scripts/media-binaries.lock and writes this record. A
+          # release must be able to state exactly which bytes it ships, and an
+          # UNPINNED entry (XPST_ALLOW_UNPINNED_MEDIA=1 dev escape hatch) must
+          # never reach a published installer.
+          PROV="src-tauri/binaries/PROVENANCE.txt"
+          test -s "$PROV" || { echo "::error::no media-binary provenance record at $PROV"; exit 1; }
+          echo "--- media binary provenance (${{ matrix.target }}) ---"
+          cat "$PROV"
+          if grep -q '^UNPINNED' "$PROV"; then
+            echo "::error::media binaries include an UNPINNED local fallback; the release lane ships checksum-verified pinned binaries only"
+            exit 1
+          fi
+          for artifact in ffmpeg ffprobe yt-dlp; do
+            awk -F'\t' -v a="$artifact" '$2 == a { found = 1 } END { exit !found }' "$PROV" \
+              || { echo "::error::$artifact has no pinned provenance entry"; exit 1; }
+          done
+          cp "$PROV" "$RUNNER_TEMP/media-binaries-PROVENANCE-${{ matrix.target }}.txt"
+          {
+            echo "### Media binary provenance (${{ matrix.target }})"
+            echo '```'
+            cat "$PROV"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Import Apple signing cert (if secrets present)
         if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != null && env.APPLE_CERTIFICATE != ''
@@ -442,18 +471,53 @@ jobs:
           Stop-Process -Name 'xpst-engine' -ErrorAction SilentlyContinue
           Stop-Process -Id $proc.Id -ErrorAction SilentlyContinue
 
+      - name: "Resolve release assets (tag builds only)"
+        if: startsWith(github.ref, 'refs/tags/')
+        id: release-assets
+        run: |
+          set -euo pipefail
+          # A tag that publishes zero files is worse than a red lane: it looks
+          # shipped. Resolve this lane's real assets, keep the provenance
+          # record, and fail if there is nothing to publish.
+          case "${RUNNER_OS}" in
+            macOS)   PATTERNS=( '*/bundle/dmg/*.dmg' '*/bundle/macos/*.app.tar.gz' '*/bundle/macos/*.app.tar.gz.sig' ) ;;
+            Windows) PATTERNS=( '*/bundle/nsis/*.exe' '*/bundle/msi/*.msi' ) ;;
+            Linux)   PATTERNS=( '*/bundle/deb/*.deb' '*/bundle/appimage/*.AppImage' ) ;;
+            *) echo "::error::unsupported runner ${RUNNER_OS}"; exit 1 ;;
+          esac
+          FILES=()
+          for pattern in "${PATTERNS[@]}"; do
+            while IFS= read -r found; do
+              [ -n "$found" ] && FILES+=("$found")
+            done < <(find src-tauri/target -type f -path "$pattern" 2>/dev/null || true)
+          done
+          # *.app.tar.gz / *.sig only exist when an updater signing key is set.
+          [ "${#FILES[@]}" -gt 0 ] || {
+            echo "::error::tag build ${GITHUB_REF_NAME} resolved no release assets for ${RUNNER_OS}; refusing to publish an empty release"
+            exit 1
+          }
+          echo "release assets for ${RUNNER_OS}:"
+          printf '  %s\n' "${FILES[@]}"
+          PROV="$RUNNER_TEMP/media-binaries-PROVENANCE-${{ matrix.target }}.txt"
+          test -s "$PROV" || { echo "::error::media binary provenance record missing"; exit 1; }
+          FILES+=("$PROV")
+          {
+            echo 'files<<RELEASE_ASSETS_EOF'
+            printf '%s\n' "${FILES[@]}"
+            echo 'RELEASE_ASSETS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            src-tauri/target/**/bundle/macos/*.app.tar.gz
-            src-tauri/target/**/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/**/bundle/dmg/*.dmg
-            src-tauri/target/**/bundle/nsis/*.exe
-            src-tauri/target/**/bundle/msi/*.msi
-            src-tauri/target/**/bundle/deb/*.deb
-            src-tauri/target/**/bundle/appimage/*.AppImage
-          fail_on_unmatched_files: false
+          # Resolved by the step above: the lane's own installers plus the
+          # media-binary provenance record for this target.
+          files: ${{ steps.release-assets.outputs.files }}
+          fail_on_unmatched_files: true
           generate_release_notes: true
-          draft: false
+          # Version tags (vX.Y.Z) publish; a documented dry-run tag
+          # (dryrun-tauri-*) exercises the exact same path into a DRAFT release
+          # so the tag lane can be proven without publishing anything.
+          draft: ${{ !startsWith(github.ref_name, 'v') }}
+          prerelease: false
