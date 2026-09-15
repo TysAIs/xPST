@@ -51,23 +51,28 @@ def _http_routes(app) -> list[str]:
     only through ``.original_router.routes``. Enumerating ``app.routes`` flat
     therefore silently under-counts on the newer releases — it drops the whole
     included router, which is exactly the /api surface this suite exists to pin
-    — so walk nested routers instead of trusting a flat list.
+    — so walk nested routers instead of trusting a flat list. A prefix passed at
+    include time lives on the sentinel's ``include_context``, not in the nested
+    routes, so it is re-applied here.
     """
     paths: list[str] = []
 
-    def _walk(routes) -> None:
+    def _walk(routes, prefix: str = "") -> None:
         for route in routes:
             methods = getattr(route, "methods", None)
             path = getattr(route, "path", None)
             if methods and path:
-                paths.append(path)
+                paths.append(f"{prefix}{path}")
                 continue
             nested = getattr(route, "routes", None)
-            if nested is None:
-                included = getattr(route, "original_router", None)
-                nested = getattr(included, "routes", None)
+            if nested is not None:  # a mount: its sub-paths hang off its path
+                _walk(nested, f"{prefix}{path or ''}")
+                continue
+            included = getattr(route, "original_router", None)
+            nested = getattr(included, "routes", None)
             if nested:
-                _walk(nested)
+                context = getattr(route, "include_context", None)
+                _walk(nested, f"{prefix}{getattr(context, 'prefix', '') or ''}")
 
     _walk(app.routes)
     return paths
@@ -85,6 +90,40 @@ class TestRouteEnumeration:
             return {}
 
         assert "/x" in _http_routes(app)
+
+    def test_enumeration_sees_routes_behind_include_router(self):
+        """A router added with ``include_router`` must not vanish from the sweep.
+
+        Regression: from FastAPI 0.14x the included router is a single opaque
+        sentinel in ``app.routes``, so a flat scan quietly dropped every
+        ``/api/*`` route and the auth sweep below stopped covering it — a guard
+        that reports success while testing nothing.
+        """
+        from fastapi import APIRouter, FastAPI
+
+        app = FastAPI()
+        router = APIRouter(prefix="/api")
+
+        @router.get("/summary")
+        def _summary():  # pragma: no cover - registration only
+            return {}
+
+        app.include_router(router)
+        assert "/api/summary" in _http_routes(app)
+
+    def test_enumeration_applies_the_include_time_prefix(self):
+        """A prefix given to ``include_router`` must survive enumeration."""
+        from fastapi import APIRouter, FastAPI
+
+        app = FastAPI()
+        router = APIRouter()
+
+        @router.get("/summary")
+        def _summary():  # pragma: no cover - registration only
+            return {}
+
+        app.include_router(router, prefix="/api")
+        assert "/api/summary" in _http_routes(app)
 
     def test_we_know_which_routes_are_public(self, authed_client):
         _, app, _ = authed_client
