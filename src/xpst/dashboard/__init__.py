@@ -7,6 +7,9 @@ No NiceGUI or other graphical dependency — the ``dashboard`` extra is a no-op
 For a GUI, use the native desktop app (``xpst app``).
 """
 
-from xpst.dashboard.analytics import AnalyticsCollector
+# ``AnalyticsCollector`` here is a deprecated alias for the dashboard read
+# model — the only AnalyticsCollector implementation is
+# ``xpst.analytics.AnalyticsCollector``.
+from xpst.dashboard.analytics import AnalyticsCollector, AnalyticsReadModel
 
-__all__ = ["AnalyticsCollector"]
+__all__ = ["AnalyticsCollector", "AnalyticsReadModel"]
