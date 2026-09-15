@@ -75,6 +75,20 @@ class TestPathArguments:
             "xpst_post", {"video_path": str(tmp_path / "clip.mp4"), "caption": "x"}
         )
 
+    def test_benign_path_under_windows_temp_is_allowed(self, monkeypatch, tmp_path):
+        """Windows sets TEMP/TMP, never TMPDIR: the temp root must still be allowed.
+
+        Reading only TMPDIR (or the cached ``tempfile.gettempdir()``) confines
+        every legitimate ``%TEMP%\\...`` path — pytest's ``tmp_path`` included —
+        out of its own temp root.
+        """
+        monkeypatch.delenv("TMPDIR", raising=False)
+        monkeypatch.setenv("TEMP", str(tmp_path))
+        monkeypatch.delenv("TMP", raising=False)
+        assert not _is_blocked(
+            "xpst_post", {"video_path": str(tmp_path / "clip.mp4"), "caption": "x"}
+        )
+
     def test_non_path_arguments_are_not_touched(self):
         assert not _is_blocked("xpst_status", {})
         assert not _is_blocked("xpst_config_show", {})

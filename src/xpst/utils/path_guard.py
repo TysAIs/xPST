@@ -16,6 +16,7 @@ absolute escapes and symlink escapes are all rejected.
 from __future__ import annotations
 
 import os
+import tempfile
 from pathlib import Path
 
 from xpst.utils.logger import get_logger
@@ -27,12 +28,35 @@ class PathConfinementError(ValueError):
     """Raised when a path escapes every allowed root."""
 
 
+def _temp_root() -> Path:
+    """The system temp directory, resolved for THIS call.
+
+    ``tempfile.gettempdir()`` caches its answer for the process lifetime and
+    only consults the POSIX ``TMPDIR`` variable, so it is the wrong probe here:
+
+    * Windows sets ``TEMP``/``TMP`` (never ``TMPDIR``), so a ``TMPDIR``-only
+      read confines every legitimate ``%TEMP%\\...`` path — the media cache,
+      the staging dir, and pytest's ``tmp_path`` — out of its own temp root.
+    * A cached value ignores a ``TMPDIR`` set later in the process, which
+      callers (external drives, test isolation) legitimately use.
+
+    Read the environment the way the platform and the caller actually set it,
+    newest override first, and fall back to the stdlib resolution.
+    """
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        value = os.environ.get(name)
+        if value and value.strip():
+            return Path(value.strip())
+    return Path(tempfile.gettempdir())
+
+
 def default_media_roots(config_dir: str | os.PathLike[str] = "~/.xpst") -> tuple[Path, ...]:
     """Roots a user-granted media path may live in by default.
 
     The config dir (xPST's own workspace, which holds ``library/`` and the
     media cache), the user's home Movies/Videos/Desktop/Downloads/Pictures
-    folders, and the system temp dir. Anything else requires an explicit
+    folders, and the system temp dir (:func:`_temp_root`, i.e. ``TMPDIR`` on
+    POSIX and ``TEMP``/``TMP`` on Windows). Anything else requires an explicit
     override — either the ``XPST_MEDIA_ROOTS`` environment variable
     (``os.pathsep``-separated, for an external drive) or an ``extra_roots``
     argument at the call site.
@@ -41,7 +65,7 @@ def default_media_roots(config_dir: str | os.PathLike[str] = "~/.xpst") -> tuple
     roots: list[Path] = [Path(config_dir).expanduser()]
     for name in ("Movies", "Videos", "Desktop", "Downloads", "Pictures"):
         roots.append(home / name)
-    roots.append(Path(os.environ.get("TMPDIR", "/tmp")))  # nosec B108 - an allowed root, not a temp file
+    roots.append(_temp_root())  # nosec B108 - an allowed root, not a temp file
     extra = os.environ.get("XPST_MEDIA_ROOTS", "")
     for part in extra.split(os.pathsep):
         if part.strip():

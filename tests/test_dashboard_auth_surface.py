@@ -43,13 +43,33 @@ def authed_client(tmp_path, monkeypatch, password_hash):
 
 
 def _http_routes(app) -> list[str]:
-    """Every registered path that serves HTTP methods (i.e. not a static mount)."""
+    """Every registered path that serves HTTP methods (i.e. not a static mount).
+
+    FastAPI versions differ in how ``include_router`` materialises routes:
+    older releases copy each ``APIRoute`` into ``app.routes``, newer ones keep
+    one lazy sentinel object (``_IncludedRouter``) that exposes the real routes
+    only through ``.original_router.routes``. Enumerating ``app.routes`` flat
+    therefore silently under-counts on the newer releases — it drops the whole
+    included router, which is exactly the /api surface this suite exists to pin
+    — so walk nested routers instead of trusting a flat list.
+    """
     paths: list[str] = []
-    for route in app.routes:
-        methods = getattr(route, "methods", None)
-        path = getattr(route, "path", None)
-        if methods and path:
-            paths.append(path)
+
+    def _walk(routes) -> None:
+        for route in routes:
+            methods = getattr(route, "methods", None)
+            path = getattr(route, "path", None)
+            if methods and path:
+                paths.append(path)
+                continue
+            nested = getattr(route, "routes", None)
+            if nested is None:
+                included = getattr(route, "original_router", None)
+                nested = getattr(included, "routes", None)
+            if nested:
+                _walk(nested)
+
+    _walk(app.routes)
     return paths
 
 
