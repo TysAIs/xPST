@@ -275,7 +275,10 @@ def test_disk_full_during_state_write_keeps_old_state_and_no_tmp(tmp_path, monke
     assert list(tmp_path.glob("state.json.tmp.*")) == []
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file permissions")
+@pytest.mark.skipif(
+    os.name == "nt" or not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="POSIX file permissions are not enforced here (Windows or root)",
+)
 def test_permission_denied_on_state_write_keeps_old_state(tmp_path):
     store = StateStore(tmp_path)
     store.update(lambda s: {**s, "content_hashes": {"keep": "me"}})
