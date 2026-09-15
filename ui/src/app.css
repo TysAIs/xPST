@@ -769,3 +769,44 @@ input,
 .xpst-inline-link:hover {
   color: var(--xpst-accent-hover);
 }
+
+/* ── In-app sign-in (the Sign in control) ─────────────────────────── */
+.xpst-signin {
+  display: grid;
+  gap: var(--xpst-space-2);
+  margin: var(--xpst-space-3) 0;
+  padding: var(--xpst-space-3);
+  background: var(--xpst-color-background);
+  border: 1px solid var(--xpst-color-border);
+  border-radius: var(--xpst-radius-md);
+}
+.xpst-signin[data-phase="waiting"],
+.xpst-signin[data-phase="starting"],
+.xpst-signin[data-phase="exchanging"] {
+  border-color: var(--xpst-color-border-strong);
+}
+.xpst-signin[data-phase="succeeded"] {
+  background: var(--xpst-color-success-surface);
+  border-color: var(--xpst-color-success);
+}
+.xpst-signin[data-phase="failed"],
+.xpst-signin[data-phase="timed_out"] {
+  background: var(--xpst-color-danger-surface);
+  border-color: var(--xpst-color-danger);
+}
+.xpst-signin__status {
+  margin: 0;
+  color: var(--xpst-color-text-secondary);
+  font: var(--xpst-type-caption);
+}
+.xpst-signin__error {
+  margin: 0;
+  color: var(--xpst-color-danger);
+  font: var(--xpst-type-caption);
+  white-space: pre-wrap;
+}
+.xpst-signin__hint {
+  margin: 0;
+  color: var(--xpst-color-text-muted);
+  font: var(--xpst-type-caption);
+}

@@ -99,6 +99,17 @@ export const api = {
   media: (folder = "") => getJSON(`/api/media${folder ? `?folder=${encodeURIComponent(folder)}` : ""}`),
   /** Inspect / enable / verify one destination platform. */
   connect: (platform, payload = {}) => postJSON(`/api/connect/${encodeURIComponent(platform)}`, payload),
+
+  // ── In-app sign-in (the Sign in control) ─────────────────────────
+  /** Start the xPST-owned OAuth flow for a platform (opens the consent page). */
+  startSignIn: (platform, payload = {}) =>
+    postJSON(`/api/auth/signin/${encodeURIComponent(platform)}`, payload),
+  /** Poll a sign-in session; each poll advances the engine's state machine. */
+  signInStatus: (sessionId) => getJSON(`/api/auth/signin/${encodeURIComponent(sessionId)}`),
+  /** Abandon a sign-in session (no credential is written). */
+  cancelSignIn: (sessionId) => postJSON(`/api/auth/signin/${encodeURIComponent(sessionId)}/cancel`, {}),
+  /** Every live (non-terminal) sign-in session. */
+  signIns: () => getJSON("/api/auth/signin"),
   /** Plan (dry_run: true) or run a post through the real engine path. */
   post: (payload) => postJSON("/api/post", payload),
 };
