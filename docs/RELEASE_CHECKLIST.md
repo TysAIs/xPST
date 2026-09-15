@@ -69,6 +69,15 @@ shippable until every box in **Gate** and **Artifacts** is checked.
 
 ## 7. Post-release verification
 
+- [ ] Clean-profile stranger install of the **published** artifact, with
+      evidence attached:
+      `bash scripts/e2e_install_from_artifact.sh --release vX.Y.Z --evidence-out /tmp/published-e2e.json`
+      (macOS, Windows). Attach the `evidence` JSON to the release record; the
+      run must report `status: "passed"`, `engine_health_200: true`,
+      `real_running_process: true` and `uninstall: true`.
+- [ ] Confirm the published macOS asset is the Tauri build: the evidence must
+      report `stack: "tauri"`. A `legacy-pyside-qml` result means the published
+      installer is not the shipped desktop app and the check has failed.
 - [ ] `pip install xpst` works on a clean machine
 - [ ] Downloaded macOS `.app`/DMG opens
 - [ ] Downloaded Windows executable launches
