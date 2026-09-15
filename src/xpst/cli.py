@@ -2158,6 +2158,70 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
 # Other Commands
 # ──────────────────────────────────────────────
 
+def _render_outcome_table(report: dict) -> None:
+    """Render the outcome report: per platform, per metric, labelled source.
+
+    A platform with no metric-bearing owned post prints "No data" rather than
+    zeros, and every populated row says whether the numbers are ``Live``
+    (fetched this run) or ``Recorded`` (last persisted snapshot).
+    """
+    table = Table(title="Platform Analytics")
+    table.add_column("Platform", style="cyan")
+    table.add_column("Posts", style="white")
+    table.add_column("Views", style="green")
+    table.add_column("Likes", style="red")
+    table.add_column("Comments", style="magenta")
+    table.add_column("Shares", style="blue")
+    table.add_column("Source", style="yellow")
+
+    totals: dict[str, int] = {}
+    counted_posts = 0
+    for platform, entry in report.get("platforms", {}).items():
+        totals_row = entry.get("totals")
+        if not entry.get("has_data") or not totals_row:
+            table.add_row(platform.title(), "—", "—", "—", "—", "—", "No data")
+            continue
+        counted_posts += int(entry.get("posts_with_metrics") or 0)
+        for key, value in totals_row.items():
+            totals[key] = totals.get(key, 0) + int(value)
+        available = set(entry.get("metrics_available") or [])
+
+        def cell(key: str, row: dict = totals_row, avail: set = available) -> str:
+            if key not in avail or row.get(key) is None:
+                return "—"
+            return f"{int(row[key]):,}"
+
+        table.add_row(
+            platform.title(),
+            str(entry.get("posts_with_metrics") or 0),
+            cell("views"),
+            cell("likes"),
+            cell("comments"),
+            cell("shares"),
+            str(entry.get("data_source_label") or "No data"),
+        )
+
+    if totals:
+        table.add_section()
+        table.add_row(
+            "[bold]TOTAL[/bold]",
+            f"[bold]{counted_posts}[/bold]",
+            f"[bold]{totals.get('views', 0):,}[/bold]",
+            f"[bold]{totals.get('likes', 0):,}[/bold]",
+            f"[bold]{totals.get('comments', 0):,}[/bold]",
+            f"[bold]{totals.get('shares', 0):,}[/bold]",
+            "[bold]Owned posts only[/bold]",
+        )
+
+    console.print(table)
+
+    excluded = (report.get("diagnostics") or {}).get("unowned_ids_excluded") or []
+    if excluded:
+        console.print(
+            f"[dim]Excluded {len(excluded)} id(s) not verified as owned by this account.[/dim]"
+        )
+
+
 @main.group(invoke_without_command=True)
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
 @click.option("--refresh", "-r", is_flag=True, help="Force refresh (ignore cache)")
@@ -2219,11 +2283,11 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
     total_ids = sum(len(v) for v in post_ids.values())
     if total_ids == 0:
         if as_json:
-            click.echo(
-                _json.dumps(collector.build_report({}, requested=post_ids), indent=2)
-            )
+            report = collector.build_report({}, requested=post_ids)
+            report["outcome_report"] = collector.outcome_report()
+            click.echo(_json.dumps(report, indent=2, default=str))
         else:
-            console.print("[yellow]No posts found in state. Run `xpst run` first.[/yellow]")
+            _render_outcome_table(collector.outcome_report())
         return
 
     if not as_json:
@@ -2232,66 +2296,33 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
     # Collect analytics
     data = asyncio.run(collector.collect_all(post_ids))
 
+    # D5: the outcome report is the single source of the numbers shown here.
+    # Rows fetched by the collection above are labelled "live"; anything read
+    # from the snapshot store is labelled "recorded"; a platform with no
+    # metric-bearing owned post says "no data" instead of printing zeros.
+    outcome_report = collector.outcome_report(live_data=data)
+
     # G24: machine-readable output for agents/scripts. Phase 1.1 contract:
     # an aggregate report — per platform: as-of timestamp, metrics available
     # vs missing, and values (architecture §2.5) — never fabricated zeros.
     if as_json:
-        click.echo(_json.dumps(collector.build_report(data, requested=post_ids), indent=2, default=str))
+        report = collector.build_report(data, requested=post_ids)
+        report["outcome_report"] = outcome_report
+        click.echo(_json.dumps(report, indent=2, default=str))
         return
 
-    # Display summary table
-    table = Table(title="Platform Analytics")
-    table.add_column("Platform", style="cyan")
-    table.add_column("Posts", style="white")
-    table.add_column("Views", style="green")
-    table.add_column("Likes", style="red")
-    table.add_column("Comments", style="magenta")
-    table.add_column("Shares", style="blue")
+    _render_outcome_table(outcome_report)
 
-    totals = {"posts": 0, "views": 0, "likes": 0, "comments": 0, "shares": 0}
-    for platform, posts_data in data.items():
-        posts = len(posts_data)
-        views = sum(m.get("views", 0) for m in posts_data.values())
-        likes = sum(m.get("likes", 0) for m in posts_data.values())
-        comments = sum(m.get("comments", 0) for m in posts_data.values())
-        shares = sum(m.get("shares", 0) for m in posts_data.values())
-
-        totals["posts"] += posts
-        totals["views"] += views
-        totals["likes"] += likes
-        totals["comments"] += comments
-        totals["shares"] += shares
-
-        table.add_row(
-            platform.title(),
-            str(posts),
-            f"{views:,}",
-            f"{likes:,}",
-            f"{comments:,}",
-            f"{shares:,}",
-        )
-
-    table.add_section()
-    table.add_row(
-        "[bold]TOTAL[/bold]",
-        f"[bold]{totals['posts']}[/bold]",
-        f"[bold]{totals['views']:,}[/bold]",
-        f"[bold]{totals['likes']:,}[/bold]",
-        f"[bold]{totals['comments']:,}[/bold]",
-        f"[bold]{totals['shares']:,}[/bold]",
-    )
-
-    console.print(table)
-
-    # Top posts detail
-    all_posts = []
-    for platform, posts_data in data.items():
-        for _post_id, metrics in posts_data.items():
-            metrics["platform"] = platform
-            all_posts.append(metrics)
+    # Top posts detail: owned posts with metrics, newest capture first.
+    all_posts = [
+        {**outcome, "platform": platform}
+        for platform, entry in outcome_report["platforms"].items()
+        for outcome in entry["outcomes"]
+        if outcome.get("metrics")
+    ]
 
     if all_posts:
-        all_posts.sort(key=lambda p: p.get("views", 0), reverse=True)
+        all_posts.sort(key=lambda p: (p.get("metrics") or {}).get("views") or 0, reverse=True)
         console.print("\n[bold]Top Posts by Views:[/bold]")
         detail_table = Table(show_header=True, header_style="bold")
         detail_table.add_column("#", style="dim")
@@ -2300,15 +2331,18 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
         detail_table.add_column("Views", style="green")
         detail_table.add_column("Likes", style="red")
         detail_table.add_column("Comments", style="magenta")
+        detail_table.add_column("Source")
 
         for i, p in enumerate(all_posts[:10], 1):
+            metrics = p.get("metrics") or {}
             detail_table.add_row(
                 str(i),
                 p["platform"].title(),
                 str(p.get("post_id", ""))[:20],
-                f"{p.get('views', 0):,}",
-                f"{p.get('likes', 0):,}",
-                f"{p.get('comments', 0):,}",
+                f"{metrics.get('views'):,}" if metrics.get("views") is not None else "—",
+                f"{metrics.get('likes'):,}" if metrics.get("likes") is not None else "—",
+                f"{metrics.get('comments'):,}" if metrics.get("comments") is not None else "—",
+                "Live" if p.get("metric_source") == "live" else "Recorded",
             )
 
         console.print(detail_table)

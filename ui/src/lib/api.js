@@ -71,6 +71,11 @@ function postJSON(path, payload) {
 export const api = {
   /** Aggregate summary stats for dashboard cards. */
   summary: () => getJSON("/api/summary"),
+  /**
+   * Per-post/per-platform outcomes, labelled recorded vs live. Pass
+   * `live=true` to run a real collection first (slower; uses API quota).
+   */
+  outcomeReport: (live = false) => getJSON(`/api/analytics/outcomes${live ? "?live=1" : ""}`),
   /** Per-video list for the Videos page. */
   videos: () => getJSON("/api/videos"),
   /** Engine health + live auth liveness per platform. */
