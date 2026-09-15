@@ -41,11 +41,20 @@ PLATFORM_KEYS = (
 # as ``linux-SHA512SUMS`` would look like Linux updater artifacts.
 ARTIFACT_SUFFIXES = (
     ".app.tar.gz",
-    ".AppImage",
+    ".appimage.tar.gz",
+    ".nsis.zip",
+    ".appimage",
     ".exe",
     ".msi",
     ".dmg",
 )
+_ARTIFACT_SUFFIXES_LOWER = tuple(suffix.lower() for suffix in ARTIFACT_SUFFIXES)
+
+# The packages `cargo tauri build` SIGNS when `bundle.createUpdaterArtifacts` is
+# enabled. The raw installer is not signed, so when a release carries both the
+# updater archive and its installer for one platform, the archive is the only
+# candidate that can be published.
+UPDATER_ARCHIVE_SUFFIXES = (".app.tar.gz", ".appimage.tar.gz", ".nsis.zip")
 
 _MACOS_ARM_HINTS = ("aarch64", "arm64")
 
@@ -67,7 +76,7 @@ def explicit_candidates(files: list[Path], platform: str) -> list[Path]:
             continue
         if path.name == "latest.json":
             continue
-        if any(path.name.endswith(suffix) for suffix in ARTIFACT_SUFFIXES):
+        if any(path.name.lower().endswith(suffix) for suffix in _ARTIFACT_SUFFIXES_LOWER):
             matches.append(path)
     return sorted(matches)
 
@@ -87,18 +96,30 @@ def inferred_candidates(files: list[Path], platform: str) -> list[Path]:
             if (platform == "darwin-aarch64") == is_arm:
                 matches.append(path)
         elif platform == "windows-x86_64":
-            if lower.endswith("setup.exe") or lower.endswith(".msi"):
+            if lower.endswith(("setup.exe", ".msi", ".nsis.zip")):
                 matches.append(path)
         elif platform == "linux-x86_64":
-            if lower.endswith(".appimage"):
+            if lower.endswith((".appimage", ".appimage.tar.gz")):
                 matches.append(path)
     return sorted(matches)
+
+
+def _prefer_updater_archives(candidates: list[Path]) -> list[Path]:
+    """Drop raw installers when a signed updater archive is also present.
+
+    ``createUpdaterArtifacts`` signs only the archive (``xPST.app.tar.gz``,
+    ``*.nsis.zip``, ``*.AppImage.tar.gz``); the ``.exe``/``.msi``/``.AppImage``
+    next to it carries no ``.sig``. Preferring the archive keeps a release with
+    both files from being reported as ``ambiguous`` (or ``unsigned``).
+    """
+    archives = [path for path in candidates if path.name.lower().endswith(UPDATER_ARCHIVE_SUFFIXES)]
+    return archives or candidates
 
 
 def select(platform: str, files: list[Path]) -> dict[str, Any]:
     """Resolve one platform to a signed artifact, or explain why it cannot be."""
     explicit = explicit_candidates(files, platform)
-    candidates = explicit or inferred_candidates(files, platform)
+    candidates = _prefer_updater_archives(explicit or inferred_candidates(files, platform))
     source = "explicit-prefix" if explicit else "bundler-name"
     if not candidates:
         return {"platform": platform, "status": "absent", "candidates": [], "source": source}
