@@ -193,6 +193,37 @@ fn handle_deep_link(app: &tauri::AppHandle, url: &Url) {
     ));
 }
 
+/// The JS the shell evaluates to hand dropped file paths to the page.
+///
+/// The composer registers `window.__xpstMediaDrag(phase, paths)` (see
+/// `ui/src/lib/native.js`). The shell pushes *paths*, never bytes: the page
+/// previews through the engine's range-aware stream route, so dropping a 2 GB
+/// video costs the app nothing until the user actually posts it.
+fn drag_payload_script(phase: &str, paths: &[std::path::PathBuf]) -> String {
+    let payload = serde_json::to_string(paths).unwrap_or_else(|_| "[]".to_string());
+    let phase = serde_json::to_string(phase).unwrap_or_else(|_| "\"drop\"".to_string());
+    format!("window.__xpstMediaDrag && window.__xpstMediaDrag({phase}, {payload});")
+}
+
+/// Forward one native drag-and-drop window event into the main webview.
+fn forward_drag_drop(app: &tauri::AppHandle, event: &tauri::DragDropEvent) {
+    // "over" fires on every cursor move; the page only needs enter/leave/drop.
+    let (phase, paths) = match event {
+        tauri::DragDropEvent::Enter { paths, .. } => ("enter", paths.clone()),
+        tauri::DragDropEvent::Drop { paths, .. } => ("drop", paths.clone()),
+        tauri::DragDropEvent::Leave => ("leave", Vec::new()),
+        _ => return,
+    };
+    if let Some(webview) = app.get_webview_window("main") {
+        let script = drag_payload_script(phase, &paths);
+        if let Err(e) = webview.eval(&script) {
+            log(&format!("DRAG_DROP_EVAL_FAILED phase={phase} error={e}"));
+            return;
+        }
+        log(&format!("DRAG_DROP_FORWARDED phase={phase} count={}", paths.len()));
+    }
+}
+
 fn focus_existing(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
@@ -711,7 +742,18 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
+        // Native OS file picker for the composer. The engine-origin page calls
+        // `plugin:dialog|open` over IPC; the grant (and the loopback origin it
+        // is granted to) lives in capabilities/default.json.
+        .plugin(tauri_plugin_dialog::init())
         .on_window_event(|window, event| {
+            // Native drag-and-drop: the shell is the only layer that can hand
+            // the page real file paths (a webview drop carries none), so the
+            // event is forwarded into the composer as a JS call.
+            if let tauri::WindowEvent::DragDrop(drop) = event {
+                let app_handle = window.app_handle().clone();
+                forward_drag_drop(&app_handle, drop);
+            }
             // macOS convention: closing the window must NOT strand the user.
             // (QA adversarial 2026-08: closing the window left the app
             // running with no window and no way back — clicking the dock
@@ -838,5 +880,83 @@ mod tests {
         let res = wait_for_engine_health(port, Duration::from_millis(300));
         assert!(res.is_none());
         assert!(started.elapsed() >= Duration::from_millis(250));
+    }
+
+    // ── Composer media: native drop forwarding + the picker's ACL grant ──
+
+    #[test]
+    fn drag_payload_script_escapes_hostile_file_names() {
+        let paths = vec![
+            std::path::PathBuf::from("/Users/me/My Videos/take \"1\" & 2.mp4"),
+            std::path::PathBuf::from("/Users/me/back\\slash.mov"),
+        ];
+        let script = drag_payload_script("drop", &paths);
+
+        // The paths survive as JSON: the page receives exactly what was dropped.
+        let payload_start = script.find('[').expect("payload");
+        let payload_end = script.rfind(']').expect("payload end") + 1;
+        let parsed: Vec<String> = serde_json::from_str(&script[payload_start..payload_end]).expect("json");
+        assert_eq!(parsed, vec![paths[0].to_string_lossy(), paths[1].to_string_lossy()]);
+        // A file name can never escape the call and execute as code.
+        assert_eq!(script.matches('"').count() % 2, 0);
+        assert!(!script.contains("take \"1\""));
+    }
+
+    #[test]
+    fn drag_payload_script_never_throws_when_the_page_has_no_hook() {
+        let script = drag_payload_script("leave", &[]);
+        assert!(script.starts_with("window.__xpstMediaDrag &&"));
+        assert!(script.ends_with(";"));
+        assert!(script.contains("\"leave\""));
+        assert!(script.contains("[]"));
+    }
+
+    /// The composer's "Choose file…" control is a single IPC command on a
+    /// remote (engine) origin. If the capability does not grant it — or does
+    /// not allow the loopback port the engine actually listens on — the button
+    /// silently fails at runtime. This test reads the SHIPPED capability file
+    /// and proves both halves, on a random port like the one the shell picks.
+    #[test]
+    fn capability_grants_the_picker_to_any_engine_loopback_port() {
+        use tauri::utils::acl::capability::{Capability, CapabilityFile};
+        use tauri::utils::acl::RemoteUrlPattern;
+
+        let raw = std::fs::read_to_string("capabilities/default.json").expect("capability file");
+        let capability: Capability = match raw.parse::<CapabilityFile>().expect("parse") {
+            CapabilityFile::Capability(capability) => capability,
+            _ => panic!("capabilities/default.json must hold exactly one capability"),
+        };
+
+        let permissions: Vec<String> = capability
+            .permissions
+            .iter()
+            .map(|entry| entry.identifier().get().to_string())
+            .collect();
+        assert!(
+            permissions.iter().any(|p| p == "dialog:default"),
+            "the dialog plugin permission is missing: {permissions:?}"
+        );
+        assert!(capability.windows.iter().any(|w| w == "main"), "the grant must target the main window");
+
+        let remote = capability.remote.as_ref().expect("remote urls are required for an engine-served UI");
+        let patterns: Vec<RemoteUrlPattern> = remote
+            .urls
+            .iter()
+            .map(|pattern| pattern.parse().expect("valid url pattern"))
+            .collect();
+
+        // Same shape as a real launch: a free loopback port chosen at boot.
+        let port = pick_free_port().expect("free port");
+        let engine_url = tauri::Url::parse(&format!("http://127.0.0.1:{port}/")).expect("url");
+        assert!(
+            patterns.iter().any(|pattern| pattern.test(&engine_url)),
+            "no remote pattern allows the engine origin {engine_url}"
+        );
+        // A non-loopback host must NOT be granted by those patterns.
+        let remote_host = tauri::Url::parse("http://198.51.100.7:1234/").expect("url");
+        assert!(
+            !patterns.iter().any(|pattern| pattern.test(&remote_host)),
+            "the grant is wider than loopback: {remote_host} was allowed"
+        );
     }
 }
