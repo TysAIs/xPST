@@ -6,20 +6,66 @@
 
 const JSON_HEADERS = { Accept: "application/json" };
 
-async function getJSON(path) {
-  const res = await fetch(path, { headers: JSON_HEADERS });
-  if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
-  return res.json();
+/**
+ * Error carrying the HTTP status and the parsed JSON body.
+ *
+ * The first-run flow needs the *engine's* reason for a refusal (a 409 from
+ * /api/post carries per-destination blockers), so the body is preserved
+ * instead of being flattened into a status code string.
+ */
+export class ApiError extends Error {
+  constructor(path, status, body, message) {
+    super(message ?? `${path} → HTTP ${status}`);
+    this.name = "ApiError";
+    this.path = path;
+    this.status = status;
+    this.body = body ?? null;
+  }
+
+  /** Engine-provided detail string, when present. */
+  get detail() {
+    const detail = this.body?.detail;
+    return typeof detail === "string" ? detail : undefined;
+  }
 }
 
-async function postJSON(path, payload) {
-  const res = await fetch(path, {
+async function readBody(res) {
+  const type = res.headers.get("content-type") ?? "";
+  if (!type.includes("json")) return null;
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+async function requestJSON(path, options = {}) {
+  let res;
+  try {
+    res = await fetch(path, options);
+  } catch (cause) {
+    throw new ApiError(path, 0, null, `${path} → engine unreachable (${cause?.message ?? cause})`);
+  }
+  if (!res.ok) {
+    const body = await readBody(res);
+    const detail = typeof body?.detail === "string" ? body.detail : undefined;
+    throw new ApiError(path, res.status, body, detail ?? `${path} → HTTP ${res.status}`);
+  }
+  const body = await readBody(res);
+  if (body === null) throw new ApiError(path, res.status, null, `${path} → response was not JSON`);
+  return body;
+}
+
+function getJSON(path) {
+  return requestJSON(path, { headers: JSON_HEADERS });
+}
+
+function postJSON(path, payload) {
+  return requestJSON(path, {
     method: "POST",
     headers: { ...JSON_HEADERS, "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(payload ?? {}),
   });
-  if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
-  return res.json();
 }
 
 export const api = {
@@ -41,8 +87,21 @@ export const api = {
   library: () => getJSON("/api/library"),
   /** Role-aware provider catalog from the canonical backend contract. */
   providers: () => getJSON("/api/providers"),
-};
 
+  // ── First-run flow ────────────────────────────────────────────────
+  /** First-run state: source folder, destinations, readiness, next step. */
+  onboarding: () => getJSON("/api/onboarding"),
+  /** Persist the content folder and the enabled destinations. */
+  saveOnboarding: (payload) => postJSON("/api/onboarding", payload),
+  /** Persist the "onboarding finished" flag so the wizard is offered once. */
+  completeOnboarding: () => postJSON("/api/onboarding/complete", {}),
+  /** Local media files in a folder (defaults to the configured folder). */
+  media: (folder = "") => getJSON(`/api/media${folder ? `?folder=${encodeURIComponent(folder)}` : ""}`),
+  /** Inspect / enable / verify one destination platform. */
+  connect: (platform, payload = {}) => postJSON(`/api/connect/${encodeURIComponent(platform)}`, payload),
+  /** Plan (dry_run: true) or run a post through the real engine path. */
+  post: (payload) => postJSON("/api/post", payload),
+};
 
 // ── Hash routing ──────────────────────────────────────────────────────
 // Routes mirror the QML desktop page ids so both shells share one set of
@@ -51,7 +110,11 @@ export const api = {
 
 export const NAV_ITEMS = [
   { id: "dashboard", href: "#/", label: "Dashboard", icon: "layout-dashboard" },
-  { id: "create", href: "#/create", label: "Create", icon: "square-pen" },
+  { id: "onboarding", href: "#/onboarding", label: "Setup", icon: "sparkles" },
+  { id: "connect", href: "#/connect", label: "Connect", icon: "plug" },
+  { id: "compose", href: "#/compose", label: "Compose", icon: "clapperboard" },
+  { id: "create", href: "#/create", label: "Preflight", icon: "square-pen" },
+  { id: "result", href: "#/result", label: "Last post", icon: "list-checks" },
   { id: "analytics", href: "#/analytics", label: "Analytics", icon: "chart-no-axes-combined" },
   { id: "videos", href: "#/videos", label: "Videos", icon: "video" },
   { id: "accounts", href: "#/accounts", label: "Accounts", icon: "users" },
@@ -68,4 +131,10 @@ export function currentRoute(inputHash = undefined) {
     inputHash ?? (typeof location === "undefined" ? "" : location.hash) ?? ""
   ).replace(/^#\/?/, "");
   return NAV_ITEMS.some((item) => item.id === hash) ? hash : "dashboard";
+}
+
+/** True when a hash points at the default landing route (no explicit section). */
+export function isLandingHash(inputHash = undefined) {
+  const raw = String(inputHash ?? (typeof location === "undefined" ? "" : location.hash) ?? "");
+  return raw === "" || raw === "#" || raw === "#/";
 }

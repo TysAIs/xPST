@@ -61,6 +61,7 @@
     <h1>Accounts</h1>
     <p>Capability readiness by role. A source login does not imply video publishing access.</p>
   </div>
+  <a class="xpst-button" data-variant="secondary" href="#/connect">Connect a platform</a>
   <a class="xpst-button" data-variant="secondary" href="#/settings">Settings</a>
 </header>
 
