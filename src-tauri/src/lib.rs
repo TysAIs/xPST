@@ -774,10 +774,17 @@ pub fn run() {
         }
         // macOS dock-icon click while the window is hidden (close-to-dock):
         // bring the window back instead of ignoring the user.
+        //
+        // `RunEvent::Reopen` only exists on macOS, so the ARM itself must be
+        // cfg-gated. A `cfg!(target_os = "macos")` guard inside the pattern is
+        // evaluated at runtime and still requires the variant to exist at
+        // compile time, which breaks the Windows and Linux builds with
+        // `error[E0599]: no variant named Reopen found for enum RunEvent`.
+        #[cfg(target_os = "macos")]
         RunEvent::Reopen {
             has_visible_windows,
             ..
-        } if cfg!(target_os = "macos") => {
+        } => {
             log(&format!(
                 "APP_REOPEN has_visible_windows={has_visible_windows}"
             ));
