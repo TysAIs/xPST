@@ -1848,19 +1848,34 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
             })
 
     # 3. Environment prerequisites.
-    ffmpeg_path = os.environ.get("XPST_FFMPEG_PATH") or shutil.which("ffmpeg")
+    # Route through resolve_*_path so the check agrees with what the engine
+    # actually uses: XPST_*_PATH override > system install > the copy xPST
+    # fetched on first use (~/.xpst/bin). A bare `shutil.which` reported
+    # "not found" for GUI-launched apps whose minimal PATH misses
+    # /opt/homebrew/bin and for the fetched build.
+    from xpst.utils.platform import resolve_ffmpeg_path, resolve_ffprobe_path
+
+    ffmpeg_path = resolve_ffmpeg_path()
+    ffprobe_path = resolve_ffprobe_path()
+    yt_dlp_path = shutil.which("yt-dlp")
     environment: list[dict[str, Any]] = [
         {
             "name": "ffmpeg",
             "ok": bool(ffmpeg_path),
-            "detail": ffmpeg_path or "not found on PATH (set XPST_FFMPEG_PATH)",
-            "fix": None if ffmpeg_path else "Install ffmpeg (e.g. `brew install ffmpeg`) or set XPST_FFMPEG_PATH.",
+            "detail": ffmpeg_path or "not found (xPST can download a verified static build)",
+            "fix": None if ffmpeg_path else "Run `xpst media fetch`, install ffmpeg (e.g. `brew install ffmpeg`), or set XPST_FFMPEG_PATH.",
+        },
+        {
+            "name": "ffprobe",
+            "ok": bool(ffprobe_path),
+            "detail": ffprobe_path or "not found (xPST can download a verified static build)",
+            "fix": None if ffprobe_path else "Run `xpst media fetch`, install ffmpeg (e.g. `brew install ffmpeg`), or set XPST_FFPROBE_PATH.",
         },
         {
             "name": "yt-dlp",
-            "ok": bool(shutil.which("yt-dlp")),
-            "detail": shutil.which("yt-dlp") or "not found on PATH",
-            "fix": None if shutil.which("yt-dlp") else "Install yt-dlp (e.g. `brew install yt-dlp` or `pipx install yt-dlp`).",
+            "ok": bool(yt_dlp_path),
+            "detail": yt_dlp_path or "not found on PATH",
+            "fix": None if yt_dlp_path else "Install yt-dlp (e.g. `brew install yt-dlp` or `pipx install yt-dlp`).",
         },
     ]
     try:
@@ -5513,6 +5528,81 @@ def search(ctx: click.Context, query: str, limit: int, as_json: bool):
             console.print(f"  • {point}{score_str}")
         if not result.get("hits"):
             console.print("[dim]No results found.[/dim]")
+
+
+@main.group()
+def media():
+    """Local media helper binaries (ffmpeg / ffprobe).
+
+    xPST no longer ships ffmpeg inside the desktop app (~87 MB of a 192 MB
+    bundle). It uses the ffmpeg already on your machine, and only downloads a
+    verified static build — once, with a checksum — when there is none.
+    """
+
+
+@media.command("status")
+@json_option
+def media_status(as_json: bool):
+    """Show which ffmpeg/ffprobe xPST will use, and where it came from.
+
+        xpst media status
+        xpst media status --json
+    """
+    from xpst.media.binaries import media_bin_dir, media_binary_status
+
+    status = media_binary_status()
+    payload = {
+        "bin_dir": str(media_bin_dir()),
+        "binaries": status,
+        "ok": all(item["ok"] for item in status.values()),
+    }
+    if as_json:
+        json_output(payload, True)
+        return
+    for name, item in status.items():
+        if item["ok"]:
+            console.print(f"[green]✓[/green] [bold]{name}[/bold] ({item['source']}): {item['path']}")
+        else:
+            console.print(f"[yellow]•[/yellow] [bold]{name}[/bold]: not found")
+    if not payload["ok"]:
+        console.print(
+            "[dim]Run [bold]xpst media fetch[/bold] to download a verified static build, "
+            "or install ffmpeg (macOS: brew install ffmpeg).[/dim]"
+        )
+
+
+@media.command("fetch")
+@click.option("--binary", "binaries", multiple=True, type=click.Choice(["ffmpeg", "ffprobe"]),
+              help="Fetch only this binary (repeatable; default: both)")
+@json_option
+def media_fetch(binaries: tuple[str, ...], as_json: bool):
+    """Download ffmpeg/ffprobe into ~/.xpst/bin (resumable, checksum-verified).
+
+    Only needed on a machine with no ffmpeg of its own. Nothing is downloaded
+    when a system ffmpeg (or XPST_FFMPEG_PATH) already resolves.
+    """
+    from xpst.media.binaries import MEDIA_BINARIES, ensure_media_binaries, media_bin_dir
+
+    names = binaries or MEDIA_BINARIES
+    report = ensure_media_binaries(names=names, fetch=True, log=lambda line: console.print(f"[dim]{line}[/dim]"))
+    failures = {name: info for name, info in report.items() if not info["ok"]}
+    payload = {
+        "bin_dir": str(media_bin_dir()),
+        "binaries": report,
+        "ok": not failures,
+    }
+    if as_json:
+        json_output(payload, True)
+        if failures:
+            sys.exit(EXIT_GENERAL)
+        return
+    for name, item in report.items():
+        if item["ok"]:
+            console.print(f"[green]✓[/green] [bold]{name}[/bold] ready: {item['path']}")
+        else:
+            console.print(f"[red]✗[/red] [bold]{name}[/bold] unavailable: {item.get('error')}")
+    if failures:
+        sys.exit(EXIT_GENERAL)
 
 
 if __name__ == "__main__":

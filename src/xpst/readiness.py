@@ -175,7 +175,12 @@ def _ffmpeg_check() -> ReadinessCheck:
         ok=ok,
         severity="error",
         message="FFmpeg is available." if ok else "FFmpeg is required for video processing.",
-        action="" if ok else "Install FFmpeg and make sure it is on PATH.",
+        action=(
+            ""
+            if ok
+            else "Run `xpst media fetch` to download a verified static build, or install "
+            "FFmpeg and make sure it is on PATH."
+        ),
         details={"binary": get_ffmpeg_name(), "path": resolve_ffmpeg_path()},
     )
 

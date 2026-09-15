@@ -446,28 +446,12 @@ fn boot_engine(app: tauri::AppHandle) {
     // regardless of which path the frozen entrypoint reads. The engine's
     // entrypoint treats an already-taken port as a loud non-zero exit.
     command = command.arg("--port").arg(port.to_string());
-    // Bundle-resolution: point the engine at the ffmpeg/ffprobe/yt-dlp
-    // binaries shipped as bundle resources (see tauri.conf.json
-    // bundle.resources). The engine honors XPST_FFMPEG_PATH,
-    // XPST_FFPROBE_PATH, and XPST_YTDLP_PATH, so the app works with zero
-    // user-installed media dependencies.
-    let ff_dir = resource_dir.join("binaries/ffmpeg");
-    let ff = ff_dir.join(if cfg!(windows) {
-        "ffmpeg.exe"
-    } else {
-        "ffmpeg"
-    });
-    let fp = ff_dir.join(if cfg!(windows) {
-        "ffprobe.exe"
-    } else {
-        "ffprobe"
-    });
-    if ff.is_file() {
-        command = command.env("XPST_FFMPEG_PATH", ff);
-    }
-    if fp.is_file() {
-        command = command.env("XPST_FFPROBE_PATH", fp);
-    }
+    // Media helpers are NOT bundled: ffmpeg+ffprobe were 87 MB of a 192 MB
+    // app (and the flaky download behind them is what kept the release lane
+    // red). The engine resolves XPST_FFMPEG_PATH > system ffmpeg > a copy it
+    // fetched into <config dir>/bin on first use (xpst.media.binaries), so a
+    // machine that already has ffmpeg downloads nothing. Only yt-dlp — a 3 MB
+    // zipapp with no system equivalent — still ships in the bundle.
     let ytdlp = resource_dir.join("binaries/ytdlp").join(if cfg!(windows) {
         "yt-dlp.exe"
     } else {
