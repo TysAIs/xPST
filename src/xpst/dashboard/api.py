@@ -416,7 +416,9 @@ def create_api_router(
                     config_changed = True
 
         entry: dict[str, Any] = {}
-        live_checked = False
+        # ``None`` = not probed (a disabled destination is never probed, and
+        # "not probed" must not read as "checked and failed").
+        live_checked: bool | None = None
         probe_error: str | None = None
         if verify and getattr(getattr(config, key, None), "enabled", False):
             try:
@@ -429,6 +431,7 @@ def create_api_router(
                 live_checked = bool(entry)
             except Exception as exc:  # noqa: BLE001 - an unverifiable account is not a 500
                 probe_error = str(exc)[:200]
+                live_checked = False
                 logger.debug("Connect probe failed for %s: %s", key, exc)
 
         provider = destinations[key]
@@ -436,6 +439,8 @@ def create_api_router(
         state = str(role.get("state") or provider.get("destination_state") or "unconfigured")
         authenticated = bool(entry.get("authenticated")) if entry else False
         verified_ready = state == "ready"
+        # ``live_checked`` is None for a skipped probe; None is falsy, so the
+        # connected verdict stays conservative without claiming a check ran.
         connected = bool((authenticated or verified_ready) and live_checked)
 
         enabled_now = bool(getattr(getattr(config, key, None), "enabled", False))
@@ -457,7 +462,7 @@ def create_api_router(
             "connected": connected,
             "authenticated": authenticated,
             "state": state,
-            "verified": live_checked,
+            "verified": live_checked is True,
             "live_checked": live_checked,
             "error": probe_error or role.get("error") or provider.get("destination_error"),
             "auth_mode": entry.get("auth_mode") or provider.get("auth_mode"),
