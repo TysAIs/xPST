@@ -262,6 +262,65 @@ pub fn pick_free_port() -> std::io::Result<u16> {
     Ok(port)
 }
 
+/// Mint a per-launch token for the engine's mutating routes.
+///
+/// The engine refuses `POST /api/post`, `/api/connect/*` and `/api/onboarding*`
+/// without the dashboard API token, so the shell hands its own webview a
+/// session token through the URL fragment instead of letting it read the
+/// persisted credential from disk. The value is never written to a file and is
+/// regenerated on every boot (including a mid-session engine respawn).
+///
+/// Entropy comes from `RandomState`, whose SipHash keys are seeded from the OS
+/// RNG at randomisation time, mixed with the clock and the pid. That keeps the
+/// crate dependency-free (no `rand`) while making the token unguessable for a
+/// session-scoped loopback credential; the durable credential is the persisted
+/// API token behind `xpst auth api-token`.
+pub fn mint_ui_token() -> String {
+    fn seed(tag: &str) -> u64 {
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
+
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write(tag.as_bytes());
+        hasher.write_u64(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0),
+        );
+        hasher.write_u32(std::process::id());
+        hasher.finish()
+    }
+
+    let mut token = String::with_capacity(64);
+    for tag in ["xpst-ui-a", "xpst-ui-b", "xpst-ui-c", "xpst-ui-d"] {
+        token.push_str(&format!("{:016x}", seed(tag)));
+    }
+    token
+}
+
+/// Build the engine UI URL the webview should load.
+///
+/// The token travels in the fragment: a fragment is never sent to the server
+/// (so it cannot end up in an access log) and the SPA strips it from the
+/// address bar as soon as it boots.
+pub fn engine_ui_url(port: u16, ui_token: &str) -> String {
+    format!("http://{ENGINE_HOST}:{port}/#xpst_token={ui_token}")
+}
+
+/// Remove a `#xpst_token=...` fragment from a URL before logging it.
+///
+/// `WEBVIEW_URL=` lines are consumed by scripts and the shell log; the session
+/// token must never land there.
+pub fn redact_url(url: &str) -> String {
+    match url.split_once('#') {
+        Some((head, frag)) if frag.starts_with("xpst_token=") => {
+            format!("{head}#xpst_token=<redacted>")
+        }
+        _ => url.to_string(),
+    }
+}
+
 /// Issue a minimal HTTP/1.1 request and return `true` if the server
 /// answers with any valid HTTP response (FastAPI returning *any* HTTP
 /// response means it is up — 200, 401, 404 all count).
@@ -372,6 +431,13 @@ fn boot_engine(app: tauri::AppHandle) {
     command = command.env("XPST_DASHBOARD_PORT", port.to_string());
     command = command.env("XPST_ENGINE_MODE", "tauri");
     command = command.env("XPST_UI_DIST", ui_dir);
+    // Per-launch credential for the engine's mutating routes. The engine
+    // accepts it in addition to the persisted API token (which stays on disk in
+    // the encrypted credential store for CLI/MCP/agent callers). Handing the
+    // webview its own token keeps the durable credential out of the browser
+    // context entirely.
+    let ui_token = mint_ui_token();
+    command = command.env("XPST_UI_TOKEN", &ui_token);
     // Also pass the port as an explicit argv flag. The env var alone was a
     // single point of failure: an engine build that ignored argv kept the
     // env path working, but every hand-run/smoke invocation
@@ -501,12 +567,13 @@ fn boot_engine(app: tauri::AppHandle) {
             log(&format!("ENGINE_PORT_VERIFIED port={port}"));
 
             if let Some(window) = app.get_webview_window("main") {
-                let url = tauri::Url::parse(&format!("http://127.0.0.1:{port}/"))
-                    .expect("valid engine URL");
+                let target = engine_ui_url(port, &ui_token);
+                let url = tauri::Url::parse(&target).expect("valid engine URL");
                 if let Err(e) = window.navigate(url) {
                     log(&format!("navigate failed, falling back to eval: {e}"));
                     let _ = window.eval(&format!(
-                        "window.location.replace('http://127.0.0.1:{port}/')"
+                        "window.location.replace({})",
+                        serde_json::to_string(&target).unwrap_or_default()
                     ));
                 }
                 let _ = window.show();
@@ -519,7 +586,7 @@ fn boot_engine(app: tauri::AppHandle) {
                 // navigation evidence).
                 std::thread::sleep(Duration::from_secs(2));
                 match window.url() {
-                    Ok(url) => log(&format!("WEBVIEW_URL={url}")),
+                    Ok(url) => log(&format!("WEBVIEW_URL={}", redact_url(url.as_str()))),
                     Err(e) => log(&format!("could not read webview url: {e}")),
                 }
             }
@@ -838,5 +905,38 @@ mod tests {
         let res = wait_for_engine_health(port, Duration::from_millis(300));
         assert!(res.is_none());
         assert!(started.elapsed() >= Duration::from_millis(250));
+    }
+
+    #[test]
+    fn mint_ui_token_is_hex_and_unique_per_call() {
+        let a = mint_ui_token();
+        let b = mint_ui_token();
+        assert_eq!(a.len(), 64, "4 x 16 hex chars");
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()), "token must be hex");
+        assert_ne!(a, b, "each launch must get its own token");
+    }
+
+    #[test]
+    fn engine_ui_url_carries_the_token_in_the_fragment() {
+        let url = engine_ui_url(51234, "deadbeef");
+        assert_eq!(url, "http://127.0.0.1:51234/#xpst_token=deadbeef");
+        // A parseable URL whose query is empty: the token is never sent to the
+        // engine, only read by the SPA.
+        let parsed = tauri::Url::parse(&url).expect("valid url");
+        assert_eq!(parsed.query(), None);
+        assert_eq!(parsed.fragment(), Some("xpst_token=deadbeef"));
+    }
+
+    #[test]
+    fn redact_url_hides_the_session_token_in_logs() {
+        assert_eq!(
+            redact_url("http://127.0.0.1:51234/#xpst_token=secret"),
+            "http://127.0.0.1:51234/#xpst_token=<redacted>"
+        );
+        assert_eq!(
+            redact_url("http://127.0.0.1:51234/#/compose"),
+            "http://127.0.0.1:51234/#/compose"
+        );
+        assert_eq!(redact_url("http://127.0.0.1:51234/"), "http://127.0.0.1:51234/");
     }
 }

@@ -203,8 +203,13 @@ def render_bio_page(config) -> str:
 """
 
 
-def render_bio_edit_page(config, saved: bool = False) -> str:
-    """Render the auth-protected admin form for editing the bio page."""
+def render_bio_edit_page(config, saved: bool = False, form_action: str = "/bio/edit") -> str:
+    """Render the auth-protected admin form for editing the bio page.
+
+    ``form_action`` lets the server thread a `?token=` credential through the
+    form POST when the editor was opened with one (no dashboard login
+    configured) — a plain HTML form cannot send an Authorization header.
+    """
     handle = config.bio.handle
     rows = []
     for i, link in enumerate(config.bio.links):
@@ -227,7 +232,7 @@ def render_bio_edit_page(config, saved: bool = False) -> str:
 <main class="card">
   <h1>Edit Link in Bio</h1>
   {flash}
-  <form method="post" action="/bio/edit">
+  <form method="post" action="{html.escape(form_action, quote=True)}">
     <label class="field" for="handle">Display name</label>
     <input type="text" id="handle" name="handle" value="{html.escape(handle)}" placeholder="Your name or brand">
     <label class="field">Social links (auto — edit in config accounts)</label>

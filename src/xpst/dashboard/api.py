@@ -9,10 +9,49 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
+
+
+def require_api_token(request: Request) -> None:
+    """Route-level guard: mutating ``/api`` routes fail closed.
+
+    The app-wide middleware in :mod:`xpst.dashboard.server` is the primary
+    enforcement point (it also covers non-``/api`` mutations such as
+    ``/bio/edit``). This dependency is defence in depth: it keeps the
+    protection attached to the routes themselves, so a future app assembly that
+    includes this router without the middleware still cannot execute a post,
+    a connect flow or an onboarding write anonymously.
+
+    Credentials come from the app state populated by ``_create_app`` (dashboard
+    Basic auth + API tokens). On a bare router the only accepted token is the
+    one supplied through ``XPST_API_TOKEN`` / ``XPST_UI_TOKEN`` — never a
+    default.
+    """
+    from xpst.dashboard.auth import env_tokens, mutation_authorized
+
+    accepted = getattr(request.app.state, "xpst_api_tokens", None)
+    if accepted is None:
+        accepted = env_tokens()
+    username, password_hash = getattr(request.app.state, "xpst_dashboard_auth", ("", ""))
+    if mutation_authorized(
+        request,
+        accepted=set(accepted),
+        username=username or "",
+        password_hash=password_hash or "",
+    ):
+        return
+    raise HTTPException(
+        status_code=401,
+        detail=(
+            "Mutating endpoints require the xPST API token. Run "
+            "`xpst auth api-token --show` (or set XPST_API_TOKEN) and send it as "
+            "`Authorization: Bearer <token>` or `X-API-Token: <token>`."
+        ),
+    )
+
 
 # Live auth probes hit the network (measured ~5.6s on a real machine), so the
 # Home screen must not pay that cost on every load. Entries are keyed by config
@@ -255,7 +294,7 @@ def create_api_router(
         """First-run onboarding state (read-only; never creates a config file)."""
         return _onboarding_payload(_load_ui_config())
 
-    @router.post("/onboarding")
+    @router.post("/onboarding", dependencies=[Depends(require_api_token)])
     def api_onboarding_save(payload: dict[str, Any]) -> dict[str, Any]:
         """Persist the first-run choices (content folder + enabled destinations).
 
@@ -299,7 +338,7 @@ def create_api_router(
         payload_out["actions"] = actions
         return payload_out
 
-    @router.post("/onboarding/complete")
+    @router.post("/onboarding/complete", dependencies=[Depends(require_api_token)])
     def api_onboarding_complete() -> dict[str, Any]:
         """Persist ``first_run_complete`` so the wizard is offered once."""
         config = _load_ui_config()
@@ -374,7 +413,7 @@ def create_api_router(
             )
         return {"ok": True, "folder": str(path), "exists": True, "items": items, "count": len(items)}
 
-    @router.post("/connect/{platform}")
+    @router.post("/connect/{platform}", dependencies=[Depends(require_api_token)])
     def api_connect(platform: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Inspect, enable, and verify one destination platform.
 
@@ -467,7 +506,7 @@ def create_api_router(
             "next_action": next_action,
         }
 
-    @router.post("/post")
+    @router.post("/post", dependencies=[Depends(require_api_token)])
     def api_post(payload: dict[str, Any]) -> JSONResponse:
         """Run (or plan) a manual post through the canonical engine path.
 
@@ -738,7 +777,7 @@ def create_api_router(
         items.sort(key=lambda item: item.get("last_attempt") or "", reverse=True)
         return {"items": items, "count": len(items)}
 
-    @router.post("/preflight")
+    @router.post("/preflight", dependencies=[Depends(require_api_token)])
     def api_preflight(payload: dict[str, Any]) -> dict[str, Any]:
         """Run the canonical, side-effect-free post preflight.
 

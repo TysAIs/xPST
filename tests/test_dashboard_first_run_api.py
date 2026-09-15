@@ -45,11 +45,24 @@ def _authed_app(tmp_path: Path) -> tuple[TestClient, str]:
     return TestClient(_create_app(config_dir)), config_dir
 
 
+# Mutating /api routes require the dashboard API token even on a bare router
+# (defence in depth in `require_api_token`). These flow tests are about route
+# behaviour, so they authenticate the way a real client does.
+API_TOKEN = "first-run-api-token"
+API_HEADERS = {"X-API-Token": API_TOKEN}
+
+
+@pytest.fixture(autouse=True)
+def _api_token_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bare-router app has no credential store, so it reads the env override."""
+    monkeypatch.setenv("XPST_API_TOKEN", API_TOKEN)
+
+
 def _open_app(tmp_path: Path, config_dir: str | None = None, **router_kwargs: Any) -> TestClient:
-    """App without auth, for flows that do not exercise the auth matrix."""
+    """App without Basic auth, for flows that do not exercise the auth matrix."""
     app = FastAPI()
     app.include_router(create_api_router(config_dir or str(tmp_path / "cfg"), **router_kwargs))
-    return TestClient(app)
+    return TestClient(app, headers=API_HEADERS)
 
 
 def _media_dir(tmp_path: Path, count: int = 2) -> Path:
