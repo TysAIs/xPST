@@ -30,6 +30,11 @@ SKIPPED_MARKDOWN_DIRS = {
     # pass on a clean checkout but fail after `scripts/build-engine.sh`.
     "target",
     "binaries",
+    # npm installs (gitignored): third-party package READMEs carry relative
+    # links (CHANGELOG, LICENSE) that do not resolve in an installed tree.
+    # Building the UI is a normal local step, so `pytest` must stay green
+    # after `npm ci` in ui/.
+    "node_modules",
 }
 
 
