@@ -148,6 +148,17 @@ def _published(platform: str):
     )
 
 
+# SIGKILL semantics are POSIX-only: Windows has no signal.SIGKILL and no
+# negative return codes, so these two tests cannot express "killed at the
+# publish boundary". The atomicity property they cover is still exercised on
+# Windows by the ENOSPC and permission-denied cases below.
+_POSIX_SIGNALS = pytest.mark.skipif(
+    os.name == "nt",
+    reason="signal.SIGKILL and negative return codes are POSIX-only; Windows has no SIGKILL",
+)
+
+
+@_POSIX_SIGNALS
 def test_sigkill_mid_upload_leaves_valid_state_and_no_duplicate(tmp_path, monkeypatch):
     """SIGKILL during the upload: state.json stays valid, nothing recorded as
     posted, and the retry publishes exactly once."""
@@ -210,6 +221,7 @@ with patch.object(engine.upload_service, "_encode_for_platform",
     assert uploader.upload.await_count == 1, "crashed attempt caused a duplicate publish"
 
 
+@_POSIX_SIGNALS
 def test_sigkill_at_the_state_publish_boundary_keeps_the_old_file(tmp_path, monkeypatch):
     """Killed between 'temp file written' and 'rename': the old state survives.
 
