@@ -264,3 +264,101 @@ async def test_engine_does_not_mark_unverified_success_as_posted(tmp_path: Path)
     assert result.all_success is False
     assert not engine.state.is_video_posted(result.video_id, "youtube")
     assert engine.state.get_video(result.video_id)["posted_to"] == {}
+
+
+# ---------------------------------------------------------------------------
+# Progress reporting must agree with the upload verdict
+#
+# A real Instagram attempt logged
+#   [ERROR] Instagram upload failed (attempt 1/4): 404 Client Error: Not Found
+#   [INFO]  Instagram upload (canary-d085d18f): 100% complete (55.4s total)
+# one millisecond apart: the tracker reported success for a failed upload,
+# which is what made a failure look like a post.
+# ---------------------------------------------------------------------------
+
+def test_progress_tracker_fail_never_reports_100_percent() -> None:
+    from xpst.utils import progress as progress_module
+
+    with patch.object(progress_module, "logger") as fake_logger:
+        tracker = progress_module.ProgressTracker("Instagram upload (canary)")
+        tracker.fail("404 Client Error: Not Found")
+
+    messages = [call.args[0] for call in fake_logger.info.call_args_list]
+    errors = [call.args[0] for call in fake_logger.error.call_args_list]
+
+    assert not any("100% complete" in message for message in messages)
+    assert any("FAILED" in message for message in errors)
+    assert any("404 Client Error" in message for message in errors)
+
+
+def test_progress_tracker_complete_still_reports_success() -> None:
+    from xpst.utils import progress as progress_module
+
+    with patch.object(progress_module, "logger") as fake_logger:
+        progress_module.ProgressTracker("YouTube upload (ok)").complete()
+
+    messages = [call.args[0] for call in fake_logger.info.call_args_list]
+    assert any("100% complete" in message for message in messages)
+
+
+async def _run_manual_upload(tmp_path: Path, upload_result: UploadResult):
+    """Drive one manual upload through the engine with a scripted uploader."""
+    config = _config(tmp_path)
+    for platform in ("youtube", "x", "instagram", "tiktok", "threads"):
+        getattr(config, platform).enabled = False
+    engine = CrossPostEngine(config)
+    engine.upload_service.anti_bot = None
+
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+    uploader = MagicMock(spec=PlatformUploader)
+    uploader.platform_name = "youtube"
+    uploader.upload = AsyncMock(return_value=upload_result)
+    engine._platforms["youtube"] = uploader
+
+    with (
+        patch.object(engine.upload_service, "_encode_for_platform", new_callable=AsyncMock, return_value=video),
+        patch("xpst.services.upload_service.verify_media") as verify_media,
+        patch("xpst.utils.progress.logger") as fake_logger,
+    ):
+        verify_media.return_value.ok = True
+        verify_media.return_value.warnings = []
+        verify_media.return_value.errors = []
+        verify_media.return_value.to_dict.return_value = {}
+        result = await engine.post_manual(video, "caption", ["youtube"])
+
+    infos = [call.args[0] for call in fake_logger.info.call_args_list]
+    errors = [call.args[0] for call in fake_logger.error.call_args_list]
+    return result, infos, errors
+
+
+@pytest.mark.asyncio
+async def test_failed_upload_does_not_report_100_percent(tmp_path: Path) -> None:
+    result, infos, errors = await _run_manual_upload(
+        tmp_path,
+        UploadResult(
+            success=False,
+            error="404 Client Error: Not Found for url: https://i.instagram.com/api/v1/qe/expose/",
+            platform="youtube",
+        ),
+    )
+
+    assert result.results["youtube"].success is False
+    assert not any("100% complete" in message for message in infos)
+    assert any("FAILED" in message for message in errors)
+
+
+@pytest.mark.asyncio
+async def test_published_upload_reports_100_percent(tmp_path: Path) -> None:
+    result, infos, _errors = await _run_manual_upload(
+        tmp_path,
+        UploadResult(
+            success=True,
+            post_id="abc123",
+            post_url="https://youtube.com/shorts/abc123",
+            platform="youtube",
+        ),
+    )
+
+    assert result.results["youtube"].success is True
+    assert any("100% complete" in message for message in infos)
