@@ -142,6 +142,9 @@ _PLACEHOLDER_PREFIXES = (
     "placeholder",
     "example",
     "sample",
+    "synthetic",
+    "redacted",
+    "anon",
     "xpst",
 )
 
@@ -211,6 +214,8 @@ EMAIL_RE = re.compile(
     r"([A-Za-z0-9._%+-]+)@"
     r"([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+)"
 )
+# TLDs reserved for documentation/tests (RFC 2606/6761) are never personal.
+EMAIL_ALLOWED_TLDS = {"test", "invalid", "localhost", "example", "local"}
 EMAIL_ALLOWED_DOMAINS = {
     "users.noreply.github.com",
     "noreply.github.com",
@@ -331,7 +336,7 @@ def _scan_text(
                 continue
             if any(label.isdigit() for label in domain.split(".")):
                 continue
-            if tld in NON_EMAIL_TLDS:
+            if tld in NON_EMAIL_TLDS or tld in EMAIL_ALLOWED_TLDS:
                 continue
             if domain in EMAIL_ALLOWED_DOMAINS:
                 continue

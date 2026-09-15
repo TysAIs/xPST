@@ -153,6 +153,25 @@ def test_allows_documentation_placeholder_email(tmp_path):
     assert result["ok"] is True, result["findings"]
 
 
+def test_allows_reserved_test_domain_email(tmp_path):
+    doc = tmp_path / "test_ssrf_guard.py"
+    payload = "https://user:" + "pw@" + "example.test/x"
+    doc.write_text('validate("' + payload + '")\n', encoding="utf-8")
+
+    result = scan_public_safety(tmp_path, [doc])
+
+    assert result["ok"] is True, result["findings"]
+
+
+def test_allows_synthetic_user_assignment(tmp_path):
+    source = tmp_path / "conftest.py"
+    source.write_text('USERNAME = "' + "synthetic" + '-admin"\n', encoding="utf-8")
+
+    result = scan_public_safety(tmp_path, [source])
+
+    assert result["ok"] is True, result["findings"]
+
+
 def test_email_like_asset_path_is_not_flagged(tmp_path):
     conf = tmp_path / "tauri.conf.json"
     conf.write_text('{"icon": "icons/128' + "x128@2x" + '.png"}\n', encoding="utf-8")
