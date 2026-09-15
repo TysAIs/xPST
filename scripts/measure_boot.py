@@ -100,8 +100,13 @@ def detect_host_class() -> str:
 
 
 def resolve_binary(app: Path) -> Path:
-    """Accept a .app bundle, a Contents/MacOS dir, or the binary itself."""
-    app = app.expanduser()
+    """Accept a .app bundle, a Contents/MacOS dir, or the binary itself.
+
+    The result is always absolute: the harness launches the app with a temporary
+    working directory, so a relative path from a CI step (`find src-tauri/target
+    ...`) would stop resolving the moment the process starts.
+    """
+    app = app.expanduser().resolve()
     if not app.exists():
         raise HarnessError(f"app bundle not found: {app}")
     if app.is_file():
@@ -122,36 +127,58 @@ def resolve_binary(app: Path) -> Path:
 # --------------------------------------------------------------------------
 # process helpers
 # --------------------------------------------------------------------------
-def engine_pids() -> list[int]:
+def engine_pids(scope: str | None = None) -> list[int]:
+    """PIDs of xPST engine sidecars; `scope` keeps only those under a path.
+
+    Scoping matters for safety: a bare `pkill xpst-engine` would kill the
+    sidecar of the xPST the user is actually running. Every kill this harness
+    performs is scoped to the bundle it was asked to measure.
+    """
     out = subprocess.run(
         ["pgrep", "-f", ENGINE_PROC], capture_output=True, text=True
     ).stdout.split()
+    pids = [int(p) for p in out if p.isdigit()]
+    if scope is None:
+        return pids
+    scoped = []
+    for pid in pids:
+        cmd = subprocess.run(
+            ["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True
+        ).stdout
+        if scope in cmd:
+            scoped.append(pid)
+    return scoped
+
+
+def app_pids(scope: str) -> list[int]:
+    """PIDs of xPST shells whose command line lives under `scope`."""
+    out = subprocess.run(["pgrep", "-f", scope], capture_output=True, text=True).stdout.split()
     return [int(p) for p in out if p.isdigit()]
 
 
-def wait_no_engine(timeout: float = 20.0) -> bool:
+def wait_no_engine(scope: str | None = None, timeout: float = 20.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not engine_pids():
+        if not engine_pids(scope):
             return True
         time.sleep(0.25)
-    return not engine_pids()
+    return not engine_pids(scope)
 
 
-def kill_engine_leftovers() -> list[int]:
-    pids = engine_pids()
+def kill_engine_leftovers(scope: str | None = None) -> list[int]:
+    pids = engine_pids(scope)
     for pid in pids:
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
             continue
-    if not wait_no_engine(10.0):
-        for pid in engine_pids():
+    if not wait_no_engine(scope, 10.0):
+        for pid in engine_pids(scope):
             try:
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 continue
-        wait_no_engine(5.0)
+        wait_no_engine(scope, 5.0)
     return pids
 
 
@@ -179,18 +206,35 @@ def parse_markers(log_text: str) -> dict[str, float]:
     return found
 
 
+def early_exit_hint(log_text: str) -> str:
+    """Explain an early exit in the shell's own terms."""
+    if "SINGLE_INSTANCE_RACE_LOSER" in log_text:
+        return (
+            "The shell exited as a single-instance race loser, so another xPST "
+            "instance grabbed the lock — close every xPST window and re-run."
+        )
+    if "FATAL: engine did not become healthy" in log_text:
+        return "The engine sidecar never answered /health (see the log below)."
+    return ""
+
+
 def measure_once(
     binary: Path,
     *,
     timeout: float,
     purge: bool,
     index: int,
+    scope: str | None = None,
 ) -> dict:
-    if engine_pids():
-        leftovers = kill_engine_leftovers()
+    # A second xPST cannot boot at all: the single-instance plugin makes it exit
+    # immediately ("SINGLE_INSTANCE_RACE_LOSER") and it would focus the other
+    # window instead. So refuse loudly rather than report a fantasy number.
+    resident = engine_pids()
+    if resident:
         raise HarnessError(
-            f"run {index}: xPST engine already running before launch "
-            f"(pids {leftovers}); refusing to measure a non-cold boot"
+            f"run {index}: an xPST engine is already running (pids {resident}) — "
+            "another xPST is open, so this launch would exit as a single-instance "
+            "loser instead of booting. Quit xPST and re-run."
         )
 
     purged = purge_cache() if purge else False
@@ -207,15 +251,21 @@ def measure_once(
     env.pop("XPST_ENGINE_PORT", None)
 
     started = time.monotonic()
-    with open(log_path, "wb") as log_fh:
-        proc = subprocess.Popen(
-            [str(binary)],
-            stdout=log_fh,
-            stderr=subprocess.STDOUT,
-            env=env,
-            start_new_session=True,
-            cwd=str(tmpdir),
-        )
+    try:
+        with open(log_path, "wb") as log_fh:
+            proc = subprocess.Popen(
+                [str(binary)],
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+                env=env,
+                start_new_session=True,
+                cwd=str(tmpdir),
+            )
+    except OSError as exc:
+        raise HarnessError(
+            f"run {index}: could not launch {binary} ({exc}). The bundle looks "
+            "incomplete or is not executable from this working directory."
+        ) from exc
     pid = proc.pid
     ready_at: float | None = None
     log_text = ""
@@ -229,7 +279,8 @@ def measure_once(
             if proc.poll() is not None:
                 raise HarnessError(
                     f"run {index}: app exited (rc={proc.returncode}) before the "
-                    f"ready marker.\n--- shell output ---\n{log_text[-4000:]}"
+                    f"ready marker. {early_exit_hint(log_text)}"
+                    f"\n--- shell output ---\n{log_text[-4000:]}"
                 )
             time.sleep(0.05)
         if ready_at is None:
@@ -253,7 +304,7 @@ def measure_once(
                 pass
             proc.wait(timeout=10)
 
-    leftovers = kill_engine_leftovers()
+    leftovers = kill_engine_leftovers(scope)
     markers = parse_markers(log_text)
     sample = {
         "run": index,
@@ -412,6 +463,9 @@ def main(argv: list[str] | None = None) -> int:
     metric = args.metric or budget_doc.get("metric", "BOOT_TO_READY_SECS")
     host_class = args.host_class or detect_host_class()
     host_budget = (budget_doc.get("budgets") or {}).get(host_class)
+    # Everything this run starts or kills is scoped to the bundle under test, so
+    # a concurrently running xPST (the user's own app) is never touched.
+    scope = str(args.app.expanduser().resolve()) if args.app.expanduser().is_dir() else str(binary)
 
     started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     print("== xPST cold-boot measurement ==")
@@ -437,6 +491,7 @@ def main(argv: list[str] | None = None) -> int:
                 timeout=args.timeout,
                 purge=not args.no_purge,
                 index=i,
+                scope=scope,
             )
         except HarnessError as exc:
             print(f"run {i}: HARNESS ERROR\n{exc}")
@@ -452,8 +507,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         # Cleanliness gap between runs; keeps run N from being measured while
         # the previous sidecar is still exiting.
-        if i < args.runs and not wait_no_engine(20.0):
-            kill_engine_leftovers()
+        if i < args.runs and not wait_no_engine(scope, 20.0):
+            kill_engine_leftovers(scope)
         time.sleep(1.0)
 
     if failures:
@@ -524,4 +579,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except HarnessError as exc:  # pragma: no cover - defensive
+        print(f"::error::{exc}" if os.environ.get("GITHUB_ACTIONS") else f"ERROR: {exc}")
+        sys.exit(2)
+    except KeyboardInterrupt:  # pragma: no cover - defensive
+        sys.exit(130)
