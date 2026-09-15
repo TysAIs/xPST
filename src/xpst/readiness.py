@@ -284,6 +284,21 @@ def _destination_checks(
         else:
             message = f"{name.title()} health is degraded."
             action = str(role.get("error") or f"Reconnect {name}.")
+
+        # `readiness` is deliberately offline and deterministic, so it never runs
+        # a live credential probe. When no probe has run, the session fields are
+        # unknown (None) for every state. Emitting False contradicts
+        # `xpst auth status`, which does probe live and reports these same
+        # platforms as valid — "not probed" is not the same as "invalid".
+        probed = bool(role.get("live_checked"))
+        session_valid = role["session_valid"] if probed else None
+        live_checked = role["live_checked"] if probed else None
+        if state == ProviderState.READY.value and not probed:
+            message = (
+                f"{name.title()} is configured. "
+                "Run `xpst auth status` for a live credential check."
+            )
+
         checks.append(
             ReadinessCheck(
                 id=f"{name}_connection",
@@ -299,8 +314,8 @@ def _destination_checks(
                 details={
                     "enabled": role["enabled"],
                     "state": state,
-                    "session_valid": role["session_valid"],
-                    "live_checked": role["live_checked"],
+                    "session_valid": session_valid,
+                    "live_checked": live_checked,
                     "error": role["error"],
                 },
             )
