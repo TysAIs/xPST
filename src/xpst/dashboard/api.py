@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
@@ -110,9 +111,387 @@ def _live_auth_and_canonical(
     return auth, canonical, False, 0.0, False
 
 
-def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
-    """Build the /api router bound to a config directory."""
+def create_api_router(
+    config_dir: str = "~/.xpst",
+    *,
+    engine_factory: Any | None = None,
+    uploaders: dict[str, Any] | None = None,
+) -> APIRouter:
+    """Build the /api router bound to a config directory.
+
+    Args:
+        config_dir: config directory the API reads from.
+        engine_factory: optional test seam — callable returning an engine-like
+            object used by ``POST /api/post``. Production passes ``None`` so the
+            real :class:`~xpst.engine.CrossPostEngine` runs.
+        uploaders: optional test seam — ``{platform: uploader}`` used by
+            ``POST /api/connect/{platform}`` instead of building real platform
+            uploaders (keeps a verification call off the network).
+    """
     router = APIRouter(prefix="/api", tags=["ui"])
+
+    def _load_ui_config() -> Any:
+        """Load this config dir's config, falling back to defaults.
+
+        Read-only by design: a GET must never create or modify a config file.
+        A brand-new install (no config.yaml yet) is answered from defaults, and
+        the first *write* endpoint materializes the file.
+        """
+        from xpst.config import XPSTConfig
+
+        path = str(Path(config_dir).expanduser() / "config.yaml")
+        try:
+            return XPSTConfig.load(path)
+        except Exception as exc:  # noqa: BLE001 - a missing/corrupt config must not 500 the UI
+            logger.debug("Using default config for %s: %s", config_dir, exc)
+            config = XPSTConfig()
+            config.config_dir = str(Path(config_dir).expanduser())
+            return config
+
+    def _save_ui_config(config: Any) -> None:
+        """Persist a config to this router's config directory."""
+        target = Path(config_dir).expanduser()
+        target.mkdir(parents=True, exist_ok=True)
+        config.config_dir = str(target)
+        config.save(str(target / "config.yaml"))
+
+    def _destination_providers(config: Any) -> list[dict[str, Any]]:
+        """Canonical video-destination providers, in catalog order.
+
+        Config-only truth (no live probe): an entry is ``ready`` only when the
+        destination is enabled AND its local credentials exist.
+        """
+        from xpst.provider_truth import canonical_provider_catalog
+
+        catalog = canonical_provider_catalog(config)
+        providers = [
+            provider
+            for provider in catalog.get("providers", [])
+            if "video_destination" in (provider.get("roles") or [])
+        ]
+        for provider in providers:
+            role = (provider.get("role_status") or {}).get("video_destination") or {}
+            provider["destination_state"] = role.get("state", "unconfigured")
+            provider["destination_ready"] = role.get("state") == "ready"
+            provider["destination_error"] = role.get("error")
+        return providers
+
+    def _guide_payload(platform: str) -> dict[str, Any]:
+        """Click-by-click setup steps for one platform (never a secret)."""
+        try:
+            from xpst.wizard import PLATFORM_GUIDES
+
+            guide = PLATFORM_GUIDES.get(platform)
+            if guide is None:
+                return {"platform": platform, "title": platform, "why": "", "steps": [], "docs_url": ""}
+            return {
+                "platform": platform,
+                "title": guide.title,
+                "why": guide.why,
+                "steps": [step.text for step in guide.steps],
+                "docs_url": guide.docs_url,
+            }
+        except Exception as exc:  # noqa: BLE001 - a missing guide must not break connect
+            logger.debug("No guide for %s: %s", platform, exc)
+            return {"platform": platform, "title": platform, "why": "", "steps": [], "docs_url": ""}
+
+    def _onboarding_payload(config: Any) -> dict[str, Any]:
+        """First-run state: source folder, destinations, readiness, next step."""
+        from xpst.readiness import build_readiness_report
+
+        destinations = _destination_providers(config)
+        source_path = str(getattr(getattr(config, "local", None), "path", "") or "")
+        source_exists = bool(source_path) and Path(source_path).expanduser().is_dir()
+        ready_destinations = [item["name"] for item in destinations if item.get("destination_ready")]
+
+        try:
+            readiness = build_readiness_report(config).to_dict()
+        except Exception as exc:  # noqa: BLE001 - report truthfully instead of 500
+            logger.warning("Readiness report failed: %s", exc)
+            readiness = {"ready": False, "summary": f"Readiness could not be computed: {str(exc)[:200]}", "checks": [], "blocking": [], "warnings": []}
+
+        first_run_complete = bool(getattr(config, "first_run_complete", False))
+        if ready_destinations:
+            next_step = {
+                "kind": "compose",
+                "label": "Compose a post",
+                "route": "#/compose",
+                "detail": ", ".join(ready_destinations),
+            }
+        elif destinations:
+            next_step = {
+                "kind": "connect",
+                "label": "Connect a destination",
+                "route": "#/connect",
+                "detail": "No destination is ready yet.",
+            }
+        else:
+            next_step = {
+                "kind": "configure",
+                "label": "Review configuration",
+                "route": "#/settings",
+                "detail": "No video destination is available.",
+            }
+
+        steps = [
+            {"id": "welcome", "title": "Welcome to xPST", "done": True},
+            {"id": "source", "title": "Choose a content folder", "done": source_exists},
+            {"id": "destination", "title": "Connect a platform", "done": bool(ready_destinations)},
+            {"id": "ready", "title": "Compose your first post", "done": False},
+        ]
+        return {
+            "first_run_complete": first_run_complete,
+            "show_wizard": not first_run_complete,
+            "source": {"path": source_path, "exists": source_exists},
+            "destinations": destinations,
+            "ready_destinations": ready_destinations,
+            "readiness": readiness,
+            "next_step": next_step,
+            "steps": steps,
+        }
+
+    @router.get("/onboarding")
+    def api_onboarding() -> dict[str, Any]:
+        """First-run onboarding state (read-only; never creates a config file)."""
+        return _onboarding_payload(_load_ui_config())
+
+    @router.post("/onboarding")
+    def api_onboarding_save(payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist the first-run choices (content folder + enabled destinations).
+
+        Only non-secret local choices are written. Credentials are never
+        accepted here — connecting a real account stays in the interactive
+        connect flow (``xpst connect`` / the Tauri deep-link).
+        """
+        from xpst.readiness import repair_local_setup
+
+        config = _load_ui_config()
+        data = payload or {}
+        applied: list[str] = []
+
+        local = data.get("local")
+        if isinstance(local, dict) and "path" in local:
+            config.local.path = str(local.get("path") or "").strip()
+            applied.append("local.path")
+
+        destinations = data.get("destinations")
+        if isinstance(destinations, dict):
+            known = {item["name"] for item in _destination_providers(config)}
+            for name, enabled in destinations.items():
+                key = str(name).strip().lower()
+                if key not in known:
+                    raise HTTPException(status_code=404, detail=f"Unknown destination platform: {name}")
+                getattr(config, key).enabled = bool(enabled)
+                applied.append(f"accounts.{key}.enabled")
+
+        _save_ui_config(config)
+        reloaded = _load_ui_config()
+        try:
+            repair = repair_local_setup(reloaded)
+            actions = list(repair.get("actions", []))
+        except Exception as exc:  # noqa: BLE001 - repair is best-effort
+            logger.debug("Local setup repair skipped: %s", exc)
+            actions = []
+
+        payload_out = _onboarding_payload(reloaded)
+        payload_out["ok"] = True
+        payload_out["applied"] = applied
+        payload_out["actions"] = actions
+        return payload_out
+
+    @router.post("/onboarding/complete")
+    def api_onboarding_complete() -> dict[str, Any]:
+        """Persist ``first_run_complete`` so the wizard is offered once."""
+        config = _load_ui_config()
+        config.first_run_complete = True
+        _save_ui_config(config)
+        reloaded = _load_ui_config()
+        payload = _onboarding_payload(reloaded)
+        return {
+            "ok": True,
+            "first_run_complete": bool(reloaded.first_run_complete),
+            "next_step": payload["next_step"],
+        }
+
+    @router.get("/media")
+    def api_media(folder: str = "", limit: int = 100) -> dict[str, Any]:
+        """List local media in a folder for the compose screen.
+
+        The folder comes from the caller or from the configured content folder.
+        No folder is guessed from the user's home directory, and nothing is
+        scanned recursively.
+        """
+        from xpst.sources.local import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+
+        config = _load_ui_config()
+        configured = str(getattr(getattr(config, "local", None), "path", "") or "")
+        target = (folder or configured or "").strip()
+        cap = max(1, min(int(limit or 100), 500))
+
+        if not target:
+            return {
+                "ok": True,
+                "folder": "",
+                "exists": False,
+                "items": [],
+                "count": 0,
+                "hint": "No content folder is configured yet. Choose one during setup.",
+            }
+
+        path = Path(target).expanduser()
+        if not path.is_dir():
+            return {
+                "ok": False,
+                "folder": str(path),
+                "exists": False,
+                "items": [],
+                "count": 0,
+                "error": f"Folder not found: {path}",
+            }
+
+        extensions = VIDEO_EXTENSIONS | IMAGE_EXTENSIONS
+        files: list[Path] = []
+        for extension in extensions:
+            files.extend(path.glob(f"*{extension}"))
+            files.extend(path.glob(f"*{extension.upper()}"))
+        unique = sorted(set(files), key=lambda item: item.name.lower())[:cap]
+
+        items: list[dict[str, Any]] = []
+        for item in unique:
+            try:
+                stat = item.stat()
+            except OSError:
+                continue
+            suffix = item.suffix.lower()
+            items.append(
+                {
+                    "path": str(item),
+                    "name": item.name,
+                    "size_bytes": stat.st_size,
+                    "type": "video" if suffix in VIDEO_EXTENSIONS else "image",
+                    "modified": stat.st_mtime,
+                }
+            )
+        return {"ok": True, "folder": str(path), "exists": True, "items": items, "count": len(items)}
+
+    @router.post("/connect/{platform}")
+    def api_connect(platform: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Inspect, enable, and verify one destination platform.
+
+        Truth contract: ``connected`` is True only when the canonical live
+        probe reports the destination authenticated. A request that merely
+        succeeded returns ``connected: false`` with the state and the exact
+        blocker — the UI must never show a success badge for an unconnected
+        account.
+
+        Body:
+            dry_run: True (default) reports the plan without writing config.
+            enable: optional bool — set ``accounts.<platform>.enabled``.
+            verify: bool (default True) — run the canonical live probe.
+        """
+        from xpst.auth_status import collect_live_auth_status
+        from xpst.provider_truth import canonical_status_report
+
+        config = _load_ui_config()
+        key = str(platform).strip().lower()
+        destinations = {item["name"]: item for item in _destination_providers(config)}
+        if key not in destinations:
+            raise HTTPException(status_code=404, detail=f"Unknown destination platform: {platform}")
+
+        data = payload or {}
+        dry_run = bool(data.get("dry_run", True))
+        verify = bool(data.get("verify", True))
+        enable = data.get("enable")
+
+        config_changed = False
+        if isinstance(enable, bool):
+            account = getattr(config, key, None)
+            if account is not None and bool(getattr(account, "enabled", False)) != enable:
+                if dry_run:
+                    config_changed = False
+                else:
+                    account.enabled = enable
+                    _save_ui_config(config)
+                    config = _load_ui_config()
+                    config_changed = True
+
+        entry: dict[str, Any] = {}
+        live_checked = False
+        probe_error: str | None = None
+        if verify and getattr(getattr(config, key, None), "enabled", False):
+            try:
+                if uploaders is not None:
+                    canonical = canonical_status_report(config, collect_live_auth_status(config, uploaders))
+                else:
+                    canonical = canonical_status_report(config, collect_live_auth_status(config))
+                providers = canonical.get("providers") or {}
+                entry = dict(providers.get(key) or {})
+                live_checked = bool(entry)
+            except Exception as exc:  # noqa: BLE001 - an unverifiable account is not a 500
+                probe_error = str(exc)[:200]
+                logger.debug("Connect probe failed for %s: %s", key, exc)
+
+        provider = destinations[key]
+        role = (entry.get("role_status") or {}).get("video_destination") or {}
+        state = str(role.get("state") or provider.get("destination_state") or "unconfigured")
+        authenticated = bool(entry.get("authenticated")) if entry else False
+        verified_ready = state == "ready"
+        connected = bool((authenticated or verified_ready) and live_checked)
+
+        enabled_now = bool(getattr(getattr(config, key, None), "enabled", False))
+        if connected:
+            next_action = {"kind": "compose", "label": "Compose a post", "route": "#/compose"}
+        elif not enabled_now:
+            next_action = {"kind": "enable", "label": f"Enable {provider['display_name']}", "route": "#/connect"}
+        else:
+            next_action = {"kind": "authenticate", "label": "Finish sign-in", "route": "#/connect"}
+
+        return {
+            "ok": True,
+            "platform": key,
+            "display_name": provider.get("display_name", key),
+            "dry_run": dry_run,
+            "enabled": enabled_now,
+            "enable_requested": enable if isinstance(enable, bool) else None,
+            "config_changed": config_changed,
+            "connected": connected,
+            "authenticated": authenticated,
+            "state": state,
+            "verified": live_checked,
+            "live_checked": live_checked,
+            "error": probe_error or role.get("error") or provider.get("destination_error"),
+            "auth_mode": entry.get("auth_mode") or provider.get("auth_mode"),
+            "official_api": bool(provider.get("is_official_api")),
+            "docs_url": provider.get("docs_url") or "",
+            "guide": _guide_payload(key),
+            "next_action": next_action,
+        }
+
+    @router.post("/post")
+    def api_post(payload: dict[str, Any]) -> JSONResponse:
+        """Run (or plan) a manual post through the canonical engine path.
+
+        ``dry_run: true`` returns the preflight plan and uploads nothing.
+        Otherwise the real engine runs; every requested destination appears in
+        the response and a destination that published nothing is reported as a
+        failure (never as success). A request refused by preflight returns 409
+        with the same truthful envelope.
+        """
+        from xpst.services.post_service import PostRequest, PostService
+
+        data = payload or {}
+        request = PostRequest.from_payload(data)
+        dry_run = bool(data.get("dry_run", False))
+        service = PostService(_load_ui_config(), config_dir, engine_factory=engine_factory)
+        envelope = service.dry_run(request) if dry_run else service.execute(request)
+        envelope["request"] = {
+            "media_paths": request.media_paths,
+            "caption": request.caption,
+            "platforms": request.platforms,
+            "dry_run": dry_run,
+        }
+        blocked = bool(envelope.get("blocked")) or (not dry_run and not envelope.get("ok") and envelope.get("blockers"))
+        return JSONResponse(envelope, status_code=409 if blocked else 200)
 
     @router.get("/summary")
     def api_summary() -> dict[str, Any]:
@@ -290,11 +669,9 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
 
     @router.get("/providers")
     def api_providers() -> dict[str, Any]:
-        from xpst.config import XPSTConfig
         from xpst.provider_truth import canonical_provider_catalog
 
-        config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
-        return canonical_provider_catalog(config)
+        return canonical_provider_catalog(_load_ui_config())
 
     @router.get("/schedules")
     def api_schedules() -> dict[str, Any]:
@@ -432,9 +809,8 @@ def create_api_router(config_dir: str = "~/.xpst") -> APIRouter:
     @router.get("/settings")
     def api_settings() -> dict[str, Any]:
         from xpst.cli import _mask_sensitive_values
-        from xpst.config import XPSTConfig
 
-        config = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+        config = _load_ui_config()
 
         def _section(obj: Any) -> dict[str, Any]:
             return dict(obj.__dict__) if hasattr(obj, "__dict__") else {}
