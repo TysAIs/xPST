@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "metric": "BOOT_TO_READY_SECS",
+  "definition": "Seconds from xPST process start to the moment the shell has navigated the webview to the engine dashboard AND the Python engine sidecar answered GET /health. This is the marker the Tauri shell prints as BOOT_TO_READY_SECS (src-tauri/src/lib.rs) and the closest thing to 'I double-clicked it and it is usable'. A host class with no entry here is measured and reported but not gated, so adding a new machine or CI runner cannot silently red-flag every run.",
+  "measured_with": "scripts/measure_boot.py",
+  "cold_definition": "Fresh process launched from the bundle's own binary, empty XPST_CONFIG_DIR, no xPST process resident, OS file cache purged before each run where passwordless sudo allows it (recorded per sample as cache_purge).",
+  "budgets": {
+    "mac-mini-m4-16gb-local": {
+      "label": "Tyler's Mac mini (Apple M4, 16 GB, macOS 27.0)",
+      "median_max": 3.5,
+      "p95_max": 4.5,
+      "max_max": 6.0,
+      "first_run_max": 5.0,
+      "baseline_measured_utc": "2026-09-15",
+      "baseline_runs": 10,
+      "baseline": {
+        "n": 10,
+        "min": 1.964,
+        "median": 2.413,
+        "p95": 3.038,
+        "max": 3.038,
+        "first_run": 2.4
+      },
+      "evidence": "missions/work/boot-baseline-mac-mini-m4-2026-09-15.json (worker t_9450b5e1, raw per-run samples + bundle SHA-256)",
+      "budget_rationale": "Budget sits above the worst sample of the 10-run baseline (3.038 s) and ~45% above the median, so run-to-run noise cannot fail it while any regression that adds roughly a second to startup does. The first-run allowance is separate because the first launch after a reboot pays code-signature and cold-mmap costs."
+    }
+  },
+  "notes": [
+    "This is a regression gate, not an aspiration. If it fails, the measured numbers are in the failure message; re-measure on the same host class before concluding anything, and only raise the budget when the new number is understood (that edit is the record of the decision).",
+    "Windows and Linux bundles are not covered yet: the release lane measures only the macOS bundle because BOOT_TO_READY_SECS is emitted by the same shell everywhere but the CI lanes for Windows/Linux boot the app under different launchers (NSIS install, xvfb-run for the AppImage)."
+  ]
+}
