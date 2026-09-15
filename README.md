@@ -49,7 +49,7 @@ xPST includes integrations for **six platforms** — YouTube, Instagram, X/Twitt
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
 - **CLI** — 38 top-level commands covering the entire workflow
-- **MCP server** — 38 tools so AI agents can drive the entire product
+- **MCP server** — 40 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
 
@@ -95,7 +95,7 @@ platform API calls you configure. See
 ### Three Drivable Surfaces
 - **Desktop GUI** — PySide6/QML app with Dashboard, Compose, Content, Analytics, Connect, Schedule, Settings, and About pages + DetailPanel
 - **CLI** — 38 Click-based commands with `--json` output, `--dry-run` mode, and meaningful exit codes
-- **MCP server** — 38 tools (32 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
+- **MCP server** — 40 tools (34 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 ### Enterprise Hardening
 - **Encrypted credential-store values** — Fernet/scrypt `.enc` fallback by default, with optional OS keychain storage; platform-specific token/session files remain owner-only and the whole `~/.xpst/` directory is sensitive
@@ -477,16 +477,20 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 }
 ```
 
-### 23 Tools
+### Tool roundup
 
-**Posting & operations (10 tools):**
+The complete, generated index of all 40 tools lives in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md);
+this section highlights the ones agents reach for most.
+
+**Posting & operations (11 tools):**
 
 | Tool | Description |
 |------|-------------|
 | `xpst_run` | Check for new videos and cross-post them (supports `dry_run`, `source`, `max_posts`) |
 | `xpst_post` | Post a specific local video file or carousel to platforms |
 | `xpst_backfill` | Retry failed or incomplete posts from history |
-| `xpst_delete` | Delete a post from a platform |
+| `xpst_failures_retry` | Retry **one** recorded failure by video_id + platform (same semantics as `xpst failures retry`) |
+| `xpst_delete` | Remove a post **record** from local state — does **not** delete the live post on the platform (use the CLI `xpst delete` for that) |
 | `xpst_health` | Test connectivity to all platforms and sources (no uploads) |
 | `xpst_status` | Show cross-posting statistics and system status |
 | `xpst_config_show` | Display current configuration (sensitive values masked) |
@@ -511,12 +515,13 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 | `xpst_transcript` | Get the transcript for a video by ID or content hash |
 | `xpst_search` | Search transcripts and content across the knowledge base |
 
-**Scheduling (2 tools):**
+**Scheduling (3 tools):**
 
 | Tool | Description |
 |------|-------------|
 | `xpst_schedule_list` | List scheduled posts (pending, completed, failed) with times and targets |
 | `xpst_schedule_add` | Schedule a post: local video + caption + ISO-8601 time + optional platform list and repeat rule |
+| `xpst_schedule_cancel` | Cancel a scheduled post by entry id (local schedule store only) |
 
 **Knowledge base (4 tools, deprecated in favor of the `xpst_*` content tools):**
 
@@ -529,7 +534,7 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 
 ### Security Guardrails
 
-Mutating tools (`xpst_run`, `xpst_post`, `xpst_backfill`, `xpst_delete`, `xpst_schedule_add`, `kb_add`, `kb_organize`) post to or mutate **real accounts**. Two environment-variable tiers control them:
+Mutating tools (`xpst_run`, `xpst_post`, `xpst_backfill`, `xpst_delete`, `xpst_schedule_add`, `xpst_schedule_cancel`, `xpst_failures_retry`, `messenger_send`, `messenger_set_rules`, `xpst_messenger_check_comments`, `xpst_disconnect`, `kb_add`, `kb_organize`) post to or mutate **real accounts**. Two environment-variable tiers control them:
 
 - **`XPST_MCP_READONLY=1`** — Blocks all mutating tools entirely (read-only mode)
 - **`XPST_MCP_REQUIRE_CONFIRM=1`** — Requires `confirm: true` in the arguments (consent tier)
