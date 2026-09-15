@@ -101,7 +101,11 @@ class InstagramUploader(PlatformUploader):
                 else "Uses persisted Instagram sessions through instagrapi; not an official Meta publishing API."
             ),
             extra={
-                "content": ("video", "image", "carousel"),
+                # "image" is deliberately NOT declared: there is no single-image
+                # publish path (both container calls hard-code media_type=REELS),
+                # so declaring it makes agents attempt an operation that cannot
+                # work. Carousel is real, but only on the session auth path.
+                "content": ("video", "carousel"),
                 "max_caption_length": self.MAX_CAPTION_LENGTH,
                 "max_carousel_items": 10,
             },
