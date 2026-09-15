@@ -58,7 +58,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_status` | Show cross-posting statistics and health status | No | — |
 | `xpst_backfill` | Retry failed or incomplete posts from history | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No | — |
-| `xpst_auth_status` | Show authentication status for all platforms | No | — |
+| `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No | — |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No | — |
 | `xpst_capabilities` | Return the canonical role-aware provider and capability contract without netw… | No | — |
 | `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets… | No | — |
