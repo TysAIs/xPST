@@ -69,10 +69,23 @@ asset list - is identical.
 
 ## What a tag publishes
 
-Per lane, the resolved asset list (installers produced by that lane plus
-`media-binaries-PROVENANCE-<target>.txt`) is uploaded with
-`fail_on_unmatched_files: true`. A tag that resolves no assets fails the lane
-instead of publishing an empty release.
+Each lane uploads its own workflow artifact (installers + its
+`media-binaries-PROVENANCE-<target>.txt`), then a single `publish-release` job
+runs once the three lanes are green:
+
+1. downloads every lane's artifact;
+2. asserts the file a stranger installs exists for **every** platform this
+   workflow claims (`.dmg`, `.exe`/`.msi`, `.AppImage`/`.deb`) plus at least one
+   provenance record, and fails naming the missing platform otherwise;
+3. writes an aggregate `SHA256SUMS` whose entries use the asset names GitHub
+   publishes, so `sha256sum -c SHA256SUMS` works on a downloaded set;
+4. publishes with `fail_on_unmatched_files: true`.
+
+One job owns the release on purpose. Before this, each of the three lanes
+uploaded straight to the release and all three raced to create it; a tag build
+died on `Creating new GitHub release ... 500 / Too many retries`. Collecting the
+artifacts first also means the published asset set is asserted *before* anything
+becomes visible.
 
 Signing is optional and never changes *what* is built:
 

@@ -59,14 +59,22 @@ have() { [[ -x "$1" ]]; }
 # sha256_of <file>: shasum / sha256sum / openssl / python, whichever exists.
 # Covers macOS (shasum), Linux (sha256sum) and Git Bash on Windows (openssl or
 # the Python that actions/setup-python installed).
+#
+# The file is fed on stdin on purpose: GNU coreutils prefixes the whole output
+# line with a backslash when the FILE NAME needs shell escaping (a Windows path
+# like D:\a\_temp\xpst-media-binaries\<hash> does), which made sha256sum report
+# "\<hash>" and every Windows download look like a provenance violation. Reading
+# from stdin removes the file name from the output entirely, and the digest is
+# still parsed strictly so a broken tool cannot pass a garbage value off as a
+# checksum.
 sha256_of() {
   local f="$1" out=""
   if command -v shasum >/dev/null 2>&1; then
-    out="$(shasum -a 256 "$f" | awk '{print $1}')"
+    out="$(shasum -a 256 < "$f" | awk '{print $1}')"
   elif command -v sha256sum >/dev/null 2>&1; then
-    out="$(sha256sum "$f" | awk '{print $1}')"
+    out="$(sha256sum < "$f" | awk '{print $1}')"
   elif command -v openssl >/dev/null 2>&1; then
-    out="$(openssl dgst -sha256 "$f" | awk '{print $NF}')"
+    out="$(openssl dgst -sha256 < "$f" | awk '{print $NF}')"
   elif command -v python3 >/dev/null 2>&1; then
     out="$(python3 -c 'import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$f")"
   elif command -v python >/dev/null 2>&1; then
@@ -74,7 +82,13 @@ sha256_of() {
   else
     die "no sha256 tool found (need shasum, sha256sum, openssl or python)"
   fi
-  printf '%s' "$out" | tr 'A-Z' 'a-z'
+  # Keep only the sha256 itself: tolerate leading escapes/quotes and trailing
+  # file names, and refuse anything that is not a 64-character hex digest.
+  out="$(printf '%s' "$out" | tr 'A-Z' 'a-z' | grep -oE '[0-9a-f]{64}' | head -n 1 || true)"
+  if [[ ! "$out" =~ ^[0-9a-f]{64}$ ]]; then
+    die "could not compute a sha256 for $f (no 64-hex digest in the tool output)"
+  fi
+  printf '%s' "$out"
 }
 
 # download <url> <dest>: retried, resumed, fail-closed transfers.
