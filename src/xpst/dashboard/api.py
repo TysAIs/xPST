@@ -476,22 +476,91 @@ def create_api_router(
         the response and a destination that published nothing is reported as a
         failure (never as success). A request refused by preflight returns 409
         with the same truthful envelope.
+
+        ``draft_id`` binds the request to a durable draft: the draft is brought
+        up to date with this request, its plan is revalidated, and a plan whose
+        destination/auth/media/content state changed is refused (409, with the
+        reasons) unless the caller re-confirms with ``confirm_stale: true``.
         """
-        from xpst.services.post_service import PostRequest, PostService
+        from xpst.drafts import DraftService
+        from xpst.services.post_service import PostRequest, PostService, serialize_post_attempt
 
         data = payload or {}
         request = PostRequest.from_payload(data)
         dry_run = bool(data.get("dry_run", False))
+        draft_id = str(data.get("draft_id") or "").strip()
+        confirm_stale = bool(data.get("confirm_stale", False))
+        draft_service = DraftService(_load_ui_config(), config_dir) if draft_id else None
+        gate: dict[str, Any] | None = None
+
+        def attach_request(envelope: dict[str, Any]) -> dict[str, Any]:
+            envelope["request"] = {
+                "media_paths": request.media_paths,
+                "caption": request.caption,
+                "platforms": request.platforms,
+                "dry_run": dry_run,
+            }
+            if draft_id:
+                envelope["draft_id"] = draft_id
+            return envelope
+
+        if draft_service is not None:
+            gate = draft_service.post_gate(
+                draft_id,
+                media_paths=request.media_paths,
+                caption=request.caption,
+                platforms=request.platforms,
+                confirm_stale=confirm_stale,
+            )
+            if gate["unknown_draft"] or not gate["allowed"]:
+                reasons = list(gate["reasons"])
+                blockers = [reason["message"] for reason in reasons]
+                if gate["unknown_draft"]:
+                    blockers = [
+                        "This draft no longer exists on disk; save the draft again before posting."
+                    ]
+                envelope = serialize_post_attempt(
+                    requested=request.platforms,
+                    results={},
+                    caption=request.caption,
+                    dry_run=dry_run,
+                    blockers=blockers,
+                )
+                envelope.update(
+                    {
+                        "stale": bool(reasons),
+                        "stale_reasons": reasons,
+                        "unknown_draft": bool(gate["unknown_draft"]),
+                        "draft": gate.get("verdict"),
+                        "ready": False,
+                        "blocked": True,
+                    }
+                )
+                return JSONResponse(attach_request(envelope), status_code=409)
+
         service = PostService(_load_ui_config(), config_dir, engine_factory=engine_factory)
         envelope = service.dry_run(request) if dry_run else service.execute(request)
-        envelope["request"] = {
-            "media_paths": request.media_paths,
-            "caption": request.caption,
-            "platforms": request.platforms,
-            "dry_run": dry_run,
-        }
+        if draft_service is not None:
+            verdict = gate.get("verdict") if gate else None
+            envelope["stale"] = False
+            envelope["stale_reasons"] = []
+            envelope["reconfirmed"] = bool(verdict and verdict.get("reconfirmed"))
+            if dry_run:
+                # A dry run *is* a plan: record it (and what it was validated
+                # against) so resuming the draft can tell whether it still holds.
+                recorded = draft_service.record_plan(
+                    draft_id,
+                    plan=envelope.get("plan"),
+                    ready=bool(envelope.get("ready")),
+                    blockers=envelope.get("blockers") or [],
+                )
+                envelope["draft"] = draft_service.verdict_for(recorded) if recorded else None
+            else:
+                if envelope.get("ok"):
+                    draft_service.mark_posted(draft_id, video_id=str(envelope.get("video_id") or ""))
+                envelope["draft"] = draft_service.verdict_for(draft_service.get(draft_id) or {})
         blocked = bool(envelope.get("blocked")) or (not dry_run and not envelope.get("ok") and envelope.get("blockers"))
-        return JSONResponse(envelope, status_code=409 if blocked else 200)
+        return JSONResponse(attach_request(envelope), status_code=409 if blocked else 200)
 
     @router.get("/summary")
     def api_summary() -> dict[str, Any]:
@@ -738,6 +807,73 @@ def create_api_router(
         items.sort(key=lambda item: item.get("last_attempt") or "", reverse=True)
         return {"items": items, "count": len(items)}
 
+    @router.get("/drafts")
+    def api_drafts() -> dict[str, Any]:
+        """Stored compose drafts, newest first, each revalidated now.
+
+        Revalidation happens on the request path (local stat + credential-file
+        reads only), so a resumed draft always carries the verdict for the
+        machine's current state, never the one from when it was written.
+        """
+        from xpst.drafts import DraftService
+
+        service = DraftService(_load_ui_config(), config_dir)
+        rows = service.list()
+        return {"ok": True, "count": len(rows), "drafts": rows, "network_calls": False}
+
+    @router.post("/drafts")
+    def api_drafts_save(payload: dict[str, Any]) -> JSONResponse:
+        """Create or update a durable draft (the compose screen's autosave).
+
+        An unknown ``draft_id`` (store wiped between calls) creates a fresh
+        draft and reports ``recreated: true`` rather than failing the save — the
+        half-written work is never thrown away because an id went stale.
+        """
+        from xpst.drafts import DraftService
+
+        data = payload or {}
+        service = DraftService(_load_ui_config(), config_dir)
+        try:
+            result = service.save(
+                draft_id=str(data.get("draft_id") or data.get("id") or ""),
+                media_paths=data.get("media_paths") or data.get("media_path"),
+                caption=str(data.get("caption") or ""),
+                platforms=data.get("platforms") or [],
+            )
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc), "saved": False}, status_code=413)
+        stored = result["draft"]
+        return JSONResponse(
+            {
+                "ok": True,
+                "saved": True,
+                "recreated": bool(result["recreated"]),
+                "draft": stored,
+                "verdict": result["verdict"],
+                "network_calls": False,
+            }
+        )
+
+    @router.get("/drafts/{draft_id}")
+    def api_draft_detail(draft_id: str) -> JSONResponse:
+        """One draft plus its fresh verdict (the resume-time revalidation)."""
+        from xpst.drafts import DraftService
+
+        service = DraftService(_load_ui_config(), config_dir)
+        try:
+            result = service.revalidate(draft_id)
+        except KeyError:
+            return JSONResponse({"ok": False, "error": "No draft with that id.", "draft": None}, status_code=404)
+        return JSONResponse({"ok": True, "draft": result["draft"], "verdict": result["verdict"], "network_calls": False})
+
+    @router.delete("/drafts/{draft_id}")
+    def api_draft_delete(draft_id: str) -> dict[str, Any]:
+        """Discard a draft. ``deleted: false`` when there was nothing to delete."""
+        from xpst.drafts import DraftService
+
+        service = DraftService(_load_ui_config(), config_dir)
+        return {"ok": True, "deleted": bool(service.delete(draft_id)), "draft_id": draft_id}
+
     @router.post("/preflight")
     def api_preflight(payload: dict[str, Any]) -> dict[str, Any]:
         """Run the canonical, side-effect-free post preflight.
@@ -750,7 +886,14 @@ def create_api_router(
         from xpst.config import XPSTConfig
         from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
 
-        media_path = str(payload.get("media_path") or "").strip()
+        raw_paths = payload.get("media_paths")
+        if raw_paths is None:
+            single = str(payload.get("media_path") or "").strip()
+            raw_paths = [single] if single else []
+        if isinstance(raw_paths, str):
+            raw_paths = [raw_paths]
+        media_paths = [str(item).strip() for item in raw_paths if str(item).strip()]
+        media_path = media_paths[0] if media_paths else ""
         caption = str(payload.get("caption") or "")
         platforms = [
             str(item).lower()
@@ -775,7 +918,7 @@ def create_api_router(
         try:
             plan = PostPreflightService(config).plan(
                 PostPlanRequest(
-                    media_paths=[media_path] if media_path else [],
+                    media_paths=media_paths,
                     target_platforms=platforms,
                     base_caption=caption,
                 )
@@ -787,11 +930,12 @@ def create_api_router(
             canonical_blockers = [f"Preflight could not run: {str(exc)[:200]}"]
 
         media = Path(media_path).expanduser() if media_path else None
-        return {
+        payload_out: dict[str, Any] = {
             "ok": not request_blockers and not canonical_blockers,
             "ready": not request_blockers and not canonical_blockers,
             "media": {
                 "path": media_path,
+                "paths": media_paths,
                 "exists": bool(media and media.exists()),
                 "is_file": bool(media and media.is_file()),
             },
@@ -805,6 +949,37 @@ def create_api_router(
             "plan": plan,
             "network_calls": False,
         }
+
+        # A preflight run against a stored draft *is* that draft's plan: record
+        # the verdict together with the local facts it was validated against, so
+        # resuming the draft later can prove whether the plan still holds.
+        draft_id = str(payload.get("draft_id") or "").strip()
+        if draft_id:
+            from xpst.drafts import DraftService
+
+            service = DraftService(config, config_dir)
+            if service.get(draft_id) is None:
+                payload_out["draft_id"] = draft_id
+                payload_out["draft_recorded"] = False
+                payload_out["draft"] = None
+                payload_out["draft_error"] = "No draft with that id."
+            else:
+                # Bind the plan to the content it was actually computed for: a
+                # preflight that ran on a different media/caption than the draft
+                # holds must not stamp the draft as validated.
+                service.sync_from_request(
+                    draft_id, media_paths=media_paths, caption=caption, platforms=platforms
+                )
+                recorded = service.record_plan(
+                    draft_id,
+                    plan=plan,
+                    ready=payload_out["ready"],
+                    blockers=payload_out["blockers"],
+                )
+                payload_out["draft_id"] = draft_id
+                payload_out["draft_recorded"] = recorded is not None
+                payload_out["draft"] = service.verdict_for(recorded) if recorded else None
+        return payload_out
 
     @router.get("/settings")
     def api_settings() -> dict[str, Any]:
