@@ -31,6 +31,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their previous behaviour so the UI is never locked out; `POST /oauth/callback`
   and the Messenger webhook stay public by design. See SECURITY.md and
   docs/DASHBOARD.md.
+### Added
+- **Composer media preview** — the Compose screen now shows the selected asset
+  before it is posted: images render from a cached, ffmpeg-generated
+  thumbnail, and videos render as a real playable `<video>` element with the
+  generated frame as its poster. Two new engine routes back it:
+  `GET /api/media/stream` (HTTP range support — real `206 Partial Content`
+  answers — serving the file through a bounded 1 MiB chunk iterator) and
+  `GET /api/media/thumb` (single-frame JPEG, cached under
+  `~/.xpst/cache/previews`, keyed by path + size + mtime). Selecting or
+  scrubbing a large video never reads the whole file: the engine holds at most
+  one chunk and the webview pulls only the ranges it needs.
+- **Native file picker and drag-and-drop in the composer** — the desktop shell
+  opens the OS file picker (`tauri-plugin-dialog`) and forwards native drops
+  into the page as paths, so a picked or dropped file becomes the selection
+  immediately. The shell grants the dialog command to the loopback engine
+  origin only (`src-tauri/capabilities/default.json`). Outside the app window
+  the composer says the picker is unavailable instead of inventing a path.
+
+### Fixed
+- **Undefined design token** — `--xpst-color-primary-soft` was referenced by
+  the selected/hover states but never defined in `tokens.css`, so those states
+  silently rendered transparent in both themes. Defined for light, dark-theme
+  and `prefers-color-scheme: dark`.
 
 ## [1.1.0] - 2026-09-04
 

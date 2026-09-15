@@ -22,6 +22,7 @@
   --xpst-color-primary: #0066cc;
   --xpst-color-primary-hover: #0052a3;
   --xpst-color-on-primary: #ffffff;
+  --xpst-color-primary-soft: #e6f0fb;
   --xpst-color-success: #197a43;
   --xpst-color-success-surface: #eaf7ef;
   --xpst-color-warning: #8a5a00;
@@ -104,6 +105,7 @@
   --xpst-color-primary: #66b3ff;
   --xpst-color-primary-hover: #8ac7ff;
   --xpst-color-on-primary: #111318;
+  --xpst-color-primary-soft: #1c2b3d;
   --xpst-color-success: #5bd18a;
   --xpst-color-success-surface: #173425;
   --xpst-color-warning: #f5c45e;
@@ -131,6 +133,7 @@
     --xpst-color-primary: #66b3ff;
     --xpst-color-primary-hover: #8ac7ff;
     --xpst-color-on-primary: #111318;
+    --xpst-color-primary-soft: #1c2b3d;
     --xpst-color-success: #5bd18a;
     --xpst-color-success-surface: #173425;
     --xpst-color-warning: #f5c45e;
