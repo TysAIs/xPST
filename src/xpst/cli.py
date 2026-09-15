@@ -23,6 +23,7 @@ import json as _json
 import os
 import shutil
 import sys
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
@@ -1933,9 +1934,15 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
 
 @main.command()
 @click.argument("platform", required=False)
+@click.option(
+    "--refresh",
+    "refresh",
+    is_flag=True,
+    help="Refresh due/expiring tokens first (bounded retry), then report status",
+)
 @json_option
 @click.pass_context
-def auth(ctx: click.Context, platform: str | None, as_json: bool):
+def auth(ctx: click.Context, platform: str | None, refresh: bool, as_json: bool):
     """Authenticate with a platform or check auth status.
 
     Usage:
@@ -1944,9 +1951,10 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         xpst auth instagram   # Authenticate with Instagram
         xpst auth tiktok      # Authenticate with TikTok
         xpst auth status      # Show auth status for all platforms
+        xpst auth status --refresh   # Refresh expiring tokens, then report
     """
     if platform is None or platform == "status":
-        _show_auth_status(ctx, as_json)
+        _show_auth_status(ctx, as_json, refresh=refresh)
         return
 
     valid_platforms = {"tiktok", "youtube", "x", "instagram", "threads", "messenger"}
@@ -1974,7 +1982,7 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         _auth_messenger(config)
 
 
-def _show_auth_status(ctx: click.Context, as_json: bool):
+def _show_auth_status(ctx: click.Context, as_json: bool, refresh: bool = False):
     """Show authentication and quota status for all platforms."""
     config = load_config(ctx.obj.get("config_path"))
 
@@ -1985,18 +1993,44 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
     stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (fallback)"
 
+    # Optional bounded refresh BEFORE probing, so a token that is due is
+    # renewed first and the badge below tells the truth about the refreshed
+    # state. Skipped entirely when nothing is due (no network, no side effect).
+    refresh_report: dict = {}
+    if refresh:
+        from xpst.token_refresh import refresh_due_tokens, save_refresh_report
+
+        refresh_report = refresh_due_tokens(config)
+        save_refresh_report(config, refresh_report)
+        if not as_json:
+            if not refresh_report:
+                console.print("[dim]No token was due for refresh.[/dim]")
+            for name, item in refresh_report.items():
+                if item.get("ok"):
+                    console.print(f"[green]Refreshed {name} access token[/green]")
+                else:
+                    console.print(f"[red]Refresh failed for {name}: {item.get('error')}[/red]")
+
     # Live session validation — same validators `xpst health` uses (engine
     # check_health / _live_auth pattern, PRs #66/#70). Fails closed per
     # platform with an `error` detail; never prompts or opens a browser.
+    # Every entry carries a badge derived from that probe plus the
+    # `checked_at` timestamp it is based on (see xpst.token_state) — this JSON
+    # is the single source of truth the web UI/desktop/MCP render from.
     from xpst.auth_status import collect_live_auth_status
 
     live = collect_live_auth_status(config)
+
+    def _entry(plat: str) -> dict:
+        info = live.get(plat)
+        return info if isinstance(info, dict) else {}
 
     if as_json:
         data: dict = {
             "credential_storage": storage_type,
             "stored_credentials": stored_keys,
             "platforms": {},
+            "badges": {},
         }
         yt_creds = cred_store.retrieve("youtube_token")
         x_creds = cred_store.retrieve_json("x_cookies")
@@ -2026,27 +2060,72 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
                 # Live validation wins over file presence — an expired
                 # session file must not report authenticated: true.
                 entry.update(live_info)
-            else:
-                # threads/messenger: presence-only (no live validator in
-                # scope for this command).
-                entry["authenticated"] = stored
+            elif plat != "local":
+                # No live entry at all: presence is explicitly NOT proof, so
+                # derive a non-green badge rather than reporting connected.
+                from xpst.token_state import derive_token_state, token_metadata
+
+                entry["authenticated"] = False
                 entry["live_checked"] = False
+                entry.update(
+                    derive_token_state(
+                        plat,
+                        {"configured": stored, "live_checked": False},
+                        token_metadata(config, plat),
+                    )
+                )
             data["platforms"][plat] = entry
+            if entry.get("badge"):
+                data["badges"][plat] = entry["badge"]
         data["providers"] = data["platforms"]
         data["roles"] = ["source", "video_destination", "messaging", "analytics"]
+        abs_checked = [
+            float(entry["checked_at"])
+            for entry in data["platforms"].values()
+            if isinstance(entry.get("checked_at"), (int, float))
+        ]
+        data["checked_at"] = max(abs_checked) if abs_checked else None
+        if data["checked_at"] is not None:
+            from xpst.token_state import iso_timestamp
+
+            data["checked_at_iso"] = iso_timestamp(data["checked_at"])
+        if refresh:
+            data["refresh"] = refresh_report
         json_output(data, True)
         return
 
+    def _badge_cell(plat: str) -> str:
+        """Render the platform's badge (never green unless live-proven)."""
+        from xpst.token_state import BADGE_LABELS, GREEN_BADGES
+
+        info = _entry(plat)
+        badge = str(info.get("badge") or "unknown")
+        label = str(info.get("badge_label") or BADGE_LABELS.get(badge, badge))
+        color = {
+            "connected": "green",
+            "expiring": "yellow",
+            "needs_reauth": "red",
+            "source_only": "cyan",
+        }.get(badge, "dim")
+        age = info.get("check_age_seconds")
+        stamp = ""
+        if isinstance(age, (int, float)) and badge in GREEN_BADGES:
+            from xpst.token_state import humanize_seconds
+
+            stamp = f" [dim](checked {humanize_seconds(age)} ago)[/dim]"
+        return f"[{color}]{label}[/{color}]{stamp}"
+
     def _live_detail(plat: str, base: str) -> str:
-        """Append the live-check error to a table Details cell (if any)."""
-        info = live.get(plat)
-        if (
-            info
-            and info.get("live_checked")
-            and not info.get("authenticated")
-            and info.get("error")
-        ):
-            return f"{base} — {info['error']}"
+        """Append the live-check error / badge reason to a table Details cell."""
+        from xpst.token_state import GREEN_BADGES
+
+        info = _entry(plat)
+        if info.get("badge") in GREEN_BADGES:
+            return base
+        reason = info.get("badge_reason") or info.get("error")
+        if info.get("live_checked") or reason:
+            if reason:
+                return f"{base} — {reason}"
         return base
 
     console.print("[bold blue]xPST Authentication Status[/bold blue]\n")
@@ -2062,7 +2141,7 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
 
     table = Table(show_header=True, header_style="bold")
     table.add_column("Platform")
-    table.add_column("Auth")
+    table.add_column("Badge")
     table.add_column("Quota (Daily)")
     table.add_column("Remaining")
     table.add_column("Details")
@@ -2070,12 +2149,10 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
     # YouTube
     yt_creds = cred_store.retrieve("youtube_token")
     yt_file = Path(config.youtube.client_secrets).expanduser()
-    yt_live = live.get("youtube", {})
-    yt_auth = "✅" if (yt_live.get("authenticated") if yt_live.get("live_checked") else (yt_creds or yt_file.exists())) else "❌"
     yt_quota = quota_mgr.get_remaining("youtube")
     table.add_row(
         "YouTube",
-        yt_auth,
+        _badge_cell("youtube"),
         str(quota_mgr.quotas.get("youtube", {}).daily_limit if hasattr(quota_mgr.quotas.get("youtube", {}), "daily_limit") else "N/A"),
         str(yt_quota.get("daily", "N/A")),
         _live_detail("youtube", "Keyring" if yt_creds else ("File" if yt_file.exists() else "Not configured")),
@@ -2084,12 +2161,10 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
     # X/Twitter
     x_creds = cred_store.retrieve_json("x_cookies")
     x_file = Path(config.x.cookies_file).expanduser()
-    x_live = live.get("x", {})
-    x_auth = "✅" if (x_live.get("authenticated") if x_live.get("live_checked") else (x_creds or x_file.exists())) else "❌"
     x_quota = quota_mgr.get_remaining("x")
     table.add_row(
         "X/Twitter",
-        x_auth,
+        _badge_cell("x"),
         str(quota_mgr.quotas.get("x", {}).daily_limit if hasattr(quota_mgr.quotas.get("x", {}), "daily_limit") else "N/A"),
         str(x_quota.get("daily", "N/A")),
         _live_detail("x", "Keyring" if x_creds else ("File" if x_file.exists() else "Not configured")),
@@ -2098,25 +2173,21 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
     # Instagram
     ig_creds = cred_store.retrieve_json("instagram_session")
     ig_file = Path(config.instagram.session_file).expanduser()
-    ig_live = live.get("instagram", {})
-    ig_auth = "✅" if (ig_live.get("authenticated") if ig_live.get("live_checked") else (ig_creds or ig_file.exists())) else "❌"
     ig_quota = quota_mgr.get_remaining("instagram")
     table.add_row(
         "Instagram",
-        ig_auth,
+        _badge_cell("instagram"),
         str(quota_mgr.quotas.get("instagram", {}).daily_limit if hasattr(quota_mgr.quotas.get("instagram", {}), "daily_limit") else "N/A"),
         str(ig_quota.get("daily", "N/A")),
         _live_detail("instagram", "Keyring" if ig_creds else ("File" if ig_file.exists() else "Not configured")),
     )
 
     # TikTok
-    tt_creds = cred_store.retrieve_json("tiktok_cookies")
-    tt_live = live.get("tiktok", {})
-    tt_auth = "✅" if (tt_live.get("authenticated") if tt_live.get("live_checked") else bool(tt_creds)) else "❌"
+    tt_live = _entry("tiktok")
     tt_quota = quota_mgr.get_remaining("tiktok")
     table.add_row(
         "TikTok",
-        tt_auth,
+        _badge_cell("tiktok"),
         str(quota_mgr.quotas.get("tiktok", {}).daily_limit if hasattr(quota_mgr.quotas.get("tiktok", {}), "daily_limit") else "N/A"),
         str(tt_quota.get("daily", "N/A")),
         _live_detail("tiktok", str(tt_live.get("auth_mode", "source_only"))),
@@ -2124,39 +2195,107 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
 
     # Threads
     threads_creds = cred_store.retrieve("threads_access_token")
-    threads_token = bool(threads_creds or config.threads.graph_access_token)
-    threads_auth = "✅" if threads_token else "❌"
     threads_quota = quota_mgr.get_remaining("threads")
     table.add_row(
         "Threads",
-        threads_auth,
+        _badge_cell("threads"),
         str(quota_mgr.quotas.get("threads", {}).daily_limit if hasattr(quota_mgr.quotas.get("threads", {}), "daily_limit") else "N/A"),
         str(threads_quota.get("daily", "N/A")),
-        "Keyring" if threads_creds else ("Config" if config.threads.graph_access_token else "Not configured"),
+        _live_detail("threads", "Keyring" if threads_creds else ("Config" if config.threads.graph_access_token else "Not configured")),
     )
 
     # Messenger
     messenger_creds = cred_store.retrieve("messenger_page_token")
-    messenger_token = bool(messenger_creds or config.messenger.page_access_token)
-    messenger_auth = "✅" if messenger_token else "❌"
     messenger_quota = quota_mgr.get_remaining("messenger")
     messenger_detail = "Not configured"
-    if messenger_token:
+    if messenger_creds or config.messenger.page_access_token:
         messenger_detail = "Auto-reply" if config.messenger.auto_reply else "Messaging"
     table.add_row(
         "Messenger",
-        messenger_auth,
+        _badge_cell("messenger"),
         str(quota_mgr.quotas.get("messenger", {}).daily_limit if hasattr(quota_mgr.quotas.get("messenger", {}), "daily_limit") else "N/A"),
         str(messenger_quota.get("daily", "N/A")),
-        messenger_detail,
+        _live_detail("messenger", messenger_detail),
     )
 
     console.print(table)
+
+    checked = [
+        float(e["checked_at"])
+        for e in live.values()
+        if isinstance(e, dict) and isinstance(e.get("checked_at"), (int, float))
+    ]
+    if checked:
+        from xpst.token_state import humanize_seconds
+
+        age = max(0.0, time.time() - max(checked))
+        console.print(
+            f"\n[dim]Badges come from a live check taken {humanize_seconds(age)} ago. "
+            "A stored credential is never enough for a green badge — run "
+            "`xpst auth status --refresh` to renew expiring tokens.[/dim]"
+        )
 
 
 # ──────────────────────────────────────────────
 # Other Commands
 # ──────────────────────────────────────────────
+
+@main.command("refresh-tokens")
+@click.option("--platform", "platform", default=None, help="Only this platform (default: every platform that is due)")
+@click.option("--force", is_flag=True, help="Refresh even when the token is not expired/near expiry")
+@click.option("--max-attempts", default=3, show_default=True, type=click.IntRange(1, 10), help="Bounded retry attempts per platform")
+@click.option("--deadline", default=30.0, show_default=True, type=float, help="Wall-clock seconds of retry budget per platform")
+@json_option
+@click.pass_context
+def refresh_tokens(
+    ctx: click.Context,
+    platform: str | None,
+    force: bool,
+    max_attempts: int,
+    deadline: float,
+    as_json: bool,
+):
+    """Refresh expiring/expired access tokens (bounded retry, no prompts).
+
+    Nothing happens when no token is due, so this is safe to run from cron or
+    before a scheduled post. Failures are bounded, recorded (0600) and never
+    print credential material.
+    """
+    from xpst.token_refresh import refresh_due_tokens, save_refresh_report
+
+    config = load_config(ctx.obj.get("config_path"))
+    platforms = [platform] if platform else None
+    report = refresh_due_tokens(
+        config,
+        platforms=platforms,
+        force=force,
+        max_attempts=max_attempts,
+        deadline=deadline,
+    )
+    save_refresh_report(config, report)
+
+    if as_json:
+        json_output(
+            {"refreshed": report, "attempted": sorted(report), "count": len(report)},
+            True,
+        )
+        return
+
+    if not report:
+        console.print("[dim]No token was due for refresh.[/dim]")
+        return
+    for name, item in report.items():
+        if item.get("ok"):
+            console.print(f"[green]Refreshed {name} access token[/green] ({item.get('reason')})")
+        else:
+            console.print(f"[red]Refresh failed for {name}[/red]: {item.get('error')}")
+    failed = [name for name, item in report.items() if not item.get("ok")]
+    if failed:
+        console.print(
+            f"\n[yellow]Still broken: {', '.join(failed)}. Reconnect with "
+            f"`xpst connect {failed[0]}`.[/yellow]"
+        )
+
 
 @main.group(invoke_without_command=True)
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")

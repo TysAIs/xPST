@@ -197,7 +197,27 @@ xpst auth instagram      # guide Instagram auth setup (Graph API or session)
 xpst auth tiktok         # guide TikTok source setup (destination pending review)
 xpst auth threads        # guide Threads setup (currently disabled)
 xpst auth status         # show auth + quota status for all platforms
+xpst auth status --refresh   # renew due/expiring tokens, then report
+xpst refresh-tokens      # renew due/expiring tokens only (cron-friendly)
 ```
+
+**Truthful badges.** `xpst auth status` never reports a platform as connected
+just because a credential is stored. Each platform carries a badge derived from
+the live check that was just run, plus the timestamp of that check:
+
+| Badge | Meaning |
+|-------|---------|
+| `connected` | a passing live check proved it works right now |
+| `expiring` | still usable, but the access token expires soon (or has expired and xPST is refreshing it) |
+| `needs_reauth` | user action required — run `xpst connect <platform>` |
+| `source_only` | usable as a source only (TikTok download), never as an upload target |
+| `disabled` | switched off in config |
+| `unknown` | no live check ran (or it is older than the freshness window) — deliberately not green |
+
+An automatic refresh path keeps the badge green for tokens xPST renews itself
+(YouTube refresh tokens, Threads/Meta long-lived tokens); a failed refresh is
+recorded and downgrades the badge to `needs_reauth` instead of promising a
+retry that is not happening.
 
 **Instagram auth modes.** The recommended/primary mode is the official Meta Graph
 API (`auth_mode: "graph_api"`, using a `graph_access_token` and `graph_ig_user_id`).
@@ -226,11 +246,12 @@ Stored Credentials: 3
   🔑 instagram_session
 
 Platform Status:
-| Platform  | Auth | Quota (Daily) | Remaining | Details      |
-|-----------|------|---------------|----------|--------------|
-| YouTube   |  ✅  |       5       |     5     | Keyring      |
-| X/Twitter |  ✅  |       5       |     5     | Keyring      |
-| Instagram |  ✅  |       5       |     5     | Keyring      |
+| Platform  | Badge                   | Quota (Daily) | Remaining | Details      |
+|-----------|-------------------------|---------------|-----------|--------------|
+| YouTube   | Connected (checked 8s ago) |    5       |     5     | Keyring      |
+| X/Twitter | Connected (checked 8s ago) |    5       |     5     | Keyring      |
+| Instagram | Needs re-auth           |       5       |     5     | Keyring — Session expired - run 'xpst auth instagram' |
+| TikTok    | Source only             |       5       |     5     | source_only  |
 ```
 
 With `--json`:

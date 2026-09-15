@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Honest token state + truthful badges** — `xpst auth status --json` now
+  reports, per platform, a `token_state` / `badge` (`connected`, `expiring`,
+  `needs_reauth`, `source_only`, `disabled`, `unknown`), a `badge_reason`
+  explaining it and the `checked_at` timestamp the live check was taken. A
+  green `connected` badge requires a passing live check on a fresh probe:
+  a stored credential, a stale check or an unchecked platform renders
+  `unknown`/`needs_reauth`, and source-only (TikTok) or disabled platforms
+  never render as connected. The same badge is what the web UI, the desktop
+  app and the MCP `xpst_auth_status` tool render, so no surface can disagree.
+- **`xpst refresh-tokens`** and **`xpst auth status --refresh`** — bounded
+  automatic refresh of expiring/expired access tokens (attempt budget,
+  exponential backoff, wall-clock deadline; no prompts; nothing token-shaped
+  is ever printed or persisted). The desktop health tick, the web API's
+  background probe and `POST /api/refresh-tokens` run the same job, and the
+  outcome is recorded in `~/.xpst/token_refresh.json` (0600) so a failed
+  refresh keeps the badge at `needs_reauth` instead of promising a silent
+  retry.
+
 ## [1.1.0] - 2026-09-04
 
 ### Added

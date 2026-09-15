@@ -557,7 +557,12 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="xpst_auth_status",
-        description="Show authentication status for all platforms",
+        description=(
+            "Show live authentication status and the truthful per-platform badge "
+            "(connected / expiring / needs_reauth / source_only / disabled / unknown). "
+            "The badge is derived from a live check with its timestamp — a stored "
+            "credential alone is never reported as connected."
+        ),
         inputSchema={
             "type": "object",
             "properties": {},
@@ -1648,7 +1653,15 @@ async def _handle_config_show(config: XPSTConfig) -> CallToolResult:
 
 
 async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
-    """Handle xpst_auth_status tool."""
+    """Handle xpst_auth_status tool.
+
+    Uses the SAME live collector as ``xpst auth status --json`` (no
+    presence-based shortcuts): an agent asking "is this account usable?" gets
+    the honest badge plus the timestamp it was derived from. A platform xPST
+    cannot currently prove is reported as ``unknown``/``needs_reauth`` — never
+    as connected.
+    """
+    from xpst.auth_status import collect_live_auth_status_async
     from xpst.utils.credentials import CredentialStore
     from xpst.utils.quota import QuotaManager
 
@@ -1658,34 +1671,58 @@ async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
     stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (encrypted fallback)"
 
+    try:
+        live = await collect_live_auth_status_async(config)
+    except Exception as exc:  # noqa: BLE001 — a status tool must never crash
+        live = {}
+        logger.warning("MCP auth status live probe failed: %s", str(exc)[:200])
+
+    platforms: dict[str, Any] = {}
+    badges: dict[str, str] = {}
+    checked_at: float | None = None
+    for platform in ("youtube", "x", "instagram", "tiktok", "threads", "messenger"):
+        entry = live.get(platform)
+        info: dict[str, Any] = dict(entry) if isinstance(entry, dict) else {}
+        if not info:
+            # No live entry: presence is not proof, so report a non-green badge
+            # rather than reporting `authenticated: true` from stored keys.
+            from xpst.token_state import derive_token_state, token_metadata
+
+            stored = bool(cred_store.retrieve(f"{platform}_access_token")) or bool(
+                cred_store.retrieve(f"{platform}_token")
+            )
+            info = {"authenticated": False, "live_checked": False}
+            info.update(
+                derive_token_state(
+                    platform,
+                    {"configured": stored, "live_checked": False},
+                    token_metadata(config, platform),
+                )
+            )
+        info["quota_remaining"] = quota_mgr.get_remaining(platform).get("daily", "N/A")
+        if platform == "messenger":
+            # Kept for clients that used it: the opt-in auto-reply switch is not
+            # an auth fact and never implies a working Messenger connection.
+            info["auto_reply"] = bool(config.messenger.auto_reply)
+        platforms[platform] = info
+        if info.get("badge"):
+            badges[platform] = str(info["badge"])
+        if isinstance(info.get("checked_at"), (int, float)) and (
+            checked_at is None or float(info["checked_at"]) > checked_at
+        ):
+            checked_at = float(info["checked_at"])
+
     result: dict[str, Any] = {
         "credential_storage": storage_type,
         "stored_credentials": stored_keys,
-        "platforms": {},
+        "platforms": platforms,
+        "badges": badges,
+        "checked_at": checked_at,
     }
+    if checked_at is not None:
+        from xpst.token_state import iso_timestamp
 
-    for platform in ["youtube", "x", "instagram"]:
-        creds = None
-        if platform == "youtube":
-            creds = cred_store.retrieve("youtube_token")
-        elif platform == "x":
-            creds = cred_store.retrieve_json("x_cookies")
-        elif platform == "instagram":
-            creds = cred_store.retrieve_json("instagram_session")
-
-        remaining = quota_mgr.get_remaining(platform)
-        result["platforms"][platform] = {
-            "authenticated": bool(creds),
-            "quota_remaining": remaining.get("daily", "N/A"),
-        }
-
-    # Messenger (static page token; token lives in CredentialStore)
-    messenger_creds = cred_store.retrieve("messenger_page_token") or config.messenger.page_access_token
-    result["platforms"]["messenger"] = {
-        "authenticated": bool(messenger_creds),
-        "auto_reply": bool(config.messenger.auto_reply),
-        "quota_remaining": quota_mgr.get_remaining("messenger").get("daily", "N/A"),
-    }
+        result["checked_at_iso"] = iso_timestamp(checked_at)
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],

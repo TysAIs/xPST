@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -35,11 +36,50 @@ def _auth_status_ttl() -> float:
         return DEFAULT_AUTH_STATUS_TTL_S
 
 
-def _probe_and_store(config_dir: str, config: Any) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run the live probe and store the result."""
+def _refresh_due_tokens_quietly(config: Any) -> None:
+    """Renew expiring access tokens before a live probe (bounded, secret-free).
+
+    Runs only when a token is actually due; failures are recorded (and keep the
+    badge red) rather than raised — a refresh problem must not break a status
+    read.
+    """
+    try:
+        from xpst.token_refresh import (
+            FAST_BASE_DELAY_SECONDS,
+            FAST_DEADLINE_SECONDS,
+            FAST_MAX_ATTEMPTS,
+            refresh_due_tokens,
+            save_refresh_report,
+        )
+
+        report = refresh_due_tokens(
+            config,
+            max_attempts=FAST_MAX_ATTEMPTS,
+            base_delay=FAST_BASE_DELAY_SECONDS,
+            deadline=FAST_DEADLINE_SECONDS,
+        )
+        if report:
+            save_refresh_report(config, report)
+    except Exception as exc:  # noqa: BLE001 - refresh is best-effort
+        logger.debug("Background token refresh skipped: %s", exc)
+
+
+def _probe_and_store(
+    config_dir: str, config: Any, *, refresh_tokens: bool = False
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run the live probe and store the result.
+
+    ``refresh_tokens`` is only set on the background path: a cold request must
+    not wait on a token refresh (bounded, but still seconds of retry budget)
+    before the UI can paint.
+    """
     from xpst.auth_status import collect_live_auth_status
     from xpst.provider_truth import canonical_status_report
 
+    if refresh_tokens:
+        # Renew expiring tokens first so the badge derived below reflects a
+        # refreshed token instead of the one that was about to die.
+        _refresh_due_tokens_quietly(config)
     auth = collect_live_auth_status(config)
     canonical = canonical_status_report(config, auth)
     with _AUTH_STATUS_LOCK:
@@ -57,7 +97,7 @@ def _refresh_in_background(config_dir: str, config: Any) -> bool:
 
     def work() -> None:
         try:
-            _probe_and_store(config_dir, config)
+            _probe_and_store(config_dir, config, refresh_tokens=True)
         except Exception as exc:  # noqa: BLE001 - a failed refresh keeps the stale value
             logger.debug("Background auth refresh failed: %s", exc)
         finally:
@@ -78,6 +118,33 @@ def warm_auth_status_cache(config_dir: str, config: Any) -> None:
 def _has_cached_auth(config_dir: str) -> bool:
     with _AUTH_STATUS_LOCK:
         return str(config_dir) in _AUTH_STATUS_CACHE
+
+
+def _badge_summary(auth: Mapping[str, Any] | None) -> dict[str, str]:
+    """``{platform: badge}`` from a live-auth mapping (never invents a badge)."""
+    summary: dict[str, str] = {}
+    if not isinstance(auth, Mapping):
+        return summary
+    for name, entry in auth.items():
+        if isinstance(entry, Mapping) and entry.get("badge"):
+            summary[str(name)] = str(entry["badge"])
+    return summary
+
+
+def _auth_checked_at(auth: Mapping[str, Any] | None) -> float | None:
+    """Newest live-check timestamp in a live-auth mapping (the badge's age)."""
+    stamps: list[float] = []
+    if isinstance(auth, Mapping):
+        for entry in auth.values():
+            if isinstance(entry, Mapping) and isinstance(entry.get("checked_at"), (int, float)):
+                stamps.append(float(entry["checked_at"]))
+    return max(stamps) if stamps else None
+
+
+def _auth_checked_at_iso(auth: Mapping[str, Any] | None) -> str | None:
+    from xpst.token_state import iso_timestamp
+
+    return iso_timestamp(_auth_checked_at(auth))
 
 
 def _auth_probe_in_flight(config_dir: str) -> bool:
@@ -658,6 +725,12 @@ def create_api_router(
             "auth_cached": auth_cached,
             "auth_age_seconds": auth_age_seconds,
             "auth_stale": auth_stale,
+            # Badge truth, straight from the probe above (xpst.token_state):
+            # the UI must render `badges[platform]` and `auth_checked_at`,
+            # never a green pill derived from credential presence.
+            "badges": _badge_summary(auth),
+            "auth_checked_at": _auth_checked_at(auth),
+            "auth_checked_at_iso": _auth_checked_at_iso(auth),
             "canonical": canonical,
             "providers": canonical["providers"],
             "readiness_pending": False,
@@ -672,6 +745,42 @@ def create_api_router(
         from xpst.provider_truth import canonical_provider_catalog
 
         return canonical_provider_catalog(_load_ui_config())
+
+    @router.post("/refresh-tokens")
+    def api_refresh_tokens(force: bool = False) -> dict[str, Any]:
+        """Renew due/expiring tokens on demand (bounded retry, no secrets).
+
+        Mirrors ``xpst refresh-tokens``: a no-op when nothing is due, so the
+        UI's "Refresh accounts" action is cheap and safe to press. ``force=true``
+        renews every platform that has a refresh path, whatever its expiry.
+        Failures are reported honestly and the cached probe is invalidated so
+        the next read re-checks liveness instead of serving the old answer.
+        """
+        from xpst.token_refresh import (
+            FAST_BASE_DELAY_SECONDS,
+            FAST_DEADLINE_SECONDS,
+            FAST_MAX_ATTEMPTS,
+            refresh_due_tokens,
+            save_refresh_report,
+        )
+
+        config = _load_ui_config()
+        report = refresh_due_tokens(
+            config,
+            force=force,
+            max_attempts=FAST_MAX_ATTEMPTS,
+            base_delay=FAST_BASE_DELAY_SECONDS,
+            deadline=FAST_DEADLINE_SECONDS,
+        )
+        save_refresh_report(config, report)
+        with _AUTH_STATUS_LOCK:
+            _AUTH_STATUS_CACHE.pop(str(config_dir), None)
+        return {
+            "refreshed": report,
+            "attempted": sorted(report),
+            "count": len(report),
+            "failed": [name for name, item in report.items() if not item.get("ok")],
+        }
 
     @router.get("/schedules")
     def api_schedules() -> dict[str, Any]:

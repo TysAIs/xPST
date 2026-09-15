@@ -81,6 +81,8 @@ export const api = {
   settings: () => getJSON("/api/settings"),
   /** Persisted schedule entries (read-only; never starts the scheduler). */
   schedules: () => getJSON("/api/schedules"),
+  /** Renew due/expiring tokens now (bounded retry; no-op when nothing is due). */
+  refreshTokens: () => postJSON("/api/refresh-tokens", {}),
   /** Recorded posting failures with truthful recovery metadata. */
   activity: () => getJSON("/api/activity"),
   /** Verified local library items. */
