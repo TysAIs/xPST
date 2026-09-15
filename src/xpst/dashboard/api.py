@@ -9,8 +9,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 logger = logging.getLogger(__name__)
 
@@ -373,6 +373,95 @@ def create_api_router(
                 }
             )
         return {"ok": True, "folder": str(path), "exists": True, "items": items, "count": len(items)}
+
+    @router.get("/media/stream")
+    def api_media_stream(request: Request, path: str = "") -> Response:
+        """Stream one local media file to the composer's preview player.
+
+        Contract the UI depends on:
+
+        * ``Accept-Ranges: bytes`` and a real ``206 Partial Content`` answer,
+          so a video is *playable and seekable* in the webview and the client
+          pulls only the ranges it needs.
+        * The body is produced by a bounded chunk iterator (see
+          :mod:`xpst.dashboard.media_preview`), so selecting or scrubbing a 2 GB
+          video never costs the engine a full-file read.
+
+        Only real, previewable local files are served; a directory, a missing
+        path, or a non-media extension is refused before any bytes are read.
+        """
+        from xpst.dashboard.media_preview import (
+            iter_file_chunks,
+            media_content_type,
+            parse_byte_range,
+            resolve_media_path,
+        )
+
+        try:
+            resolved = resolve_media_path(path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+        try:
+            size = resolved.stat().st_size
+        except OSError as exc:
+            raise HTTPException(status_code=404, detail=f"Media file unreadable: {exc}") from None
+
+        try:
+            span = parse_byte_range(request.headers.get("range"), size)
+        except ValueError:
+            # 416 with the true size: a player asking past EOF must not be
+            # handed the whole file as a consolation prize.
+            return JSONResponse(
+                status_code=416,
+                content={"ok": False, "error": "Range not satisfiable", "size_bytes": size},
+                headers={"Accept-Ranges": "bytes", "Content-Range": f"bytes */{size}"},
+            )
+
+        start, end = span if span else (0, max(size - 1, 0))
+        length = end - start + 1 if size else 0
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(length),
+            "Cache-Control": "private, max-age=0",
+        }
+        status_code = 200
+        if span is not None:
+            status_code = 206
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        return StreamingResponse(
+            iter_file_chunks(resolved, start=start, length=length),
+            status_code=status_code,
+            media_type=media_content_type(resolved),
+            headers=headers,
+        )
+
+    @router.get("/media/thumb")
+    def api_media_thumb(path: str = "", width: int = 640) -> FileResponse:
+        """Serve a generated, cached thumbnail (JPEG) for one media file.
+
+        ``ffmpeg`` extracts a single scaled frame; the result is cached under
+        ``~/.xpst/cache/previews`` keyed by path+size+mtime, so re-selecting
+        the same asset is a file read of a small JPEG, not another decode.
+
+        404 means *no thumbnail could be generated* (ffmpeg missing or the
+        decode failed) — the UI answers that by streaming the original file
+        through ``/api/media/stream``, so a preview still appears.
+        """
+        from xpst.dashboard.media_preview import resolve_media_path, thumbnail_for
+
+        try:
+            resolved = resolve_media_path(path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+        thumb = thumbnail_for(resolved, width=max(64, min(int(width or 640), 1280)))
+        if thumb is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No thumbnail could be generated for this file; stream the original instead.",
+            )
+        return FileResponse(thumb, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
     @router.post("/connect/{platform}")
     def api_connect(platform: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:

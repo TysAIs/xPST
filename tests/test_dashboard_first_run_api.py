@@ -121,6 +121,10 @@ def _engine_factory(engine: FakeEngine):
 NEW_ROUTES = [
     ("GET", "/api/onboarding"),
     ("GET", "/api/media"),
+    # Preview routes serve the user's own media bytes, so they belong behind
+    # exactly the same gate as the rest of the API.
+    ("GET", "/api/media/stream"),
+    ("GET", "/api/media/thumb"),
 ]
 
 
