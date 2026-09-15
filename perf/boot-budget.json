@@ -23,6 +23,25 @@
       },
       "evidence": "missions/work/boot-baseline-mac-mini-m4-2026-09-15.json (worker t_9450b5e1, raw per-run samples + bundle SHA-256)",
       "budget_rationale": "Budget sits above the worst sample of the 10-run baseline (3.038 s) and ~45% above the median, so run-to-run noise cannot fail it while any regression that adds roughly a second to startup does. The first-run allowance is separate because the first launch after a reboot pays code-signature and cold-mmap costs."
+    },
+    "github-macos-arm64": {
+      "label": "GitHub Actions macos-latest runner (arm64), the class both CI lanes run on",
+      "median_max": 12.0,
+      "p95_max": 16.0,
+      "max_max": 20.0,
+      "first_run_max": 18.0,
+      "baseline_measured_utc": "2026-09-15",
+      "baseline_runs": 3,
+      "baseline": {
+        "n": 3,
+        "min": 6.167,
+        "median": 7.334,
+        "p95": 10.153,
+        "max": 10.153,
+        "first_run": 10.153
+      },
+      "evidence": "GitHub Actions run 34960332441 (Boot budget lane, artifact boot-samples-34960332441, 209 MB xPST.app built from PR #194)",
+      "budget_rationale": "The runner is roughly 3x slower than the Mac mini and far noisier: one 3-run set spread 6.167-10.153 s around a 7.334 s median, i.e. +/-38%. The limits sit above the worst sample of that set with room for a second bad set, because a flaky release lane is worse than a coarse gate here. This class is the coarse net for 'something huge changed'; the Mac mini class above is the sensitive one, and it is the number Tyler actually feels."
     }
   },
   "notes": [
