@@ -258,7 +258,8 @@ xPST provides 38 top-level commands. Run `xpst --help` for the full list. Most c
 | `xpst doctor` | Diagnose auth health, quotas and environment; prints a prioritized fix-it checklist |
 | `xpst connect [PLATFORM]` | Streamlined account connection wizard; use `--test` to test existing |
 | `xpst auth [PLATFORM]` | Authenticate with a specific platform (youtube/x/instagram/tiktok/threads) |
-| `xpst auth status` | Show authentication and quota status for all platforms |
+| `xpst auth status` | Show authentication and quota status for all platforms, with a truthful per-platform badge derived from a live check |
+| `xpst refresh-tokens` | Refresh expiring/expired access tokens in the background (bounded retry, no prompts, no token material printed) |
 | `xpst config show` | Display current configuration as YAML (sensitive values masked) |
 | `xpst config set KEY VALUE` | Set a config value using dotted keys (e.g. `rate_limits.youtube 10`) |
 | `xpst config validate` | Validate configuration for errors (exit 0 if valid, 4 if invalid) |
