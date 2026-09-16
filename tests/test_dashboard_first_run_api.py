@@ -338,7 +338,11 @@ def test_connect_never_reports_connected_for_a_disabled_destination(tmp_path: Pa
     assert data["connected"] is False
     assert data["authenticated"] is False
     assert data["enabled"] is False
-    assert data["live_checked"] is False, "a disabled destination must not be probed"
+    # A disabled destination is never probed: the answer is "unknown", not a
+    # failed check. `false` would contradict `xpst auth status`, which probes
+    # it and reports live_checked=true with error="disabled".
+    assert data["live_checked"] is None, "a disabled destination must not be probed"
+    assert data["verified"] is False
     assert data["guide"]["steps"], "the setup guide must be available"
     assert data["next_action"]["kind"] == "enable"
     assert token.exists() is False
