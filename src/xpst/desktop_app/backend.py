@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -279,6 +280,10 @@ class AppController(QObject):
         # every platform to "ok", which previously let the Dashboard claim
         # "Connected" for expired sessions (#user-report 2026-08-27).
         self._live_auth: dict[str, dict[str, Any]] = {}
+
+        # Last bounded token-refresh report (xpst.token_refresh). Empty until a
+        # refresh actually runs; a recorded failure keeps the badge honest.
+        self._refresh_report: dict[str, Any] = {}
 
         # Wire error signal to notification signal
         self.error.connect(lambda msg: self.notification.emit(msg, True))
@@ -552,16 +557,53 @@ class AppController(QObject):
             if isinstance(live, dict):
                 info["authenticated"] = bool(live.get("authenticated", False))
                 info["session_valid"] = bool(live.get("session_valid", False))
-                if not (info["authenticated"] and info["session_valid"]):
-                    err = str(live.get("error") or "")
-                    info["status"] = "disabled" if err == "disabled" else "error"
-                    info["auth_error"] = err or "Session invalid or missing"
-                else:
+                # Truthful badge (xpst.token_state): a stored credential or a
+                # stale state.json "ok" may never produce a green pill. Only
+                # badge == "connected" (a passing live check, with `checked_at`)
+                # is allowed to render as Connected.
+                badge_info = self._badge_for_platform(plat, live)
+                info.update(badge_info)
+                badge = str(badge_info.get("badge") or "unknown")
+                if badge == "connected":
                     info["status"] = "ok"
+                elif badge == "expiring":
+                    info["status"] = "warning"
+                elif badge == "disabled":
+                    info["status"] = "disabled"
+                else:
+                    info["status"] = "error"
+                    info["auth_error"] = (
+                        badge_info.get("badge_reason")
+                        or str(live.get("error") or "")
+                        or "Session invalid or missing"
+                    )
 
             health[plat] = info
 
         self._platform_health = json.dumps(health, default=str)
+
+    def _badge_for_platform(self, plat: str, live: dict[str, Any]) -> dict[str, Any]:
+        """Derive the honest badge for one platform (never raises).
+
+        Consumes the same live-auth entry the rest of the health payload uses,
+        plus the persisted refresh report, so a failed background refresh keeps
+        the badge at ``needs_reauth`` instead of quietly reverting.
+        """
+        try:
+            if self._config is None:
+                return {}
+            from xpst.token_state import derive_token_state, token_metadata
+
+            entry = dict(live)
+            entry.setdefault("checked_at", time.time())
+            refresh = None
+            report = self._refresh_report
+            if isinstance(report, dict) and isinstance(report.get(plat), dict):
+                refresh = report[plat]
+            return derive_token_state(plat, entry, token_metadata(self._config, plat), refresh=refresh)
+        except Exception as exc:  # noqa: BLE001 - a badge must never break the UI
+            logger.debug("Badge derivation failed for %s: %s", plat, exc)
+            return {}
 
     def _refresh_recent_posts(self) -> None:
         """Build recent posts list from StateManager with per-platform metrics."""
@@ -2453,6 +2495,34 @@ class AppController(QObject):
                 self._refresh_platform_health()
             except Exception as exc:
                 logger.warning("Background health check failed: %s", exc)
+
+            # Renew expiring/expired tokens first (bounded retry, off the GUI
+            # thread) so the live check below reflects a refreshed token and the
+            # badge can honestly stay/return to green.
+            if self._config is not None:
+                try:
+                    from xpst.token_refresh import (
+                        FAST_BASE_DELAY_SECONDS,
+                        FAST_DEADLINE_SECONDS,
+                        FAST_MAX_ATTEMPTS,
+                        load_refresh_report,
+                        refresh_due_tokens,
+                        save_refresh_report,
+                    )
+
+                    report = refresh_due_tokens(
+                        self._config,
+                        max_attempts=FAST_MAX_ATTEMPTS,
+                        base_delay=FAST_BASE_DELAY_SECONDS,
+                        deadline=FAST_DEADLINE_SECONDS,
+                    )
+                    if report:
+                        save_refresh_report(self._config, report)
+                        self._refresh_report = report
+                    else:
+                        self._refresh_report = load_refresh_report(self._config)
+                except Exception as exc:
+                    logger.warning("Background token refresh failed: %s", exc)
 
             if self._ensure_engine():
                 try:
