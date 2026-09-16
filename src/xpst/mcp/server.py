@@ -1364,8 +1364,7 @@ async def _handle_analytics(
     live = bool(arguments.get("live", False))
 
     collector = AnalyticsCollector(config_dir=config.config_dir)
-    if live:
-        await collector.collect_all()
+    live_data = await collector.collect_all() if live else None
 
     store = collector.store
     latest = store.latest(platform)
@@ -1378,11 +1377,17 @@ async def _handle_analytics(
         for key in ("views", "likes", "comments", "shares"):
             agg[key] += row.get(key) or 0
 
+    # Outcome report (D5): the same per-post/per-platform numbers the UI and
+    # CLI show, each labelled "live" or "recorded" and filtered to posts the
+    # account actually owns. Platforms with nothing report totals=None.
+    report = collector.outcome_report(live_data=live_data)
+
     payload = {
         "live": live,
         "snapshot_count": store.snapshot_count(),
         "platforms": per_platform,
         "posts": latest,
+        "outcome_report": report,
     }
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, default=str))],
