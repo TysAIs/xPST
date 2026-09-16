@@ -7,30 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Security
-- **Mutating dashboard routes now require authentication by default.**
-  `POST /api/post`, `POST /api/connect/{platform}`, `POST /api/onboarding*`,
-  `POST /api/preflight` and the `/bio/edit` form save were only protected when
-  `monitoring.dashboard_username` / `dashboard_password_hash` happened to be
-  configured — loopback is not an authorisation boundary, so any process on the
-  machine (or any page open in a browser) could trigger a real post or start a
-  connect flow. Every mutating route now fails closed with `401`, accepting
-  either the dashboard Basic login (when configured) or the new dashboard API
-  token.
-- **New dashboard API token** (`xpst auth api-token`, `--rotate`): generated on
-  first run and stored in the encrypted credential store
-  (`dashboard_api_token`) like the platform OAuth tokens — never in
-  `config.yaml`, and no default value ships with the project. Operators, scripts
-  and agents can send it as `Authorization: Bearer <token>` or
-  `X-API-Token: <token>`, or supply `XPST_API_TOKEN`.
-- **Desktop/UI token hand-off**: the Tauri shell mints a per-launch token
-  (`XPST_UI_TOKEN`) and opens its webview at
-  `http://127.0.0.1:<port>/#xpst_token=…`; `xpst ui` does the same for the
-  browser it opens. The token is never embedded in served HTML, and the SPA
-  strips the fragment from the address bar immediately. Read-only routes keep
-  their previous behaviour so the UI is never locked out; `POST /oauth/callback`
-  and the Messenger webhook stay public by design. See SECURITY.md and
-  docs/DASHBOARD.md.
+### Added
+- **Honest token state + truthful badges** — `xpst auth status --json` now
+  reports, per platform, a `token_state` / `badge` (`connected`, `expiring`,
+  `needs_reauth`, `source_only`, `disabled`, `unknown`), a `badge_reason`
+  explaining it and the `checked_at` timestamp the live check was taken. A
+  green `connected` badge requires a passing live check on a fresh probe:
+  a stored credential, a stale check or an unchecked platform renders
+  `unknown`/`needs_reauth`, and source-only (TikTok) or disabled platforms
+  never render as connected. The same badge is what the web UI, the desktop
+  app and the MCP `xpst_auth_status` tool render, so no surface can disagree.
+- **`xpst refresh-tokens`** and **`xpst auth status --refresh`** — bounded
+  automatic refresh of expiring/expired access tokens (attempt budget,
+  exponential backoff, wall-clock deadline; no prompts; nothing token-shaped
+  is ever printed or persisted). The desktop health tick, the web API's
+  background probe and `POST /api/refresh-tokens` run the same job, and the
+  outcome is recorded in `~/.xpst/token_refresh.json` (0600) so a failed
+  refresh keeps the badge at `needs_reauth` instead of promising a silent
+  retry.
 
 ## [1.1.0] - 2026-09-04
 

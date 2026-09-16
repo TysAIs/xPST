@@ -58,7 +58,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_status` | Show cross-posting statistics and health status | No | — |
 | `xpst_backfill` | Retry failed or incomplete posts from history | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No | — |
-| `xpst_auth_status` | Show live authentication status for every provider — the same verdict as `xps… | No | — |
+| `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No | — |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No | — |
 | `xpst_capabilities` | Return the canonical role-aware provider and capability contract without netw… | No | — |
 | `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets… | No | — |
@@ -141,15 +141,7 @@ Response shape: a JSON object with `accounts`, `video`, `monitoring`, and `sched
 
 ## xpst_auth_status
 
-Returns the **same live status as `xpst auth status --json`**: the credential storage mode (OS keychain
-vs encrypted file fallback), the list of stored credential keys, and one entry per provider carrying the
-canonical role-aware verdict (`state`, `live_checked`, `authenticated`, `session_valid`, `auth_mode`,
-`error`, `role_states`), plus remaining daily quota and whether credentials are stored locally.
-
-This tool runs live probes (bounded, and fail-closed per provider: a dead network yields
-`authenticated: false` with an `error`, not a hang). It used to report only credential-store key
-presence, which meant it could answer `authenticated: false` for an account the CLI had just proved
-live. Live facts are `null` — never `false` — when no probe ran.
+Returns the credential storage mode (OS keychain vs encrypted file fallback), the list of stored credential keys, and per-platform authentication plus remaining daily quota.
 
 Arguments: none.
 
@@ -163,37 +155,15 @@ Example response shape:
 
 ```json
 {
-  "credential_storage": "File Storage (encrypted fallback)",
+  "credential_storage": "OS Keychain",
   "stored_credentials": ["youtube_token", "x_cookies"],
-  "roles": ["source", "video_destination", "messaging", "analytics"],
   "platforms": {
-    "youtube": {
-      "state": "ready",
-      "authenticated": true,
-      "session_valid": true,
-      "live_checked": true,
-      "auth_mode": "oauth",
-      "error": null,
-      "role_states": { "source": "ready", "video_destination": "ready", "analytics": "ready" },
-      "credentials_stored": true,
-      "quota_remaining": 5
-    },
-    "tiktok": {
-      "state": "unconfigured",
-      "authenticated": true,
-      "session_valid": true,
-      "live_checked": true,
-      "auth_mode": "source_only",
-      "error": "TikTok Content Posting API is not configured",
-      "role_states": { "source": "ready", "video_destination": "unconfigured", "analytics": "unconfigured" },
-      "credentials_stored": true,
-      "quota_remaining": "N/A"
-    }
+    "youtube": { "authenticated": true, "quota_remaining": 5 },
+    "x": { "authenticated": true, "quota_remaining": 5 },
+    "instagram": { "authenticated": false, "quota_remaining": 5 }
   }
 }
 ```
-
-`platforms` and `providers` are the same object (one is an alias for existing clients).
 
 ## xpst_status
 
