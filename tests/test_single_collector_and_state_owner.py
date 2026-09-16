@@ -30,7 +30,7 @@ def _classes_named(name: str) -> list[str]:
     """Every module under src/xpst that defines a class called ``name``."""
     hits: list[str] = []
     for path in sorted(SRC_ROOT.rglob("*.py")):
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name == name:
                 hits.append(str(path.relative_to(SRC_ROOT)))
@@ -179,7 +179,7 @@ def test_state_module_is_a_pure_reexport():
     assert state_module.NewStateManager is state_manager_module.StateManager
     assert state_module.StateStore is state_store_module.StateStore
 
-    tree = ast.parse(Path(state_module.__file__).read_text())
+    tree = ast.parse(Path(state_module.__file__).read_text(encoding="utf-8"))
     assert not [n for n in tree.body if isinstance(n, ast.ClassDef)]
     assert not [n for n in tree.body if isinstance(n, ast.FunctionDef)]
 
