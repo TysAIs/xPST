@@ -3322,75 +3322,61 @@ def failures_list(ctx: click.Context, as_json: bool) -> None:
 @json_option
 @click.pass_context
 def failures_retry(ctx: click.Context, video_id: str, platform: str, as_json: bool) -> None:
-    """Retry one failed upload by re-posting its source file."""
+    """Retry one failed upload by re-posting its source file.
+
+    The verdict (target resolution, error code, whether the destination
+    accepted the post) comes from
+    :mod:`xpst.services.recovery_service`, which the MCP ``xpst_failures_retry``
+    tool calls too — the two surfaces cannot disagree about what happened.
+    """
     import asyncio as _asyncio
-    from pathlib import Path as _Path
 
     from xpst.engine import CrossPostEngine
+    from xpst.services import recovery_service
     from xpst.state import StateManager
 
     config = load_config(ctx.obj.get("config_path"))
-    sm = StateManager(config.config_dir)
-    video = sm.get_video(video_id)
-    if video is None:
-        if as_json:
-            json_output(_error_payload(
-                "VIDEO_NOT_FOUND", f"Unknown video id: {video_id}", video_id=video_id), True)
-        else:
-            console.print(f"[red]Unknown video id: {video_id}[/red]")
-        raise SystemExit(1)
-    if not video.get("errors", {}).get(platform):
-        if as_json:
-            json_output(_error_payload(
-                "NO_RECORDED_FAILURE",
-                f"{video_id} has no recorded failure on {platform}.",
-                video_id=video_id, platform=platform), True)
-        else:
-            console.print(f"[yellow]{video_id} has no recorded failure on {platform}.[/yellow]")
-        raise SystemExit(1)
 
-    # Find a local file to re-post: the original download if it survives.
-    download_dir = _Path(config.video.download_dir).expanduser()
-    candidates = sorted(download_dir.glob(f"*{video_id.split(':')[-1]}*"))
-    candidates = [p for p in candidates if p.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}]
-    if not candidates:
-        message = (
-            f"No local file for {video_id} in {download_dir}. "
-            "Re-run the source cycle (`xpst run`) or post manually with `xpst post`."
-        )
-        if as_json:
-            json_output(_error_payload("NO_LOCAL_FILE", message,
-                                       video_id=video_id, platform=platform), True)
-        else:
-            console.print(f"[red]No local file for {video_id} in {download_dir}.[/red] "
-                          "Re-run the source cycle (`xpst run`) or post manually with `xpst post`.")
-        raise SystemExit(1)
-
-    engine = CrossPostEngine(config)
-    if as_json:
-        click.echo(f"Retrying {video_id} on {platform}...", err=True)
-    else:
-        console.print(f"Retrying {video_id} on {platform} from {candidates[0].name}...")
-    result = _asyncio.run(
-        engine.post_manual(candidates[0], video.get("caption") or "", [platform])
+    # Resolve the target BEFORE constructing the engine: CrossPostEngine.__init__
+    # runs crash recovery and can create/rotate state files, which a retry that
+    # is going to be refused must never do.
+    plan = recovery_service.plan_failure_retry(
+        config, StateManager(config.config_dir), video_id, platform
     )
-    upload = result.results.get(platform)
-    if upload and upload.success:
-        sm.clear_dead_letter_queue(video_id)
-        sm.save()
+
+    if plan.ok:
         if as_json:
-            json_output({"ok": True, "video_id": video_id, "platform": platform,
-                         "post_url": upload.post_url or None}, True)
+            click.echo(f"Retrying {video_id} on {platform}...", err=True)
         else:
-            console.print(f"[green]Retry succeeded[/green]: {upload.post_url or 'posted'}")
+            assert plan.media_path is not None
+            console.print(f"Retrying {video_id} on {platform} from {plan.media_path.name}...")
+        engine = CrossPostEngine(config)
+        payload = _asyncio.run(recovery_service.execute_failure_retry(engine, plan))
     else:
-        error = upload.error if upload else "no result"
+        payload = plan.to_payload()
+
+    error = payload.get("error") or {}
+
+    if payload["ok"]:
         if as_json:
-            json_output(_error_payload("RETRY_FAILED", str(error or "retry failed"),
-                                       video_id=video_id, platform=platform), True)
+            json_output(payload, True)
         else:
-            console.print(f"[red]Retry failed[/red]: {error}")
-        raise SystemExit(1)
+            console.print(f"[green]Retry succeeded[/green]: {payload.get('post_url') or 'posted'}")
+        return
+
+    message = str(error.get("message") or "retry failed")
+    if as_json:
+        json_output(
+            {**payload, **_error_payload(
+                str(error.get("code") or "RETRY_FAILED"), message,
+                video_id=video_id, platform=platform)},
+            True,
+        )
+    elif payload.get("attempted"):
+        console.print(f"[red]Retry failed[/red]: {message}")
+    else:
+        console.print(f"[red]{message}[/red]")
+    raise SystemExit(1)
 
 
 @main.group()
@@ -4048,41 +4034,49 @@ def schedule_list(ctx: click.Context, as_json: bool):
 @json_option
 @click.pass_context
 def schedule_remove(ctx: click.Context, entry_id: str, dry_run: bool, as_json: bool):
-    """Remove a scheduled post by ID"""
-    from xpst.schedule_manager import ScheduleManager
+    """Remove a scheduled post by ID
 
-    manager = ScheduleManager()
+    Removal is a local schedule-store operation only — it never un-posts
+    content that has already been published. The verdict comes from
+    :mod:`xpst.services.recovery_service`, which the MCP
+    ``xpst_schedule_cancel`` tool calls too.
+    """
+    from xpst.services import recovery_service
+
+    payload = recovery_service.cancel_scheduled_post(None, entry_id, dry_run=dry_run)
+
     if dry_run:
-        entry = next((e for e in manager.list() if e.get("id") == entry_id), None)
-        plan = {
-            "dry_run": True,
-            "entry_id": entry_id,
-            "found": entry is not None,
-            "entry": entry,
-        }
         if as_json:
-            json_output(plan, True)
+            json_output(payload, True)
         else:
             if not ctx.obj.get("quiet", False):
                 console.print("[bold blue]Dry run — would remove:[/bold blue]")
+            entry = payload.get("entry")
             if entry:
-                console.print(f"  ID: [bold]{entry_id}[/bold] — {entry.get('caption', '')[:60]}")
+                console.print(
+                    f"  ID: [bold]{entry_id}[/bold] — {entry.get('caption', '')[:60]}"
+                )
             else:
                 console.print(f"  ID: [bold]{entry_id}[/bold] — [yellow]not found[/yellow]")
         return
 
-    if manager.remove(entry_id):
+    if payload["ok"]:
+        # Legacy key kept for already-shipped consumers (`removed`: entry id).
+        payload["removed"] = entry_id
         if as_json:
-            json_output({"ok": True, "removed": entry_id}, True)
+            json_output(payload, True)
         else:
             console.print(f"[green]✓ Removed scheduled post [bold]{entry_id}[/bold][/green]")
+        return
+
+    error = payload.get("error") or {}
+    message = str(error.get("message") or f"Post not found: {entry_id}")
+    if as_json:
+        json_output({**payload, **_error_payload(
+            str(error.get("code") or "POST_NOT_FOUND"), message, entry_id=entry_id)}, True)
     else:
-        if as_json:
-            json_output(_error_payload(
-                "POST_NOT_FOUND", f"Post not found: {entry_id}", entry_id=entry_id), True)
-        else:
-            console.print(f"[red]Post not found:[/red] {entry_id}")
-        sys.exit(EXIT_GENERAL)
+        console.print(f"[red]Post not found:[/red] {entry_id}")
+    sys.exit(EXIT_GENERAL)
 
 
 @schedule.command("run")

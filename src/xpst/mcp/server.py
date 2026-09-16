@@ -498,6 +498,64 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="xpst_schedule_cancel",
+        description=(
+            "Cancel a scheduled post by entry id — the MCP equivalent of "
+            "`xpst schedule remove`. Removes the entry from the LOCAL schedule "
+            "store (~/.xpst/schedule.json) only; it never un-posts content that "
+            "has already been published. Get entry ids from xpst_schedule_list. "
+            "dry_run=true returns the same verdict without modifying the store. "
+            "An unknown id is an error (POST_NOT_FOUND), never a silent success."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
+                "entry_id": {"type": "string", "description": "Schedule entry id (from xpst_schedule_list)"},
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Report whether the entry exists and would be cancelled, without modifying the store",
+                    "default": False,
+                },
+            },
+            "required": ["entry_id"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_failures_retry",
+        description=(
+            "Retry ONE recorded upload failure, identified by video_id + platform "
+            "— the MCP equivalent of `xpst failures retry <video_id> --platform "
+            "<name>`. Re-posts that video's local source file to that single "
+            "destination (a REAL platform upload; scope=platform_upload). Returns "
+            "ok=false with VIDEO_NOT_FOUND, NO_RECORDED_FAILURE, NO_LOCAL_FILE or "
+            "RETRY_FAILED instead of pretending a retry happened; posted=true only "
+            "when the destination accepted the post. Use xpst_activity to list "
+            "failures and their retryable flag, and dry_run=true to plan without "
+            "uploading."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
+                "video_id": {"type": "string", "description": "Video id as recorded in xpst_activity failures"},
+                "platform": {
+                    "type": "string",
+                    "enum": list(_PLATFORM_ENUM),
+                    "description": "The single destination whose failure is being retried",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Resolve the retry target and report the verdict without uploading",
+                    "default": False,
+                },
+            },
+            "required": ["video_id", "platform"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_health",
         description="Test connectivity to all platforms and sources (no uploads)",
         inputSchema={
@@ -652,18 +710,26 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="xpst_delete",
-        description="Delete a post record from state",
+        description=(
+            "Delete a post RECORD from local xPST state only (operation="
+            "delete_record, scope=local_state_only). This does NOT delete the "
+            "post on YouTube/X/Instagram/TikTok: the live post stays up and "
+            "remains publicly visible. The response always carries "
+            "platform_deleted=false. Use the CLI `xpst delete <video_id>` for "
+            "real platform deletion. Removing the record also makes the engine "
+            "treat the video as new again, so treat this as destructive."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
                 "video_id": {
                     "type": "string",
-                    "description": "Video ID to delete",
+                    "description": "Video ID whose local record should be removed",
                 },
                 "platform": {
                     "type": "string",
-                    "description": "Platform to delete from (or all)",
+                    "description": "Platform record to remove (or all)",
                     "enum": [*_PLATFORM_ENUM, "all"],
                     "default": "all",
                 },
@@ -874,6 +940,11 @@ _MUTATING_TOOLS = {
     "xpst_schedule_add", "xpst_disconnect",
     "messenger_send", "messenger_set_rules", "xpst_messenger_check_comments",
     "kb_add", "kb_organize",
+    # Parity wave: both of these change real state. `xpst_schedule_cancel`
+    # removes a scheduled post; `xpst_failures_retry` re-uploads to a live
+    # destination. Gating them keeps the consent story uniform (and matches the
+    # CLI, which demands an explicit --yes / confirmation for the same act).
+    "xpst_schedule_cancel", "xpst_failures_retry",
 }
 
 
@@ -983,7 +1054,12 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
                             (_time.monotonic() - _start) * 1000, False, "guardrail_block")
         return blocked
 
-    engine_tools = {"xpst_run", "xpst_post", "xpst_health", "xpst_status", "xpst_backfill", "xpst_delete"}
+    engine_tools = {
+        "xpst_run", "xpst_post", "xpst_health", "xpst_status", "xpst_backfill", "xpst_delete",
+        # Targeted retry drives a real upload through the engine.
+        "xpst_failures_retry",
+    }
+
     server = await get_server(initialize=name in engine_tools)
 
     try:
@@ -1026,6 +1102,11 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             result = await _handle_schedule_list(server.config)
         elif name == "xpst_schedule_add":
             result = await _handle_schedule_add(server.config, arguments)
+        elif name == "xpst_schedule_cancel":
+            result = await _handle_schedule_cancel(server.config, arguments)
+        elif name == "xpst_failures_retry":
+            engine = server.get_engine()
+            result = await _handle_failures_retry(engine, arguments)
         elif name == "xpst_config_show":
             result = await _handle_config_show(server.config)
         elif name == "xpst_auth_status":
@@ -1343,6 +1424,46 @@ async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) ->
     )
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps({"scheduled": entry}, default=str))],
+    )
+
+
+async def _handle_schedule_cancel(config: XPSTConfig, arguments: dict[str, Any]) -> CallToolResult:
+    """Handle xpst_schedule_cancel — CLI `schedule remove` semantics over MCP.
+
+    Delegates to :mod:`xpst.services.recovery_service` so the verdict an agent
+    reads is the verdict the CLI would print: an unknown entry id fails with
+    POST_NOT_FOUND, and ``cancelled`` is true only after a real removal.
+    """
+    from xpst.services import recovery_service
+
+    payload = recovery_service.cancel_scheduled_post(
+        config.config_dir,
+        arguments["entry_id"],
+        dry_run=bool(arguments.get("dry_run", False)),
+    )
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, default=str))],
+        isError=not payload["ok"],
+    )
+
+
+async def _handle_failures_retry(engine: CrossPostEngine, arguments: dict[str, Any]) -> CallToolResult:
+    """Handle xpst_failures_retry — CLI `failures retry` semantics over MCP.
+
+    Targets exactly one (video_id, platform) pair and only reports
+    ``posted: true`` when that destination accepted the re-upload.
+    """
+    from xpst.services import recovery_service
+
+    payload = await recovery_service.retry_failed_post(
+        engine,
+        arguments["video_id"],
+        arguments["platform"],
+        dry_run=bool(arguments.get("dry_run", False)),
+    )
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, default=str))],
+        isError=not payload["ok"],
     )
 
 
@@ -1959,13 +2080,20 @@ async def _handle_messenger_check_comments(config: XPSTConfig, args: dict[str, A
 async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallToolResult:
     """Handle xpst_delete tool.
 
-    Removes a post *record* from local state. ``platform="all"`` removes the
-    record for every platform the video was posted to. This is a state-only
-    operation and does not call the social platform's delete API (use the CLI
-    ``delete`` command for live deletion).
+    Removes a post *record* from local state — NEVER the live post. ``scope``
+    and ``platform_deleted: false`` say so in the payload, because the CLI
+    ``delete`` command is the same-looking operation with a different (real)
+    scope, and an agent that confuses the two believes it deleted a post it did
+    not. ``platform="all"`` removes the record for every platform the video was
+    recorded against.
     """
     video_id = args["video_id"]
     platform = args.get("platform", "all")
+    scope_note = (
+        "Local xPST state only — the post on the platform was NOT deleted and is "
+        "still publicly visible. Use the CLI `xpst delete <video_id>` to delete "
+        "on the platform."
+    )
 
     video = engine.state.get_video(video_id)
     if video is None:
@@ -1973,34 +2101,52 @@ async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallT
         # Return an explicit failure payload so agents can distinguish
         # "record removed" from "record never existed".
         result = {
+            "ok": False,
             "video_id": video_id,
             "platform": platform,
             "removed": [],
             "success": False,
+            "operation": "delete_record",
+            "scope": "local_state_only",
+            "platform_deleted": False,
+            "note": scope_note,
             "error": f"Unknown video: {video_id} (not found in state)",
         }
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+            isError=True,
         )
-    platforms = (
-        list(video.get("posted_to", {}).keys())
-        if platform == "all"
-        else [platform]
-    )
 
-    for plat in platforms:
+    posted_to = video.get("posted_to") or {}
+    platforms = list(posted_to.keys()) if platform == "all" else [platform]
+    # Only records that actually exist can be removed: claiming success for a
+    # platform the video was never posted to is the same fabricated success.
+    removable = [plat for plat in platforms if plat in posted_to]
+
+    for plat in removable:
         engine.state.remove_post(video_id, plat)
-    engine.state.save()
+    if removable:
+        engine.state.save()
 
     result = {
+        "ok": bool(removable),
         "video_id": video_id,
         "platform": platform,
-        "removed": platforms,
-        "success": True,
+        "removed": removable,
+        "success": bool(removable),
+        "operation": "delete_record",
+        "scope": "local_state_only",
+        "platform_deleted": False,
+        "note": scope_note,
     }
+    if not removable:
+        result["error"] = (
+            f"No local record of {video_id} on {platform}; nothing was removed."
+        )
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+        isError=not result["ok"],
     )
 
 

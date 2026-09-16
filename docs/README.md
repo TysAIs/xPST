@@ -414,7 +414,7 @@ xpst mcp
 
 ### Available Tools
 
-xPST exposes 38 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
+xPST exposes 40 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 
 | Tool | Description |
 |------|-------------|
@@ -423,9 +423,11 @@ xPST exposes 38 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 | `xpst_health` | Platform health check |
 | `xpst_status` | Statistics |
 | `xpst_backfill` | Retry failed posts |
+| `xpst_failures_retry` | Retry one recorded failure (video_id + platform) |
+| `xpst_schedule_cancel` | Cancel a scheduled post (local schedule store only) |
 | `xpst_config_show` | Show configuration |
 | `xpst_auth_status` | Auth status |
-| `xpst_delete` | Delete post from platform |
+| `xpst_delete` | Remove local post record (does **not** delete the live post) |
 | `xpst_capabilities` | Canonical role-aware capability catalog |
 | `xpst_readiness` | Local readiness checks and blockers |
 | `xpst_auth_start` | Browser-free human authentication action plan |
@@ -551,7 +553,7 @@ xpst/
 │   ├── sessions.py     # SessionManager (auth consolidation)
 │   ├── video.py        # FFmpeg encoding per platform
 │   └── platform.py     # Cross-platform paths
-├── mcp/                # MCP server (38 tools)
+├── mcp/                # MCP server (40 tools)
 │   └── server.py       # stdio MCP server with audit logging
 ├── dashboard/          # Web API dashboard
 │   ├── server.py       # FastAPI server
