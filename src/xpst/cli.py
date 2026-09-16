@@ -757,10 +757,18 @@ def verify_media_cmd(
         media_item = platform_plan.media[0]
         checks = [Check(**check) for check in media_item.media_spec.get("checks", [])]
         known_codes = {check.name for check in checks}
+        # A hard blocker is added only when it carries a fact the spec checks do
+        # not already show. Matching on the message as well as the code matters
+        # for checks whose preflight code differs from the check name
+        # (``modality`` → ``MEDIA_MODALITY_UNSUPPORTED``): without it the same
+        # refusal was printed twice.
+        known_messages = {check.detail for check in checks}
         checks.extend(
             Check(name=issue.code, status="error", detail=issue.message)
             for issue in platform_plan.hard_blockers
-            if issue.media_path == str(media_path) and issue.code not in known_codes
+            if issue.media_path == str(media_path)
+            and issue.code not in known_codes
+            and issue.message not in known_messages
         )
         reports.append(
             MediaReport(
