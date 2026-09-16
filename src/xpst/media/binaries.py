@@ -360,14 +360,14 @@ def _install_gz(source_path: Path, dest: Path) -> None:
     tmp = dest.with_name(dest.name + ".install")
     with gzip.open(source_path, "rb") as gz_in, open(tmp, "wb") as out:
         shutil.copyfileobj(gz_in, out, 1024 * 1024)
-    os.chmod(tmp, 0o755)
+    os.chmod(tmp, 0o755)  # nosec B103 - executable installer binary, world-executable by design
     os.replace(tmp, dest)
 
 
 def _install_raw(source_path: Path, dest: Path) -> None:
     tmp = dest.with_name(dest.name + ".install")
     shutil.copyfile(source_path, tmp)
-    os.chmod(tmp, 0o755)
+    os.chmod(tmp, 0o755)  # nosec B103 - executable installer binary, world-executable by design
     os.replace(tmp, dest)
 
 
