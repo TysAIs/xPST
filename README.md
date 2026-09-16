@@ -424,8 +424,12 @@ On first launch, a welcome dialog guides you to the Connect page to set up your 
 ## Dashboard Guide
 
 xPST ships a lightweight web API dashboard (FastAPI + uvicorn, no extra UI
-framework needed). It is loopback-only by default (`127.0.0.1`) and protects
-all endpoints with HTTP Basic auth when dashboard credentials are configured.
+framework needed). It is loopback-only by default (`127.0.0.1`). Read-only
+endpoints are protected with HTTP Basic auth when dashboard credentials are
+configured; every mutating endpoint (`POST /api/post`, `/api/connect/{platform}`,
+`/api/onboarding*`, `/bio/edit`) always requires the xPST API token, because
+loopback is not an authorisation boundary. Print it with
+`xpst auth api-token`.
 
 ```bash
 xpst dashboard                # http://127.0.0.1:8080
@@ -437,10 +441,12 @@ xpst dashboard --port 9000    # custom port
 | `GET /health` | none | Aggregated per-platform health (`healthy` / `degraded`) |
 | `GET /metrics` | none | Prometheus text-format metrics |
 | `GET /state` | Basic | Posting summary: totals, per-platform counts, health, best platform |
+| `POST /api/post` | API token | Plan (`dry_run`) or publish through the real engine |
+| `POST /api/connect/{platform}` | API token | Inspect / enable / verify one destination |
 | `GET /webhook/messenger` | none | Meta webhook handshake (only when Messenger is enabled) |
 | `POST /webhook/messenger` | none | Messenger events, verified with `X-Hub-Signature-256` |
 
-Set the dashboard password (stored as a bcrypt hash):
+Set the dashboard password (stored as a bcrypt hash) to also protect reads:
 
 ```bash
 xpst config set monitoring.dashboard_password mypassword

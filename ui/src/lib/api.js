@@ -3,6 +3,12 @@
 // proxies /api/* to the engine (see vite.config.js); in production the
 // FastAPI server mounts this bundle and serves the API from the same origin.
 // Basic auth (when configured) is handled by the browser natively.
+//
+// Mutating routes additionally require the dashboard API token, which this
+// module attaches from lib/auth-token.js (never from the served HTML). Read
+// routes work without it, so the UI is never locked out.
+
+import { tokenHeaders } from "./auth-token.js";
 
 const JSON_HEADERS = { Accept: "application/json" };
 
@@ -57,13 +63,13 @@ async function requestJSON(path, options = {}) {
 }
 
 function getJSON(path) {
-  return requestJSON(path, { headers: JSON_HEADERS });
+  return requestJSON(path, { headers: { ...JSON_HEADERS, ...tokenHeaders() } });
 }
 
 function postJSON(path, payload) {
   return requestJSON(path, {
     method: "POST",
-    headers: { ...JSON_HEADERS, "Content-Type": "application/json" },
+    headers: { ...JSON_HEADERS, ...tokenHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify(payload ?? {}),
   });
 }
