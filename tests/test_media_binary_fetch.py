@@ -319,7 +319,7 @@ def _explode(url: str, headers: dict[str, str], timeout: float) -> FakeResponse:
 def test_no_download_when_system_ffmpeg_is_present(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     system_dir = tmp_path / "system"
     for name in ("ffmpeg", "ffprobe"):
-        exe = system_dir / name
+        exe = system_dir / binaries.media_binary_name(name)
         exe.parent.mkdir(parents=True, exist_ok=True)
         exe.write_bytes(REAL_BINARY)
         exe.chmod(0o755)
@@ -395,12 +395,12 @@ def test_status_reports_env_system_fetched_and_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     system_dir = tmp_path / "system"
-    exe = system_dir / "ffprobe"
+    exe = system_dir / binaries.media_binary_name("ffprobe")
     exe.parent.mkdir(parents=True, exist_ok=True)
     exe.write_bytes(REAL_BINARY)
     exe.chmod(0o755)
     fetched_dir = tmp_path / "bin"
-    fetched = fetched_dir / "ffmpeg"
+    fetched = fetched_dir / binaries.media_binary_name("ffmpeg")
     fetched.parent.mkdir(parents=True)
     fetched.write_bytes(REAL_BINARY)
     fetched.chmod(0o755)

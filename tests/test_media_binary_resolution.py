@@ -13,6 +13,7 @@ on what happens to be installed on the host.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,11 @@ def _fake_binary(path: Path, body: bytes = b"#!/bin/sh\n") -> Path:
     return path
 
 
+def _bin_name(name: str) -> str:
+    """Platform-native file name: the production resolver probes ffmpeg.exe on win32."""
+    return f"{name}.exe" if sys.platform == "win32" else name
+
+
 @pytest.mark.parametrize(
     ("resolver", "env_var", "name"),
     [
@@ -64,12 +70,12 @@ def test_env_override_beats_system_and_fetched(
     env_var: str,
     name: str,
 ) -> None:
-    override = _fake_binary(tmp_path / "override" / name)
+    override = _fake_binary(tmp_path / "override" / _bin_name(name))
     system = tmp_path / "system"
     monkeypatch.setattr("xpst.utils.platform.system_media_dirs", lambda: [system])
-    _fake_binary(system / name)
+    _fake_binary(system / _bin_name(name))
     fetched_dir = tmp_path / "fetched"
-    _fake_binary(fetched_dir / name)
+    _fake_binary(fetched_dir / _bin_name(name))
     monkeypatch.setenv("XPST_MEDIA_BIN_DIR", str(fetched_dir))
     monkeypatch.setenv(env_var, str(override))
     monkeypatch.setattr("xpst.utils.platform.shutil.which", lambda _name: str(system / name))
@@ -93,10 +99,10 @@ def test_system_install_beats_fetched_copy(
     name: str,
 ) -> None:
     system_dir = tmp_path / "system"
-    system = _fake_binary(system_dir / name)
+    system = _fake_binary(system_dir / _bin_name(name))
     monkeypatch.setattr("xpst.utils.platform.system_media_dirs", lambda: [system_dir])
     fetched_dir = tmp_path / "fetched"
-    _fake_binary(fetched_dir / name)
+    _fake_binary(fetched_dir / _bin_name(name))
     monkeypatch.setenv("XPST_MEDIA_BIN_DIR", str(fetched_dir))
 
     assert resolver() == str(system)
@@ -120,7 +126,7 @@ def test_fetched_copy_used_when_no_env_and_no_system(
     """The machine-without-ffmpeg case: only the fetched copy exists."""
     monkeypatch.setattr("xpst.utils.platform.system_media_dirs", lambda: [tmp_path / "empty"])
     fetched_dir = tmp_path / "fetched"
-    fetched = _fake_binary(fetched_dir / name)
+    fetched = _fake_binary(fetched_dir / _bin_name(name))
     monkeypatch.setenv("XPST_MEDIA_BIN_DIR", str(fetched_dir))
 
     assert resolver() == str(fetched)
@@ -154,7 +160,14 @@ def test_fetched_copy_must_be_executable(
     resolver,
     name: str,
 ) -> None:
-    """A file that is not executable is not a usable binary."""
+    """A file that is not executable is not a usable binary.
+
+    POSIX-only: Windows has no execute bit, so ``os.access(..., X_OK)`` is
+    always True there and the non-executable seed could not be probed anyway
+    (the resolver looks for the ``.exe`` name this test intentionally skips).
+    """
+    if sys.platform == "win32":
+        pytest.skip("no execute bit on Windows; exec-bit gate is POSIX-only")
     monkeypatch.setattr("xpst.utils.platform.system_media_dirs", lambda: [tmp_path / "empty"])
     fetched_dir = tmp_path / "fetched"
     not_executable = fetched_dir / name
@@ -170,7 +183,7 @@ def test_missing_env_override_falls_through(monkeypatch: pytest.MonkeyPatch, tmp
     monkeypatch.setenv("XPST_FFMPEG_PATH", "/nonexistent/ffmpeg")
     monkeypatch.setattr("xpst.utils.platform.system_media_dirs", lambda: [tmp_path / "empty"])
     monkeypatch.setenv("XPST_MEDIA_BIN_DIR", str(tmp_path / "fetched"))
-    fetched = _fake_binary(tmp_path / "fetched" / "ffmpeg")
+    fetched = _fake_binary(tmp_path / "fetched" / _bin_name("ffmpeg"))
 
     assert resolve_ffmpeg_path() == str(fetched)
 
