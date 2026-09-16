@@ -1196,9 +1196,19 @@ async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallTool
         catch_up=catch_up, source=source, max_posts=max_posts
     )
     # G28: agents need the per-video outcomes and post URLs, not a bare
-    # success string.
+    # success string. `ok` used to be hard-coded True regardless of what
+    # happened, so an agent that trusted it reported success for a failed run.
+    # It now means what it says, derived from the same per-platform
+    # ``UploadResult.is_published`` the engine's own status flags use: every
+    # upload in every result must be provably published, and "nothing ran" is
+    # not success.
+    uploads = [upload for result in results for upload in result.results.values()]
+    published = [upload for upload in uploads if upload.is_published]
     payload = {
-        "ok": True,
+        "ok": bool(uploads) and len(published) == len(uploads),
+        "attempted": len(results),
+        "uploads": len(uploads),
+        "published": len(published),
         "processed": len(results),
         "results": [_serialize_result(r) for r in results],
     }
@@ -1476,8 +1486,7 @@ async def _handle_analytics(
     live = bool(arguments.get("live", False))
 
     collector = AnalyticsCollector(config_dir=config.config_dir)
-    if live:
-        await collector.collect_all()
+    live_data = await collector.collect_all() if live else None
 
     store = collector.store
     latest = store.latest(platform)
@@ -1490,11 +1499,17 @@ async def _handle_analytics(
         for key in ("views", "likes", "comments", "shares"):
             agg[key] += row.get(key) or 0
 
+    # Outcome report (D5): the same per-post/per-platform numbers the UI and
+    # CLI show, each labelled "live" or "recorded" and filtered to posts the
+    # account actually owns. Platforms with nothing report totals=None.
+    report = collector.outcome_report(live_data=live_data)
+
     payload = {
         "live": live,
         "snapshot_count": store.snapshot_count(),
         "platforms": per_platform,
         "posts": latest,
+        "outcome_report": report,
     }
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, default=str))],
@@ -1783,6 +1798,7 @@ async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
     as connected.
     """
     from xpst.auth_status import collect_live_auth_status_async
+    from xpst.token_state import PLATFORM_ORDER
     from xpst.utils.credentials import CredentialStore
     from xpst.utils.quota import QuotaManager
 
@@ -1801,7 +1817,13 @@ async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
     platforms: dict[str, Any] = {}
     badges: dict[str, str] = {}
     checked_at: float | None = None
-    for platform in ("youtube", "x", "instagram", "tiktok", "threads", "messenger"):
+    # Every provider the canonical collector reports — including the local
+    # file source — appears with an honest badge; omission would make this
+    # surface disagree with CLI/HTTP on the same fact.
+    order = list(PLATFORM_ORDER) + [
+        name for name in live if isinstance(name, str) and name not in PLATFORM_ORDER
+    ]
+    for platform in order:
         entry = live.get(platform)
         info: dict[str, Any] = dict(entry) if isinstance(entry, dict) else {}
         if not info:
@@ -1945,10 +1967,14 @@ async def _handle_readiness(config: XPSTConfig) -> CallToolResult:
     """Return local readiness without initializing the posting engine."""
     from xpst.readiness import build_readiness_report
 
+    report = build_readiness_report(config).to_dict()
     payload = {
-        "ok": True,
+        # `ok` must mirror the readiness verdict instead of being a constant:
+        # an agent gating on `ok` alone must not proceed when the install is
+        # not actually ready.
+        "ok": bool(report.get("ready")),
         "contract_version": 1,
-        "readiness": build_readiness_report(config).to_dict(),
+        "readiness": report,
     }
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, default=str))])
 
