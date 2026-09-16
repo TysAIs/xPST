@@ -1,6 +1,6 @@
 # xPST — Cross-Posting Suite
 
-**Enterprise-grade Python CLI/desktop app for automated video cross-posting to YouTube, X, Instagram, TikTok.**
+**Enterprise-grade Python CLI/desktop app for automated video cross-posting to YouTube, X, and Instagram, with TikTok as a video source (TikTok publishing is not available yet — see docs/INSTALL.md capability truth table).**
 
 ## Quick Start
 
