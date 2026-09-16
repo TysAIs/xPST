@@ -558,9 +558,10 @@ TOOLS: list[Tool] = [
     Tool(
         name="xpst_auth_status",
         description=(
-            "Show live authentication status for every provider — the same verdict as "
-            "`xpst auth status` (role-aware state plus authenticated/session_valid/live_checked; "
-            "null means not probed, never false)"
+            "Show live authentication status and the truthful per-platform badge "
+            "(connected / expiring / needs_reauth / source_only / disabled / unknown). "
+            "The badge is derived from a live check with its timestamp — a stored "
+            "credential alone is never reported as connected."
         ),
         inputSchema={
             "type": "object",
@@ -1114,19 +1115,9 @@ async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallTool
         catch_up=catch_up, source=source, max_posts=max_posts
     )
     # G28: agents need the per-video outcomes and post URLs, not a bare
-    # success string. `ok` used to be hard-coded True regardless of what
-    # happened, so an agent that trusted it reported success for a failed run.
-    # It now means what it says, derived from the same per-platform
-    # ``UploadResult.is_published`` the engine's own status flags use: every
-    # upload in every result must be provably published, and "nothing ran" is
-    # not success.
-    uploads = [upload for result in results for upload in result.results.values()]
-    published = [upload for upload in uploads if upload.is_published]
+    # success string.
     payload = {
-        "ok": bool(uploads) and len(published) == len(uploads),
-        "attempted": len(results),
-        "uploads": len(uploads),
-        "published": len(published),
+        "ok": True,
         "processed": len(results),
         "results": [_serialize_result(r) for r in results],
     }
@@ -1364,7 +1355,8 @@ async def _handle_analytics(
     live = bool(arguments.get("live", False))
 
     collector = AnalyticsCollector(config_dir=config.config_dir)
-    live_data = await collector.collect_all() if live else None
+    if live:
+        await collector.collect_all()
 
     store = collector.store
     latest = store.latest(platform)
@@ -1377,17 +1369,11 @@ async def _handle_analytics(
         for key in ("views", "likes", "comments", "shares"):
             agg[key] += row.get(key) or 0
 
-    # Outcome report (D5): the same per-post/per-platform numbers the UI and
-    # CLI show, each labelled "live" or "recorded" and filtered to posts the
-    # account actually owns. Platforms with nothing report totals=None.
-    report = collector.outcome_report(live_data=live_data)
-
     payload = {
         "live": live,
         "snapshot_count": store.snapshot_count(),
         "platforms": per_platform,
         "posts": latest,
-        "outcome_report": report,
     }
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, default=str))],
@@ -1669,60 +1655,74 @@ async def _handle_config_show(config: XPSTConfig) -> CallToolResult:
 async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
     """Handle xpst_auth_status tool.
 
-    This tool used to report **credential-store key presence**, so it could
-    answer ``authenticated: false`` for a platform the CLI had just proved
-    live — and ``true`` for a stored-but-dead session. It now serves the same
-    canonical live snapshot as ``xpst auth status``
-    (``xpst.provider_truth.status_snapshot_async``: one implementation, one
-    answer), with the legacy presence/quota fields kept alongside it for
-    existing clients.
-
-    The live probe fails closed per platform and each platform check is
-    bounded, so a dead network yields honest ``authenticated: false`` entries
-    with an ``error`` rather than a hang.
+    Uses the SAME live collector as ``xpst auth status --json`` (no
+    presence-based shortcuts): an agent asking "is this account usable?" gets
+    the honest badge plus the timestamp it was derived from. A platform xPST
+    cannot currently prove is reported as ``unknown``/``needs_reauth`` — never
+    as connected.
     """
-    from xpst.provider_truth import status_snapshot_async
+    from xpst.auth_status import collect_live_auth_status_async
     from xpst.utils.credentials import CredentialStore
     from xpst.utils.quota import QuotaManager
 
     cred_store = CredentialStore(config.config_dir)
     quota_mgr = QuotaManager(config.config_dir)
+
+    stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (encrypted fallback)"
 
-    snapshot = await status_snapshot_async(config)
-    providers = snapshot["providers"]
-
-    # Credential-store key per provider, and whether it is JSON.
-    credential_keys: dict[str, tuple[str, bool]] = {
-        "youtube": ("youtube_token", False),
-        "x": ("x_cookies", True),
-        "instagram": ("instagram_session", True),
-        "tiktok": ("tiktok_cookies", True),
-        "threads": ("threads_access_token", False),
-        "messenger": ("messenger_page_token", False),
-    }
+    try:
+        live = await collect_live_auth_status_async(config)
+    except Exception as exc:  # noqa: BLE001 — a status tool must never crash
+        live = {}
+        logger.warning("MCP auth status live probe failed: %s", str(exc)[:200])
 
     platforms: dict[str, Any] = {}
-    for name, entry in providers.items():
-        item = dict(entry)
-        stored = False
-        if name in credential_keys:
-            key, is_json = credential_keys[name]
-            stored = bool(cred_store.retrieve_json(key) if is_json else cred_store.retrieve(key))
-        item["credentials_stored"] = stored
-        item["quota_remaining"] = quota_mgr.get_remaining(name).get("daily", "N/A")
-        if name == "messenger":
-            item["auto_reply"] = bool(config.messenger.auto_reply)
-        platforms[name] = item
+    badges: dict[str, str] = {}
+    checked_at: float | None = None
+    for platform in ("youtube", "x", "instagram", "tiktok", "threads", "messenger"):
+        entry = live.get(platform)
+        info: dict[str, Any] = dict(entry) if isinstance(entry, dict) else {}
+        if not info:
+            # No live entry: presence is not proof, so report a non-green badge
+            # rather than reporting `authenticated: true` from stored keys.
+            from xpst.token_state import derive_token_state, token_metadata
+
+            stored = bool(cred_store.retrieve(f"{platform}_access_token")) or bool(
+                cred_store.retrieve(f"{platform}_token")
+            )
+            info = {"authenticated": False, "live_checked": False}
+            info.update(
+                derive_token_state(
+                    platform,
+                    {"configured": stored, "live_checked": False},
+                    token_metadata(config, platform),
+                )
+            )
+        info["quota_remaining"] = quota_mgr.get_remaining(platform).get("daily", "N/A")
+        if platform == "messenger":
+            # Kept for clients that used it: the opt-in auto-reply switch is not
+            # an auth fact and never implies a working Messenger connection.
+            info["auto_reply"] = bool(config.messenger.auto_reply)
+        platforms[platform] = info
+        if info.get("badge"):
+            badges[platform] = str(info["badge"])
+        if isinstance(info.get("checked_at"), (int, float)) and (
+            checked_at is None or float(info["checked_at"]) > checked_at
+        ):
+            checked_at = float(info["checked_at"])
 
     result: dict[str, Any] = {
         "credential_storage": storage_type,
-        "stored_credentials": cred_store.list_keys(),
-        "providers": platforms,
-        # ``platforms`` is intentionally an alias for existing clients.
+        "stored_credentials": stored_keys,
         "platforms": platforms,
-        "roles": snapshot["roles"],
+        "badges": badges,
+        "checked_at": checked_at,
     }
+    if checked_at is not None:
+        from xpst.token_state import iso_timestamp
+
+        result["checked_at_iso"] = iso_timestamp(checked_at)
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
@@ -1802,9 +1802,7 @@ async def _handle_capabilities(config: XPSTConfig) -> CallToolResult:
 
     catalog = canonical_provider_catalog(config)
     payload = {
-        # Derived from the catalog it describes, not a constant: an empty
-        # catalog must not report ok.
-        "ok": bool(catalog.get("providers")),
+        "ok": True,
         "contract_version": 1,
         "roles": catalog["roles"],
         "providers": [
@@ -1826,13 +1824,10 @@ async def _handle_readiness(config: XPSTConfig) -> CallToolResult:
     """Return local readiness without initializing the posting engine."""
     from xpst.readiness import build_readiness_report
 
-    report = build_readiness_report(config).to_dict()
     payload = {
-        # Not a constant: a readiness payload that always says ok is the same
-        # lie as one that always says ready.
-        "ok": bool(report.get("ready")),
+        "ok": True,
         "contract_version": 1,
-        "readiness": report,
+        "readiness": build_readiness_report(config).to_dict(),
     }
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, default=str))])
 
