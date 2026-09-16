@@ -103,6 +103,10 @@ jobs:
           npm ci
           npm run build
 
+      - name: UI contracts (node --test)
+        working-directory: ui
+        run: npm test
+
       - name: Install Linux system dependencies (Tauri v2 + AppImage)
         if: runner.os == 'Linux'
         run: |
@@ -194,6 +198,15 @@ jobs:
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+
+      - name: Shell unit tests (cargo test)
+        # Runs the shell's own tests, including the capability/ACL contract that
+        # proves the engine origin is granted the dialog command on whatever
+        # loopback port the app picks at launch. Deliberately placed after the
+        # UI build and the resource fetch: the test harness compiles the same
+        # generate_context!() the app does, and that needs both present.
+        working-directory: src-tauri
+        run: cargo test
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
