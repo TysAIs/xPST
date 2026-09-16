@@ -69,12 +69,65 @@ sensitive and do not loosen its permissions.
 | YouTube OAuth Token | `youtube_token` | Encrypted file (`.enc`) by default; OS keychain with `XPST_USE_KEYRING=1` + `0600` `youtube_token.json` |
 | X/Twitter Cookies | `x_cookies` | Encrypted file (`.enc`) by default; OS keychain with `XPST_USE_KEYRING=1` + `0600` `x_cookies.json` |
 | Instagram Session | `instagram_session` | Encrypted file (`.enc`) by default; OS keychain with `XPST_USE_KEYRING=1` + `0600` `instagram_session.json` |
+| Dashboard API token | `dashboard_api_token` | Encrypted file (`.enc`) by default; OS keychain with `XPST_USE_KEYRING=1` |
 
 ### What Is NOT Stored
 
 - Passwords are **never** stored by xPST
 - API keys are read from environment variables or config files
 - OAuth client secrets (`client_secrets.json`) must be provided by the user
+- The dashboard API token is never written to `config.yaml`
+
+## Local HTTP surface (dashboard / desktop app)
+
+The dashboard binds loopback (`127.0.0.1`) and is embedded by the desktop app.
+**Loopback is not an authorisation boundary**: any process running as your user,
+and any page open in your browser, can reach `127.0.0.1:<port>`. The server
+therefore treats every mutating route as privileged:
+
+- `POST /api/post`, `POST /api/connect/{platform}`, `POST /api/onboarding`,
+  `POST /api/onboarding/complete`, `POST /api/preflight` and `POST /bio/edit`
+  **always** require a credential — either the dashboard API token or, when
+  configured, the dashboard Basic login. Without one they answer `401`.
+- Read-only routes keep their previous behaviour (`/health`, `/metrics`, `/bio`
+  and the OAuth callback stay public; everything else requires Basic auth only
+  when a dashboard password is configured), so the UI is never locked out.
+- `POST /oauth/callback` and the optional Messenger webhook stay public by
+  design — they are reached by browser redirects and by Meta, neither of which
+  can attach a header — and validate their own payloads.
+
+The API token is generated on first run and stored in the encrypted credential
+store (`dashboard_api_token`), never in `config.yaml`; no default value ships
+with the project. Print or rotate it with `xpst auth api-token` /
+`xpst auth api-token --rotate`.
+
+The token is handed to browser contexts out-of-band and is never embedded in
+served HTML:
+
+- the desktop shell mints a per-launch token, passes it to the engine as
+  `XPST_UI_TOKEN` and opens its own webview at
+  `http://127.0.0.1:<port>/#xpst_token=<token>`; the SPA reads the fragment and
+  immediately strips it from the address bar (fragments are never sent to the
+  server, so the token cannot reach an access log),
+- `xpst ui` does the same for the browser it opens,
+- CLI/agent callers use `xpst auth api-token` or `XPST_API_TOKEN`.
+
+The one place a token does appear in a URL is the link-in-bio editor form
+(`?token=`), because a plain HTML form cannot send a header. The server
+therefore filters `token=` out of uvicorn's access log before it is written
+(`AccessLogRedactionFilter`), so the console/CI log cannot capture it.
+
+Scope and limits, stated plainly: this stops unauthenticated writes from other
+processes, other users, and cross-origin/CSRF attempts from web pages. It is
+**not** a defence against malware already running as your user, which can read
+`~/.xpst/` (as it could read any other file of yours) and therefore the token.
+
+## Configured bind host
+
+Binding to a non-loopback address exposes the dashboard to the network. In that
+configuration set `monitoring.dashboard_username` + `dashboard_password_hash` so
+reads are protected too: mutating routes are always credential-gated, but
+read-only analytics/state would otherwise be world-readable on your LAN.
 
 ## .gitignore Protection
 

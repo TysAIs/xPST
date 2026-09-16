@@ -1933,20 +1933,28 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
 
 @main.command()
 @click.argument("platform", required=False)
+@click.option("--rotate", is_flag=True,
+              help="With `api-token`: generate a new API token, invalidating the old one")
 @json_option
 @click.pass_context
-def auth(ctx: click.Context, platform: str | None, as_json: bool):
+def auth(ctx: click.Context, platform: str | None, rotate: bool, as_json: bool):
     """Authenticate with a platform or check auth status.
 
     Usage:
-        xpst auth youtube     # Authenticate with YouTube
-        xpst auth x           # Authenticate with X/Twitter
-        xpst auth instagram   # Authenticate with Instagram
-        xpst auth tiktok      # Authenticate with TikTok
-        xpst auth status      # Show auth status for all platforms
+        xpst auth youtube       # Authenticate with YouTube
+        xpst auth x             # Authenticate with X/Twitter
+        xpst auth instagram     # Authenticate with Instagram
+        xpst auth tiktok        # Authenticate with TikTok
+        xpst auth status        # Show auth status for all platforms
+        xpst auth api-token     # Print the local dashboard API token
+        xpst auth api-token --rotate   # Replace it
     """
     if platform is None or platform == "status":
         _show_auth_status(ctx, as_json)
+        return
+
+    if platform in ("api-token", "api_token"):
+        _show_api_token(ctx, as_json, rotate=rotate)
         return
 
     valid_platforms = {"tiktok", "youtube", "x", "instagram", "threads", "messenger"}
@@ -1972,6 +1980,43 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         _auth_threads(config)
     elif platform == "messenger":
         _auth_messenger(config)
+
+
+def _show_api_token(ctx: click.Context, as_json: bool, *, rotate: bool = False) -> None:
+    """Print (or replace) the local dashboard API token.
+
+    Every mutating dashboard route (``POST /api/post``,
+    ``POST /api/connect/{platform}``, ``POST /api/onboarding*`` and the
+    link-in-bio form save) requires this token. Loopback is not an authorisation
+    boundary, so an unauthenticated write from any process on the machine — or
+    any page open in a browser — is refused with 401. The token is generated on
+    the first run and stored in the encrypted credential store, never in
+    ``config.yaml``.
+    """
+    from xpst.dashboard.auth import ensure_api_token, rotate_api_token
+
+    config = load_config(ctx.obj.get("config_path"))
+    config_dir = config.config_dir
+    try:
+        token = rotate_api_token(config_dir) if rotate else ensure_api_token(config_dir)
+    except Exception as exc:  # noqa: BLE001 - surface the reason, never a traceback
+        console.print(f"[red]Could not access the dashboard API token: {exc}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    if as_json:
+        json_output({"config_dir": config_dir, "api_token": token, "rotated": rotate}, True)
+        return
+
+    console.print(f"[bold blue]Dashboard API token[/bold blue] [dim]({config_dir})[/dim]")
+    click.echo(token)
+    console.print(
+        "[dim]Send it as `Authorization: Bearer <token>` or `X-API-Token: <token>` "
+        "on mutating endpoints (POST /api/post, /api/connect/<platform>, "
+        "/api/onboarding*). Read-only endpoints stay open.[/dim]"
+    )
+    if rotate:
+        console.print("[yellow]Rotated — previously issued tokens no longer work.[/yellow]")
 
 
 def _show_auth_status(ctx: click.Context, as_json: bool):
@@ -2542,15 +2587,29 @@ def dashboard(ctx: click.Context, port: int, host: str, api_only: bool):
 @json_option
 @click.pass_context
 def bio(ctx: click.Context, port: int, host: str, as_json: bool):
-    """Print your Link-in-Bio page URL (start the dashboard with `xpst dashboard` first)"""
-    from xpst.dashboard.server import bio_url
+    """Print your Link-in-Bio page URL (start the dashboard with `xpst dashboard` first)
 
+    Also prints the admin editor URL with the dashboard API token attached: the
+    editor is a plain HTML form, so that token is what authorises its writes
+    when no dashboard username/password is configured.
+    """
+    from xpst.dashboard.auth import ensure_api_token
+    from xpst.dashboard.server import bio_edit_url, bio_url
+
+    config = load_config(ctx.obj.get("config_path"))
     url = bio_url(host=host, port=port)
+    try:
+        edit_url = bio_edit_url(host=host, port=port, token=ensure_api_token(config.config_dir))
+    except Exception as exc:  # noqa: BLE001 - the public URL is still useful
+        logger.debug("Could not read the dashboard API token: %s", exc)
+        edit_url = bio_edit_url(host=host, port=port)
+
     if as_json:
-        json_output({"url": url}, True)
+        json_output({"url": url, "edit_url": edit_url}, True)
         return
     console.print(f"[bold blue]Link-in-Bio:[/bold blue] {url}")
-    console.print("[dim]Start the dashboard with `xpst dashboard`, then share this URL.[/dim]")
+    console.print(f"[bold blue]Edit page:[/bold blue] {edit_url}")
+    console.print("[dim]Start the dashboard with `xpst dashboard`, then share the public URL.[/dim]")
 
 
 # ──────────────────────────────────────────────

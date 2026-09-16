@@ -490,10 +490,17 @@ xpst dashboard --port 9000 --host 127.0.0.1
 
 ### Authentication
 
-Basic auth with `dashboard_username` and bcrypt `dashboard_password_hash` from config.
+Read-only endpoints use Basic auth with `dashboard_username` and bcrypt
+`dashboard_password_hash` from config (open on loopback when neither is set).
+
+Every **mutating** endpoint (`POST /api/post`, `/api/connect/{platform}`,
+`/api/onboarding*`, `/api/preflight`, `/bio/edit`) always requires the dashboard
+API token, whether or not Basic auth is configured — loopback is not an
+authorisation boundary. Print it with `xpst auth api-token` and send it as
+`Authorization: Bearer <token>` or `X-API-Token: <token>`.
 
 ```bash
-# Set password
+# Set password (protects reads too)
 xpst config set monitoring.dashboard_password mypassword
 ```
 
