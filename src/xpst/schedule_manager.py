@@ -100,18 +100,31 @@ class ScheduleManager:
     def _process_lock(self):
         """Acquire an exclusive advisory file lock shared by all processes
         (cron + daemon may run concurrently). fcntl on POSIX, msvcrt on
-        Windows; degrades to in-process locking only if neither exists."""
+        Windows; degrades to in-process locking only if neither exists.
+
+        msvcrt.LK_LOCK retries the lock for ~10 seconds and then raises
+        OSError; that must NOT be swallowed — proceeding unlocked lets two
+        writers load-append-save concurrently and the last save silently
+        drops the other writer's entry (observed on Windows CI: 10 threaded
+        adds → 9 entries). Retry until the bounded deadline, then fail
+        loudly instead of corrupting the schedule.
+        """
         with open(self._lockfile, "a+") as f:
             locked = False
-            try:
-                if fcntl is not None:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                    locked = True
-                elif msvcrt is not None:
-                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
-                    locked = True
-            except (AttributeError, OSError):  # pragma: no cover
-                pass
+            if fcntl is not None:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                locked = True
+            elif msvcrt is not None:
+                deadline = time.monotonic() + 30.0
+                while True:
+                    try:
+                        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+                        locked = True
+                        break
+                    except (AttributeError, OSError):
+                        if time.monotonic() >= deadline:
+                            raise  # fail loudly: an unlocked write loses data
+                        time.sleep(0.05)
             try:
                 yield
             finally:

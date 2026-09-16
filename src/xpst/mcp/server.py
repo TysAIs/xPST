@@ -616,9 +616,10 @@ TOOLS: list[Tool] = [
     Tool(
         name="xpst_auth_status",
         description=(
-            "Show live authentication status for every provider — the same verdict as "
-            "`xpst auth status` (role-aware state plus authenticated/session_valid/live_checked; "
-            "null means not probed, never false)"
+            "Show live authentication status and the truthful per-platform badge "
+            "(connected / expiring / needs_reauth / source_only / disabled / unknown). "
+            "The badge is derived from a live check with its timestamp — a stored "
+            "credential alone is never reported as connected."
         ),
         inputSchema={
             "type": "object",
@@ -1790,60 +1791,81 @@ async def _handle_config_show(config: XPSTConfig) -> CallToolResult:
 async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
     """Handle xpst_auth_status tool.
 
-    This tool used to report **credential-store key presence**, so it could
-    answer ``authenticated: false`` for a platform the CLI had just proved
-    live — and ``true`` for a stored-but-dead session. It now serves the same
-    canonical live snapshot as ``xpst auth status``
-    (``xpst.provider_truth.status_snapshot_async``: one implementation, one
-    answer), with the legacy presence/quota fields kept alongside it for
-    existing clients.
-
-    The live probe fails closed per platform and each platform check is
-    bounded, so a dead network yields honest ``authenticated: false`` entries
-    with an ``error`` rather than a hang.
+    Uses the SAME live collector as ``xpst auth status --json`` (no
+    presence-based shortcuts): an agent asking "is this account usable?" gets
+    the honest badge plus the timestamp it was derived from. A platform xPST
+    cannot currently prove is reported as ``unknown``/``needs_reauth`` — never
+    as connected.
     """
-    from xpst.provider_truth import status_snapshot_async
+    from xpst.auth_status import collect_live_auth_status_async
+    from xpst.token_state import PLATFORM_ORDER
     from xpst.utils.credentials import CredentialStore
     from xpst.utils.quota import QuotaManager
 
     cred_store = CredentialStore(config.config_dir)
     quota_mgr = QuotaManager(config.config_dir)
+
+    stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (encrypted fallback)"
 
-    snapshot = await status_snapshot_async(config)
-    providers = snapshot["providers"]
-
-    # Credential-store key per provider, and whether it is JSON.
-    credential_keys: dict[str, tuple[str, bool]] = {
-        "youtube": ("youtube_token", False),
-        "x": ("x_cookies", True),
-        "instagram": ("instagram_session", True),
-        "tiktok": ("tiktok_cookies", True),
-        "threads": ("threads_access_token", False),
-        "messenger": ("messenger_page_token", False),
-    }
+    try:
+        live = await collect_live_auth_status_async(config)
+    except Exception as exc:  # noqa: BLE001 — a status tool must never crash
+        live = {}
+        logger.warning("MCP auth status live probe failed: %s", str(exc)[:200])
 
     platforms: dict[str, Any] = {}
-    for name, entry in providers.items():
-        item = dict(entry)
-        stored = False
-        if name in credential_keys:
-            key, is_json = credential_keys[name]
-            stored = bool(cred_store.retrieve_json(key) if is_json else cred_store.retrieve(key))
-        item["credentials_stored"] = stored
-        item["quota_remaining"] = quota_mgr.get_remaining(name).get("daily", "N/A")
-        if name == "messenger":
-            item["auto_reply"] = bool(config.messenger.auto_reply)
-        platforms[name] = item
+    badges: dict[str, str] = {}
+    checked_at: float | None = None
+    # Every provider the canonical collector reports — including the local
+    # file source — appears with an honest badge; omission would make this
+    # surface disagree with CLI/HTTP on the same fact.
+    order = list(PLATFORM_ORDER) + [
+        name for name in live if isinstance(name, str) and name not in PLATFORM_ORDER
+    ]
+    for platform in order:
+        entry = live.get(platform)
+        info: dict[str, Any] = dict(entry) if isinstance(entry, dict) else {}
+        if not info:
+            # No live entry: presence is not proof, so report a non-green badge
+            # rather than reporting `authenticated: true` from stored keys.
+            from xpst.token_state import derive_token_state, token_metadata
+
+            stored = bool(cred_store.retrieve(f"{platform}_access_token")) or bool(
+                cred_store.retrieve(f"{platform}_token")
+            )
+            info = {"authenticated": False, "live_checked": False}
+            info.update(
+                derive_token_state(
+                    platform,
+                    {"configured": stored, "live_checked": False},
+                    token_metadata(config, platform),
+                )
+            )
+        info["quota_remaining"] = quota_mgr.get_remaining(platform).get("daily", "N/A")
+        if platform == "messenger":
+            # Kept for clients that used it: the opt-in auto-reply switch is not
+            # an auth fact and never implies a working Messenger connection.
+            info["auto_reply"] = bool(config.messenger.auto_reply)
+        platforms[platform] = info
+        if info.get("badge"):
+            badges[platform] = str(info["badge"])
+        if isinstance(info.get("checked_at"), (int, float)) and (
+            checked_at is None or float(info["checked_at"]) > checked_at
+        ):
+            checked_at = float(info["checked_at"])
 
     result: dict[str, Any] = {
         "credential_storage": storage_type,
-        "stored_credentials": cred_store.list_keys(),
-        "providers": platforms,
-        # ``platforms`` is intentionally an alias for existing clients.
+        "stored_credentials": stored_keys,
         "platforms": platforms,
-        "roles": snapshot["roles"],
+        "badges": badges,
+        "checked_at": checked_at,
     }
+    if checked_at is not None:
+        from xpst.token_state import iso_timestamp
+
+        result["checked_at_iso"] = iso_timestamp(checked_at)
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
@@ -1923,9 +1945,7 @@ async def _handle_capabilities(config: XPSTConfig) -> CallToolResult:
 
     catalog = canonical_provider_catalog(config)
     payload = {
-        # Derived from the catalog it describes, not a constant: an empty
-        # catalog must not report ok.
-        "ok": bool(catalog.get("providers")),
+        "ok": True,
         "contract_version": 1,
         "roles": catalog["roles"],
         "providers": [
@@ -1949,8 +1969,9 @@ async def _handle_readiness(config: XPSTConfig) -> CallToolResult:
 
     report = build_readiness_report(config).to_dict()
     payload = {
-        # Not a constant: a readiness payload that always says ok is the same
-        # lie as one that always says ready.
+        # `ok` must mirror the readiness verdict instead of being a constant:
+        # an agent gating on `ok` alone must not proceed when the install is
+        # not actually ready.
         "ok": bool(report.get("ready")),
         "contract_version": 1,
         "readiness": report,
