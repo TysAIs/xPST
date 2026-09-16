@@ -59,11 +59,12 @@ class AuthCodeResult:
     error_description: str | None = None
     port: int = 0
     path: str = "/callback"
+    public_host: str = "127.0.0.1"
 
     @property
     def redirect_uri(self) -> str:
         """The loopback redirect URI this result was captured on."""
-        return f"http://127.0.0.1:{self.port}{self.path}"
+        return f"http://{self.public_host}:{self.port}{self.path}"
 
 
 _SUCCESS_PAGE = """<!doctype html>
@@ -100,10 +101,20 @@ class LocalOAuthListener:
             authorize URL from this AFTER starting the listener.
     """
 
-    def __init__(self, port: int = 8085, path: str = "/callback", state: str | None = None) -> None:
+    def __init__(
+        self,
+        port: int = 8085,
+        path: str = "/callback",
+        state: str | None = None,
+        public_host: str = "127.0.0.1",
+    ) -> None:
         self.requested_port = port
         self.path = path if path.startswith("/") else f"/{path}"
         self.state = state
+        # Only the redirect_uri *string* uses this: the socket always binds
+        # IPv4 loopback. Providers that register ``http://localhost:PORT/...``
+        # need the URI spelled exactly that way to accept the exchange.
+        self.public_host = public_host
         self.port: int = 0
         self.redirect_uri: str | None = None
         self._result: AuthCodeResult | None = None
@@ -135,11 +146,22 @@ class LocalOAuthListener:
 
         self._server = server
         self.port = server.server_address[1]
-        self.redirect_uri = f"http://127.0.0.1:{self.port}{self.path}"
+        self.redirect_uri = f"http://{self.public_host}:{self.port}{self.path}"
         self._thread = threading.Thread(target=server.serve_forever, name="xpst-oauth-listener", daemon=True)
         self._thread.start()
         logger.info("OAuth redirect listener started: %s", self.redirect_uri)
         return self
+
+    def poll(self) -> AuthCodeResult | None:
+        """Return the captured redirect without blocking, else ``None``.
+
+        The non-blocking twin of :meth:`wait`, for callers that drive their own
+        polling loop (the in-app sign-in state machine) instead of parking a
+        thread on the redirect. The listener stays open either way.
+        """
+        if self._done.is_set():
+            return self._result
+        return None
 
     def wait(self, timeout: float | None = None) -> AuthCodeResult:
         """Block until the redirect is captured (or ``timeout`` elapses).
@@ -347,6 +369,7 @@ class _OAuthHandler(BaseHTTPRequestHandler):
             )
             self._respond(200, "Authorization failed: no authorization code in redirect.")
 
+        result.public_host = listener.public_host
         listener._result = result
         listener._done.set()
 
