@@ -557,7 +557,11 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="xpst_auth_status",
-        description="Show authentication status for all platforms",
+        description=(
+            "Show live authentication status for every provider — the same verdict as "
+            "`xpst auth status` (role-aware state plus authenticated/session_valid/live_checked; "
+            "null means not probed, never false)"
+        ),
         inputSchema={
             "type": "object",
             "properties": {},
@@ -1110,9 +1114,19 @@ async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallTool
         catch_up=catch_up, source=source, max_posts=max_posts
     )
     # G28: agents need the per-video outcomes and post URLs, not a bare
-    # success string.
+    # success string. `ok` used to be hard-coded True regardless of what
+    # happened, so an agent that trusted it reported success for a failed run.
+    # It now means what it says, derived from the same per-platform
+    # ``UploadResult.is_published`` the engine's own status flags use: every
+    # upload in every result must be provably published, and "nothing ran" is
+    # not success.
+    uploads = [upload for result in results for upload in result.results.values()]
+    published = [upload for upload in uploads if upload.is_published]
     payload = {
-        "ok": True,
+        "ok": bool(uploads) and len(published) == len(uploads),
+        "attempted": len(results),
+        "uploads": len(uploads),
+        "published": len(published),
         "processed": len(results),
         "results": [_serialize_result(r) for r in results],
     }
@@ -1648,43 +1662,61 @@ async def _handle_config_show(config: XPSTConfig) -> CallToolResult:
 
 
 async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
-    """Handle xpst_auth_status tool."""
+    """Handle xpst_auth_status tool.
+
+    This tool used to report **credential-store key presence**, so it could
+    answer ``authenticated: false`` for a platform the CLI had just proved
+    live — and ``true`` for a stored-but-dead session. It now serves the same
+    canonical live snapshot as ``xpst auth status``
+    (``xpst.provider_truth.status_snapshot_async``: one implementation, one
+    answer), with the legacy presence/quota fields kept alongside it for
+    existing clients.
+
+    The live probe fails closed per platform and each platform check is
+    bounded, so a dead network yields honest ``authenticated: false`` entries
+    with an ``error`` rather than a hang.
+    """
+    from xpst.provider_truth import status_snapshot_async
     from xpst.utils.credentials import CredentialStore
     from xpst.utils.quota import QuotaManager
 
     cred_store = CredentialStore(config.config_dir)
     quota_mgr = QuotaManager(config.config_dir)
-
-    stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (encrypted fallback)"
+
+    snapshot = await status_snapshot_async(config)
+    providers = snapshot["providers"]
+
+    # Credential-store key per provider, and whether it is JSON.
+    credential_keys: dict[str, tuple[str, bool]] = {
+        "youtube": ("youtube_token", False),
+        "x": ("x_cookies", True),
+        "instagram": ("instagram_session", True),
+        "tiktok": ("tiktok_cookies", True),
+        "threads": ("threads_access_token", False),
+        "messenger": ("messenger_page_token", False),
+    }
+
+    platforms: dict[str, Any] = {}
+    for name, entry in providers.items():
+        item = dict(entry)
+        stored = False
+        if name in credential_keys:
+            key, is_json = credential_keys[name]
+            stored = bool(cred_store.retrieve_json(key) if is_json else cred_store.retrieve(key))
+        item["credentials_stored"] = stored
+        item["quota_remaining"] = quota_mgr.get_remaining(name).get("daily", "N/A")
+        if name == "messenger":
+            item["auto_reply"] = bool(config.messenger.auto_reply)
+        platforms[name] = item
 
     result: dict[str, Any] = {
         "credential_storage": storage_type,
-        "stored_credentials": stored_keys,
-        "platforms": {},
-    }
-
-    for platform in ["youtube", "x", "instagram"]:
-        creds = None
-        if platform == "youtube":
-            creds = cred_store.retrieve("youtube_token")
-        elif platform == "x":
-            creds = cred_store.retrieve_json("x_cookies")
-        elif platform == "instagram":
-            creds = cred_store.retrieve_json("instagram_session")
-
-        remaining = quota_mgr.get_remaining(platform)
-        result["platforms"][platform] = {
-            "authenticated": bool(creds),
-            "quota_remaining": remaining.get("daily", "N/A"),
-        }
-
-    # Messenger (static page token; token lives in CredentialStore)
-    messenger_creds = cred_store.retrieve("messenger_page_token") or config.messenger.page_access_token
-    result["platforms"]["messenger"] = {
-        "authenticated": bool(messenger_creds),
-        "auto_reply": bool(config.messenger.auto_reply),
-        "quota_remaining": quota_mgr.get_remaining("messenger").get("daily", "N/A"),
+        "stored_credentials": cred_store.list_keys(),
+        "providers": platforms,
+        # ``platforms`` is intentionally an alias for existing clients.
+        "platforms": platforms,
+        "roles": snapshot["roles"],
     }
 
     return CallToolResult(
@@ -1765,7 +1797,9 @@ async def _handle_capabilities(config: XPSTConfig) -> CallToolResult:
 
     catalog = canonical_provider_catalog(config)
     payload = {
-        "ok": True,
+        # Derived from the catalog it describes, not a constant: an empty
+        # catalog must not report ok.
+        "ok": bool(catalog.get("providers")),
         "contract_version": 1,
         "roles": catalog["roles"],
         "providers": [
@@ -1787,10 +1821,13 @@ async def _handle_readiness(config: XPSTConfig) -> CallToolResult:
     """Return local readiness without initializing the posting engine."""
     from xpst.readiness import build_readiness_report
 
+    report = build_readiness_report(config).to_dict()
     payload = {
-        "ok": True,
+        # Not a constant: a readiness payload that always says ok is the same
+        # lie as one that always says ready.
+        "ok": bool(report.get("ready")),
         "contract_version": 1,
-        "readiness": build_readiness_report(config).to_dict(),
+        "readiness": report,
     }
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, default=str))])
 
