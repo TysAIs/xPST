@@ -241,7 +241,7 @@ def sha256_file(path: Path) -> str:
 
 def _default_opener(url: str, headers: dict[str, str], timeout: float) -> _Response:
     request = urllib.request.Request(url, headers=headers)  # noqa: S310 - pinned https URLs
-    return urllib.request.urlopen(request, timeout=timeout)  # noqa: S310,B310 - pinned https release URLs; caller verifies sha256  # type: ignore[return-value]
+    return urllib.request.urlopen(request, timeout=timeout)  # nosec B310 - pinned https release URL; sha256 verified by caller  # type: ignore[return-value]
 
 
 def _content_length(response: _Response) -> int | None:
