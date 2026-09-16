@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -254,14 +255,24 @@ def surface_data() -> dict[str, Any]:
 
         app = FastAPI()
         app.include_router(create_api_router(str(root), uploaders=uploaders))
-        with TestClient(app) as client:
-            data["http_health"] = client.get("/api/health-status").json()
-            data["http_providers"] = client.get("/api/providers").json()
-            data["http_onboarding"] = client.get("/api/onboarding").json()
-            data["http_connect"] = {
-                platform: client.post(f"/api/connect/{platform}", json={"dry_run": True}).json()
-                for platform in DESTINATIONS
-            }
+        # /api/connect is a mutating route and fails closed without a token
+        # (PR #204): the harness must present one or every connect entry is a
+        # 401 detail dict with no live facts.
+        os.environ["XPST_API_TOKEN"] = "agreement-harness"
+        token_headers = {"X-API-Token": "agreement-harness"}
+        try:
+            with TestClient(app) as client:
+                data["http_health"] = client.get("/api/health-status").json()
+                data["http_providers"] = client.get("/api/providers").json()
+                data["http_onboarding"] = client.get("/api/onboarding").json()
+                data["http_connect"] = {
+                    platform: client.post(
+                        f"/api/connect/{platform}", json={"dry_run": True}, headers=token_headers
+                    ).json()
+                    for platform in DESTINATIONS
+                }
+        finally:
+            os.environ.pop("XPST_API_TOKEN", None)
 
     _SURFACE_CACHE = data
     return data
