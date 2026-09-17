@@ -107,6 +107,15 @@
     items.find((item) => item.path === selectedMedia) ??
       (selectedMedia ? { path: selectedMedia, name: fileNameOf(selectedMedia), type: mediaKind(selectedMedia) } : null)
   );
+  // Files the engine will refuse are never offered for selection; the reason is
+  // shown instead of a silent gap in the list.
+  const skippedItems = $derived(media?.skipped ?? []);
+  const skippedCount = $derived(media?.skipped_count ?? 0);
+  const skipNote = $derived(
+    skippedCount
+      ? `${skippedCount} file${skippedCount === 1 ? "" : "s"} in this folder cannot be posted: ${skippedItems[0]?.reason ?? "unsupported file type"}`
+      : ""
+  );
   const chosen = $derived(destinations.filter((row) => selected[row.name] && row.ready));
   const summary = $derived(targetSummary(destinations));
   const canPost = $derived(Boolean(selectedMedia) && !posting);
@@ -256,8 +265,8 @@
         <ErrorState title="Could not read that folder" message={mediaError} retry={() => loadMedia(folderInput)} />
       {:else if items.length === 0}
         <EmptyState
-          title={folder ? "No videos in this folder" : "No content folder yet"}
-          description={folder ? `xPST found no video or image files in ${folder}.` : (media?.hint ?? "Choose a content folder during setup.")}
+          title={folder ? "No postable files in this folder" : "No content folder yet"}
+          description={folder ? (skipNote || `xPST found no files it can post in ${folder}.`) : (media?.hint ?? "Choose a content folder during setup.")}
           actionLabel="Set up the folder"
           actionHref="#/onboarding"
         />
@@ -279,6 +288,9 @@
             </button>
           {/each}
         </div>
+        {#if skipNote}
+          <p class="xpst-field__hint" role="status">{skipNote}</p>
+        {/if}
       {/if}
     </div>
   </Card>

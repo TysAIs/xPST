@@ -16,7 +16,13 @@ from urllib.parse import urlparse
 
 from xpst.config import EncodingConfig, XPSTConfig
 from xpst.media.pipeline import TransformPlan, plan_transform
-from xpst.media.specs import PLATFORM_SPECS, Check, MediaReport, verify_media
+from xpst.media.specs import (
+    MODALITY_CHECK,
+    PLATFORM_SPECS,
+    Check,
+    MediaReport,
+    verify_media,
+)
 from xpst.utils.quota import QuotaManager
 from xpst.utils.video import VideoProcessor
 
@@ -453,7 +459,13 @@ class PostPreflightService:
             elif check.status == "warn":
                 warnings.append(issue)
 
-        if platform == "threads":
+        # A destination that cannot publish this file's modality at all is
+        # already fully explained by the one modality blocker: do not stack a
+        # second, unrelated blocker on top (the user cannot act on "Threads
+        # needs a public URL" for a file Threads would refuse anyway).
+        modality_blocked = any(check.name == MODALITY_CHECK and check.status == "error" for check in report.checks)
+
+        if platform == "threads" and not modality_blocked:
             blockers.append(
                 PreflightIssue(
                     "THREADS_NEEDS_URL",
@@ -465,7 +477,7 @@ class PostPreflightService:
 
         duration, aspect_ratio = _probe_dimensions(report)
         transform = None
-        if request.include_transform:
+        if request.include_transform and not modality_blocked:
             transform = self._transform(path, platform, config)
 
         return MediaFilePlan(
@@ -493,6 +505,13 @@ class PostPreflightService:
             severity = "warning"
         else:
             return None
+        # The modality check carries its own plain-language, destination-naming
+        # message (specs.modality_unsupported_message) and is a capability
+        # verdict, not a spec comparison — give it a dedicated code so a client
+        # can branch on "this destination cannot take this file type" without
+        # parsing prose. It is the only media issue raised for such a file.
+        if check.name == MODALITY_CHECK:
+            return PreflightIssue("MEDIA_MODALITY_UNSUPPORTED", check.detail, "blocker", media_path)
         return PreflightIssue(code, check.detail, severity, media_path)
 
     def _transform(self, path: Path, platform: str, config: XPSTConfig) -> TransformPlan:
