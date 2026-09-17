@@ -48,7 +48,7 @@ xPST includes integrations for **six platforms** — YouTube, Instagram, X/Twitt
 
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
-- **CLI** — 45 top-level commands (67 including subcommands) covering the entire workflow
+- **CLI** — 46 top-level commands (69 including subcommands) covering the entire workflow
 - **MCP server** — 40 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
@@ -94,7 +94,7 @@ platform API calls you configure. See
 
 ### Three Drivable Surfaces
 - **Desktop GUI** — PySide6/QML app with Dashboard, Compose, Content, Analytics, Connect, Schedule, Settings, and About pages + DetailPanel
-- **CLI** — 45 Click-based commands (67 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
+- **CLI** — 46 Click-based commands (69 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
 - **MCP server** — 40 tools (34 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 #### Surface counts
@@ -264,9 +264,9 @@ See `Dockerfile` and `docker-compose.yml` for details.
 ## CLI Reference
 
 <<<<<<< Updated upstream
-xPST provides 45 top-level commands. Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 46 top-level commands. Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 =======
-xPST provides 45 top-level commands (67 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 >>>>>>> Stashed changes
 
 ### Setup & Accounts
