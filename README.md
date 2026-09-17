@@ -247,7 +247,7 @@ See `Dockerfile` and `docker-compose.yml` for details.
 
 ## CLI Reference
 
-xPST provides 38 top-level commands. Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 45 top-level commands. Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 
 ### Setup & Accounts
 
@@ -268,6 +268,8 @@ xPST provides 38 top-level commands. Run `xpst --help` for the full list. Most c
 | `xpst config import FILE` | Import configuration (merge or replace, with diff preview) |
 | `xpst readiness` | Show first-run readiness and next actions; use `--fix` to create missing dirs |
 | `xpst providers` | Show supported source and destination providers with capabilities |
+| `xpst media status` | Show which ffmpeg/ffprobe xPST will use and where it came from (env / system / fetched) |
+| `xpst media fetch` | Download a checksum-verified static ffmpeg/ffprobe into `~/.xpst/bin` (only needed when the machine has none) |
 
 ### Core Posting
 
