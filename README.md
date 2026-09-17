@@ -105,8 +105,8 @@ These numbers are generated from the shipped code, not maintained by hand. `pyth
 | Surface | Count | Measured from |
 |---------|-------|---------------|
 | MCP tools | **40** | `tools/list` over a real stdio handshake with `xpst mcp start` |
-| CLI top-level commands | **45** | `xpst.cli.main.commands` |
-| CLI commands including subcommands | **67** | recursive walk of the Click command tree |
+| CLI top-level commands | **46** | `xpst.cli.main.commands` |
+| CLI commands including subcommands | **69** | recursive walk of the Click command tree |
 | HTTP routes (dashboard app) | **34** | FastAPI route table (30 xPST routes + 4 framework docs routes) |
 | Supported providers | **7** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
 
