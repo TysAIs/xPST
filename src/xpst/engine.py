@@ -678,12 +678,17 @@ class CrossPostEngine:
         """Manually post a carousel/multi-media to specified platforms.
 
         Each platform handles carousels differently:
-        - Instagram: native ``album_upload()`` (up to 10 items)
+        - Instagram: native ``album_upload()`` (2-10 items, order preserved)
         - X/Twitter: tweet thread with one media per tweet
-        - YouTube/TikTok: stitched into a single vertical video
+
+        A destination with no native carousel path is refused *by name* before
+        its uploader is called — nothing is stitched into a video. This is the
+        chokepoint every caller (CLI, MCP, HTTP API) shares, so a photo carousel
+        can never be silently turned into a video by a caller that skipped the
+        preflight.
 
         Args:
-            media_paths: List of paths to images/videos.
+            media_paths: List of paths to images/videos, in post order.
             caption: Caption for the post.
             platforms: Target platform names. None means all enabled.
 
@@ -711,6 +716,25 @@ class CrossPostEngine:
                 logger.warning(f"Platform {platform_name} not available")
                 continue
 
+            refusal = self._carousel_capability_refusal(platform_name)
+            if refusal is not None:
+                # Refused on capability, not on transport: the destination
+                # cannot publish a carousel, so nothing is uploaded and the row
+                # says exactly why.
+                logger.warning("Refusing carousel for %s: %s", platform_name, refusal)
+                result.results[platform_name] = UploadResult(
+                    success=False,
+                    error=refusal,
+                    platform=platform_name,
+                    retryable=False,
+                    metadata={
+                        "content_type": "carousel",
+                        "items": len(media_paths),
+                        "unsupported": True,
+                    },
+                )
+                continue
+
             # Delegate to upload service
             upload_result = await self.upload_service.upload_carousel_to_platform(
                 uploader=uploader,
@@ -725,6 +749,32 @@ class CrossPostEngine:
         result.update_status()
         self.state.save()
         return result
+
+    @staticmethod
+    def _carousel_capability_refusal(platform_name: str) -> str | None:
+        """The refusal text for a destination that cannot publish a carousel.
+
+        The wording is the content contract's own destination-naming refusal
+        (:func:`xpst.content.unsupported_content_message`, the same string the
+        preflight produces) plus the explicit promise that nothing was stitched.
+        ``None`` means the destination can publish carousels — or is not in the
+        capability table at all (a third-party plugin), in which case its own
+        uploader reports the real outcome rather than xPST inventing a verdict.
+        """
+        from xpst.content import ContentType, content_profile, unsupported_content_message
+
+        profile = content_profile(platform_name)
+        if profile is None or not profile.is_publishing:
+            return None
+        if profile.supports(ContentType.CAROUSEL):
+            return None
+        base = unsupported_content_message(
+            platform_name,
+            ContentType.CAROUSEL,
+            supported=sorted(profile.implemented, key=lambda item: item.value),
+            declared=ContentType.CAROUSEL in profile.declared,
+        )
+        return f"{base} xPST will not stitch your items into a single video and call that a carousel."
 
     async def post_manual_image(
         self,
