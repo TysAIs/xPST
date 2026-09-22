@@ -455,7 +455,11 @@ def test_uninstall_inventory_is_documented(tmp_path, monkeypatch):
     assert runner.invoke(main, ["status"]).exit_code == 0
 
     leftovers = {
-        str(p.relative_to(config_dir))
+        # ``as_posix()`` so the separators are comparable on Windows too:
+        # ``str(WindowsPath)`` yields "credentials\\file", which never matches
+        # the "credentials/" filter below and leaked the credential files into
+        # the "undocumented surface" assertion.
+        p.relative_to(config_dir).as_posix()
         for p in config_dir.rglob("*")
         if p.is_file() or (p.is_dir() and not any(p.iterdir()))
     }
