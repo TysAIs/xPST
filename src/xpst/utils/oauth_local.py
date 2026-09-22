@@ -342,7 +342,7 @@ class _OAuthHandler(BaseHTTPRequestHandler):
             message = f"The provider returned an error: {error}"
             if error_description:
                 message += f" — {error_description}"
-            self._respond(200, message)
+            page = None
         elif code and listener.state is not None and state != listener.state:
             result = AuthCodeResult(
                 success=False,
@@ -353,10 +353,12 @@ class _OAuthHandler(BaseHTTPRequestHandler):
                 port=listener.port,
                 path=listener.path,
             )
-            self._respond(200, "Authorization failed: state mismatch. Please try again.")
+            message = "Authorization failed: state mismatch. Please try again."
+            page = None
         elif code:
             result = AuthCodeResult(success=True, code=code, state=state, port=listener.port, path=listener.path)
-            self._respond(200, "Authorization complete.", page=_SUCCESS_PAGE)
+            message = "Authorization complete."
+            page = _SUCCESS_PAGE
         else:
             result = AuthCodeResult(
                 success=False,
@@ -367,11 +369,20 @@ class _OAuthHandler(BaseHTTPRequestHandler):
                 port=listener.port,
                 path=listener.path,
             )
-            self._respond(200, "Authorization failed: no authorization code in redirect.")
+            message = "Authorization failed: no authorization code in redirect."
+            page = None
 
+        # Publish the capture BEFORE writing the response body. The browser
+        # renders the success page the moment the body is read, so a caller
+        # driving its own poll() loop (the in-app sign-in state machine) can
+        # poll as soon as the user sees "Authorization complete". Setting the
+        # result afterwards left a window where poll() still returned None
+        # after the redirect had visibly completed.
         result.public_host = listener.public_host
         listener._result = result
         listener._done.set()
+
+        self._respond(200, message, page=page)
 
     def _respond(self, status: int, message: str, page: str | None = None) -> None:
         template = page if page is not None else _ERROR_PAGE
