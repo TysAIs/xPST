@@ -301,7 +301,7 @@ xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help
 | `xpst watch` | Continuous monitoring loop (runs until Ctrl+C) |
 | `xpst watch --interval 300` | Check every 300 seconds (default: from config) |
 | `xpst post -v VIDEO -c CAPTION` | Manually post a video file; use multiple `-v` for carousel |
-| `xpst post -v v.mp4 -c 'text' -p youtube,x,threads` | Post to specific platforms only |
+| `xpst post -v v.mp4 -c 'text' -p youtube,x,instagram` | Post to specific platforms only |
 | `xpst backfill` | Retry failed or incomplete posts from history |
 | `xpst backfill --dry-run` | Show what would be backfilled without uploading |
 | `xpst delete VIDEO_ID` | Delete a posted video from platforms; use `--platform` to target one |
@@ -690,6 +690,16 @@ The configured Threads path has platform limits (including post frequency,
 video duration/size, and caption length) and may refresh a still-valid token.
 See [docs/setup-threads.md](docs/setup-threads.md) for the opt-in requirements.
 
+**Threads takes no uploaded media.** Meta's API retrieves `video_url` from a
+public server and offers no upload endpoint, and xPST has no server to host a
+file, so a local file is refused before any request — by `xpst preflight`, by
+`xpst post`, and by the uploader — with the code `THREADS_NEEDS_URL` and the
+requirement spelled out. xPST cannot deliver a media URL to Threads either yet:
+its publish pipeline prepares a local file before an uploader runs and no
+CLI/MCP surface accepts a URL, so **Threads media publishing is not offered at
+all today** — post that content from the Threads app. Text posts need no URL,
+but xPST has no Threads text sender yet, so they are not offered either.
+
 ### Messenger (opt-in — currently disabled)
 
 Messenger is an **opt-in messaging/auto-reply** integration, not a video-posting
@@ -728,9 +738,13 @@ MCP tools: `messenger_send`, `messenger_set_rules`. See
 Use local folders as a source for manual posting and carousels:
 
 ```bash
-xpst post -v ./my-video.mp4 -c "My caption" -p youtube,instagram,x,threads
+xpst post -v ./my-video.mp4 -c "My caption" -p youtube,instagram,x
 xpst run --source local
 ```
+
+Threads is absent from that list on purpose: Meta's Threads API fetches `video_url`
+from a server *you* host and has no upload endpoint, so xPST cannot publish a local
+file there and refuses it before any request (`THREADS_NEEDS_URL`).
 
 ---
 
