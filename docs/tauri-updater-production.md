@@ -35,6 +35,67 @@ Notes:
   `signature` = the contents of the `.sig` file produced at build time; `url` =
   absolute URL of the `xPST.app.tar.gz` artifact.
 
+## How `latest.json` actually gets published
+
+The endpoint `https://tysais.github.io/xPST/updates/latest.json` is a **committed
+file**, not an upload target. GitHub Pages for this repository runs with
+`build_type: legacy` and source `main:/` (`gh api repos/TysAIs/xPST/pages`), so
+`actions/deploy-pages` cannot deploy here, and a Pages *artifact* upload would
+publish a site built from that artifact — replacing the site instead of adding
+`updates/` to it. The served path is therefore `updates/latest.json` on `main`,
+next to `privacy/` and `terms/`.
+
+`.github/workflows/publish-updater.yml` builds and lands that file:
+
+1. Triggers: `release: [published]`, `workflow_run` of `Tauri Shell Release`
+   (completed), and `workflow_dispatch` with a `release_tag` input.
+2. Downloads the release's updater artifacts (`gh release download`, patterns
+   for `*.app.tar.gz`, `*setup.exe`, `*.AppImage`, `*.msi` plus the `<platform>-`
+   prefixed names) into a scratch directory.
+3. `scripts/select-updater-artifacts.py` resolves exactly one **signed** artifact
+   per target. A platform with no artifact is `absent`, with no non-empty `.sig`
+   is `unsigned`, with several candidates is `ambiguous` — none of those abort
+   the run, and none of them is guessed.
+4. `scripts/gen-updater-manifest.py` writes the manifest for the platforms that
+   are publishable, with the `.sig` contents and a SHA-512 of the exact artifact
+   bytes; it refuses to write anything if the configured `plugins.updater.pubkey`
+   trust root is missing.
+5. `scripts/publish-updater.sh` validates the manifest and stages it at
+   `updates/latest.json` in the checkout.
+6. The job commits that file to `main` (Pages rebuilds from the branch) and also
+   attaches `latest.json` to the release.
+
+Manual run, including a build-only rehearsal:
+
+```bash
+gh workflow run publish-updater.yml --repo TysAIs/xPST -f release_tag=v1.2.3 -f dry_run=true
+```
+
+Invariants worth keeping:
+
+- **The job never signs anything and needs no signing secret.** It publishes only
+  artifacts that already carry a `.sig`. With no `TAURI_SIGNING_PRIVATE_KEY`
+  secret (this repository has none) it emits a notice and a job summary and
+  finishes green — it must never fail the run over an absent key, and it must
+  never invent a signature.
+- A release with no updater artifacts leaves the committed manifest untouched, so
+  the endpoint keeps serving the last good manifest instead of going 404 or
+  advertising an artifact that cannot be verified.
+- **Direct commits to `main` are gated by branch protection.** `main` requires 13
+  status-check contexts, so the `GITHUB_TOKEN` cannot create a new commit there
+  (GitHub rejects the ref update with `GH006: ... Required status check ... is
+  expected`). The job handles that by force-updating the `updater/latest-json`
+  branch and opening/refreshing a pull request, and stays green. Fully automatic
+  publishing needs a bypass: a token stored as a secret whose actor may push to
+  `main`, or a repository ruleset with a bypass for the GitHub Actions app.
+
+Current gap for a real update round-trip (tracked outside this workflow): a
+release only contains signed updater artifacts if the Tauri build ran with
+`TAURI_SIGNING_PRIVATE_KEY` **and** `bundle.createUpdaterArtifacts` enabled, and
+only macOS builds are attached to releases today. `gh release view v1.1.0`
+contains no updater artifact at all, which is exactly the `absent` path above.
+
+
 ## Release signing keypair
 
 1. Generate a dedicated release keypair (do **not** reuse the E2E key):

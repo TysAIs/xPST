@@ -113,15 +113,62 @@ def get_ffprobe_name() -> str:
     return "ffprobe"
 
 
+def get_media_bin_dir() -> Path:
+    """Directory holding fetch-on-first-use media binaries (ffmpeg/ffprobe).
+
+    ``XPST_MEDIA_BIN_DIR`` overrides it; the default is ``<config dir>/bin``
+    (``~/.xpst/bin``). This is where :mod:`xpst.media.binaries` installs a
+    verified static build when the machine has no ffmpeg of its own.
+    """
+    override = os.environ.get("XPST_MEDIA_BIN_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+    # A relocated config dir (XPST_CONFIG_DIR, used by CI/smoke harnesses and
+    # by anyone running a second isolated profile) owns its own bin dir.
+    config_override = os.environ.get("XPST_CONFIG_DIR", "").strip()
+    if config_override:
+        return Path(config_override).expanduser() / "bin"
+    return get_config_dir() / "bin"
+
+
+def system_media_dirs() -> list[Path]:
+    """Directories probed for a system install when PATH lookup fails.
+
+    GUI-launched macOS apps get a minimal PATH that misses both
+    ``/opt/homebrew/bin`` and the user's own ``~/bin``, so these are probed
+    directly. Kept as a named helper so the resolution order is testable
+    without depending on what happens to be installed on the test host.
+    """
+    home = Path.home()
+    dirs = [
+        home / "bin",
+        Path("/opt/homebrew/bin"),
+        Path("/usr/local/bin"),
+        home / ".local" / "bin",
+    ]
+    if sys.platform != "darwin":
+        dirs.append(Path("/usr/bin"))
+    return dirs
+
+
+def _executable_file(path: Path) -> bool:
+    try:
+        return path.is_file() and os.access(path, os.X_OK)
+    except OSError:
+        return False
+
+
 def resolve_ffmpeg_path() -> str | None:
     """
-    Resolve the ffmpeg binary path, honoring the XPST_FFMPEG_PATH override.
+    Resolve the ffmpeg binary path.
 
-    Returns the path from ``XPST_FFMPEG_PATH`` when set and pointing at an
-    existing file; otherwise falls back to ``shutil.which(get_ffmpeg_name())``.
-    When PATH lookup fails (GUI-launched macOS apps get a minimal PATH that
-    misses /opt/homebrew/bin and ~/bin), common install locations are probed
-    directly. Returns None when no ffmpeg binary can be found.
+    Resolution order (first hit wins):
+      1. ``XPST_FFMPEG_PATH`` when set and pointing at an existing file;
+      2. a system install — ``shutil.which`` then :func:`system_media_dirs`;
+      3. a previously fetched copy in :func:`get_media_bin_dir`
+         (``~/.xpst/bin``), downloaded on first use and checksum-verified.
+
+    Returns None when no ffmpeg binary can be found.
     """
     env_path = os.environ.get("XPST_FFMPEG_PATH")
     if env_path and os.path.exists(env_path):
@@ -129,34 +176,23 @@ def resolve_ffmpeg_path() -> str | None:
     found = shutil.which(get_ffmpeg_name())
     if found:
         return found
-    # GUI-launch fallback: probe well-known locations missed by the minimal
-    # PATH inside .app bundles (Finder/Spotlight launches don't source the
-    # user's shell profile).
-    home = Path.home()
-    candidates = [
-        home / "bin" / get_ffmpeg_name(),
-        Path("/opt/homebrew/bin") / get_ffmpeg_name(),
-        Path("/usr/local/bin") / get_ffmpeg_name(),
-        home / ".local" / "bin" / get_ffmpeg_name(),
-    ]
-    if sys.platform != "darwin":
-        candidates.append(Path("/usr/bin") / get_ffmpeg_name())
-    for cand in candidates:
-        try:
-            if cand.is_file() and os.access(cand, os.X_OK):
-                return str(cand)
-        except OSError:
-            continue
+    for base in system_media_dirs():
+        cand = base / get_ffmpeg_name()
+        if _executable_file(cand):
+            return str(cand)
+    # Last: the copy xPST fetched itself on a machine with no system ffmpeg.
+    fetched = get_media_bin_dir() / get_ffmpeg_name()
+    if _executable_file(fetched):
+        return str(fetched)
     return None
 
 
 def resolve_ffprobe_path() -> str | None:
     """Resolve the ffprobe binary path.
 
-    Honors the ``XPST_FFPROBE_PATH`` override (set by the Tauri shell to the
-    bundled resource binary) first, then PATH; when that fails (GUI-launched
-    apps with a minimal PATH) probes the same well-known locations as
-    :func:`resolve_ffmpeg_path`.
+    Same order as :func:`resolve_ffmpeg_path`: the ``XPST_FFPROBE_PATH``
+    override first, then a system install (PATH plus :func:`system_media_dirs`),
+    then the fetched copy in :func:`get_media_bin_dir`.
     """
     env_path = os.environ.get("XPST_FFPROBE_PATH")
     if env_path and os.path.exists(env_path):
@@ -164,15 +200,13 @@ def resolve_ffprobe_path() -> str | None:
     found = shutil.which(get_ffprobe_name())
     if found:
         return found
-    home = Path.home()
-    for base in (home / "bin", Path("/opt/homebrew/bin"), Path("/usr/local/bin"),
-                 home / ".local" / "bin"):
+    for base in system_media_dirs():
         cand = base / get_ffprobe_name()
-        try:
-            if cand.is_file() and os.access(cand, os.X_OK):
-                return str(cand)
-        except OSError:
-            continue
+        if _executable_file(cand):
+            return str(cand)
+    fetched = get_media_bin_dir() / get_ffprobe_name()
+    if _executable_file(fetched):
+        return str(fetched)
     return None
 
 

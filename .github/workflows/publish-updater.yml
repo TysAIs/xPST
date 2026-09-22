@@ -1,0 +1,292 @@
+name: Publish Tauri updater manifest
+
+# Builds the static updater manifest (`latest.json`) from the signed updater
+# artifacts attached to a GitHub Release, then commits it to the path this
+# repository's GitHub Pages site serves: `updates/latest.json` on `main`.
+#
+# Why a commit and not a Pages artifact upload: this repository publishes Pages
+# with `build_type: legacy` from source `main:/` (verified with
+# `gh api repos/TysAIs/xPST/pages`), so `actions/deploy-pages` cannot deploy
+# here -- and an artifact upload would replace the whole site instead of adding
+# `updates/` to it. A committed path is served (`/privacy/` and `/terms/` prove
+# it), so the manifest belongs in the tree.
+#
+# The previous revision of this file never executed a single step. It used the
+# `runner` context from a workflow-level `env:` block, which is not one of the
+# contexts available there, so GitHub rejected the file as an invalid workflow
+# and recorded a zero-step failure (run 34811052542:
+# "(Line: 46, Col: 18): Unrecognized named-value: 'runner'"). Runner paths now
+# come from the `RUNNER_TEMP` environment variable inside `run:` steps, and
+# every other expression stays inside an allowed scope.
+#
+# Signing: this job never signs anything and never needs a signing key. It
+# publishes only artifacts that already carry a `.sig` sidecar. With no
+# `TAURI_SIGNING_PRIVATE_KEY` secret configured (this repository has none) the
+# absence of signatures is reported as a notice and a job summary, and the job
+# still succeeds -- it does not fail the run.
+
+on:
+  release:
+    types: [published]
+  workflow_run:
+    workflows: ["Tauri Shell Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing GitHub release tag to publish (for example v1.2.3)"
+        required: true
+        type: string
+      dry_run:
+        description: "Build and validate the manifest, but do not commit it"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: updater-manifest
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # A freshly published release, a successful Tauri Shell Release run, or a
+    # manual dispatch. Tagged releases are the only ones that can carry updater
+    # artifacts; a non-tag run is skipped by the "Resolve release tag" step.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'release' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      # Always the branch that Pages serves, whatever ref the event carries: a
+      # `release` event points at a tag, and the manifest has to be committed on
+      # top of `main` or the push would move the branch backwards.
+      - name: Check out the served branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Resolve the release tag from the event
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          tag=""
+          case "$EVENT_NAME" in
+            release) tag="$EVENT_TAG" ;;
+            workflow_run) tag="$RUN_BRANCH" ;;
+            *) tag="$INPUT_TAG" ;;
+          esac
+          if [[ -z "$tag" ]]; then
+            printf 'reason=no release tag in this event (%s); nothing to publish\n' "$EVENT_NAME" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ ! "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            printf 'reason=%s is not a SemVer release tag; nothing to publish\n' "$tag" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          {
+            printf 'tag=%s\n' "$tag"
+            printf 'version=%s\n' "${tag#v}"
+            printf 'reason=\n'
+          } >> "$GITHUB_OUTPUT"
+          printf 'publishing updater manifest for %s\n' "$tag"
+
+      - name: Note whether updater signing is available
+        id: signing
+        if: steps.release.outputs.tag != ''
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SIGNING_KEY" ]]; then
+            printf 'available=false\n' >> "$GITHUB_OUTPUT"
+            echo "::notice::No TAURI_SIGNING_PRIVATE_KEY secret is configured in this repository. This job signs nothing: it publishes only artifacts that already carry a .sig sidecar, and reports missing signatures as notices."
+          else
+            printf 'available=true\n' >> "$GITHUB_OUTPUT"
+            echo "signing key secret is configured (its value is never read by this job)"
+          fi
+
+      - name: Download the release's updater artifacts
+        id: download
+        if: steps.release.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          asset_dir="$RUNNER_TEMP/updater-assets"
+          rm -rf "$asset_dir"
+          mkdir -p "$asset_dir"
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::notice::release $TAG does not exist yet; nothing to publish"
+            printf 'downloaded=0\n' >> "$GITHUB_OUTPUT"
+            echo "reason=release $TAG was not found" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Patterns cover both the explicit-target naming the release workflow
+          # produces and the bundler's own names. A release with no updater
+          # assets is expected here (it means the build had no signing key), so
+          # a failed download is not a failure of this job.
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$asset_dir" \
+            --pattern '*.app.tar.gz' --pattern '*.app.tar.gz.sig' \
+            --pattern '*setup.exe' --pattern '*setup.exe.sig' \
+            --pattern '*.AppImage' --pattern '*.AppImage.sig' \
+            --pattern '*.msi' --pattern '*.msi.sig' \
+            --pattern 'darwin-*' --pattern 'windows-*' --pattern 'linux-*' \
+            || echo "::notice::no updater artifact pattern matched the assets of $TAG"
+          printf 'downloaded=%s\n' "$(find "$asset_dir" -type f | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Select one signed artifact per target
+        id: select
+        if: >-
+          steps.release.outputs.tag != '' &&
+          steps.download.outputs.downloaded != '' &&
+          steps.download.outputs.downloaded != '0'
+        run: |
+          set -euo pipefail
+          python3 scripts/select-updater-artifacts.py \
+            --dir "$RUNNER_TEMP/updater-assets" \
+            --report "$RUNNER_TEMP/updater-artifacts.json" \
+            --args-file "$RUNNER_TEMP/updater-artifact-args.txt" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Generate latest.json
+        id: manifest
+        if: >-
+          steps.release.outputs.tag != '' &&
+          steps.select.outputs.found != '' &&
+          steps.select.outputs.found != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body' > "$notes_file"
+          manifest="$RUNNER_TEMP/latest.json"
+          args=()
+          while IFS= read -r entry; do
+            [[ -n "$entry" ]] || continue
+            args+=(--platform "${entry%%=*}" --artifact "$entry")
+          done < "$RUNNER_TEMP/updater-artifact-args.txt"
+          python scripts/gen-updater-manifest.py \
+            --version "$VERSION" \
+            --notes-file "$notes_file" \
+            --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG" \
+            --output "$manifest" \
+            --config src-tauri/tauri.conf.json \
+            --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "${args[@]}"
+          # Stage the manifest at the exact path Pages serves for this repo.
+          scripts/publish-updater.sh --manifest "$manifest" --site-dir "$GITHUB_WORKSPACE"
+          test -s "$GITHUB_WORKSPACE/updates/latest.json"
+          printf 'manifest=%s\n' "$manifest" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the manifest to the served path
+        id: publish
+        if: steps.manifest.outputs.manifest != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          PLATFORMS: ${{ steps.select.outputs.platforms }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git config user.name "TysAIs"
+          git config user.email "TysAIs@users.noreply.github.com"
+          git add updates/latest.json
+          if [[ -n "$(git status --porcelain updates/latest.json)" ]]; then
+            git commit -m "chore(updater): publish latest.json for $TAG"
+          else
+            printf 'status=unchanged\n' >> "$GITHUB_OUTPUT"
+            echo "::notice::updates/latest.json already matches $TAG; nothing to commit"
+            exit 0
+          fi
+          if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            printf 'status=dry-run\n' >> "$GITHUB_OUTPUT"
+            echo "::notice::dry_run requested; the manifest is validated but not committed"
+            git --no-pager show --stat HEAD
+            exit 0
+          fi
+          if git push --no-verify origin "HEAD:refs/heads/main"; then
+            printf 'status=published\n' >> "$GITHUB_OUTPUT"
+            echo "::notice::committed updates/latest.json to main; GitHub Pages rebuilds the site from that path"
+          else
+            # `main` is protected by required status checks, so the Actions
+            # token cannot create a new commit there (GitHub rejects the ref
+            # update with "Required status check ... is expected"). Fall back to
+            # a pull request that a maintainer can merge, and stay green.
+            printf 'status=pr\n' >> "$GITHUB_OUTPUT"
+            git push --force origin "HEAD:refs/heads/updater/latest-json"
+            if gh pr view updater/latest-json --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "::warning::main rejected the direct manifest push (branch protection); refreshed the open updater/latest-json pull request for $TAG"
+            else
+              printf 'commit: %s\n' "$(git rev-parse HEAD)" > "$RUNNER_TEMP/pr-body.md"
+              gh pr create --repo "$GITHUB_REPOSITORY" \
+                --base main --head updater/latest-json \
+                --title "chore(updater): publish latest.json for $TAG" \
+                --body-file "$RUNNER_TEMP/pr-body.md"
+              echo "::warning::main rejected the direct manifest push (branch protection); opened a pull request with the $TAG manifest"
+            fi
+          fi
+
+      - name: Attach latest.json to the release
+        if: steps.publish.outputs.status == 'published'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "$RUNNER_TEMP/latest.json#latest.json" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Summarize
+        if: always()
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          SKIP_REASON: ${{ steps.release.outputs.reason }}
+          SIGNING: ${{ steps.signing.outputs.available }}
+          FOUND: ${{ steps.select.outputs.found }}
+          PLATFORMS: ${{ steps.select.outputs.platforms }}
+          MISSING: ${{ steps.select.outputs.missing }}
+          STATUS: ${{ steps.publish.outputs.status }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Updater manifest"
+            echo
+            echo "- job result: ${JOB_STATUS}"
+            echo "- release tag: ${TAG:-<none>}"
+            echo "- signing secret configured: ${SIGNING:-unknown}"
+            echo "- publishable platforms: ${PLATFORMS:-<none>}"
+            echo "- platforms without a signed artifact: ${MISSING:-<none>}"
+            echo "- publish status: ${STATUS:-not attempted}"
+            if [[ -n "${SKIP_REASON}" ]]; then
+              echo "- skipped: ${SKIP_REASON}"
+            fi
+            if [[ "${FOUND:-0}" == "0" ]]; then
+              echo
+              echo "No signed updater artifact was found for this release, so \`updates/latest.json\` was left"
+              echo "untouched and the endpoint keeps its current content. That is expected while the"
+              echo "repository has no \`TAURI_SIGNING_PRIVATE_KEY\` secret: a Tauri build without the key"
+              echo "produces no \`.sig\`, and the manifest must never invent one."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat "$GITHUB_STEP_SUMMARY"

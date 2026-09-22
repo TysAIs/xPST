@@ -175,7 +175,12 @@ def _ffmpeg_check() -> ReadinessCheck:
         ok=ok,
         severity="error",
         message="FFmpeg is available." if ok else "FFmpeg is required for video processing.",
-        action="" if ok else "Install FFmpeg and make sure it is on PATH.",
+        action=(
+            ""
+            if ok
+            else "Run `xpst media fetch` to download a verified static build, or install "
+            "FFmpeg and make sure it is on PATH."
+        ),
         details={"binary": get_ffmpeg_name(), "path": resolve_ffmpeg_path()},
     )
 
@@ -268,7 +273,16 @@ def _destination_checks(
                     label=f"{name.title()} connection",
                     ok=True,
                     message=f"{name.title()} is disabled.",
-                    details={"enabled": False, "state": state},
+                    details={
+                        "role": "video_destination",
+                        "enabled": False,
+                        "state": state,
+                        # Disabled is not a probe result: the live facts are
+                        # unknown, not False.
+                        "session_valid": None,
+                        "live_checked": None,
+                        "error": role["error"],
+                    },
                 )
             )
             continue
@@ -284,6 +298,21 @@ def _destination_checks(
         else:
             message = f"{name.title()} health is degraded."
             action = str(role.get("error") or f"Reconnect {name}.")
+
+        # `readiness` is deliberately offline and deterministic, so it never runs
+        # a live credential probe. When no probe has run, the session fields are
+        # unknown (None) for every state. Emitting False contradicts
+        # `xpst auth status`, which does probe live and reports these same
+        # platforms as valid — "not probed" is not the same as "invalid".
+        probed = bool(role.get("live_checked"))
+        session_valid = role["session_valid"] if probed else None
+        live_checked = role["live_checked"] if probed else None
+        if state == ProviderState.READY.value and not probed:
+            message = (
+                f"{name.title()} is configured. "
+                "Run `xpst auth status` for a live credential check."
+            )
+
         checks.append(
             ReadinessCheck(
                 id=f"{name}_connection",
@@ -297,10 +326,14 @@ def _destination_checks(
                 message=message,
                 action=action,
                 details={
+                    # This check is the video-destination role's verdict; the
+                    # platform-level entry in `xpst auth status` aggregates
+                    # roles, so name the role here to keep the two comparable.
+                    "role": "video_destination",
                     "enabled": role["enabled"],
                     "state": state,
-                    "session_valid": role["session_valid"],
-                    "live_checked": role["live_checked"],
+                    "session_valid": session_valid,
+                    "live_checked": live_checked,
                     "error": role["error"],
                 },
             )

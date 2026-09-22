@@ -99,7 +99,11 @@ test("settings is readable and links to capability truth", async () => {
 test("navigation uses one local icon family and exposes all foundation routes", () => {
   assert.deepEqual(NAV_ITEMS.map((item) => item.id), [
     "dashboard",
+    "onboarding",
+    "connect",
+    "compose",
     "create",
+    "result",
     "analytics",
     "videos",
     "accounts",

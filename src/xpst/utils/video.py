@@ -258,11 +258,12 @@ def get_video_info_standalone(video_path: Path) -> dict:
 def ffmpeg_install_hint() -> str:
     """Return a platform-specific, actionable FFmpeg install instruction."""
     if sys.platform == "darwin":
-        return "Install it with: brew install ffmpeg (macOS)"
+        return "Run `xpst media fetch` (downloads a verified static build into ~/.xpst/bin), or: brew install ffmpeg (macOS)"
     if sys.platform == "win32":
-        return "Download it from https://ffmpeg.org/download.html and add it to PATH (Windows)"
+        return "Run `xpst media fetch` (downloads a verified static build into %USERPROFILE%\\.xpst\\bin), or download it from https://ffmpeg.org/download.html and add it to PATH (Windows)"
     return (
-        "Install it with your package manager (Linux), e.g. apt install ffmpeg, dnf install ffmpeg, or pacman -S ffmpeg"
+        "Run `xpst media fetch` (downloads a verified static build), or install it with your "
+        "package manager (Linux), e.g. apt install ffmpeg, dnf install ffmpeg, or pacman -S ffmpeg"
     )
 
 

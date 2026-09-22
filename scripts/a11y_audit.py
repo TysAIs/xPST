@@ -38,6 +38,10 @@ import time
 BRAVE_DEFAULT = "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
 ROUTES = (
     "",
+    "#/onboarding",
+    "#/connect",
+    "#/compose",
+    "#/result",
     "#/create",
     "#/accounts",
     "#/schedule",

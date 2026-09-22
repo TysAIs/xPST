@@ -70,7 +70,7 @@
     <h1>Home</h1>
     <p>One clear view of what is ready, what needs attention, and what xPST has done.</p>
   </div>
-  <a class="xpst-button" data-variant="secondary" href={canCreatePost ? "#/create" : "#/accounts"}>
+  <a class="xpst-button" data-variant="secondary" href={canCreatePost ? "#/compose" : "#/accounts"}>
     {canCreatePost ? "Create post" : nextAction.label}
   </a>
 </header>
@@ -122,7 +122,7 @@
         title="No posts tracked yet"
         description="The engine has no recorded posts yet. Once a verified post exists, it will appear here."
         actionLabel={canCreatePost ? "Create your first post" : "Review accounts"}
-        actionHref={canCreatePost ? "#/create" : "#/accounts"}
+        actionHref={canCreatePost ? "#/compose" : "#/accounts"}
       />
     </section>
   {/if}

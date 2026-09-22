@@ -16,6 +16,15 @@ dashboard ``_live_auth`` pattern from PRs #66 and #70):
   graph token is configured
 - tiktok:  Content Posting API token probe, or a source check
   (yt-dlp + cookie jar) in ``source_only`` mode
+- threads/messenger: their uploader probes; an unconfigured platform
+  fails with a guidance error instead of reporting "connected"
+
+Every entry also carries a truthful badge derived from the probe it just
+ran — ``token_state``/``badge``/``badge_label``/``badge_reason`` and the
+``checked_at`` timestamp the badge is based on (see
+:mod:`xpst.token_state`).  That makes this function the single source of
+truth the CLI, web UI, desktop app and MCP all render from: a stored
+credential is never enough for a green badge.
 
 Non-interactive by design: every validator used here fails CLOSED
 (returns ``authenticated=False`` with an ``error``) — none of them
@@ -394,7 +403,65 @@ async def collect_live_auth_status_async(
                 if key in entry
             }
         )
+    attach_badge_truth(config, canonical)
     return canonical
+
+
+#: Badge fields copied onto canonical entries for JSON/UI consumers.
+BADGE_FIELD_NAMES: tuple[str, ...] = (
+    "token_state",
+    "badge",
+    "badge_label",
+    "badge_reason",
+    "badge_action",
+    "checked_at",
+    "checked_at_iso",
+    "check_age_seconds",
+    "expires_at",
+    "expires_at_iso",
+    "expires_in_seconds",
+    "auto_refresh",
+    "token_metadata",
+)
+
+
+def attach_badge_truth(
+    config: XPSTConfig,
+    canonical: dict[str, dict[str, Any]],
+    *,
+    checked_at: float | None = None,
+) -> None:
+    """Attach truthful badge fields to every canonical provider entry (in place).
+
+    Reads the persisted refresh report so a failed automatic refresh keeps the
+    badge at ``needs_reauth`` instead of silently reverting to "expiring".
+    """
+    from xpst.token_refresh import load_refresh_report
+    from xpst.token_state import enrich_live_status
+
+    moment = time.time() if checked_at is None else float(checked_at)
+    stamped: dict[str, dict[str, Any]] = {}
+    for name, entry in canonical.items():
+        item = dict(entry)
+        if item.get("live_checked"):
+            item["checked_at"] = moment
+        stamped[name] = item
+
+    badges = enrich_live_status(
+        config,
+        stamped,
+        refresh_report=load_refresh_report(config),
+        now=moment,
+    )
+    for name, entry in canonical.items():
+        info = badges.get(name)
+        if not info:
+            # Platforms outside the badge surface (e.g. the local source) keep
+            # their own truth and simply carry no badge.
+            continue
+        for field in BADGE_FIELD_NAMES:
+            if field in info:
+                entry[field] = info[field]
 
 
 def collect_live_auth_status(
@@ -429,4 +496,7 @@ def collect_live_auth_status(
         canonical = build_canonical_status(config, fallback)
         for name in platforms:
             canonical[name]["session_age_days"] = None
+        # A total collection failure is not a licence to guess: every platform
+        # gets a non-green badge for the same reason the collection failed.
+        attach_badge_truth(config, canonical)
         return canonical
