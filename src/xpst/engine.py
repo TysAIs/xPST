@@ -22,6 +22,7 @@ Features:
 Refactored to delegate to UploadService and SourceService.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -29,10 +30,12 @@ from typing import Any
 from xpst.anti_bot import AntiBotProtection
 from xpst.config import XPSTConfig
 from xpst.content import (
+    PUBLISH_ROUTE_CAROUSEL,
+    PUBLISH_ROUTE_VIDEO,
     UNIMPLEMENTED_PUBLISH_ERROR,
     ContentIssue,
     ContentRequest,
-    ContentType,
+    publish_route,
     validate_content_request,
 )
 from xpst.crash_recovery import CrashRecoveryManager
@@ -102,6 +105,36 @@ class CrossPostResult:
         successes = [r.is_published for r in self.results.values()]
         self.all_success = all(successes) and len(successes) > 0
         self.partial_success = any(successes)
+
+
+def refused_result(
+    request: ContentRequest,
+    blockers: Sequence[ContentIssue],
+    *,
+    platforms: Sequence[str] | None = None,
+) -> CrossPostResult:
+    """Build the ONE truthful "this request was refused" result.
+
+    Pure and engine-free on purpose: a surface that refuses a request must not
+    have to construct an engine (whose ``__init__`` performs crash recovery and
+    state writes) just to report the refusal. Every surface therefore reports
+    the same per-destination rows with the same contract message, and none of
+    them can turn a refusal into a success.
+    """
+    targets = list(platforms) if platforms is not None else [str(item).strip().lower() for item in request.platforms]
+    content_type = request.effective_content_type
+    result = CrossPostResult(video_id=f"{content_type.value}-request", caption=request.text)
+    for platform in targets:
+        messages = [issue.message for issue in blockers if issue.platform in (None, platform)]
+        result.results[platform] = UploadResult(
+            success=False,
+            error=" ".join(messages) or blockers[0].message,
+            platform=platform,
+            metadata={"content_type": content_type.value, "blocked": True},
+            retryable=False,
+        )
+    result.update_status()
+    return result
 
 
 class CrossPostEngine:
@@ -758,32 +791,22 @@ class CrossPostEngine:
                 )
             )
 
-        result = CrossPostResult(video_id=f"{content_type.value}-request", caption=request.text)
-
         blockers = [issue for issue in issues if issue.is_error]
         if blockers:
             # Refused before any upload: every requested destination is
             # reported, none of them is reported as a success.
-            for platform in platforms:
-                messages = [issue.message for issue in blockers if issue.platform in (None, platform)]
-                result.results[platform] = UploadResult(
-                    success=False,
-                    error=" ".join(messages) or blockers[0].message,
-                    platform=platform,
-                    metadata={"content_type": content_type.value, "blocked": True},
-                    retryable=False,
-                )
-            result.update_status()
-            return result
+            return refused_result(request, blockers, platforms=platforms)
 
         media = list(request.resolved_media)
-        if content_type is ContentType.VIDEO and len(media) == 1:
+        route = publish_route(request)
+        if route == PUBLISH_ROUTE_VIDEO:
             return await self.post_manual(media[0], request.text, platforms)
-        if content_type is ContentType.CAROUSEL and len(media) >= 2:
+        if route == PUBLISH_ROUTE_CAROUSEL:
             return await self.post_manual_carousel(media, request.text, platforms)
 
         # Validated for this destination (an undeclared/plugin destination) but
         # there is no publishing path for the content type yet.
+        result = CrossPostResult(video_id=f"{content_type.value}-request", caption=request.text)
         for platform in platforms:
             result.results[platform] = UploadResult(
                 success=False,

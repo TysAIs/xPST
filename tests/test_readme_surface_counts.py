@@ -67,7 +67,7 @@ def test_readme_claims_match_live_counts(counts) -> None:
 
 def test_a_wrong_command_count_is_rejected(counts) -> None:
     """The check must actually fail on mismatch, not merely pass today."""
-    tampered = _readme().replace("46 top-level commands", "38 top-level commands", 1)
+    tampered = _readme().replace("47 top-level commands", "38 top-level commands", 1)
 
     problems = check_claims(counts, tampered)
 

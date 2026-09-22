@@ -74,6 +74,13 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
     Tool = _MCPStub  # type: ignore[assignment,misc]
 
 from xpst.config import XPSTConfig
+from xpst.content import (
+    CONTENT_TYPES,
+    PUBLISH_ROUTE_UNIMPLEMENTED,
+    ContentRequest,
+    capability_document,
+    content_verdict,
+)
 from xpst.engine import CrossPostEngine, CrossPostResult
 from xpst.provider_truth import ProviderRole
 from xpst.setup_transaction import (
@@ -244,18 +251,36 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="xpst_post",
-        description="Manually post a local video file or carousel to platforms",
+        description=(
+            "Post to platforms: one local video/image file, a carousel "
+            "(carousel_paths), or a text post. `content_type` states what the post "
+            "is in the canonical vocabulary (video/image/carousel/text/thread); a "
+            "type a chosen destination cannot publish is refused with an explicit "
+            "blocker BEFORE anything is uploaded, and the refusal is never reported "
+            "as a success. Call `xpst_capabilities` to see what each destination can "
+            "actually publish."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
                 "video_path": {
                     "type": "string",
-                    "description": "Path to video file (or first image for carousel)",
+                    "description": "Path to the video/image file (or the first item for a carousel); omit for a text post",
+                },
+                "content_type": {
+                    "type": "string",
+                    "enum": [item.value for item in CONTENT_TYPES],
+                    "description": (
+                        "What this post is (canonical vocabulary). Defaults to what the "
+                        "media implies: one file = video, several = carousel. A text "
+                        "post needs `content_type: text` and no media; destinations "
+                        "with no text path refuse it."
+                    ),
                 },
                 "caption": {
                     "type": "string",
-                    "description": "Caption for the post",
+                    "description": "Caption (or the text itself for a text post)",
                 },
                 "platforms": {
                     "type": "array",
@@ -273,7 +298,7 @@ TOOLS: list[Tool] = [
                     "default": False,
                 },
             },
-            "required": ["video_path", "caption"],
+            "required": ["caption"],
             "additionalProperties": False,
         },
     ),
@@ -643,14 +668,20 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="xpst_capabilities",
-        description="Return the canonical role-aware provider and capability contract without network calls",
+        description=(
+            "Return the canonical role-aware provider catalog AND the content contract "
+            "without network calls: per destination, which content types it declares "
+            "and which it can actually publish (`content`), plus the publishing route "
+            "each content type takes. Read this before posting so you never attempt a "
+            "modality a destination cannot publish."
+        ),
         inputSchema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
     Tool(
         name="xpst_preflight",
         description=(
             "Run the canonical side-effect-free post preflight for local media and targets "
-            "(media, caption, destination readiness); never uploads and never touches the network"
+            "(media, caption, destination readiness, content type); never uploads and never touches the network"
         ),
         inputSchema={
             "type": "object",
@@ -658,8 +689,16 @@ TOOLS: list[Tool] = [
                 "media_path": {"type": "string"},
                 "platforms": {"type": "array", "items": {"type": "string"}},
                 "caption": {"type": "string", "default": ""},
+                "content_type": {
+                    "type": "string",
+                    "enum": [item.value for item in CONTENT_TYPES],
+                    "description": (
+                        "What the post is (canonical vocabulary). Omit to let the media "
+                        "decide; state `text` to ask whether a text-only post is possible."
+                    ),
+                },
             },
-            "required": ["media_path", "platforms"],
+            "required": ["platforms"],
             "additionalProperties": False,
         },
     ),
@@ -1239,39 +1278,73 @@ def _serialize_result(result: CrossPostResult) -> dict[str, Any]:
 
 
 async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToolResult:
-    """Handle xpst_post tool."""
+    """Handle xpst_post tool.
+
+    Validation is the shared content contract (:mod:`xpst.content`): the same
+    request produces the same verdict here as on the CLI and over HTTP, and a
+    request that cannot be published is refused before any uploader is touched
+    instead of being posted "as a video just in case".
+    """
+    from xpst.services.post_service import refusal_envelope, unimplemented_envelope
+
     dry_run = args.get("dry_run", False)
-    carousel_paths = args.get("carousel_paths", [])
+    carousel_paths = list(args.get("carousel_paths") or [])
+    video_path = args.get("video_path")
+    content_type = args.get("content_type")
+    caption = str(args.get("caption") or "")
+
+    if not video_path and not content_type:
+        # Same request-shape rule as the CLI: without a file or a stated content
+        # type there is nothing to post, and guessing "video" would fabricate a
+        # request the caller never made.
+        payload = {
+            "ok": False,
+            "blockers": [
+                'Provide "video_path" (a file to post) or "content_type" '
+                '(what this post is, e.g. "text").'
+            ],
+            "network_calls": False,
+        }
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
+
+    targets = list(args.get("platforms") or list(engine._platforms.keys()))
+    media_paths = (([video_path] if video_path else []) + carousel_paths)
+    request = ContentRequest.from_legacy(media_paths, caption, targets, content_type=content_type)
+    verdict = content_verdict(request)
 
     if dry_run:
         # Same canonical, side-effect-free verdict the CLI and the dashboard use.
         from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
 
-        targets = args.get("platforms") or list(engine._platforms.keys())
-        media_paths = [args["video_path"], *carousel_paths]
         plan_payload: dict[str, Any] | None = None
-        blockers: list[str] = []
+        blockers: list[str] = list(verdict["blockers"])
         try:
             plan_payload = PostPreflightService(engine.config).plan(
                 PostPlanRequest(
                     media_paths=media_paths,
                     target_platforms=targets,
-                    base_caption=args["caption"],
+                    base_caption=caption,
                 )
             ).to_dict()
-            blockers = [issue["message"] for issue in plan_payload["hard_blockers"]]
+            blockers.extend(issue["message"] for issue in plan_payload["hard_blockers"])
         except Exception as exc:  # noqa: BLE001 - report truthfully instead of failing the tool
-            blockers = [f"Preflight could not run: {str(exc)[:200]}"]
+            blockers.append(f"Preflight could not run: {str(exc)[:200]}")
 
         return CallToolResult(
             content=[TextContent(
                 type="text",
                 text=json.dumps({
                     "dry_run": True,
-                    "video": args["video_path"],
-                    "caption": args["caption"][:100],
-                    "carousel": len(carousel_paths) > 0,
+                    # Legacy keys existing clients read.
+                    "video": video_path,
+                    "caption": caption[:100],
+                    "carousel": len(media_paths) > 1,
                     "targets": targets,
+                    # The canonical content verdict, shared with CLI/HTTP.
+                    "content_type": verdict["content_type"] or verdict["effective_content_type"],
+                    "effective_content_type": verdict["effective_content_type"],
+                    "route": verdict["route"],
+                    "content": verdict,
                     "ready": not blockers and bool(plan_payload and plan_payload["ready"]),
                     "blockers": blockers,
                     "plan": plan_payload,
@@ -1280,25 +1353,45 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
             )],
         )
 
+    if verdict["blockers"]:
+        # Refused before any upload, with the same envelope every other surface
+        # returns. No uploader is constructed and nothing is sent.
+        envelope = refusal_envelope(request, verdict["blockers"], content=verdict)
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(envelope, indent=2, default=str))],
+        )
+
+    if verdict["route"] == PUBLISH_ROUTE_UNIMPLEMENTED:
+        # Validated for its destinations but with no publishing path (a plugin
+        # destination, or a type no uploader implements): say so instead of
+        # posting something else.
+        envelope = unimplemented_envelope(request)
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(envelope, indent=2, default=str))],
+        )
+
     from pathlib import Path
 
-    if carousel_paths:
-        media_paths = [Path(args["video_path"]), *(Path(p) for p in carousel_paths)]
+    if len(media_paths) > 1:
         result = await engine.post_manual_carousel(
-            media_paths=media_paths,
-            caption=args["caption"],
+            media_paths=[Path(p) for p in media_paths],
+            caption=caption,
             platforms=args.get("platforms"),
         )
     else:
         result = await engine.post_manual(
-            video_path=Path(args["video_path"]),
-            caption=args["caption"],
+            video_path=Path(video_path),
+            caption=caption,
             platforms=args.get("platforms"),
         )
+    payload = _serialize_result(result)
+    if isinstance(payload, dict):
+        payload.setdefault("content_type", verdict["effective_content_type"])
+        payload.setdefault("content", verdict)
     return CallToolResult(
         content=[TextContent(
             type="text",
-            text=json.dumps(_serialize_result(result), indent=2, default=str),
+            text=json.dumps(payload, indent=2, default=str),
         )],
     )
 
@@ -1906,6 +1999,7 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
     media_path = str(arguments.get("media_path") or "").strip()
     platforms = [str(item).lower() for item in (arguments.get("platforms") or []) if str(item).strip()]
     caption = str(arguments.get("caption") or "")
+    content_type = arguments.get("content_type")
 
     missing = []
     if not platforms:
@@ -1921,6 +2015,16 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
         }
         return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
 
+    # The content verdict is the same one the CLI and HTTP surfaces report, so
+    # "can this be posted?" has one answer everywhere.
+    request = ContentRequest.from_legacy(
+        [media_path] if media_path else [],
+        caption,
+        platforms,
+        content_type=content_type,
+    )
+    verdict = content_verdict(request)
+
     plan = PostPreflightService(config).plan(
         PostPlanRequest(
             media_paths=[media_path] if media_path else [],
@@ -1928,11 +2032,16 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
             base_caption=caption,
         )
     ).to_dict()
+    blockers = [issue["message"] for issue in plan["hard_blockers"]] + verdict["blockers"]
     payload = {
-        "ok": plan["ok"],
-        "ready": plan["ready"],
-        "blockers": [issue["message"] for issue in plan["hard_blockers"]],
+        "ok": not blockers,
+        "ready": not blockers,
+        "blockers": blockers,
         "warnings": [issue["message"] for issue in plan["warnings"]],
+        "content_type": verdict["content_type"] or verdict["effective_content_type"],
+        "effective_content_type": verdict["effective_content_type"],
+        "route": verdict["route"],
+        "content": verdict,
         "plan": plan,
         "network_calls": False,
     }
@@ -1959,6 +2068,10 @@ async def _handle_capabilities(config: XPSTConfig) -> CallToolResult:
             }
             for item in catalog["providers"]
         ],
+        # The content contract, verbatim from its one source (xpst.content), so
+        # the list an agent plans against is the list the CLI prints and the HTTP
+        # API serves — not a per-surface copy.
+        "content": capability_document(),
     }
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
 

@@ -1091,13 +1091,16 @@ def create_api_router(
         Delegates to ``PostPreflightService`` — the same service the CLI and the
         MCP tool use — so no surface can disagree about whether a post is ready.
         Only the request-shape preconditions (missing media or targets) are
-        decided here; every media, caption, and destination verdict is canonical.
+        decided here; every media, caption, destination and **content-type**
+        verdict is canonical.
         """
         from xpst.config import XPSTConfig
+        from xpst.content import ContentRequest, content_verdict
         from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
 
         media_path = str(payload.get("media_path") or "").strip()
         caption = str(payload.get("caption") or "")
+        content_type = payload.get("content_type")
         platforms = [
             str(item).lower()
             for item in (payload.get("platforms") or [])
@@ -1109,6 +1112,17 @@ def create_api_router(
             # An empty target list would produce an empty plan that reports
             # "ready", so the request-shape precondition is decided here.
             request_blockers.append("Choose at least one destination platform.")
+
+        # One content verdict, from the contract module: the same request gets
+        # the same answer here, in the CLI, and over MCP.
+        verdict = content_verdict(
+            ContentRequest.from_legacy(
+                [media_path] if media_path else [],
+                caption,
+                platforms,
+                content_type=content_type,
+            )
+        )
 
         plan: dict[str, Any] | None = None
         canonical_blockers: list[str] = []
@@ -1133,9 +1147,10 @@ def create_api_router(
             canonical_blockers = [f"Preflight could not run: {str(exc)[:200]}"]
 
         media = Path(media_path).expanduser() if media_path else None
+        blockers = request_blockers + canonical_blockers + verdict["blockers"]
         return {
-            "ok": not request_blockers and not canonical_blockers,
-            "ready": not request_blockers and not canonical_blockers,
+            "ok": not blockers,
+            "ready": not blockers,
             "media": {
                 "path": media_path,
                 "exists": bool(media and media.exists()),
@@ -1146,11 +1161,28 @@ def create_api_router(
                 "per_platform": {platform: caption for platform in platforms},
             },
             "platforms": platforms,
-            "blockers": request_blockers + canonical_blockers,
+            "content_type": verdict["content_type"] or verdict["effective_content_type"],
+            "effective_content_type": verdict["effective_content_type"],
+            "route": verdict["route"],
+            "content": verdict,
+            "blockers": blockers,
             "warnings": canonical_warnings,
             "plan": plan,
             "network_calls": False,
         }
+
+    @router.get("/capabilities")
+    def api_capabilities() -> dict[str, Any]:
+        """The canonical capability contract, from its one source.
+
+        The CLI ``capabilities`` command and the MCP ``xpst_capabilities`` tool
+        return the same document (``xpst.content.capability_document``), so a
+        dashboard, a human and an agent cannot disagree about what xPST can
+        publish. No network calls, no secrets.
+        """
+        from xpst.content import capability_document
+
+        return capability_document()
 
     @router.get("/settings")
     def api_settings() -> dict[str, Any]:

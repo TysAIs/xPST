@@ -28,9 +28,13 @@ from typing import TYPE_CHECKING, Any
 
 from xpst.content import (
     MAX_MEDIA_ITEMS,
+    PUBLISH_ROUTE_CAROUSEL,
+    PUBLISH_ROUTE_UNIMPLEMENTED,
     UNIMPLEMENTED_PUBLISH_ERROR,
     ContentRequest,
     ContentType,
+    content_verdict,
+    publish_route,
     validate_content_request,
 )
 from xpst.platforms.base import UploadOutcome, UploadResult
@@ -66,7 +70,9 @@ __all__ = [
     "NO_RESULT_ERROR",
     "PostRequest",
     "PostService",
+    "refusal_envelope",
     "serialize_post_attempt",
+    "unimplemented_envelope",
 ]
 
 
@@ -196,6 +202,83 @@ def serialize_post_attempt(
     }
 
 
+def refusal_envelope(
+    request: ContentRequest,
+    blockers: Sequence[str],
+    *,
+    content: dict[str, Any] | None = None,
+    plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The ONE envelope for a request refused before any upload.
+
+    Built here (not per surface) so the CLI, MCP and HTTP API report the same
+    per-destination rows, the same blockers, and the same content verdict. Every
+    requested destination appears as a failure carrying the refusal reason (not
+    the generic "no uploader" text, which would blame the wiring for a decision);
+    ``ok``/``uploaded`` are False, so no surface can render a refusal as a
+    success.
+    """
+    reason = " ".join(str(item) for item in blockers) or "Refused before any upload."
+    # The reason is the contract's own message; the tail states the fact that
+    # matters to a reader: a refusal uploads nothing.
+    error = f"{reason} — nothing was uploaded."
+    results = {
+        platform: UploadResult(
+            success=False,
+            outcome=UploadOutcome.FAILED,
+            error=error,
+            platform=platform,
+            retryable=False,
+        )
+        for platform in request.platforms
+    }
+    return serialize_post_attempt(
+        requested=request.platforms,
+        results=results,
+        caption=request.caption,
+        content_type=request.effective_content_type.value,
+        dry_run=False,
+        blockers=list(blockers),
+    ) | {
+        "plan": plan,
+        "ready": False,
+        "blocked": True,
+        "content": content if content is not None else content_verdict(request),
+    }
+
+
+def unimplemented_envelope(request: ContentRequest) -> dict[str, Any]:
+    """The ONE envelope for a request with validated destinations but no path.
+
+    A request can pass capability validation (a plugin destination, or a type no
+    uploader implements) and still have no publishing path. That is reported
+    per destination — never uploaded "as a video just in case".
+    """
+    content_type = request.effective_content_type
+    results = {
+        platform: UploadResult(
+            success=False,
+            outcome=UploadOutcome.FAILED,
+            error=UNIMPLEMENTED_CONTENT_ERROR.format(platform=platform, content_type=content_type.value),
+            platform=platform,
+            retryable=False,
+        )
+        for platform in request.platforms
+    }
+    envelope = serialize_post_attempt(
+        requested=request.platforms,
+        results=results,
+        caption=request.caption,
+        content_type=content_type.value,
+        dry_run=False,
+        blockers=[UNIMPLEMENTED_CONTENT_ERROR.format(platform=platform, content_type=content_type.value) for platform in request.platforms],
+    )
+    envelope["ready"] = True
+    envelope["blocked"] = True
+    envelope["content"] = content_verdict(request)
+    return envelope
+
+
 class PostService:
     """Plan, run, and report a manual post for one config directory."""
 
@@ -221,6 +304,15 @@ class PostService:
 
     # ── Planning ────────────────────────────────────────────────────────
 
+    def content(self, request: PostRequest) -> dict[str, Any]:
+        """The canonical content answer for a request (one source, all surfaces).
+
+        Every surface embeds this mapping instead of re-deriving a content type
+        or re-writing a refusal message, so a request that one surface refuses
+        is refused identically by the others.
+        """
+        return content_verdict(request)
+
     def preflight(self, request: PostRequest) -> dict[str, Any]:
         """Run the canonical, side-effect-free preflight for a request."""
         from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
@@ -230,17 +322,18 @@ class PostService:
             # An empty target list would produce an empty plan that reports
             # "ready", so the request-shape precondition is decided here.
             blockers.append("Choose at least one destination platform.")
-        if not request.media_paths:
-            blockers.append("Choose a video file before posting.")
 
         # Content-type validation against the real capability table. A
         # media-less payload that states no content type is the existing
         # "no file chosen" case, not a text post, so it keeps the legacy
         # blocker alone instead of being reported as a refused text post.
         content_issues: tuple[Any, ...] = ()
+        verdict = self.content(request)
         if request.media_paths or request.is_explicit_content_type:
             content_issues = validate_content_request(request)
             blockers.extend(issue.message for issue in content_issues if issue.is_error)
+        else:
+            blockers.append("Choose a video file before posting.")
 
         plan: dict[str, Any] | None = None
         try:
@@ -262,6 +355,7 @@ class PostService:
             "plan": plan,
             "content_type": request.effective_content_type.value,
             "content_issues": [issue.to_dict() for issue in content_issues],
+            "content": verdict,
             "network_calls": False,
         }
 
@@ -275,7 +369,12 @@ class PostService:
             content_type=request.effective_content_type.value,
             dry_run=True,
             blockers=verdict["blockers"],
-        ) | {"plan": verdict["plan"], "network_calls": False, "ready": verdict["ready"]}
+        ) | {
+            "plan": verdict["plan"],
+            "network_calls": False,
+            "ready": verdict["ready"],
+            "content": verdict["content"],
+        }
 
     # ── Execution ───────────────────────────────────────────────────────
 
@@ -288,45 +387,25 @@ class PostService:
 
     def _unimplemented_envelope(self, request: PostRequest, content_type: ContentType) -> dict[str, Any]:
         """Report a content type with no publishing path, per destination."""
-        results = {
-            platform: UploadResult(
-                success=False,
-                outcome=UploadOutcome.FAILED,
-                error=UNIMPLEMENTED_CONTENT_ERROR.format(platform=platform, content_type=content_type.value),
-                platform=platform,
-                retryable=False,
-            )
-            for platform in request.platforms
-        }
-        envelope = serialize_post_attempt(
-            requested=request.platforms,
-            results=results,
-            caption=request.caption,
-            content_type=content_type.value,
-            dry_run=False,
-        )
-        envelope["ready"] = True
-        envelope["blocked"] = True
-        return envelope
+        return unimplemented_envelope(request)
 
     async def execute_async(self, request: PostRequest) -> dict[str, Any]:
         """Run the real upload path and return the truthful envelope."""
         verdict = self.preflight(request)
         if not verdict["ready"]:
-            return serialize_post_attempt(
-                requested=request.platforms,
-                results={},
-                caption=request.caption,
-                content_type=request.effective_content_type.value,
-                dry_run=False,
-                blockers=verdict["blockers"],
-            ) | {"plan": verdict["plan"], "ready": False, "blocked": True}
+            return refusal_envelope(
+                request,
+                verdict["blockers"],
+                content=verdict["content"],
+                plan=verdict["plan"],
+            )
 
         content_type = request.effective_content_type
         paths = list(request.resolved_media)
-        if not (content_type is ContentType.VIDEO and len(paths) == 1) and not (
-            content_type is ContentType.CAROUSEL and len(paths) >= 2
-        ):
+        # The modality -> publishing-path decision lives in the contract module
+        # so the CLI, MCP and HTTP surfaces cannot route a request differently.
+        route = publish_route(request)
+        if route == PUBLISH_ROUTE_UNIMPLEMENTED:
             # No uploader implements this content type (validation catches the
             # destinations we know about; this is the safety net for a
             # third-party destination and guarantees nothing is uploaded as a
@@ -345,10 +424,10 @@ class PostService:
                 content_type=content_type.value,
                 dry_run=False,
                 blockers=[f"Posting engine unavailable: {str(exc)[:200]}"],
-            ) | {"ready": True, "blocked": True}
+            ) | {"ready": True, "blocked": True, "content": verdict["content"]}
 
         try:
-            if content_type is ContentType.CAROUSEL:
+            if route == PUBLISH_ROUTE_CAROUSEL:
                 result: CrossPostResult = await engine.post_manual_carousel(paths, request.caption, list(request.platforms))
             else:
                 result = await engine.post_manual(paths[0], request.caption, list(request.platforms))
@@ -361,7 +440,7 @@ class PostService:
                 content_type=content_type.value,
                 dry_run=False,
                 blockers=[f"Post failed: {str(exc)[:200]}"],
-            ) | {"ready": True, "blocked": False}
+            ) | {"ready": True, "blocked": False, "content": verdict["content"]}
 
         envelope = serialize_post_attempt(
             requested=request.platforms,
@@ -373,6 +452,7 @@ class PostService:
         )
         envelope["ready"] = True
         envelope["blocked"] = False
+        envelope["content"] = verdict["content"]
         return envelope
 
     def execute(self, request: PostRequest) -> dict[str, Any]:

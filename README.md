@@ -48,7 +48,7 @@ xPST includes integrations for **six platforms** — YouTube, Instagram, X/Twitt
 
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
-- **CLI** — 46 top-level commands (69 including subcommands) covering the entire workflow
+- **CLI** — 47 top-level commands (70 including subcommands) covering the entire workflow
 - **MCP server** — 40 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
@@ -94,7 +94,7 @@ platform API calls you configure. See
 
 ### Three Drivable Surfaces
 - **Desktop GUI** — PySide6/QML app with Dashboard, Compose, Content, Analytics, Connect, Schedule, Settings, and About pages + DetailPanel
-- **CLI** — 46 Click-based commands (69 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
+- **CLI** — 47 Click-based commands (70 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
 - **MCP server** — 40 tools (34 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 #### Surface counts
@@ -105,9 +105,9 @@ These numbers are generated from the shipped code, not maintained by hand. `pyth
 | Surface | Count | Measured from |
 |---------|-------|---------------|
 | MCP tools | **40** | `tools/list` over a real stdio handshake with `xpst mcp start` |
-| CLI top-level commands | **46** | `xpst.cli.main.commands` |
-| CLI commands including subcommands | **69** | recursive walk of the Click command tree |
-| HTTP routes (dashboard app) | **34** | FastAPI route table (30 xPST routes + 4 framework docs routes) |
+| CLI top-level commands | **47** | `xpst.cli.main.commands` |
+| CLI commands including subcommands | **70** | recursive walk of the Click command tree |
+| HTTP routes (dashboard app) | **35** | FastAPI route table (31 xPST routes + 4 framework docs routes) |
 | Supported providers | **7** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
 
 Regenerate and verify with `python scripts/generate_counts.py --write` / `--check`; the check runs in CI, so these numbers cannot drift silently.
@@ -264,9 +264,9 @@ See `Dockerfile` and `docker-compose.yml` for details.
 ## CLI Reference
 
 <<<<<<< Updated upstream
-xPST provides 46 top-level commands. Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 47 top-level commands. Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 =======
-xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 47 top-level commands (70 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 >>>>>>> Stashed changes
 
 ### Setup & Accounts
@@ -464,7 +464,9 @@ xpst dashboard --port 9000    # custom port
 | `GET /health` | none | Aggregated per-platform health (`healthy` / `degraded`) |
 | `GET /metrics` | none | Prometheus text-format metrics |
 | `GET /state` | Basic | Posting summary: totals, per-platform counts, health, best platform |
-| `POST /api/post` | API token | Plan (`dry_run`) or publish through the real engine |
+| `GET /api/capabilities` | Basic when configured | The canonical capability contract: what each destination declares and can actually publish |
+| `POST /api/post` | API token | Plan (`dry_run`) or publish through the real engine (accepts `content_type`) |
+| `POST /api/preflight` | API token | Local, no-network post preflight (accepts `content_type`) |
 | `POST /api/connect/{platform}` | API token | Inspect / enable / verify one destination |
 | `GET /webhook/messenger` | none | Meta webhook handshake (only when Messenger is enabled) |
 | `POST /webhook/messenger` | none | Messenger events, verified with `X-Hub-Signature-256` |

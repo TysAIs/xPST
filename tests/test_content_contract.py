@@ -29,8 +29,10 @@ from xpst.content import (
     PUBLISH_DESTINATIONS,
     ContentRequest,
     ContentType,
+    DestinationContentProfile,
     UnknownContentTypeError,
     UnsupportedContentTypeError,
+    _build_support,
     capability_matrix,
     coerce_content_type,
     content_profile,
@@ -43,6 +45,7 @@ from xpst.content import (
     validate_destination_content,
 )
 from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
+from xpst.providers import ProviderRole
 
 # ── The capability matrix ───────────────────────────────────────────────────
 
@@ -59,9 +62,9 @@ EXPECTED_MATRIX: dict[tuple[str, str], bool] = {
     ("x", "image"): False,
     ("x", "carousel"): True,  # published as a tweet thread, one media per tweet
     ("x", "text"): False,
-    ("x", "thread"): False,  # declared by X, no text-thread implementation
+    ("x", "thread"): False,  # no text-thread sender; multi-media posts are carousel
     ("instagram", "video"): True,
-    ("instagram", "image"): False,  # declared by Instagram, no feed-photo path
+    ("instagram", "image"): False,  # the Graph path is REELS-only: no feed-photo path
     ("instagram", "carousel"): True,
     ("instagram", "text"): False,
     ("instagram", "thread"): False,
@@ -73,17 +76,9 @@ EXPECTED_MATRIX: dict[tuple[str, str], bool] = {
     ("threads", "video"): True,
     ("threads", "image"): False,
     ("threads", "carousel"): False,
-    ("threads", "text"): False,  # declared by Threads, only media_type VIDEO exists
+    ("threads", "text"): False,  # only a media_type VIDEO container is built
     ("threads", "thread"): False,
 }
-
-#: Declared-but-unimplemented: an agent reading the manifest would try these.
-FALSE_DECLARATIONS: tuple[tuple[str, str], ...] = (
-    ("x", "thread"),
-    ("instagram", "image"),
-    ("threads", "text"),
-)
-
 
 def _config() -> Any:
     from xpst.config import XPSTConfig
@@ -153,18 +148,45 @@ def test_declared_labels_match_the_provider_manifests() -> None:
         )
 
 
-@pytest.mark.parametrize(("platform", "content_type"), FALSE_DECLARATIONS)
-def test_declared_but_unimplemented_content_types_are_reported_as_false(platform: str, content_type: str) -> None:
-    profile = content_profile(platform)
-    assert profile is not None
-    resolved = coerce_content_type(content_type)
-    assert resolved in profile.declared
-    assert not profile.supports(resolved)
-    assert resolved in profile.declared_but_unimplemented
+def test_the_shipped_table_has_no_false_declarations() -> None:
+    """No destination declares a content type it cannot publish.
+
+    This is the invariant that stops an agent reading a capability list and
+    attempting an operation that cannot work; it is asserted over the whole
+    table, so re-adding a declaration without its implementation fails here.
+    """
+    for platform, profile in DESTINATION_CONTENT_PROFILES.items():
+        assert profile.declared_but_unimplemented == frozenset(), (
+            f"{platform} declares "
+            f"{sorted(item.value for item in profile.declared_but_unimplemented)} "
+            f"with no implementation"
+        )
+
+
+def test_a_false_declaration_is_refused_and_names_the_destination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal behavior itself, on a profile that does declare a dead type.
+
+    Kept even though the shipped table has no false declarations: it is what a
+    future destination hits the moment it declares more than it can post.
+    """
+    profile = DestinationContentProfile(
+        platform="hypothetical",
+        display_name="Hypothetical",
+        role=ProviderRole.VIDEO_DESTINATION,
+        support=_build_support(("video", "text"), (ContentType.VIDEO,)),
+        declared_labels=("video", "text"),
+    )
+    monkeypatch.setitem(DESTINATION_CONTENT_PROFILES, "hypothetical", profile)
+
+    assert profile.declared_but_unimplemented == frozenset({ContentType.TEXT})
+    assert not profile.supports(ContentType.TEXT)
+    assert content_support_status("hypothetical", ContentType.TEXT) == "unsupported"
     with pytest.raises(UnsupportedContentTypeError) as excinfo:
-        validate_destination_content(platform, resolved)
+        validate_destination_content("hypothetical", ContentType.TEXT)
     message = str(excinfo.value)
-    assert platform in message, "the refusal must name the destination"
+    assert "hypothetical" in message, "the refusal must name the destination"
     assert "declared" in message, "a false declaration must be named as such"
 
 
@@ -187,7 +209,12 @@ def test_capability_matrix_is_json_serializable() -> None:
     payload = capability_matrix()
     json.dumps(payload)  # must not raise: CLI/MCP/dashboard all serialize this
     assert payload["content_types"] == [item.value for item in CONTENT_TYPES]
-    assert payload["platforms"]["threads"]["declared_but_unimplemented"] == ["text"]
+    # No destination declares a content type it cannot publish — the false
+    # declarations (threads/text, instagram/image, x/thread) are withdrawn.
+    assert payload["platforms"]["threads"]["declared_but_unimplemented"] == []
+    assert all(
+        profile["declared_but_unimplemented"] == [] for profile in payload["platforms"].values()
+    )
 
 
 # ── Vocabulary ──────────────────────────────────────────────────────────────
