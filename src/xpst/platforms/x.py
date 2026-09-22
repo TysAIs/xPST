@@ -893,26 +893,70 @@ class XUploader(PlatformUploader):
             )
 
     async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
-        """Upload a carousel as a thread on X/Twitter.
+        """Publish a multi-media post as a tweet thread on X/Twitter.
 
-        Creates a tweet thread: first tweet has the caption + first media,
-        then reply tweets for each subsequent media file.
+        Creates a tweet thread: the first tweet carries the caption + first
+        media, then one reply per remaining item, in the order given. Each item
+        keeps its own modality — images go through the media upload endpoint as
+        images (twikit derives ``media_type`` from the file), never stitched or
+        re-encoded — and image items are checked against X's image contract
+        before any client call.
 
         Args:
-            media_paths: List of paths to media files
-            caption: Caption for the first tweet
+            media_paths: List of paths to media files, in post order.
+            caption: Caption for the first tweet.
 
         Returns:
-            UploadResult with root tweet ID and URL
+            UploadResult with root tweet ID and URL.
         """
-        if len(media_paths) < 2:
-            logger.warning("Carousel needs 2+ items, falling back to single upload")
-            return await self.upload(media_paths[0], caption) if media_paths else UploadResult(
-                success=False, error="No media files provided", platform="x"
+        items = [Path(p) for p in media_paths]
+
+        if len(items) < 2:
+            reason = (
+                "X multi-media posts need at least 2 items "
+                f"(got {len(items)}). Post it as a single image or video instead."
+            )
+            logger.warning("Refusing X thread: %s", reason)
+            return UploadResult(
+                success=False,
+                error=f"X_THREAD_NEEDS_TWO: {reason}",
+                platform="x",
+                retryable=False,
+                metadata={"content_type": "thread", "items": len(items)},
+            )
+
+        if self.config.x.auth_mode == "api_v2":
+            # The official API path has no thread implementation in xPST. Say so
+            # instead of letting the twikit client fail with a path error that
+            # reads like a bug.
+            reason = (
+                "X_THREAD_API_V2_UNSUPPORTED: the official X API path has no multi-media thread "
+                "implementation in xPST (one tweet per item); switch auth_mode to 'cookies' to "
+                "publish a multi-media post, or post the items separately."
+            )
+            logger.warning("Refusing X thread: %s", reason)
+            return UploadResult(
+                success=False,
+                error=reason,
+                platform="x",
+                retryable=False,
+                metadata={"content_type": "thread", "items": len(items), "auth_mode": "api_v2"},
+            )
+
+        rejections = self.carousel_item_rejection_reasons(items)
+        if rejections:
+            message = " ".join(rejections)
+            logger.warning("Refusing X thread: %s", message)
+            return UploadResult(
+                success=False,
+                error=f"X_THREAD_ITEM_REJECTED: {message}",
+                platform="x",
+                retryable=False,
+                metadata={"content_type": "thread", "items": len(items)},
             )
 
         # Truncate caption if needed (with thread indicator)
-        thread_header = f"\n\n🧵 1/{len(media_paths)}"
+        thread_header = f"\n\n🧵 1/{len(items)}"
         max_caption = 280 - len(thread_header)
         if len(caption) > max_caption:
             caption = caption[:max_caption - 3] + "..."
@@ -920,34 +964,38 @@ class XUploader(PlatformUploader):
         try:
             client = await self._get_client()
 
-            logger.info(f"Creating X thread with {len(media_paths)} items")
+            logger.info(f"Creating X thread with {len(items)} items")
 
             # First tweet: caption + first media
             media_id_1 = await client.upload_media(
-                str(media_paths[0]),
+                str(items[0]),
                 wait_for_completion=True,
             )
             first_tweet = await client.create_tweet(
                 text=f"{caption}{thread_header}",
                 media_ids=[media_id_1],
             )
+            # Every item's own tweet id, in order: a caller can verify each
+            # media item landed, not just that the thread started.
+            tweet_ids: list[str] = [str(first_tweet.id)]
 
             # Reply tweets for remaining media
             last_tweet_id = first_tweet.id
-            for i, path in enumerate(media_paths[1:], 2):
+            for i, path in enumerate(items[1:], 2):
                 media_id = await client.upload_media(
                     str(path),
                     wait_for_completion=True,
                 )
                 reply = await client.create_tweet(
-                    text=f"{i}/{len(media_paths)}",
+                    text=f"{i}/{len(items)}",
                     reply_to=last_tweet_id,
                     media_ids=[media_id],
                 )
                 last_tweet_id = reply.id
+                tweet_ids.append(str(reply.id))
 
             tweet_url = f"https://x.com/i/status/{first_tweet.id}"
-            logger.info(f"Posted X thread: {tweet_url} ({len(media_paths)} tweets)")
+            logger.info(f"Posted X thread: {tweet_url} ({len(items)} tweets)")
 
             return UploadResult(
                 success=True,
@@ -956,7 +1004,9 @@ class XUploader(PlatformUploader):
                 platform="x",
                 metadata={
                     "caption_length": len(caption),
-                    "thread_items": len(media_paths),
+                    "thread_items": len(items),
+                    "item_order": [p.name for p in items],
+                    "tweet_ids": tweet_ids,
                     "content_type": "thread",
                     "last_tweet_id": str(last_tweet_id),
                 },
@@ -985,6 +1035,23 @@ class XUploader(PlatformUploader):
                 error=f"X_THREAD_ERROR: {str(e)[:200]}",
                 platform="x",
             )
+
+    def carousel_item_rejection_reasons(self, items: list[Path]) -> tuple[str, ...]:
+        """Destination-named reasons X cannot publish these thread items.
+
+        Only still images are checked, with X's image contract (JPG/PNG/WEBP,
+        ≤ 5 MB, aspect between 1:3 and 3:1) and the preflight's own wording. The
+        check reads the file header in pure Python — no ffmpeg, no ffprobe.
+        """
+        from xpst.content import MEDIA_KIND_IMAGE, media_kind
+        from xpst.media.specs import image_rejection_reasons
+
+        reasons: list[str] = []
+        for item in items:
+            if media_kind(item) != MEDIA_KIND_IMAGE:
+                continue
+            reasons.extend(image_rejection_reasons(item, self.platform_name))
+        return tuple(reasons)
 
     async def get_followers(self) -> int:
         """Return follower count for the authenticated X account.
