@@ -337,12 +337,12 @@ class TestJsonPayloadUnchanged:
 
 class TestDocumented:
     def test_tutorial_documents_the_posting_rule(self):
-        doc = (Path(__file__).resolve().parents[1] / "docs" / "TUTORIAL_CLI.md").read_text()
+        doc = (Path(__file__).resolve().parents[1] / "docs" / "TUTORIAL_CLI.md").read_text(encoding="utf-8")
         assert "**Posting rule (`xpst post`).**" in doc
         exit_codes = doc[doc.index("## Exit Codes Reference") :]
         assert "a partial success exits `0`" in exit_codes.lower() or "A partial success exits `0`" in exit_codes
         assert "THREADS_NEEDS_URL" in exit_codes
 
     def test_post_section_documents_the_exit_status(self):
-        doc = (Path(__file__).resolve().parents[1] / "docs" / "TUTORIAL_CLI.md").read_text()
+        doc = (Path(__file__).resolve().parents[1] / "docs" / "TUTORIAL_CLI.md").read_text(encoding="utf-8")
         assert "**Exit status.**" in doc
