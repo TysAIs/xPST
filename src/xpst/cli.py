@@ -1120,7 +1120,15 @@ def health(ctx: click.Context, as_json: bool):
         console.print("[dim]Testing connectivity to all platforms (no uploads)...[/dim]\n")
 
     engine = CrossPostEngine(config)
-    health_data = asyncio.run(engine.check_health())
+    # Platform auth facts come from the canonical live probe that every other
+    # surface renders from (``auth status``, ``doctor``, MCP, HTTP). ``health``
+    # used to probe platforms on its own path, which let it report a different
+    # verdict than ``doctor`` for the same account on the same box; the engine
+    # is still asked for sources/quotas/state/circuit breakers.
+    from xpst.auth_status import collect_live_auth_status, platform_health_entries
+
+    health_data = asyncio.run(engine.check_health(include_platforms=False))
+    health_data["platforms"] = platform_health_entries(collect_live_auth_status(config))
     health_data["sessions"] = _session_health(config)
 
     if as_json:
@@ -1770,6 +1778,7 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     """
     from xpst.connect import test_connections
     from xpst.utils.errors import describe_remediation
+    from xpst.utils.probe_errors import PROBE_INVALID_CREDENTIALS, PROBE_UNVERIFIED
 
     config = load_config(ctx.obj.get("config_path"))
 
@@ -1814,11 +1823,29 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
         canonical_info = canonical.get(p, {})
         connected = bool(canonical_info.get("authenticated", ok))
         disabled = canonical_info.get("state") == "disabled" and canonical_results is not None
+        probe_class = canonical_info.get("probe_class")
+        probe_error = canonical_info.get("probe_error")
         if connected or disabled:
             problem = None
             fix = None
+        elif creds_present and probe_class == PROBE_UNVERIFIED:
+            # The probe failed without proving the credential is dead (network
+            # error, challenge, anti-bot redirect). Report that honestly and ask
+            # for a retry — "token expired, re-run connect" would send the user
+            # into a credential re-entry for a failure that may clear on its own.
+            problem = (
+                "Live check could not verify this account — the probe failed "
+                "without proving the credential is dead: "
+                f"{probe_error or 'unclassified probe failure'}"
+            )
+            fix = f"Retry: xpst health (only run `xpst connect {p}` if it keeps failing)"
         elif creds_present:
-            problem = "Credentials found but the health check failed — token may be expired or revoked."
+            problem = (
+                "Credentials found but the health check failed — the provider "
+                f"rejected them: {probe_error}"
+                if probe_class == PROBE_INVALID_CREDENTIALS and probe_error
+                else "Credentials found but the health check failed — token may be expired or revoked."
+            )
             fix = describe_remediation(p, "token expired") or f"xpst connect {p}"
         else:
             problem = "Not connected."
@@ -1833,6 +1860,9 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
                 "auth_mode", getattr(getattr(config, p, None), "auth_mode", None)
             ),
             "session_age_days": session.get("age_days"),
+            "probe_class": probe_class,
+            "probe_error": probe_error,
+            "probe_retryable": canonical_info.get("probe_retryable"),
             "problem": problem,
             "fix": fix,
             "quota": {
