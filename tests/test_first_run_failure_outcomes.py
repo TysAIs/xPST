@@ -46,6 +46,10 @@ from xpst.utils.pidfile import PidfileLock, PidfileLockError
 # ``xpst.utils.net.check_network`` with an "online" stub for every test).
 _REAL_CHECK_NETWORK = xpst_net.check_network
 
+# Original ``socket.socket.connect`` captured at import time: the loopback
+# carve-out in ``_block_all_network`` still has to be able to call it.
+_REAL_SOCKET_CONNECT = socket.socket.connect
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC = REPO_ROOT / "src"
 
@@ -64,8 +68,23 @@ def _profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Pat
     return home, config_dir
 
 
+# Loopback stays reachable even in "airplane mode": it is not the network, and
+# on Windows blocking it kills asyncio before xPST runs (see _block_all_network).
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
 def _block_all_network(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make every outbound connection/DNS lookup fail (airplane mode)."""
+    """Make every *outbound* connection/DNS lookup fail (airplane mode).
+
+    Loopback is deliberately left working.  On Windows ``socket.socketpair`` is
+    CPython's pure-Python fallback, and that fallback builds its socket pair by
+    connecting to 127.0.0.1 through ``socket.socket.connect`` -- the very method
+    patched here.  asyncio creates that self-pipe while bootstrapping the event
+    loop, so refusing loopback made ``asyncio.run()`` (and therefore ``xpst
+    doctor`` / ``xpst run``) die with ``ConnectionRefusedError`` before any xPST
+    code ran.  macOS/Linux use the C-level ``_socket.socketpair``, which never
+    touches the Python method -- which is why only Windows CI failed.
+    """
 
     def _refused(*_a, **_kw):
         raise ConnectionRefusedError(61, "Connection refused")
@@ -73,9 +92,15 @@ def _block_all_network(monkeypatch: pytest.MonkeyPatch) -> None:
     def _no_dns(*_a, **_kw):
         raise socket.gaierror(-2, "Name or service not known")
 
+    def _connect(sock, address, *args, **kwargs):
+        host = address[0] if isinstance(address, tuple) else address
+        if str(host) in _LOOPBACK_HOSTS:
+            return _REAL_SOCKET_CONNECT(sock, address, *args, **kwargs)
+        raise ConnectionRefusedError(61, "Connection refused")
+
     monkeypatch.setattr(socket, "create_connection", _refused)
     monkeypatch.setattr(socket, "getaddrinfo", _no_dns)
-    monkeypatch.setattr(socket.socket, "connect", _refused, raising=False)
+    monkeypatch.setattr(socket.socket, "connect", _connect, raising=False)
 
 
 def _bind_port() -> tuple[socket.socket, int]:
@@ -228,9 +253,13 @@ def test_missing_config_dir_is_created(tmp_path, monkeypatch):
     assert not config_dir.exists()
     XPSTConfig.load()
     assert (config_dir / "config.yaml").is_file()
-    # A freshly created config directory is owner-only (it holds credentials).
-    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
-    assert stat.S_IMODE((config_dir / "config.yaml").stat().st_mode) == 0o600
+    if _posix_perms_enforced():
+        # A freshly created config directory is owner-only (it holds
+        # credentials).  Windows has no POSIX directory modes -- ``stat``
+        # reports 0o777/0o666 whatever ``chmod`` was asked for -- so an exact
+        # mode is only assertable where the kernel enforces the bits.
+        assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
+        assert stat.S_IMODE((config_dir / "config.yaml").stat().st_mode) == 0o600
 
 
 def _posix_perms_enforced() -> bool:
@@ -558,12 +587,17 @@ def test_serve_port_guard_skipped_headless(tmp_path):
 def test_engine_entry_taken_port_subprocess(tmp_path):
     """End-to-end: the packaged entrypoint exits 3 naming the taken port."""
     listener, port = _bind_port()
-    env = {
-        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "HOME": str(tmp_path / "home"),
-        "PYTHONPATH": str(SRC),
-        "XPST_CONFIG_DIR": str(tmp_path / "profile"),
-    }
+    # Inherit the real environment and override only the isolation knobs.  A
+    # hand-built env drops ``SystemRoot`` on Windows, and without it the child
+    # cannot load the Winsock provider: ``socket.socket()`` raises
+    # ``OSError [WinError 10106]`` before any xPST code runs, so the port guard
+    # never gets the chance to exit 3.
+    env = dict(os.environ)
+    env.update(
+        HOME=str(tmp_path / "home"),
+        PYTHONPATH=str(SRC),
+        XPST_CONFIG_DIR=str(tmp_path / "profile"),
+    )
     try:
         proc = subprocess.run(
             [sys.executable, str(REPO_ROOT / "scripts" / "engine_entry.py"), "--port", str(port)],

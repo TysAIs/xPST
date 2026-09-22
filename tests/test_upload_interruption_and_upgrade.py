@@ -38,6 +38,20 @@ from xpst.state_store import StateStore
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC = REPO_ROOT / "src"
 
+
+def _posix_perms_enforced() -> bool:
+    """Whether chmod-based permission tests can mean anything on this host.
+
+    ``os.geteuid`` does not exist on Windows, Windows does not enforce POSIX
+    file modes (``stat`` reports 0o666 whatever ``chmod`` was asked for), and
+    root bypasses them entirely.  Asserting an exact mode there tests the
+    platform, not xPST.
+    """
+    if os.name == "nt" or not hasattr(os, "geteuid"):
+        return False
+    return os.geteuid() != 0
+
+
 # ── a populated v1 config (the upgrade fixture) ──────────────────────────────
 
 V1_CONFIG = """\
@@ -288,7 +302,7 @@ def test_disk_full_during_state_write_keeps_old_state_and_no_tmp(tmp_path, monke
 
 
 @pytest.mark.skipif(
-    os.name == "nt" or not hasattr(os, "geteuid") or os.geteuid() == 0,
+    not _posix_perms_enforced(),
     reason="POSIX file permissions are not enforced here (Windows or root)",
 )
 def test_permission_denied_on_state_write_keeps_old_state(tmp_path):
@@ -330,6 +344,10 @@ def test_failed_config_save_keeps_the_previous_config(tmp_path, monkeypatch, cap
     assert any("Failed to save config" in r.message for r in caplog.records)
 
 
+@pytest.mark.skipif(
+    not _posix_perms_enforced(),
+    reason="POSIX file permissions are not enforced here (Windows or root)",
+)
 def test_config_file_is_never_world_readable(tmp_path, monkeypatch):
     """config.yaml holds API tokens: it must be 0600, not 0644 (umask 022)."""
     monkeypatch.setattr(os, "umask", lambda _v: 0o022)
@@ -431,7 +449,7 @@ def test_uninstall_inventory_is_documented(tmp_path, monkeypatch):
     from xpst.utils.credentials import CredentialStore
 
     store = CredentialStore(str(config_dir))
-    store.store("youtube:token", "example-token-value")
+    store.store("youtube_token", "example-token-value")
 
     runner = CliRunner()
     assert runner.invoke(main, ["status"]).exit_code == 0
@@ -465,7 +483,7 @@ def test_credentials_directory_shape_is_stable(tmp_path, monkeypatch):
     from xpst.utils.credentials import CredentialStore
 
     store = CredentialStore(str(config_dir))
-    store.store("youtube:token", "example-token-value")
+    store.store("youtube_token", "example-token-value")
 
     names = sorted(p.name for p in (config_dir / "credentials").iterdir())
     assert names, "expected credential artefacts"
@@ -480,7 +498,10 @@ def test_credentials_directory_shape_is_stable(tmp_path, monkeypatch):
 def test_credentials_are_not_left_world_readable(tmp_path, monkeypatch):
     home, config_dir = _profile(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
-    monkeypatch.setattr(os, "umask", lambda _v: 0o022)  # typical desktop umask
+    if _posix_perms_enforced():
+        # ``os.umask`` does not exist on Windows; the 0600 expectation it feeds
+        # is a POSIX-mode guarantee anyway.
+        monkeypatch.setattr(os, "umask", lambda _v: 0o022)  # typical desktop umask
 
     config = XPSTConfig.load()
     config.instagram.graph_access_token = "example-graph-token"
@@ -489,7 +510,7 @@ def test_credentials_are_not_left_world_readable(tmp_path, monkeypatch):
     from xpst.utils.credentials import CredentialStore
 
     store = CredentialStore(str(config_dir))
-    store.store("instagram:graph_access_token", "example-graph-token")
+    store.store("instagram_graph_token", "example-graph-token")
 
     StateStore(config_dir).update(lambda s: {**s, "content_hashes": {"vid": "hash"}})
 
@@ -500,15 +521,20 @@ def test_credentials_are_not_left_world_readable(tmp_path, monkeypatch):
     for path in secret_bearing:
         if path.is_dir():
             continue
-        mode = stat.S_IMODE(path.stat().st_mode)
-        assert mode & 0o077 == 0, f"{path.name} is group/world accessible ({oct(mode)})"
+        if _posix_perms_enforced():
+            mode = stat.S_IMODE(path.stat().st_mode)
+            assert mode & 0o077 == 0, f"{path.name} is group/world accessible ({oct(mode)})"
         assert "example-graph-token" not in path.read_text(errors="replace") or path.name == "config.yaml"
 
     # The credential *value* is not readable in any file that is not 0600.
-    for path in config_dir.rglob("*"):
-        if not path.is_file():
-            continue
-        if stat.S_IMODE(path.stat().st_mode) & 0o077:
-            assert "example-graph-token" not in path.read_text(errors="replace"), (
-                f"credential left in a world-readable file: {path}"
-            )
+    # On Windows every file "is" group/world accessible by this measure (stat
+    # reports 0o666 regardless), so the 0600 guarantee there comes from the
+    # user-profile ACL rather than chmod -- only meaningful where enforced.
+    if _posix_perms_enforced():
+        for path in config_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            if stat.S_IMODE(path.stat().st_mode) & 0o077:
+                assert "example-graph-token" not in path.read_text(errors="replace"), (
+                    f"credential left in a world-readable file: {path}"
+                )
