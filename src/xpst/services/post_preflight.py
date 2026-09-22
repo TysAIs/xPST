@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlparse
 
 from xpst.config import EncodingConfig, XPSTConfig
+from xpst.content import ContentType, UnknownContentTypeError, coerce_content_type, text_limit
 from xpst.media.pipeline import TransformPlan, plan_transform
 from xpst.media.specs import (
     MODALITY_CHECK,
@@ -30,7 +31,24 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 _SUPPORTED_PLATFORMS = tuple(PLATFORM_SPECS)
-_CAPTION_LIMITS = {"threads": 500}
+
+#: Content types that carry no media, so "at least one media path is required"
+#: does not apply to them.
+_MEDIA_LESS_CONTENT_TYPES = frozenset({ContentType.TEXT, ContentType.THREAD})
+
+
+def content_needs_media(content_type: str | None) -> bool:
+    """Whether a content type requires media (the pre-contract default: yes).
+
+    An unrecognized or absent value keeps the legacy behaviour — a plan without
+    a file is blocked — so a typo can never turn into a media-less post.
+    """
+    if not content_type:
+        return True
+    try:
+        return coerce_content_type(content_type) not in _MEDIA_LESS_CONTENT_TYPES
+    except UnknownContentTypeError:
+        return True
 
 
 @dataclass(frozen=True)
@@ -121,6 +139,10 @@ class PostPlanRequest:
     per_platform_captions: Mapping[str, str] = field(default_factory=dict)
     platform_captions: Mapping[str, str] | None = None
     captions: Mapping[str, str] | None = None
+    #: What the caller is posting, in the canonical vocabulary. ``text`` (and
+    #: ``thread``) carry no media, so the media requirement does not apply to
+    #: them; every other value keeps the legacy "a file is required" rule.
+    content_type: str | None = None
     config: XPSTConfig | None = None
     include_transform: bool = True
     include_readiness: bool = True
@@ -128,6 +150,8 @@ class PostPlanRequest:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "media_paths", tuple(self.media_paths))
+        if self.content_type is not None:
+            object.__setattr__(self, "content_type", str(self.content_type).strip().lower() or None)
         normalized = tuple(dict.fromkeys(str(platform).strip().lower() for platform in self.target_platforms))
         object.__setattr__(self, "target_platforms", normalized)
         caption_overrides: dict[str, str] = {}
@@ -375,10 +399,12 @@ class PostPreflightService:
             media_plans.append(media_plan)
             platform_issues.extend(media_plan.hard_blockers)
 
-        if not request.media_paths:
+        if not request.media_paths and content_needs_media(request.content_type):
             platform_issues.append(PreflightIssue("MEDIA_REQUIRED", "At least one media path is required.", "blocker"))
 
-        limit = _CAPTION_LIMITS.get(platform)
+        # One source for the limit: xpst.content.TEXT_LIMITS (the same number the
+        # sender refuses on), so a plan and a publish cannot disagree.
+        limit = text_limit(platform)
         if limit is not None and len(caption) > limit:
             platform_issues.append(
                 PreflightIssue(
@@ -602,7 +628,7 @@ class PostPreflightService:
             "containers": list(spec.containers),
             "caption": {
                 "observed_characters": len(caption),
-                "max_characters": _CAPTION_LIMITS.get(platform),
+                "max_characters": text_limit(platform),
             },
         }
 

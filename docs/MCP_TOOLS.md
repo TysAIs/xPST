@@ -240,12 +240,15 @@ can really publish (`content.publish_routes`, `content.platforms.*.implemented`)
 
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| `caption` | string | yes | — | Caption/title for the post (the text itself for a text post). |
+| `caption` | string | yes* | — | Caption/title for the post. |
+| `text` | string | no | — | The body of a text post. Sending `text` with no file implies `content_type: "text"`. |
 | `video_path` | string | no | — | Path to the video (or first carousel item). Omit for a text post. |
 | `content_type` | string | no | inferred | `video`, `image`, `carousel`, `text`, or `thread`. |
 | `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`. |
 | `carousel_paths` | string[] | no | `[]` | Additional image/video paths for a carousel. |
 | `dry_run` | boolean | no | `false` | Preview without uploading. Always use first. |
+
+\* `caption` is required for media posts; for a text post supply `text` (or `caption`).
 
 Example call:
 
@@ -261,12 +264,21 @@ Example call:
 }
 ```
 
+Example text post (X and Threads both publish text; a text post carries no file):
+
+```json
+{
+  "name": "xpst_post",
+  "arguments": { "text": "Shipping the text-post path today.", "platforms": ["x", "threads"] }
+}
+```
+
 Example refusal (a text post to a destination with no text path):
 
 ```json
 {
   "name": "xpst_post",
-  "arguments": { "caption": "hello", "content_type": "text", "platforms": ["youtube"] }
+  "arguments": { "text": "hello", "platforms": ["youtube"] }
 }
 ```
 
@@ -278,7 +290,7 @@ Example refusal (a text post to a destination with no text path):
   "content_type": "text",
   "blockers": ["youtube does not support text posts. Supported content types for youtube: video."],
   "destinations": [{ "platform": "youtube", "success": false, "published": false }],
-  "content": { "effective_content_type": "text", "route": "unimplemented", "ok": false }
+  "content": { "effective_content_type": "text", "route": "text", "ok": false }
 }
 ```
 

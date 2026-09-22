@@ -415,9 +415,10 @@ Features during watch:
 ### `xpst post`
 
 Manually post a local video file, a carousel (multiple `--video` flags), or a text post
-(`--content-type text` with no file). `--content-type` states what the post is in the
-canonical vocabulary (`video`, `image`, `carousel`, `text`, `thread`); omit it and the media
-decides (one file = video, several = carousel).
+(`--text "..."`, or `--caption` with `--content-type text`). `--content-type` states what
+the post is in the canonical vocabulary (`video`, `image`, `carousel`, `text`, `thread`);
+omit it and the media decides (one file = video, several = carousel). A text post carries no
+media at all: no file to encode and no ffmpeg needed.
 
 A content type the chosen destination cannot publish is refused **before anything is
 uploaded**, with the reason in `blockers` and exit code 1 — never reported as a success. Run
@@ -439,8 +440,11 @@ xpst post -v ./my-video.mp4 -c "Test" --dry-run
 # State the modality explicitly
 xpst post -v ./clip.mp4 -c "Test" --content-type video -p youtube
 
-# Text post: refused by destinations with no text path, and it says why
-xpst post -c "hello world" --content-type text -p threads
+# Text post: no media pipeline, one API call per destination
+xpst post --text "Shipping the text-post path today." -p x,threads
+
+# A text post to a destination with no text path is refused, and it says why
+xpst post --text "hello world" -p youtube
 
 # JSON output
 xpst post -v ./my-video.mp4 -c "Test" --json
@@ -1036,9 +1040,9 @@ Vocabulary: video, image, carousel, text, thread
 | Destination            | Declared | Implemented | Notes |
 |------------------------|----------|-------------|-------|
 | YouTube Shorts (youtube) | video  | video       | always forced to Shorts … |
-| X (x)                  | video, carousel | video, carousel | carousel is a tweet thread, one media per tweet |
+| X (x)                  | video, carousel, text | video, carousel, text | carousel is a tweet thread, one media per tweet; text is one post (280 chars, no media) |
 | Instagram Reels (instagram) | video, carousel | video, carousel | native album upload (2-10 items) |
-| Threads (threads)      | video    | video       | no text path: only a media_type VIDEO container exists |
+| Threads (threads)      | video, text | video, text | video needs a public URL; text is a media_type TEXT container (500 chars) |
 ```
 
 The JSON form also carries `publish_routes` (the publishing path per content type) and

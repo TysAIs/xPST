@@ -1099,7 +1099,8 @@ def create_api_router(
         from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
 
         media_path = str(payload.get("media_path") or "").strip()
-        caption = str(payload.get("caption") or "")
+        # `text` is the text-post spelling of `caption`; both name the same body.
+        caption = str(payload.get("text") or payload.get("caption") or "")
         content_type = payload.get("content_type")
         platforms = [
             str(item).lower()
@@ -1138,6 +1139,9 @@ def create_api_router(
                     media_paths=[media_path] if media_path else [],
                     target_platforms=platforms,
                     base_caption=caption,
+                    # A text post carries no file, so the media requirement must
+                    # not be applied to it (it would block every text preflight).
+                    content_type=verdict["effective_content_type"],
                 )
             ).to_dict()
             canonical_blockers = [issue["message"] for issue in plan["hard_blockers"]]

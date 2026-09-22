@@ -651,6 +651,102 @@ class UploadService:
                 platform=platform_name,
             )
 
+    async def upload_text_to_platform(
+        self,
+        uploader: PlatformUploader,
+        text: str,
+        platform_name: str,
+        video_id: str,
+        source_platform: str = "",
+    ) -> UploadResult:
+        """Publish a text-only post to a single platform.
+
+        Same pipeline as :meth:`upload_to_platform` — ToS warning, circuit
+        breaker, quota preflight, retry, state, notifications — with the media
+        stages removed: there is no file to encode, nothing to upload and no
+        content hash to dedup on. The post is recorded in state under
+        ``video_id`` so text posts show up in the same "what did I post"
+        surface as everything else instead of vanishing.
+
+        A text post is NOT retried on an ambiguous failure for destinations
+        without server-side duplicate detection: the result is surfaced for a
+        deliberate retry rather than risking a double-post.
+        """
+        # ToS warning for unofficial API platforms
+        if platform_name in _TOS_UNOFFICIAL_PLATFORMS:
+            logger.warning(
+                "Using unofficial API for %s - may violate platform ToS",
+                platform_name,
+            )
+
+        # Check circuit breaker
+        if not self.circuit_breakers.allow_request(platform_name):
+            logger.warning("Circuit breaker open for %s, skipping", platform_name)
+            return UploadResult(
+                success=False,
+                error="Circuit breaker open",
+                platform=platform_name,
+            )
+
+        # Pre-flight quota check (fail fast, before the network call)
+        try:
+            self.quota_manager.preflight(platform_name)
+        except QuotaExhaustedError as exc:
+            logger.warning("Pre-flight quota check failed for %s: %s", platform_name, exc)
+            return UploadResult(
+                success=False,
+                error=str(exc),
+                platform=platform_name,
+                metadata={"quota": exc.to_dict()},
+            )
+
+        try:
+            raw_upload_result = await retry_operation(
+                uploader.post_text,
+                text,
+                config=STANDARD_RETRY,
+                platform=platform_name,
+                ambiguous_safe=platform_name == "x",
+            )
+            upload_result = normalize_upload_result(raw_upload_result, platform_name)
+
+            if upload_result.is_published:
+                self.state.mark_video_posted(
+                    video_id,
+                    platform_name,
+                    post_id=upload_result.post_id,
+                    post_url=upload_result.post_url,
+                    caption=text,
+                    source_platform=source_platform,
+                )
+                self.circuit_breakers.record_success(platform_name)
+                self.quota_manager.record_upload(platform_name)
+                self.notifier.notify_upload_success(
+                    platform=platform_name,
+                    video_id=video_id,
+                    post_url=upload_result.post_url or "",
+                )
+            else:
+                self.circuit_breakers.record_failure(
+                    platform_name,
+                    upload_result.error or "text post did not publish",
+                )
+                self.notifier.notify_upload_failure(
+                    platform=platform_name,
+                    video_id=video_id,
+                    error=upload_result.error or "Unknown error",
+                )
+
+            return upload_result
+
+        except Exception as e:
+            logger.error("Text post failed for %s: %s", platform_name, e)
+            return UploadResult(
+                success=False,
+                error=f"Text post failed: {str(e)[:200]}",
+                platform=platform_name,
+            )
+
     async def _encode_for_platform(
         self,
         video_path: Path,

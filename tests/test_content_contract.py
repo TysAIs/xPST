@@ -61,7 +61,7 @@ EXPECTED_MATRIX: dict[tuple[str, str], bool] = {
     ("x", "video"): True,
     ("x", "image"): False,
     ("x", "carousel"): True,  # published as a tweet thread, one media per tweet
-    ("x", "text"): False,
+    ("x", "text"): True,  # post_text (280 characters, no media)
     ("x", "thread"): False,  # no text-thread sender; multi-media posts are carousel
     ("instagram", "video"): True,
     ("instagram", "image"): False,  # the Graph path is REELS-only: no feed-photo path
@@ -76,7 +76,7 @@ EXPECTED_MATRIX: dict[tuple[str, str], bool] = {
     ("threads", "video"): True,
     ("threads", "image"): False,
     ("threads", "carousel"): False,
-    ("threads", "text"): False,  # only a media_type VIDEO container is built
+    ("threads", "text"): True,  # post_text builds a media_type TEXT container
     ("threads", "thread"): False,
 }
 
@@ -404,7 +404,9 @@ def test_override_content_type_is_validated_for_that_destination() -> None:
         {
             "media_paths": ["a.mp4"],
             "platforms": ["youtube", "x"],
-            "overrides": {"x": {"content_type": "text"}},
+            # x/thread is still unimplemented (x/text is implemented now — see
+            # tests/test_text_posts.py), so the override is refused for x only.
+            "overrides": {"x": {"content_type": "thread"}},
         }
     )
     issues = [issue for issue in validate_content_request(request) if issue.code == "content_type.unsupported"]
@@ -460,6 +462,17 @@ def _recording_uploader(platform: str, *, success: bool = True) -> MagicMock:
     )
     uploader.upload_carousel = AsyncMock(
         return_value=UploadResult(success=success, post_id="c1", post_url="https://example.invalid/c1", platform=platform)
+    )
+    # A double for a destination with no text path: the base class's default
+    # behaviour, spelled out so a text request still gets a destination-named
+    # refusal instead of a generic adapter error.
+    uploader.post_text = AsyncMock(
+        return_value=UploadResult(
+            success=False,
+            error=f"{platform.upper()}_TEXT_UNSUPPORTED: {platform} has no text-post path in xPST.",
+            platform=platform,
+            retryable=False,
+        )
     )
     uploader.check_health = AsyncMock(return_value=PlatformHealth(platform=platform, authenticated=True, session_valid=True))
     uploader.delete = MagicMock(return_value=True)
