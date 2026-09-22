@@ -425,23 +425,27 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
     "x": _publish_profile(
         "x",
         "X",
-        declared_labels=("video", "thread"),
-        implemented=(ContentType.VIDEO, ContentType.CAROUSEL),
+        declared_labels=("video", "thread", "image"),
+        implemented=(ContentType.VIDEO, ContentType.CAROUSEL, ContentType.IMAGE),
         notes={
             ContentType.THREAD: (
                 "declared as `thread`; a text-only thread has no implementation. "
                 "Multi-media posting works as a tweet thread and is reported as carousel."
             ),
             ContentType.CAROUSEL: "published as a tweet thread, one media item per tweet (upload_carousel)",
+            ContentType.IMAGE: "single image post (upload_image): JPG/PNG/WEBP, ≤ 5 MB, aspect 1:3–3:1",
         },
     ),
     "instagram": _publish_profile(
         "instagram",
         "Instagram Reels",
         declared_labels=("video", "image", "carousel"),
-        implemented=(ContentType.VIDEO, ContentType.CAROUSEL),
+        implemented=(ContentType.VIDEO, ContentType.CAROUSEL, ContentType.IMAGE),
         notes={
-            ContentType.IMAGE: "declared as `image`; single-image feed posting is not implemented",
+            ContentType.IMAGE: (
+                "feed photo (upload_image): JPEG only, ≤ 8 MB, aspect within 4:5–1.91:1; "
+                "the Graph API path needs a public image URL and refuses a local file explicitly"
+            ),
             ContentType.CAROUSEL: "native album upload (2-10 items)",
         },
     ),

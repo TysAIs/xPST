@@ -726,6 +726,106 @@ class CrossPostEngine:
         self.state.save()
         return result
 
+    async def post_manual_image(
+        self,
+        image_path: Path,
+        caption: str,
+        platforms: list[str] | None = None,
+    ) -> CrossPostResult:
+        """Publish a single image to the specified platforms.
+
+        Each destination publishes the image natively:
+
+        - Instagram: feed photo (``photo_upload`` / Graph API image container)
+        - X: image post (twikit media upload / v1.1 chunked media + v2 tweet)
+
+        The file is never encoded: an image is not a video, and no destination's
+        image path invokes ffmpeg. A destination whose adapter has no image path
+        (or that refuses this image format, aspect or size) reports an explicit
+        failure naming the reason — nothing is silently uploaded as a video.
+
+        Args:
+            image_path: Path to the image file on disk.
+            caption: Caption/text for the post.
+            platforms: Target platform names. None means all enabled platforms.
+
+        Returns:
+            CrossPostResult with per-platform outcomes.
+
+        Raises:
+            FileNotFoundError: If a local image_path does not exist.
+        """
+        if not str(image_path).startswith(("http://", "https://")) and not image_path.exists():
+            raise FileNotFoundError(f"Image not found: {image_path}")
+
+        if platforms is None:
+            platforms = list(self._platforms.keys())
+
+        from xpst.utils.content_hash import compute_content_hash
+
+        video_id = f"image_{image_path.stem}-{compute_content_hash(file_path=image_path, filename=image_path.name)[:8]}"
+
+        result = CrossPostResult(
+            video_id=video_id,
+            caption=caption,
+        )
+
+        for platform_name in platforms:
+            if self.shutdown_handler.should_shutdown:
+                logger.info("Shutdown requested, stopping image post")
+                break
+
+            uploader = self._platforms.get(platform_name)
+            if not uploader:
+                logger.warning(f"Platform {platform_name} not available")
+                continue
+
+            upload_result = await self.upload_service.upload_image_to_platform(
+                uploader=uploader,
+                image_path=image_path,
+                caption=caption,
+                platform_name=platform_name,
+                video_id=video_id,
+                source_platform="local",
+            )
+
+            result.results[platform_name] = upload_result
+
+            # Notifications, circuit breaking, quota and state are owned by
+            # ``upload_service.upload_image_to_platform`` (it reports the outcome
+            # once per upload) — the engine must not announce the same upload a
+            # second time, or every webhook fires twice.
+
+        # Record the cross-post group (B1) so an image post also aggregates as a
+        # single analytics entry.
+        platforms_data = [
+            {
+                "platform": platform_name,
+                "post_id": upload_result.post_id,
+                "url": upload_result.post_url,
+            }
+            for platform_name, upload_result in result.results.items()
+            if upload_result.is_published
+        ]
+        if platforms_data:
+            try:
+                from xpst.analytics_store import AnalyticsStore
+
+                store = AnalyticsStore()
+                store.record_cross_post_group(
+                    content_hash=video_id,
+                    video_id=video_id,
+                    caption=caption,
+                    source_url=str(image_path),
+                    platforms=platforms_data,
+                )
+            except Exception as exc:  # noqa: BLE001 — analytics must never block posting
+                logger.warning("Failed to record cross-post group: %s", exc)
+
+        result.update_status()
+        self.state.save()
+        return result
+
     # ── Typed content requests (the content_type contract) ──────────────
 
     async def post_request(self, request: ContentRequest) -> CrossPostResult:
@@ -779,6 +879,8 @@ class CrossPostEngine:
         media = list(request.resolved_media)
         if content_type is ContentType.VIDEO and len(media) == 1:
             return await self.post_manual(media[0], request.text, platforms)
+        if content_type is ContentType.IMAGE and len(media) == 1:
+            return await self.post_manual_image(media[0], request.text, platforms)
         if content_type is ContentType.CAROUSEL and len(media) >= 2:
             return await self.post_manual_carousel(media, request.text, platforms)
 
