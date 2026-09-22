@@ -101,6 +101,8 @@ export function postRequestSummary(request) {
   return {
     media_paths: [...(request.media_paths ?? [])],
     caption: String(request.caption ?? ""),
+    overrides: { ...(request.overrides ?? {}) },
+    captions: { ...(request.captions ?? {}) },
     platforms: [...(request.platforms ?? [])],
     dry_run: Boolean(request.dry_run),
   };
@@ -217,6 +219,7 @@ export function destinationOutcomes(envelope) {
       detail: row.error ?? (row.post_url || ""),
       postUrl: row.post_url ?? null,
       retryable: row.retryable ?? null,
+      caption: row.caption ?? null,
     };
   });
 }

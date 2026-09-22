@@ -34,6 +34,9 @@
   let selectedMedia = $state("");
   let caption = $state("");
   let selected = $state({});
+  // Per-destination copy: platform -> caption. An empty entry means "use the
+  // shared caption", and only the chosen destinations are ever sent.
+  let overrides = $state({});
   let dryRun = $state(false);
   let posting = $state(false);
   let postError = $state("");
@@ -119,6 +122,24 @@
   const chosen = $derived(destinations.filter((row) => selected[row.name] && row.ready));
   const summary = $derived(targetSummary(destinations));
   const canPost = $derived(Boolean(selectedMedia) && !posting);
+  // The copy each chosen destination will receive: its own text when the user
+  // wrote one, else the shared caption. This is what the engine is asked for.
+  const captions = $derived(
+    Object.fromEntries(chosen.map((row) => [row.name, overrides[row.name] ?? caption]))
+  );
+  // Only the destinations whose copy differs from the shared caption, which is
+  // exactly the shape /api/post and /api/preflight accept.
+  const sentOverrides = $derived(
+    Object.fromEntries(
+      chosen
+        .filter((row) => (overrides[row.name] ?? "") !== "" && overrides[row.name] !== caption)
+        .map((row) => [row.name, { text: overrides[row.name] }])
+    )
+  );
+
+  function setOverride(platform, value) {
+    overrides = { ...overrides, [platform]: value };
+  }
 
   function toggleDestination(row) {
     if (!row.ready) return;
@@ -173,6 +194,7 @@
         media_paths: selectedMedia ? [selectedMedia] : [],
         caption,
         platforms: chosen.map((row) => row.name),
+        overrides: sentOverrides,
         dry_run: true,
       });
     } catch (cause) {
@@ -189,6 +211,8 @@
     const request = postRequestSummary({
       media_paths: selectedMedia ? [selectedMedia] : [],
       caption,
+      overrides: sentOverrides,
+      captions,
       platforms: chosen.map((row) => row.name),
       dry_run: dryRun,
     });
@@ -330,6 +354,35 @@
           No destination is ready, so posting is refused by the engine. <a class="xpst-inline-link" href="#/connect">Connect a destination</a>.
         </p>
       {/if}
+      {#if chosen.length}
+        <div class="xpst-field">
+          <p class="xpst-field__label">Copy per destination</p>
+          <p class="xpst-field__hint">
+            Leave a field empty to send the shared caption. A caption over that
+            destination's own limit is refused before anything is uploaded, and the
+            destination is named in the refusal.
+          </p>
+          {#each chosen as row (row.name)}
+            <div class="xpst-field">
+              <label class="xpst-field__label" for={`compose-caption-${row.name}`}>
+                Caption for {row.displayName}
+              </label>
+              <textarea
+                id={`compose-caption-${row.name}`}
+                class="xpst-field__input"
+                rows="2"
+                value={overrides[row.name] ?? ""}
+                placeholder={caption ? `Uses the shared caption (${caption.length} characters)` : "Uses the shared caption"}
+                oninput={(event) => setOverride(row.name, event.currentTarget.value)}
+              ></textarea>
+              <p class="xpst-field__hint">
+                {(overrides[row.name] ?? caption).length} characters
+                {#if (overrides[row.name] ?? "") === ""} · shared caption{/if}
+              </p>
+            </div>
+          {/each}
+        </div>
+      {/if}
     {/if}
 
     <label class="xpst-inline-meta">
@@ -363,6 +416,16 @@
         <dt>Destinations</dt>
         <dd>{preflight.requested?.join(", ") || "none"}</dd>
       </div>
+      {#if preflight.captions}
+        <div>
+          <dt>Copy per destination</dt>
+          <dd>
+            {Object.entries(preflight.captions)
+              .map(([platform, text]) => `${platform}: ${text}`)
+              .join(" · ")}
+          </dd>
+        </div>
+      {/if}
       <div>
         <dt>Blockers</dt>
         <dd>{preflight.blockers?.length ? preflight.blockers.join("; ") : "None"}</dd>
