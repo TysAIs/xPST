@@ -41,7 +41,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | Tool | Purpose | Mutates real accounts | Consent gate |
 |------|---------|-----------------------|--------------|
 | `xpst_run` | Check for new videos and cross-post them to configured platforms | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
-| `xpst_post` | Manually post a local video file or carousel to platforms | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_post` | Post to platforms: one local video/image file, a carousel (carousel_paths), o… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_analytics` | Per-post and per-platform engagement metrics (views, likes, comments, shares)… | No | — |
 | `xpst_cross_post_analytics` | Cross-post correlation analytics (B1): one video posted to multiple platforms… | No | — |
 | `xpst_followers` | Follower counts per platform with growth history. Returns total followers acr… | No | — |
@@ -51,17 +51,24 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_generate_ideas` | Generate post ideas for a content topic (AI content studio). Uses the KB LLM… | No | — |
 | `xpst_transcript` | Get the transcript for a video by its content_hash or video_id. Returns the f… | No | — |
 | `xpst_search` | Search the knowledge base for nuggets, clips, and topics. Returns matching kn… | No | — |
+| `xpst_activity` | List recorded platform failures with targeted retry or review actions (read-o… | No | — |
 | `xpst_schedule_list` | List scheduled posts (pending, completed, failed) with times and targets | No | — |
 | `xpst_schedule_add` | Schedule a post for later: local video file + caption + ISO-8601 time, option… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_schedule_cancel` | Cancel a scheduled post by entry id — the MCP equivalent of `xpst schedule re… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_failures_retry` | Retry ONE recorded upload failure, identified by video_id + platform — the MC… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_health` | Test connectivity to all platforms and sources (no uploads) | No | — |
 | `xpst_status` | Show cross-posting statistics and health status | No | — |
 | `xpst_backfill` | Retry failed or incomplete posts from history | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No | — |
-| `xpst_auth_status` | Show authentication status for all platforms | No | — |
+| `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No | — |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No | — |
+| `xpst_capabilities` | Return the canonical role-aware provider catalog AND the content contract wit… | No | — |
+| `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets… | No | — |
+| `xpst_readiness` | Return local setup readiness and actionable blockers without starting the pos… | No | — |
+| `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or acce… | No | — |
 | `xpst_providers` | List supported content sources and posting destinations with capabilities | No | — |
 | `xpst_disconnect` | Disconnect a platform: remove its stored account credentials (tokens, cookies… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
-| `xpst_delete` | Delete a post record from state | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_delete` | Delete a post RECORD from local xPST state only (operation=delete_record, sco… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `messenger_send` | Send a text message to a Messenger recipient (page-scoped PSID) via the Meta… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `messenger_set_rules` | Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->re… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_messenger_check_comments` | Fetch recent comments on an Instagram or Facebook post and auto-reply per the… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
@@ -69,8 +76,12 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `kb_query` | Return stored knowledge nuggets whose text matches the query | No | — |
 | `kb_organize` | Discover areas, tag difficulty, and assign nuggets | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `kb_areas` | List discovered knowledge areas in course order (beginner -> advanced) | No | — |
+| `xpst_setup_start` | Start or return the shared resumable setup transaction | No | — |
+| `xpst_setup_status` | Read the shared setup transaction and pending human actions | No | — |
+| `xpst_setup_resume` | Resume setup with safe step state or caller-verified readiness | No | — |
+| `xpst_setup_reset` | Reset the shared setup transaction and its recovery copies | No | — |
 
-Registry size: **29 tools**.
+Registry size: **40 tools**.
 <!-- END GENERATED TOOL INDEX -->
 
 ---
