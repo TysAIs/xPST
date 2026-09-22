@@ -76,6 +76,7 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
 from xpst.config import XPSTConfig
 from xpst.content import (
     CONTENT_TYPES,
+    PUBLISH_ROUTE_TEXT,
     PUBLISH_ROUTE_UNIMPLEMENTED,
     ContentRequest,
     capability_document,
@@ -281,6 +282,14 @@ TOOLS: list[Tool] = [
                 "caption": {
                     "type": "string",
                     "description": "Caption (or the text itself for a text post)",
+                },
+                "text": {
+                    "type": "string",
+                    "description": (
+                        "Text of a text-only post (no media). Same body as `caption`; "
+                        "passing `text` with `content_type: text` (or on its own) "
+                        "publishes a text post. Destinations with no text path refuse it."
+                    ),
                 },
                 "platforms": {
                     "type": "array",
@@ -1291,17 +1300,23 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
     carousel_paths = list(args.get("carousel_paths") or [])
     video_path = args.get("video_path")
     content_type = args.get("content_type")
-    caption = str(args.get("caption") or "")
+    # `text` is the text-post spelling of `caption`; both name the same body.
+    caption = str(args.get("text") or args.get("caption") or "")
+
+    if args.get("text") and not video_path and not content_type:
+        # A text argument with no file IS a text post: state it rather than
+        # inferring it, so the verdict and the route agree with the CLI/HTTP.
+        content_type = "text"
 
     if not video_path and not content_type:
-        # Same request-shape rule as the CLI: without a file or a stated content
-        # type there is nothing to post, and guessing "video" would fabricate a
-        # request the caller never made.
+        # Same request-shape rule as the CLI: without a file, a text body or a
+        # stated content type there is nothing to post, and guessing "video"
+        # would fabricate a request the caller never made.
         payload = {
             "ok": False,
             "blockers": [
-                'Provide "video_path" (a file to post) or "content_type" '
-                '(what this post is, e.g. "text").'
+                'Provide "video_path" (a file to post), "text" (a text post), or '
+                '"content_type" (what this post is, e.g. "text").'
             ],
             "network_calls": False,
         }
@@ -1324,6 +1339,7 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                     media_paths=media_paths,
                     target_platforms=targets,
                     base_caption=caption,
+                    content_type=verdict["effective_content_type"],
                 )
             ).to_dict()
             blockers.extend(issue["message"] for issue in plan_payload["hard_blockers"])
@@ -1372,7 +1388,9 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
 
     from pathlib import Path
 
-    if len(media_paths) > 1:
+    if verdict["route"] == PUBLISH_ROUTE_TEXT:
+        result = await engine.post_text(caption, args.get("platforms"))
+    elif len(media_paths) > 1:
         result = await engine.post_manual_carousel(
             media_paths=[Path(p) for p in media_paths],
             caption=caption,
@@ -2030,6 +2048,9 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
             media_paths=[media_path] if media_path else [],
             target_platforms=platforms,
             base_caption=caption,
+            # A text post carries no file: the media requirement must not be
+            # applied to it, or every text preflight would be blocked.
+            content_type=verdict["effective_content_type"],
         )
     ).to_dict()
     blockers = [issue["message"] for issue in plan["hard_blockers"]] + verdict["blockers"]

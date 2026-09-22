@@ -301,6 +301,7 @@ xPST provides 47 top-level commands (70 including subcommands). Run `xpst --help
 | `xpst watch` | Continuous monitoring loop (runs until Ctrl+C) |
 | `xpst watch --interval 300` | Check every 300 seconds (default: from config) |
 | `xpst post -v VIDEO -c CAPTION` | Manually post a video file; use multiple `-v` for carousel |
+| `xpst post --text 'TEXT' -p x,threads` | Publish a text-only post (no file, no ffmpeg) to destinations with a text path |
 | `xpst post -v v.mp4 -c 'text' -p youtube,x,threads` | Post to specific platforms only |
 | `xpst backfill` | Retry failed or incomplete posts from history |
 | `xpst backfill --dry-run` | Show what would be backfilled without uploading |

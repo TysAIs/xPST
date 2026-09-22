@@ -58,6 +58,31 @@ MEDIA_KIND_VIDEO = "video"
 MEDIA_KIND_IMAGE = "image"
 MEDIA_KIND_UNKNOWN = "unknown"
 
+# ── Text limits: one number per destination, in one place ───────────────────
+#: Maximum characters one post's text may carry, per destination.
+#:
+#: This is THE single source for the limit. The uploaders import it (so a sender
+#: cannot carry a different number than preflight enforces), each provider
+#: manifest reports it as ``extra["max_caption_length"]``, and
+#: ``tests/test_content_contract.py`` pins both directions — a destination whose
+#: sender or manifest disagrees with this table fails the suite rather than
+#: silently truncating a post at a number nobody else can see.
+#:
+#: A destination absent from this mapping has no *verified* limit, so nothing is
+#: checked for it: xPST does not invent a character count it has not confirmed.
+TEXT_LIMITS: dict[str, int] = {
+    "x": 280,
+    "threads": 500,
+    "instagram": 2200,
+    "tiktok": 2200,
+    "messenger": 640,
+}
+
+
+def text_limit(platform: str) -> int | None:
+    """Return the verified maximum text length for a destination, or ``None``."""
+    return TEXT_LIMITS.get(str(platform).strip().lower())
+
 
 def media_kind(path: str | Path) -> str:
     """Classify one media path as ``video``, ``image`` or ``unknown``.
@@ -344,11 +369,15 @@ class DestinationContentProfile:
 
 #: Uploader method that must exist (and be overridden) for a content type to
 #: count as implemented. Read by the contract tests, which check the real code.
+#: A *messaging* adapter (Messenger) is the exception: its text path is
+#: ``send_text`` and delivers a DM, so it is checked by name in
+#: ``test_message_destination_implements_only_its_message_path`` instead — a
+#: publishing destination implements ``post_text``.
 IMPLEMENTATION_METHODS: dict[ContentType, str] = {
     ContentType.VIDEO: "upload",
     ContentType.CAROUSEL: "upload_carousel",
     ContentType.IMAGE: "upload_image",
-    ContentType.TEXT: "send_text",
+    ContentType.TEXT: "post_text",
     ContentType.THREAD: "upload_thread",
 }
 
@@ -425,10 +454,10 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
     "x": _publish_profile(
         "x",
         "X",
-        declared_labels=("video", "carousel"),
-        implemented=(ContentType.VIDEO, ContentType.CAROUSEL),
+        declared_labels=("video", "carousel", "text"),
+        implemented=(ContentType.VIDEO, ContentType.CAROUSEL, ContentType.TEXT),
         notes={
-            ContentType.TEXT: "not declared: xPST has no text-only sender for X",
+            ContentType.TEXT: "one text post (280 characters max); no media, published via post_text",
             ContentType.THREAD: (
                 "not declared: a text-only thread has no sender. Multi-media posting "
                 "works as a tweet thread and is reported as carousel."
@@ -456,9 +485,12 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
     "threads": _publish_profile(
         "threads",
         "Threads",
-        declared_labels=("video",),
-        implemented=(ContentType.VIDEO,),
-        notes={ContentType.TEXT: "not declared: the adapter only builds a media_type VIDEO container, so there is no text path"},
+        declared_labels=("video", "text"),
+        implemented=(ContentType.VIDEO, ContentType.TEXT),
+        notes={
+            ContentType.TEXT: "one text post (500 characters max) via the TEXT container, no media needed",
+            ContentType.VIDEO: "URL-fetch only: the Meta Threads API needs a public video URL, not a local file",
+        },
     ),
     "messenger": DestinationContentProfile(
         platform="messenger",
@@ -890,6 +922,54 @@ def _media_issues(content_type: ContentType, media: Sequence[str]) -> list[Conte
     return issues
 
 
+def _text_issues(request: ContentRequest) -> list[ContentIssue]:
+    """Per-destination text findings: missing text, or text past the limit.
+
+    The limit comes from :data:`TEXT_LIMITS` — the same number the sender
+    imports — so a post is *refused with the destination and the limit named*
+    instead of being silently truncated to a length nobody can see. A messaging
+    destination is skipped here: it is refused for what it is, not for its size.
+    """
+    issues: list[ContentIssue] = []
+    for platform in request.platforms:
+        key = str(platform).strip().lower()
+        profile = content_profile(key)
+        if profile is not None and not profile.is_publishing:
+            continue
+        content_type = request.content_type_for(key)
+        body = request.text_for(key)
+        if content_type in _TEXT_ONLY and not body.strip():
+            issues.append(
+                ContentIssue(
+                    code="content_type.text_required",
+                    message=f"{content_type.label} for {key} need text: the request carried none.",
+                    severity="error",
+                    platform=key,
+                )
+            )
+            continue
+        limit = text_limit(key)
+        if limit is not None and len(body) > limit:
+            issues.append(
+                ContentIssue(
+                    code="content_type.text_too_long",
+                    message=(
+                        f"{key} accepts at most {limit} characters per post; this one has "
+                        f"{len(body)}. xPST will not truncate it — shorten the text"
+                        + (
+                            ""
+                            if request.override_for(key) is not None
+                            else f", or give {key} its own shorter text with a per-destination override."
+                        )
+                        + "."
+                    ),
+                    severity="error",
+                    platform=key,
+                )
+            )
+    return issues
+
+
 def validate_content_request(request: ContentRequest) -> tuple[ContentIssue, ...]:
     """Validate a request against the real capability table. Pure, no I/O.
 
@@ -915,26 +995,24 @@ def validate_content_request(request: ContentRequest) -> tuple[ContentIssue, ...
 
     content_type = request.effective_content_type
     issues.extend(_media_issues(content_type, request.media))
-
-    if content_type in _TEXT_ONLY and not request.text.strip():
-        issues.append(
-            ContentIssue(
-                code="content_type.text_required",
-                message=f"{content_type.label} need text: the request carried none.",
-                severity="error",
-            )
-        )
+    issues.extend(_text_issues(request))
 
     for name in request.overrides:
-        if str(name).strip().lower() not in {platform.lower() for platform in request.platforms}:
+        override_key = str(name).strip().lower()
+        if override_key not in {platform.lower() for platform in request.platforms}:
             issues.append(
                 ContentIssue(
                     code="content_type.override_destination",
                     message=(f"Per-destination overrides were given for {name}, which is not a requested destination."),
                     severity="error",
-                    platform=str(name).strip().lower(),
+                    platform=override_key,
                 )
             )
+            continue
+        if request.content_type_for(override_key) in _TEXT_ONLY:
+            # The text route reads the per-destination copy (engine.post_text
+            # takes one text per destination), so this override IS honoured and
+            # there is nothing to warn about.
             continue
         # The request shape carries per-destination copy, but no uploader reads
         # it yet: the engine still publishes the shared text to every
@@ -949,7 +1027,7 @@ def validate_content_request(request: ContentRequest) -> tuple[ContentIssue, ...
                     f"uploaders yet."
                 ),
                 severity="warning",
-                platform=str(name).strip().lower(),
+                platform=override_key,
             )
         )
 
@@ -1040,6 +1118,7 @@ def content_verdict(request: ContentRequest) -> dict[str, Any]:
 #: instead of being uploaded "as a video just in case".
 PUBLISH_ROUTE_VIDEO = "video"
 PUBLISH_ROUTE_CAROUSEL = "carousel"
+PUBLISH_ROUTE_TEXT = "text"
 PUBLISH_ROUTE_UNIMPLEMENTED = "unimplemented"
 
 #: The publishing path a content type takes once its media requirement is met.
@@ -1047,6 +1126,7 @@ PUBLISH_ROUTE_UNIMPLEMENTED = "unimplemented"
 _ROUTE_BY_CONTENT_TYPE: dict[ContentType, str] = {
     ContentType.VIDEO: PUBLISH_ROUTE_VIDEO,
     ContentType.CAROUSEL: PUBLISH_ROUTE_CAROUSEL,
+    ContentType.TEXT: PUBLISH_ROUTE_TEXT,
 }
 
 
@@ -1064,5 +1144,7 @@ def publish_route(request: ContentRequest) -> str:
     if route == PUBLISH_ROUTE_VIDEO and len(media) == 1:
         return route
     if route == PUBLISH_ROUTE_CAROUSEL and len(media) >= 2:
+        return route
+    if route == PUBLISH_ROUTE_TEXT and not media:
         return route
     return PUBLISH_ROUTE_UNIMPLEMENTED

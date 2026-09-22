@@ -19,9 +19,10 @@ from __future__ import annotations
 import re
 import urllib.parse
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from xpst.anti_bot import AntiBotProtection
+from xpst.content import TEXT_LIMITS
 from xpst.platforms.base import (
     DeleteOutcome,
     DeleteResult,
@@ -178,6 +179,12 @@ _apply_twikit_patches()
 class XUploader(PlatformUploader):
     """X/Twitter uploader with cookie-based authentication via twikit."""
 
+    #: Text-post limit, read from the content contract's single source
+    #: (:data:`xpst.content.TEXT_LIMITS`) so preflight and the sender cannot
+    #: disagree about how long a post may be. A missing entry is a loud
+    #: KeyError at import rather than a silently invented number.
+    MAX_TEXT_LENGTH = TEXT_LIMITS["x"]
+
     def __init__(self, config: XPSTConfig) -> None:
         """Initialize X/Twitter uploader with lazy client caching."""
         super().__init__(config)
@@ -224,8 +231,10 @@ class XUploader(PlatformUploader):
                 # ``carousel`` instead. Re-add "thread" in the same change that
                 # adds the text-thread sender; the content contract refuses a
                 # declared-but-unimplemented type and its test fails on drift.
-                "content": ("video", "carousel"),
-                "max_caption_length": 280,
+                # "text" IS implemented (post_text), so it is declared here and
+                # echoed by the content contract's table for this destination.
+                "content": ("video", "carousel", "text"),
+                "max_caption_length": self.MAX_TEXT_LENGTH,
                 "max_video_duration_seconds": 140,
             },
         )
@@ -520,6 +529,159 @@ class XUploader(PlatformUploader):
                 error=f"X_UPLOAD_ERROR: {str(e)[:200]}",
                 platform="x",
             )
+
+    # ── Text posts (content_type: text) ─────────────────────────────────
+
+    def _oauth1_client(self, timeout: int = 60) -> Any:
+        """Build the official-API OAuth 1.0a client for this config.
+
+        A method (rather than an inline import) so tests can stub the HTTP
+        client without patching authlib itself.
+        """
+        from authlib.integrations.httpx_client import AsyncOAuth1Client
+
+        x_config = self.config.x
+        return AsyncOAuth1Client(
+            x_config.api_key,
+            x_config.api_secret,
+            x_config.access_token,
+            x_config.access_token_secret,
+            timeout=timeout,
+        )
+
+    async def post_text(self, text: str) -> UploadResult:
+        """Publish a text-only post to X.
+
+        Dispatches on ``auth_mode`` exactly like :meth:`upload`:
+        ``api_v2`` posts through the official ``POST /2/tweets``, ``cookies``
+        posts through twikit's ``create_tweet``.
+
+        The text is sent **verbatim**: an empty post, or one longer than X's
+        limit, is refused with an explicit error naming the limit — xPST does
+        not truncate a post into something the user never wrote. The limit is
+        read from the content contract's single source
+        (:data:`xpst.content.TEXT_LIMITS`).
+
+        Args:
+            text: the post's text (no media).
+
+        Returns:
+            UploadResult with the tweet id and URL, or an explicit failure.
+        """
+        violation = self._text_limit_violation(text)
+        if violation is not None:
+            return violation
+        if self.config.x.auth_mode == "api_v2":
+            return await self._post_text_api_v2(text)
+        return await self._post_text_twikit(text)
+
+    async def _post_text_twikit(self, text: str) -> UploadResult:
+        """Publish a text post through twikit (cookie-based path)."""
+        try:
+            client = await self._get_client()
+            logger.info(f"Posting text to X ({len(text)} characters)")
+            tweet = await client.create_tweet(text=text)
+            tweet_id = getattr(tweet, "id", None)
+            if not tweet_id:
+                return UploadResult(
+                    success=False,
+                    error="X_POST_TEXT_ERROR: no tweet id in the create_tweet response",
+                    platform="x",
+                    retryable=False,
+                )
+            tweet_url = f"https://x.com/i/status/{tweet_id}"
+            logger.info(f"Posted text to X: {tweet_url}")
+            return UploadResult(
+                success=True,
+                post_id=str(tweet_id),
+                post_url=tweet_url,
+                platform="x",
+                metadata={
+                    "text_length": len(text),
+                    "content_type": "text",
+                    "auth_mode": "cookies",
+                },
+            )
+        except Exception as e:
+            return self._text_failure(e)
+
+    async def _post_text_api_v2(self, text: str) -> UploadResult:
+        """Publish a text post through the official X API v2 (OAuth 1.0a)."""
+        x_config = self.config.x
+        if not all([x_config.api_key, x_config.api_secret, x_config.access_token, x_config.access_token_secret]):
+            return UploadResult(
+                success=False,
+                error=(
+                    "X_API_V2_NOT_CONFIGURED: Set api_key, api_secret, access_token and "
+                    "access_token_secret in config, or switch auth_mode to 'cookies'."
+                ),
+                platform="x",
+                retryable=False,
+            )
+        try:
+            async with self._oauth1_client(timeout=60) as client:
+                logger.info(f"Posting text to X via API v2 ({len(text)} characters)")
+                resp = await client.post("https://api.twitter.com/2/tweets", json={"text": text})
+                resp.raise_for_status()
+                tweet_id = resp.json().get("data", {}).get("id")
+                if not tweet_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"X_API_V2_ERROR: No tweet ID in response: {resp.text[:200]}",
+                        platform="x",
+                        retryable=False,
+                    )
+                tweet_url = f"https://x.com/i/status/{tweet_id}"
+                logger.info(f"Posted text to X via API v2: {tweet_url}")
+                return UploadResult(
+                    success=True,
+                    post_id=str(tweet_id),
+                    post_url=tweet_url,
+                    platform="x",
+                    metadata={
+                        "text_length": len(text),
+                        "content_type": "text",
+                        "auth_mode": "api_v2",
+                    },
+                )
+        except Exception as e:
+            return self._text_failure(e)
+
+    def _text_failure(self, exc: Exception) -> UploadResult:
+        """Map a text-post exception onto the X error vocabulary."""
+        error_msg = str(exc).lower()
+        logger.error(f"X text post failed: {exc}")
+        if "unauthorized" in error_msg or "login" in error_msg or "401" in error_msg:
+            return UploadResult(
+                success=False,
+                error="X_SESSION_EXPIRED: Run 'xpst auth x'",
+                platform="x",
+                retryable=False,
+            )
+        if "rate limit" in error_msg or "429" in error_msg:
+            return UploadResult(
+                success=False,
+                error="X_RATE_LIMITED: Too many requests, try again later",
+                platform="x",
+                retryable=True,
+            )
+        if "duplicate" in error_msg:
+            # The upload path silently treats a duplicate as success; that is
+            # not honest for a text post — no new post exists, so say so.
+            return UploadResult(
+                success=False,
+                error=(
+                    "X_DUPLICATE_TEXT: X already has a post with this exact text, "
+                    "so nothing new was published."
+                ),
+                platform="x",
+                retryable=False,
+            )
+        return UploadResult(
+            success=False,
+            error=f"X_POST_TEXT_ERROR: {str(exc)[:200]}",
+            platform="x",
+        )
 
     async def _check_health_api_v2(self) -> PlatformHealth:
         """Check the configured official X API v2 user context."""
