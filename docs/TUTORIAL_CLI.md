@@ -461,6 +461,27 @@ Posting carousel (3 items) to: x
 carousel123 - ✅ Success
 ```
 
+**Exit status.** `xpst post` exits non-zero when nothing was published, so
+`xpst post … && echo ok` (and every cron job or agent wrapper that branches on
+the exit status) cannot read a failed post as success:
+
+| Exit | When |
+|------|------|
+| `0` | At least one destination published — **a partial success is a success** — or every destination was already posted (nothing to do) |
+| `4` | Every attempted destination failed for quota / rate-limit reasons |
+| `3` | Every attempted destination failed to authenticate |
+| `10` | No destination was attempted at all, or every attempted destination is unavailable or refused the media (e.g. `THREADS_NEEDS_URL`) |
+| `1` | Every attempted destination failed for any other reason, or for a mix of reasons |
+
+The `--json` payload is unchanged (`all_success`, `partial_success`, and the
+per-platform `success` / `outcome` / `error` fields); a non-zero run also
+carries an `exit_code` field, so a JSON caller never has to guess.
+
+```bash
+xpst post -v ./clip.mp4 -c "…" -p youtube,x --json
+if [ $? -ne 0 ]; then echo "post failed (see per-platform error)"; fi
+```
+
 ---
 
 ### `xpst backfill`
@@ -1213,6 +1234,21 @@ xPST uses meaningful exit codes for scripting and agent integration:
 | `3` | `EXIT_AUTH_FAILURE` | Authentication failure |
 | `4` | `EXIT_RATE_LIMIT` | Rate limit exceeded |
 | `10` | `EXIT_PLATFORM_UNAVAILABLE` | Platform unavailable |
+
+**Posting rule (`xpst post`).** A post where nothing was published never exits
+`0`, because the exit status is what scripts and agents branch on. When every
+attempted destination failed, the exit code names the shared reason: `4` for
+quota/rate limits, `3` for authentication, `10` when no destination was
+attempted at all or every destination is unavailable / refused the media
+(e.g. `THREADS_NEEDS_URL`), and `1` for anything else, including a mix of
+reasons. **A partial success exits `0`** (something was published), and so does
+a run where every destination was already posted. The `--json` payload keeps
+its shape — `all_success`, `partial_success`, and per-platform
+`success` / `outcome` / `error` — and a non-zero run adds `exit_code`:
+
+```bash
+xpst post -v ./clip.mp4 -c "…" -p youtube,x --json || echo "post failed"
+```
 
 Use these in shell scripts:
 
