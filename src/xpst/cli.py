@@ -18,6 +18,7 @@ Uses Click for CLI framework with rich for beautiful output.
 """
 
 import asyncio
+import copy
 import importlib.metadata
 import json as _json
 import os
@@ -3076,7 +3077,16 @@ def _display_result(result: CrossPostResult) -> None:
 
 
 def _result_to_dict(result: CrossPostResult) -> dict:
-    """Convert a CrossPostResult to a plain dict for JSON output."""
+    """Convert a CrossPostResult to a plain dict for JSON output.
+
+    Each platform entry carries the uploader's ``metadata`` when it reported
+    any, so ``xpst post --json`` (and every other CLI consumer of this helper)
+    can prove what was published: a carousel reports ``carousel_items`` +
+    ``item_order``, an X thread reports ``thread_items`` + ``item_order`` +
+    ``tweet_ids``. The key is additive and never invented — an uploader that
+    reported nothing produces no ``metadata`` key, and the fields above it are
+    unchanged.
+    """
     from xpst.utils.errors import describe_remediation
 
     platforms = {}
@@ -3090,6 +3100,10 @@ def _result_to_dict(result: CrossPostResult) -> dict:
             "error": ur.error,
             "platform": ur.platform,
         }
+        if getattr(ur, "metadata", None):
+            # Deep copy: JSON output is handed to callers who may mutate it, and
+            # it must not share nested lists (``item_order``) with the live result.
+            entry["metadata"] = copy.deepcopy(ur.metadata)
         if ur.retryable is not None:
             entry["retryable"] = ur.retryable
             entry["terminal"] = not ur.retryable

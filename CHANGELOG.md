@@ -50,6 +50,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the composer says the picker is unavailable instead of inventing a path.
 
 ### Fixed
+- **The post envelope dropped each destination's `metadata`** — CLI
+  `xpst post --json` and `POST /api/post` reported `success`/`post_url` and
+  nothing else, so a caller could not verify that an N-item carousel or thread
+  really published N items in order: the adapter knew, the response did not say.
+  Every destination row on those surfaces now carries the uploader's `metadata`
+  when it reported any (`carousel_items` + `item_order` for an Instagram
+  carousel, `thread_items` + `item_order` + `tweet_ids` for an X thread), and the
+  MCP payload — which already exposed it — is pinned by a test so it cannot
+  regress. The key is additive and deep-copied: it is omitted when the uploader
+  reported nothing, and it never upgrades a failed upload to success.
 - **Undefined design token** — `--xpst-color-primary-soft` was referenced by
   the selected/hover states but never defined in `tokens.css`, so those states
   silently rendered transparent in both themes. Defined for light, dark-theme

@@ -372,6 +372,30 @@ $ xpst run --json | jq '.results[0]'
 }
 ```
 
+Each platform entry also carries `metadata` when the uploader reported
+verifiable facts about what published, so a script can confirm a multi-item post
+rather than trusting `success`:
+
+```json
+{
+  "platforms": {
+    "instagram": {
+      "success": true,
+      "post_url": "https://www.instagram.com/p/.../",
+      "metadata": { "content_type": "carousel", "carousel_items": 3, "item_order": ["1.jpg", "2.jpg", "3.jpg"] }
+    },
+    "x": {
+      "success": true,
+      "post_url": "https://x.com/i/status/...",
+      "metadata": { "content_type": "thread", "thread_items": 3, "item_order": ["1.jpg", "2.jpg", "3.jpg"], "tweet_ids": ["100", "101", "102"] }
+    }
+  }
+}
+```
+
+The key is additive: it is omitted when the uploader reported nothing, and it
+never upgrades a failed upload to success.
+
 ---
 
 ### `xpst watch`
