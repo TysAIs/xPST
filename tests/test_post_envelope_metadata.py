@@ -212,28 +212,24 @@ def _cli_config(tmp_path: Path) -> XPSTConfig:
 
 
 def test_cli_post_json_reports_carousel_items_and_order(tmp_path: Path) -> None:
-    """The carousel metadata is readable from the CLI's own JSON output."""
-    items = _carousel(tmp_path, 3)
-    adapter_upload = asyncio.run(
-        _instagram_uploader(_config(tmp_path), client=_album_client(code="CLI1")).upload_carousel(items, "caption")
-    )
-    assert adapter_upload.success is True, adapter_upload.error
+    """The carousel metadata is readable from the CLI's own JSON output.
 
+    The engine is real (only the instagrapi client is mocked), so this exercises
+    the whole CLI post path: engine -> Instagram adapter -> ``_result_to_dict``.
+    """
+    items = _carousel(tmp_path, 3)
     config = _cli_config(tmp_path)
-    fake_engine = MagicMock()
-    fake_engine.post_manual_carousel = AsyncMock(
-        return_value=CrossPostResult(
-            video_id="carousel_cli",
-            caption="caption",
-            results={"instagram": adapter_upload},
-            all_success=True,
-            partial_success=True,
-        )
-    )
+
+    def _real_engine(_config: Any):  # noqa: ANN202
+        """A real engine whose Instagram client is mocked — no network, real pipeline."""
+        engine = CrossPostEngine(config)
+        engine.upload_service.anti_bot = None
+        engine._platforms["instagram"] = _instagram_uploader(config, client=_album_client(code="CLI1"))
+        return engine
 
     with (
         patch("xpst.cli.load_config", return_value=config),
-        patch("xpst.cli.CrossPostEngine", return_value=fake_engine),
+        patch("xpst.cli.CrossPostEngine", _real_engine),
     ):
         result = CliRunner().invoke(
             cli_main,
