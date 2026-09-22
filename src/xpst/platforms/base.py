@@ -50,6 +50,12 @@ _DELETE_UI_MESSAGES: dict[DeleteOutcome, str] = {
     DeleteOutcome.UNSUPPORTED: "{platform} does not support deleting this post",
 }
 
+# UI-facing refusal for a destination whose adapter has no image publish path.
+# Substituted with the platform name so a user (or an agent) always learns *who*
+# cannot publish the image. Overridden by adapters that really can
+# (``InstagramUploader.upload_image``, ``XUploader.upload_image``).
+IMAGE_UNSUPPORTED_MESSAGE = "{platform} cannot publish image posts: it has no image upload path."
+
 
 def delete_ui_message(outcome: DeleteOutcome, platform: str) -> str:
     """Return the UI-facing message that corresponds to ``outcome``.
@@ -643,6 +649,28 @@ class PlatformUploader(ABC):
         Returns 0 if not supported or on error.
         """
         return 0
+
+    async def upload_image(self, image_path: Path, caption: str) -> UploadResult:
+        """Publish a single still image to this platform.
+
+        Override in subclasses that have a real image publish path (Instagram
+        feed photos, X image posts). The default is an explicit, non-retryable
+        refusal that names the destination — never a silent video upload and
+        never a fabricated success.
+
+        Args:
+            image_path: Path to the image file.
+            caption: Caption/text for the post.
+
+        Returns:
+            UploadResult with success status and metadata.
+        """
+        return UploadResult(
+            success=False,
+            error=IMAGE_UNSUPPORTED_MESSAGE.format(platform=self.platform_name),
+            platform=self.platform_name,
+            retryable=False,
+        )
 
     async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
         """
