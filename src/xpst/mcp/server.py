@@ -498,6 +498,64 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="xpst_schedule_cancel",
+        description=(
+            "Cancel a scheduled post by entry id — the MCP equivalent of "
+            "`xpst schedule remove`. Removes the entry from the LOCAL schedule "
+            "store (~/.xpst/schedule.json) only; it never un-posts content that "
+            "has already been published. Get entry ids from xpst_schedule_list. "
+            "dry_run=true returns the same verdict without modifying the store. "
+            "An unknown id is an error (POST_NOT_FOUND), never a silent success."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
+                "entry_id": {"type": "string", "description": "Schedule entry id (from xpst_schedule_list)"},
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Report whether the entry exists and would be cancelled, without modifying the store",
+                    "default": False,
+                },
+            },
+            "required": ["entry_id"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_failures_retry",
+        description=(
+            "Retry ONE recorded upload failure, identified by video_id + platform "
+            "— the MCP equivalent of `xpst failures retry <video_id> --platform "
+            "<name>`. Re-posts that video's local source file to that single "
+            "destination (a REAL platform upload; scope=platform_upload). Returns "
+            "ok=false with VIDEO_NOT_FOUND, NO_RECORDED_FAILURE, NO_LOCAL_FILE or "
+            "RETRY_FAILED instead of pretending a retry happened; posted=true only "
+            "when the destination accepted the post. Use xpst_activity to list "
+            "failures and their retryable flag, and dry_run=true to plan without "
+            "uploading."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
+                "video_id": {"type": "string", "description": "Video id as recorded in xpst_activity failures"},
+                "platform": {
+                    "type": "string",
+                    "enum": list(_PLATFORM_ENUM),
+                    "description": "The single destination whose failure is being retried",
+                },
+                "dry_run": {
+                    "type": "boolean",
+                    "description": "Resolve the retry target and report the verdict without uploading",
+                    "default": False,
+                },
+            },
+            "required": ["video_id", "platform"],
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_health",
         description="Test connectivity to all platforms and sources (no uploads)",
         inputSchema={
@@ -557,7 +615,12 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="xpst_auth_status",
-        description="Show authentication status for all platforms",
+        description=(
+            "Show live authentication status and the truthful per-platform badge "
+            "(connected / expiring / needs_reauth / source_only / disabled / unknown). "
+            "The badge is derived from a live check with its timestamp — a stored "
+            "credential alone is never reported as connected."
+        ),
         inputSchema={
             "type": "object",
             "properties": {},
@@ -648,18 +711,26 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="xpst_delete",
-        description="Delete a post record from state",
+        description=(
+            "Delete a post RECORD from local xPST state only (operation="
+            "delete_record, scope=local_state_only). This does NOT delete the "
+            "post on YouTube/X/Instagram/TikTok: the live post stays up and "
+            "remains publicly visible. The response always carries "
+            "platform_deleted=false. Use the CLI `xpst delete <video_id>` for "
+            "real platform deletion. Removing the record also makes the engine "
+            "treat the video as new again, so treat this as destructive."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
                 "video_id": {
                     "type": "string",
-                    "description": "Video ID to delete",
+                    "description": "Video ID whose local record should be removed",
                 },
                 "platform": {
                     "type": "string",
-                    "description": "Platform to delete from (or all)",
+                    "description": "Platform record to remove (or all)",
                     "enum": [*_PLATFORM_ENUM, "all"],
                     "default": "all",
                 },
@@ -870,6 +941,11 @@ _MUTATING_TOOLS = {
     "xpst_schedule_add", "xpst_disconnect",
     "messenger_send", "messenger_set_rules", "xpst_messenger_check_comments",
     "kb_add", "kb_organize",
+    # Parity wave: both of these change real state. `xpst_schedule_cancel`
+    # removes a scheduled post; `xpst_failures_retry` re-uploads to a live
+    # destination. Gating them keeps the consent story uniform (and matches the
+    # CLI, which demands an explicit --yes / confirmation for the same act).
+    "xpst_schedule_cancel", "xpst_failures_retry",
 }
 
 
@@ -979,7 +1055,12 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
                             (_time.monotonic() - _start) * 1000, False, "guardrail_block")
         return blocked
 
-    engine_tools = {"xpst_run", "xpst_post", "xpst_health", "xpst_status", "xpst_backfill", "xpst_delete"}
+    engine_tools = {
+        "xpst_run", "xpst_post", "xpst_health", "xpst_status", "xpst_backfill", "xpst_delete",
+        # Targeted retry drives a real upload through the engine.
+        "xpst_failures_retry",
+    }
+
     server = await get_server(initialize=name in engine_tools)
 
     try:
@@ -1022,6 +1103,11 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             result = await _handle_schedule_list(server.config)
         elif name == "xpst_schedule_add":
             result = await _handle_schedule_add(server.config, arguments)
+        elif name == "xpst_schedule_cancel":
+            result = await _handle_schedule_cancel(server.config, arguments)
+        elif name == "xpst_failures_retry":
+            engine = server.get_engine()
+            result = await _handle_failures_retry(engine, arguments)
         elif name == "xpst_config_show":
             result = await _handle_config_show(server.config)
         elif name == "xpst_auth_status":
@@ -1110,9 +1196,19 @@ async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallTool
         catch_up=catch_up, source=source, max_posts=max_posts
     )
     # G28: agents need the per-video outcomes and post URLs, not a bare
-    # success string.
+    # success string. `ok` used to be hard-coded True regardless of what
+    # happened, so an agent that trusted it reported success for a failed run.
+    # It now means what it says, derived from the same per-platform
+    # ``UploadResult.is_published`` the engine's own status flags use: every
+    # upload in every result must be provably published, and "nothing ran" is
+    # not success.
+    uploads = [upload for result in results for upload in result.results.values()]
+    published = [upload for upload in uploads if upload.is_published]
     payload = {
-        "ok": True,
+        "ok": bool(uploads) and len(published) == len(uploads),
+        "attempted": len(results),
+        "uploads": len(uploads),
+        "published": len(published),
         "processed": len(results),
         "results": [_serialize_result(r) for r in results],
     }
@@ -1332,6 +1428,46 @@ async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) ->
     )
 
 
+async def _handle_schedule_cancel(config: XPSTConfig, arguments: dict[str, Any]) -> CallToolResult:
+    """Handle xpst_schedule_cancel — CLI `schedule remove` semantics over MCP.
+
+    Delegates to :mod:`xpst.services.recovery_service` so the verdict an agent
+    reads is the verdict the CLI would print: an unknown entry id fails with
+    POST_NOT_FOUND, and ``cancelled`` is true only after a real removal.
+    """
+    from xpst.services import recovery_service
+
+    payload = recovery_service.cancel_scheduled_post(
+        config.config_dir,
+        arguments["entry_id"],
+        dry_run=bool(arguments.get("dry_run", False)),
+    )
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, default=str))],
+        isError=not payload["ok"],
+    )
+
+
+async def _handle_failures_retry(engine: CrossPostEngine, arguments: dict[str, Any]) -> CallToolResult:
+    """Handle xpst_failures_retry — CLI `failures retry` semantics over MCP.
+
+    Targets exactly one (video_id, platform) pair and only reports
+    ``posted: true`` when that destination accepted the re-upload.
+    """
+    from xpst.services import recovery_service
+
+    payload = await recovery_service.retry_failed_post(
+        engine,
+        arguments["video_id"],
+        arguments["platform"],
+        dry_run=bool(arguments.get("dry_run", False)),
+    )
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, default=str))],
+        isError=not payload["ok"],
+    )
+
+
 async def _handle_analytics(
     config: XPSTConfig,
     arguments: dict[str, Any],
@@ -1350,8 +1486,7 @@ async def _handle_analytics(
     live = bool(arguments.get("live", False))
 
     collector = AnalyticsCollector(config_dir=config.config_dir)
-    if live:
-        await collector.collect_all()
+    live_data = await collector.collect_all() if live else None
 
     store = collector.store
     latest = store.latest(platform)
@@ -1364,11 +1499,17 @@ async def _handle_analytics(
         for key in ("views", "likes", "comments", "shares"):
             agg[key] += row.get(key) or 0
 
+    # Outcome report (D5): the same per-post/per-platform numbers the UI and
+    # CLI show, each labelled "live" or "recorded" and filtered to posts the
+    # account actually owns. Platforms with nothing report totals=None.
+    report = collector.outcome_report(live_data=live_data)
+
     payload = {
         "live": live,
         "snapshot_count": store.snapshot_count(),
         "platforms": per_platform,
         "posts": latest,
+        "outcome_report": report,
     }
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, default=str))],
@@ -1648,7 +1789,16 @@ async def _handle_config_show(config: XPSTConfig) -> CallToolResult:
 
 
 async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
-    """Handle xpst_auth_status tool."""
+    """Handle xpst_auth_status tool.
+
+    Uses the SAME live collector as ``xpst auth status --json`` (no
+    presence-based shortcuts): an agent asking "is this account usable?" gets
+    the honest badge plus the timestamp it was derived from. A platform xPST
+    cannot currently prove is reported as ``unknown``/``needs_reauth`` — never
+    as connected.
+    """
+    from xpst.auth_status import collect_live_auth_status_async
+    from xpst.token_state import PLATFORM_ORDER
     from xpst.utils.credentials import CredentialStore
     from xpst.utils.quota import QuotaManager
 
@@ -1658,34 +1808,64 @@ async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
     stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (encrypted fallback)"
 
+    try:
+        live = await collect_live_auth_status_async(config)
+    except Exception as exc:  # noqa: BLE001 — a status tool must never crash
+        live = {}
+        logger.warning("MCP auth status live probe failed: %s", str(exc)[:200])
+
+    platforms: dict[str, Any] = {}
+    badges: dict[str, str] = {}
+    checked_at: float | None = None
+    # Every provider the canonical collector reports — including the local
+    # file source — appears with an honest badge; omission would make this
+    # surface disagree with CLI/HTTP on the same fact.
+    order = list(PLATFORM_ORDER) + [
+        name for name in live if isinstance(name, str) and name not in PLATFORM_ORDER
+    ]
+    for platform in order:
+        entry = live.get(platform)
+        info: dict[str, Any] = dict(entry) if isinstance(entry, dict) else {}
+        if not info:
+            # No live entry: presence is not proof, so report a non-green badge
+            # rather than reporting `authenticated: true` from stored keys.
+            from xpst.token_state import derive_token_state, token_metadata
+
+            stored = bool(cred_store.retrieve(f"{platform}_access_token")) or bool(
+                cred_store.retrieve(f"{platform}_token")
+            )
+            info = {"authenticated": False, "live_checked": False}
+            info.update(
+                derive_token_state(
+                    platform,
+                    {"configured": stored, "live_checked": False},
+                    token_metadata(config, platform),
+                )
+            )
+        info["quota_remaining"] = quota_mgr.get_remaining(platform).get("daily", "N/A")
+        if platform == "messenger":
+            # Kept for clients that used it: the opt-in auto-reply switch is not
+            # an auth fact and never implies a working Messenger connection.
+            info["auto_reply"] = bool(config.messenger.auto_reply)
+        platforms[platform] = info
+        if info.get("badge"):
+            badges[platform] = str(info["badge"])
+        if isinstance(info.get("checked_at"), (int, float)) and (
+            checked_at is None or float(info["checked_at"]) > checked_at
+        ):
+            checked_at = float(info["checked_at"])
+
     result: dict[str, Any] = {
         "credential_storage": storage_type,
         "stored_credentials": stored_keys,
-        "platforms": {},
+        "platforms": platforms,
+        "badges": badges,
+        "checked_at": checked_at,
     }
+    if checked_at is not None:
+        from xpst.token_state import iso_timestamp
 
-    for platform in ["youtube", "x", "instagram"]:
-        creds = None
-        if platform == "youtube":
-            creds = cred_store.retrieve("youtube_token")
-        elif platform == "x":
-            creds = cred_store.retrieve_json("x_cookies")
-        elif platform == "instagram":
-            creds = cred_store.retrieve_json("instagram_session")
-
-        remaining = quota_mgr.get_remaining(platform)
-        result["platforms"][platform] = {
-            "authenticated": bool(creds),
-            "quota_remaining": remaining.get("daily", "N/A"),
-        }
-
-    # Messenger (static page token; token lives in CredentialStore)
-    messenger_creds = cred_store.retrieve("messenger_page_token") or config.messenger.page_access_token
-    result["platforms"]["messenger"] = {
-        "authenticated": bool(messenger_creds),
-        "auto_reply": bool(config.messenger.auto_reply),
-        "quota_remaining": quota_mgr.get_remaining("messenger").get("daily", "N/A"),
-    }
+        result["checked_at_iso"] = iso_timestamp(checked_at)
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
@@ -1787,10 +1967,14 @@ async def _handle_readiness(config: XPSTConfig) -> CallToolResult:
     """Return local readiness without initializing the posting engine."""
     from xpst.readiness import build_readiness_report
 
+    report = build_readiness_report(config).to_dict()
     payload = {
-        "ok": True,
+        # `ok` must mirror the readiness verdict instead of being a constant:
+        # an agent gating on `ok` alone must not proceed when the install is
+        # not actually ready.
+        "ok": bool(report.get("ready")),
         "contract_version": 1,
-        "readiness": build_readiness_report(config).to_dict(),
+        "readiness": report,
     }
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, default=str))])
 
@@ -1917,13 +2101,20 @@ async def _handle_messenger_check_comments(config: XPSTConfig, args: dict[str, A
 async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallToolResult:
     """Handle xpst_delete tool.
 
-    Removes a post *record* from local state. ``platform="all"`` removes the
-    record for every platform the video was posted to. This is a state-only
-    operation and does not call the social platform's delete API (use the CLI
-    ``delete`` command for live deletion).
+    Removes a post *record* from local state — NEVER the live post. ``scope``
+    and ``platform_deleted: false`` say so in the payload, because the CLI
+    ``delete`` command is the same-looking operation with a different (real)
+    scope, and an agent that confuses the two believes it deleted a post it did
+    not. ``platform="all"`` removes the record for every platform the video was
+    recorded against.
     """
     video_id = args["video_id"]
     platform = args.get("platform", "all")
+    scope_note = (
+        "Local xPST state only — the post on the platform was NOT deleted and is "
+        "still publicly visible. Use the CLI `xpst delete <video_id>` to delete "
+        "on the platform."
+    )
 
     video = engine.state.get_video(video_id)
     if video is None:
@@ -1931,34 +2122,52 @@ async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallT
         # Return an explicit failure payload so agents can distinguish
         # "record removed" from "record never existed".
         result = {
+            "ok": False,
             "video_id": video_id,
             "platform": platform,
             "removed": [],
             "success": False,
+            "operation": "delete_record",
+            "scope": "local_state_only",
+            "platform_deleted": False,
+            "note": scope_note,
             "error": f"Unknown video: {video_id} (not found in state)",
         }
         return CallToolResult(
             content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+            isError=True,
         )
-    platforms = (
-        list(video.get("posted_to", {}).keys())
-        if platform == "all"
-        else [platform]
-    )
 
-    for plat in platforms:
+    posted_to = video.get("posted_to") or {}
+    platforms = list(posted_to.keys()) if platform == "all" else [platform]
+    # Only records that actually exist can be removed: claiming success for a
+    # platform the video was never posted to is the same fabricated success.
+    removable = [plat for plat in platforms if plat in posted_to]
+
+    for plat in removable:
         engine.state.remove_post(video_id, plat)
-    engine.state.save()
+    if removable:
+        engine.state.save()
 
     result = {
+        "ok": bool(removable),
         "video_id": video_id,
         "platform": platform,
-        "removed": platforms,
-        "success": True,
+        "removed": removable,
+        "success": bool(removable),
+        "operation": "delete_record",
+        "scope": "local_state_only",
+        "platform_deleted": False,
+        "note": scope_note,
     }
+    if not removable:
+        result["error"] = (
+            f"No local record of {video_id} on {platform}; nothing was removed."
+        )
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
+        isError=not result["ok"],
     )
 
 

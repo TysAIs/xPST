@@ -193,6 +193,37 @@ fn handle_deep_link(app: &tauri::AppHandle, url: &Url) {
     ));
 }
 
+/// The JS the shell evaluates to hand dropped file paths to the page.
+///
+/// The composer registers `window.__xpstMediaDrag(phase, paths)` (see
+/// `ui/src/lib/native.js`). The shell pushes *paths*, never bytes: the page
+/// previews through the engine's range-aware stream route, so dropping a 2 GB
+/// video costs the app nothing until the user actually posts it.
+fn drag_payload_script(phase: &str, paths: &[std::path::PathBuf]) -> String {
+    let payload = serde_json::to_string(paths).unwrap_or_else(|_| "[]".to_string());
+    let phase = serde_json::to_string(phase).unwrap_or_else(|_| "\"drop\"".to_string());
+    format!("window.__xpstMediaDrag && window.__xpstMediaDrag({phase}, {payload});")
+}
+
+/// Forward one native drag-and-drop window event into the main webview.
+fn forward_drag_drop(app: &tauri::AppHandle, event: &tauri::DragDropEvent) {
+    // "over" fires on every cursor move; the page only needs enter/leave/drop.
+    let (phase, paths) = match event {
+        tauri::DragDropEvent::Enter { paths, .. } => ("enter", paths.clone()),
+        tauri::DragDropEvent::Drop { paths, .. } => ("drop", paths.clone()),
+        tauri::DragDropEvent::Leave => ("leave", Vec::new()),
+        _ => return,
+    };
+    if let Some(webview) = app.get_webview_window("main") {
+        let script = drag_payload_script(phase, &paths);
+        if let Err(e) = webview.eval(&script) {
+            log(&format!("DRAG_DROP_EVAL_FAILED phase={phase} error={e}"));
+            return;
+        }
+        log(&format!("DRAG_DROP_FORWARDED phase={phase} count={}", paths.len()));
+    }
+}
+
 fn focus_existing(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
@@ -260,6 +291,65 @@ pub fn pick_free_port() -> std::io::Result<u16> {
     let port = listener.local_addr()?.port();
     drop(listener);
     Ok(port)
+}
+
+/// Mint a per-launch token for the engine's mutating routes.
+///
+/// The engine refuses `POST /api/post`, `/api/connect/*` and `/api/onboarding*`
+/// without the dashboard API token, so the shell hands its own webview a
+/// session token through the URL fragment instead of letting it read the
+/// persisted credential from disk. The value is never written to a file and is
+/// regenerated on every boot (including a mid-session engine respawn).
+///
+/// Entropy comes from `RandomState`, whose SipHash keys are seeded from the OS
+/// RNG at randomisation time, mixed with the clock and the pid. That keeps the
+/// crate dependency-free (no `rand`) while making the token unguessable for a
+/// session-scoped loopback credential; the durable credential is the persisted
+/// API token behind `xpst auth api-token`.
+pub fn mint_ui_token() -> String {
+    fn seed(tag: &str) -> u64 {
+        use std::collections::hash_map::RandomState;
+        use std::hash::{BuildHasher, Hasher};
+
+        let mut hasher = RandomState::new().build_hasher();
+        hasher.write(tag.as_bytes());
+        hasher.write_u64(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0),
+        );
+        hasher.write_u32(std::process::id());
+        hasher.finish()
+    }
+
+    let mut token = String::with_capacity(64);
+    for tag in ["xpst-ui-a", "xpst-ui-b", "xpst-ui-c", "xpst-ui-d"] {
+        token.push_str(&format!("{:016x}", seed(tag)));
+    }
+    token
+}
+
+/// Build the engine UI URL the webview should load.
+///
+/// The token travels in the fragment: a fragment is never sent to the server
+/// (so it cannot end up in an access log) and the SPA strips it from the
+/// address bar as soon as it boots.
+pub fn engine_ui_url(port: u16, ui_token: &str) -> String {
+    format!("http://{ENGINE_HOST}:{port}/#xpst_token={ui_token}")
+}
+
+/// Remove a `#xpst_token=...` fragment from a URL before logging it.
+///
+/// `WEBVIEW_URL=` lines are consumed by scripts and the shell log; the session
+/// token must never land there.
+pub fn redact_url(url: &str) -> String {
+    match url.split_once('#') {
+        Some((head, frag)) if frag.starts_with("xpst_token=") => {
+            format!("{head}#xpst_token=<redacted>")
+        }
+        _ => url.to_string(),
+    }
 }
 
 /// Issue a minimal HTTP/1.1 request and return `true` if the server
@@ -372,6 +462,13 @@ fn boot_engine(app: tauri::AppHandle) {
     command = command.env("XPST_DASHBOARD_PORT", port.to_string());
     command = command.env("XPST_ENGINE_MODE", "tauri");
     command = command.env("XPST_UI_DIST", ui_dir);
+    // Per-launch credential for the engine's mutating routes. The engine
+    // accepts it in addition to the persisted API token (which stays on disk in
+    // the encrypted credential store for CLI/MCP/agent callers). Handing the
+    // webview its own token keeps the durable credential out of the browser
+    // context entirely.
+    let ui_token = mint_ui_token();
+    command = command.env("XPST_UI_TOKEN", &ui_token);
     // Also pass the port as an explicit argv flag. The env var alone was a
     // single point of failure: an engine build that ignored argv kept the
     // env path working, but every hand-run/smoke invocation
@@ -380,28 +477,12 @@ fn boot_engine(app: tauri::AppHandle) {
     // regardless of which path the frozen entrypoint reads. The engine's
     // entrypoint treats an already-taken port as a loud non-zero exit.
     command = command.arg("--port").arg(port.to_string());
-    // Bundle-resolution: point the engine at the ffmpeg/ffprobe/yt-dlp
-    // binaries shipped as bundle resources (see tauri.conf.json
-    // bundle.resources). The engine honors XPST_FFMPEG_PATH,
-    // XPST_FFPROBE_PATH, and XPST_YTDLP_PATH, so the app works with zero
-    // user-installed media dependencies.
-    let ff_dir = resource_dir.join("binaries/ffmpeg");
-    let ff = ff_dir.join(if cfg!(windows) {
-        "ffmpeg.exe"
-    } else {
-        "ffmpeg"
-    });
-    let fp = ff_dir.join(if cfg!(windows) {
-        "ffprobe.exe"
-    } else {
-        "ffprobe"
-    });
-    if ff.is_file() {
-        command = command.env("XPST_FFMPEG_PATH", ff);
-    }
-    if fp.is_file() {
-        command = command.env("XPST_FFPROBE_PATH", fp);
-    }
+    // Media helpers are NOT bundled: ffmpeg+ffprobe were 87 MB of a 192 MB
+    // app (and the flaky download behind them is what kept the release lane
+    // red). The engine resolves XPST_FFMPEG_PATH > system ffmpeg > a copy it
+    // fetched into <config dir>/bin on first use (xpst.media.binaries), so a
+    // machine that already has ffmpeg downloads nothing. Only yt-dlp — a 3 MB
+    // zipapp with no system equivalent — still ships in the bundle.
     let ytdlp = resource_dir.join("binaries/ytdlp").join(if cfg!(windows) {
         "yt-dlp.exe"
     } else {
@@ -501,12 +582,13 @@ fn boot_engine(app: tauri::AppHandle) {
             log(&format!("ENGINE_PORT_VERIFIED port={port}"));
 
             if let Some(window) = app.get_webview_window("main") {
-                let url = tauri::Url::parse(&format!("http://127.0.0.1:{port}/"))
-                    .expect("valid engine URL");
+                let target = engine_ui_url(port, &ui_token);
+                let url = tauri::Url::parse(&target).expect("valid engine URL");
                 if let Err(e) = window.navigate(url) {
                     log(&format!("navigate failed, falling back to eval: {e}"));
                     let _ = window.eval(&format!(
-                        "window.location.replace('http://127.0.0.1:{port}/')"
+                        "window.location.replace({})",
+                        serde_json::to_string(&target).unwrap_or_default()
                     ));
                 }
                 let _ = window.show();
@@ -519,7 +601,7 @@ fn boot_engine(app: tauri::AppHandle) {
                 // navigation evidence).
                 std::thread::sleep(Duration::from_secs(2));
                 match window.url() {
-                    Ok(url) => log(&format!("WEBVIEW_URL={url}")),
+                    Ok(url) => log(&format!("WEBVIEW_URL={}", redact_url(url.as_str()))),
                     Err(e) => log(&format!("could not read webview url: {e}")),
                 }
             }
@@ -711,7 +793,18 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
+        // Native OS file picker for the composer. The engine-origin page calls
+        // `plugin:dialog|open` over IPC; the grant (and the loopback origin it
+        // is granted to) lives in capabilities/default.json.
+        .plugin(tauri_plugin_dialog::init())
         .on_window_event(|window, event| {
+            // Native drag-and-drop: the shell is the only layer that can hand
+            // the page real file paths (a webview drop carries none), so the
+            // event is forwarded into the composer as a JS call.
+            if let tauri::WindowEvent::DragDrop(drop) = event {
+                let app_handle = window.app_handle().clone();
+                forward_drag_drop(&app_handle, drop);
+            }
             // macOS convention: closing the window must NOT strand the user.
             // (QA adversarial 2026-08: closing the window left the app
             // running with no window and no way back — clicking the dock
@@ -774,10 +867,17 @@ pub fn run() {
         }
         // macOS dock-icon click while the window is hidden (close-to-dock):
         // bring the window back instead of ignoring the user.
+        //
+        // `RunEvent::Reopen` only exists on macOS, so the ARM itself must be
+        // cfg-gated. A `cfg!(target_os = "macos")` guard inside the pattern is
+        // evaluated at runtime and still requires the variant to exist at
+        // compile time, which breaks the Windows and Linux builds with
+        // `error[E0599]: no variant named Reopen found for enum RunEvent`.
+        #[cfg(target_os = "macos")]
         RunEvent::Reopen {
             has_visible_windows,
             ..
-        } if cfg!(target_os = "macos") => {
+        } => {
             log(&format!(
                 "APP_REOPEN has_visible_windows={has_visible_windows}"
             ));
@@ -831,5 +931,114 @@ mod tests {
         let res = wait_for_engine_health(port, Duration::from_millis(300));
         assert!(res.is_none());
         assert!(started.elapsed() >= Duration::from_millis(250));
+    }
+
+    #[test]
+    fn mint_ui_token_is_hex_and_unique_per_call() {
+        let a = mint_ui_token();
+        let b = mint_ui_token();
+        assert_eq!(a.len(), 64, "4 x 16 hex chars");
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()), "token must be hex");
+        assert_ne!(a, b, "each launch must get its own token");
+    }
+
+    #[test]
+    fn engine_ui_url_carries_the_token_in_the_fragment() {
+        let url = engine_ui_url(51234, "deadbeef");
+        assert_eq!(url, "http://127.0.0.1:51234/#xpst_token=deadbeef");
+        // A parseable URL whose query is empty: the token is never sent to the
+        // engine, only read by the SPA.
+        let parsed = tauri::Url::parse(&url).expect("valid url");
+        assert_eq!(parsed.query(), None);
+        assert_eq!(parsed.fragment(), Some("xpst_token=deadbeef"));
+    }
+
+    #[test]
+    fn redact_url_hides_the_session_token_in_logs() {
+        assert_eq!(
+            redact_url("http://127.0.0.1:51234/#xpst_token=secret"),
+            "http://127.0.0.1:51234/#xpst_token=<redacted>"
+        );
+        assert_eq!(
+            redact_url("http://127.0.0.1:51234/#/compose"),
+            "http://127.0.0.1:51234/#/compose"
+        );
+        assert_eq!(redact_url("http://127.0.0.1:51234/"), "http://127.0.0.1:51234/");
+    // ── Composer media: native drop forwarding + the picker's ACL grant ──
+
+    #[test]
+    fn drag_payload_script_escapes_hostile_file_names() {
+        let paths = vec![
+            std::path::PathBuf::from("/Users/me/My Videos/take \"1\" & 2.mp4"),
+            std::path::PathBuf::from("/Users/me/back\\slash.mov"),
+        ];
+        let script = drag_payload_script("drop", &paths);
+
+        // The paths survive as JSON: the page receives exactly what was dropped.
+        let payload_start = script.find('[').expect("payload");
+        let payload_end = script.rfind(']').expect("payload end") + 1;
+        let parsed: Vec<String> = serde_json::from_str(&script[payload_start..payload_end]).expect("json");
+        assert_eq!(parsed, vec![paths[0].to_string_lossy(), paths[1].to_string_lossy()]);
+        // A file name can never escape the call and execute as code.
+        assert_eq!(script.matches('"').count() % 2, 0);
+        assert!(!script.contains("take \"1\""));
+    }
+
+    #[test]
+    fn drag_payload_script_never_throws_when_the_page_has_no_hook() {
+        let script = drag_payload_script("leave", &[]);
+        assert!(script.starts_with("window.__xpstMediaDrag &&"));
+        assert!(script.ends_with(";"));
+        assert!(script.contains("\"leave\""));
+        assert!(script.contains("[]"));
+    }
+
+    /// The composer's "Choose file…" control is a single IPC command on a
+    /// remote (engine) origin. If the capability does not grant it — or does
+    /// not allow the loopback port the engine actually listens on — the button
+    /// silently fails at runtime. This test reads the SHIPPED capability file
+    /// and proves both halves, on a random port like the one the shell picks.
+    #[test]
+    fn capability_grants_the_picker_to_any_engine_loopback_port() {
+        use tauri::utils::acl::capability::{Capability, CapabilityFile};
+        use tauri::utils::acl::RemoteUrlPattern;
+
+        let raw = std::fs::read_to_string("capabilities/default.json").expect("capability file");
+        let capability: Capability = match raw.parse::<CapabilityFile>().expect("parse") {
+            CapabilityFile::Capability(capability) => capability,
+            _ => panic!("capabilities/default.json must hold exactly one capability"),
+        };
+
+        let permissions: Vec<String> = capability
+            .permissions
+            .iter()
+            .map(|entry| entry.identifier().get().to_string())
+            .collect();
+        assert!(
+            permissions.iter().any(|p| p == "dialog:default"),
+            "the dialog plugin permission is missing: {permissions:?}"
+        );
+        assert!(capability.windows.iter().any(|w| w == "main"), "the grant must target the main window");
+
+        let remote = capability.remote.as_ref().expect("remote urls are required for an engine-served UI");
+        let patterns: Vec<RemoteUrlPattern> = remote
+            .urls
+            .iter()
+            .map(|pattern| pattern.parse().expect("valid url pattern"))
+            .collect();
+
+        // Same shape as a real launch: a free loopback port chosen at boot.
+        let port = pick_free_port().expect("free port");
+        let engine_url = tauri::Url::parse(&format!("http://127.0.0.1:{port}/")).expect("url");
+        assert!(
+            patterns.iter().any(|pattern| pattern.test(&engine_url)),
+            "no remote pattern allows the engine origin {engine_url}"
+        );
+        // A non-loopback host must NOT be granted by those patterns.
+        let remote_host = tauri::Url::parse("http://198.51.100.7:1234/").expect("url");
+        assert!(
+            !patterns.iter().any(|pattern| pattern.test(&remote_host)),
+            "the grant is wider than loopback: {remote_host} was allowed"
+        );
     }
 }

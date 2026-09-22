@@ -1,9 +1,27 @@
 <script>
-  import { LayoutDashboard, ChartNoAxesCombined, Video, Users, Settings, CalendarClock, TriangleAlert, Library as LibraryIcon, Info } from "@lucide/svelte";
+  import {
+    Clapperboard,
+    ChartNoAxesCombined,
+    Info,
+    LayoutDashboard,
+    Library as LibraryIcon,
+    ListChecks,
+    Plug,
+    Settings,
+    Sparkles,
+    TriangleAlert,
+    Users,
+    Video,
+    CalendarClock,
+  } from "@lucide/svelte";
   import { NAV_ITEMS } from "../api.js";
 
   const ICONS = {
     "layout-dashboard": LayoutDashboard,
+    sparkles: Sparkles,
+    plug: Plug,
+    clapperboard: Clapperboard,
+    "list-checks": ListChecks,
     "chart-no-axes-combined": ChartNoAxesCombined,
     video: Video,
     users: Users,

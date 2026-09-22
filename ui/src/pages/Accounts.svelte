@@ -21,6 +21,8 @@
   let catalog = $state(null);
   let health = $state(null);
   let error = $state("");
+  let refreshing = $state(false);
+  let refreshNote = $state("");
 
   async function load() {
     state = "loading";
@@ -36,8 +38,26 @@
     }
   }
 
+  async function refreshTokens() {
+    refreshing = true;
+    refreshNote = "";
+    try {
+      const result = await api.refreshTokens();
+      const failed = result?.failed ?? [];
+      refreshNote = result?.count
+        ? `Refreshed ${result.count - failed.length} of ${result.count} due account(s).${failed.length ? ` Still broken: ${failed.join(", ")}.` : ""}`
+        : "No token was due for refresh.";
+      await load();
+    } catch (cause) {
+      refreshNote = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      refreshing = false;
+    }
+  }
+
   onMount(load);
   const providers = $derived(catalog?.providers ?? []);
+  const badges = $derived(health?.badges ?? {});
 
   function statusFor(provider) {
     if (provider?.state === "disabled") return "disabled";
@@ -51,6 +71,31 @@
     return state.replaceAll("_", " ");
   }
 
+  function badgeFor(name) {
+    const badge = badges[name];
+    if (badge) return badge;
+    return "unknown";
+  }
+
+  function badgeLabel(name) {
+    const badge = badgeFor(name);
+    return badge.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase());
+  }
+
+  function badgeReason(name) {
+    const entry = health?.auth?.[name];
+    return entry?.badge_reason ?? "";
+  }
+
+  function checkedAgo() {
+    const iso = health?.auth_checked_at_iso;
+    if (!iso) return "";
+    const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+    if (seconds < 90) return `checked ${seconds}s ago`;
+    if (seconds < 5400) return `checked ${Math.round(seconds / 60)}m ago`;
+    return `checked ${Math.round(seconds / 3600)}h ago`;
+  }
+
   function roleLabel(role) {
     return role.replaceAll("_", " ");
   }
@@ -60,9 +105,20 @@
   <div>
     <h1>Accounts</h1>
     <p>Capability readiness by role. A source login does not imply video publishing access.</p>
+    <p class="xpst-badge-note">
+      Badges come from a live check{checkedAgo() ? ` (${checkedAgo()})` : ""} — a stored credential is never shown as connected.
+    </p>
   </div>
+  <button class="xpst-button" data-variant="secondary" onclick={refreshTokens} disabled={refreshing}>
+    {refreshing ? "Refreshing…" : "Refresh accounts"}
+  </button>
+  <a class="xpst-button" data-variant="secondary" href="#/connect">Connect a platform</a>
   <a class="xpst-button" data-variant="secondary" href="#/settings">Settings</a>
 </header>
+
+{#if refreshNote}
+  <p class="xpst-badge-note" role="status">{refreshNote}</p>
+{/if}
 
 {#if state === "loading"}
   <LoadingSkeleton rows={7} label="Loading provider capabilities" onRetry={load} />
@@ -85,6 +141,12 @@
             </div>
           </div>
           <StatusBadge status={statusFor(provider)} label={statusLabel(provider)} />
+        </div>
+        <div class="xpst-inline-meta">
+          <StatusBadge status={badgeFor(provider.name)} label={badgeLabel(provider.name)} />
+          {#if badgeReason(provider.name)}
+            <span class="xpst-badge-note">{badgeReason(provider.name)}</span>
+          {/if}
         </div>
         <div class="xpst-capability-grid">
           {#each provider.roles as role (role)}

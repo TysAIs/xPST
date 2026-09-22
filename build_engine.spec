@@ -106,6 +106,16 @@ a.datas = [
     or entry_[0].replace("\\", "/").endswith(_KEEP_DOCS)
 ]
 
+# Drop the editable-install marker. `direct_url.json` records the build
+# machine's absolute source path (e.g. file:///Users/<user>/xPST); shipping it
+# leaks a home path into the published bundle. Guarded by
+# scripts/scan_public_safety.py.
+a.datas = [
+    entry_
+    for entry_ in a.datas
+    if not entry_[0].replace("\\", "/").endswith("dist-info/direct_url.json")
+]
+
 pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(

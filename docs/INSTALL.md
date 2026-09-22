@@ -40,9 +40,22 @@ locally; otherwise select the exact asset line as above.
 
 ## FFmpeg prerequisite
 
-The standalone app can open without FFmpeg, but xPST's video processing and
-encoding paths resolve an external `ffmpeg` executable. Install FFmpeg with your
-OS package manager and make sure it is available on `PATH` before posting:
+The standalone app opens without FFmpeg, and xPST's video processing and
+encoding paths resolve an external `ffmpeg` executable. FFmpeg is **not**
+bundled inside the app (it was 87 MB of a 192 MB bundle).
+
+xPST looks for, in order: `XPST_FFMPEG_PATH` (an explicit override), an FFmpeg
+already installed on your machine, and finally a copy it downloads and
+checksum-verifies itself on first use. The desktop app does that download
+automatically when no FFmpeg is present; from the CLI:
+
+```bash
+xpst media status      # which ffmpeg/ffprobe xPST will use, and from where
+xpst media fetch       # download a verified static build into ~/.xpst/bin
+```
+
+Installing FFmpeg with your OS package manager remains the best option when you
+want to control the build:
 
 - macOS: `brew install ffmpeg`
 - Windows: install an FFmpeg build and add its directory containing

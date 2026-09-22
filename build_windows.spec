@@ -154,6 +154,15 @@ def _keep_entry(entry):
 a.binaries = [entry for entry in a.binaries if _keep_entry(entry)]
 a.datas = [entry for entry in a.datas if _keep_entry(entry)]
 
+# Drop the editable-install marker. `direct_url.json` records the build
+# machine's absolute source path (e.g. file:///Users/<user>/xPST); shipping it
+# leaks a home path into the published bundle. Guarded by
+# scripts/scan_public_safety.py.
+a.datas = [
+    entry for entry in a.datas
+    if not entry[0].replace("\\", "/").endswith("dist-info/direct_url.json")
+]
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(

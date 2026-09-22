@@ -38,7 +38,7 @@ live availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-t
 │  └──────────────────────────────────────────────────────┘   │
 │                                                              │
 │  Surfaces: CLI (38 cmds) │ Desktop (10 QML pages)          │
-│            Dashboard (FastAPI) │ MCP Server (38 tools)      │
+│            Dashboard (FastAPI) │ MCP Server (40 tools)      │
 └─────────────────────────────────────────────────────────────┘
 ```
 

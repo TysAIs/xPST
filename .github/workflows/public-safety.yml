@@ -1,0 +1,146 @@
+name: Public Safety
+
+# Guards the public project against personal data, secrets and unsafe content.
+#
+#  * tree-and-artifacts (every push + PR) fails the build on ANY finding in the
+#    publishable working tree or in the artifacts built from it (sdist, wheel,
+#    and any desktop bundle that happens to be present).
+#  * history-scan (manual, report only) walks every commit and blob reachable
+#    from any ref and reports the categories with their commit SHAs. It never
+#    rewrites history; a full-history rewrite is a human decision.
+#
+# Findings never carry the matched value: reports contain only paths, categories
+# and offsets. See scripts/scan_public_safety.py.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      fail_on_history:
+        description: "Fail the history job when historical findings exist (report is written either way)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  tree-and-artifacts:
+    name: Tree + artifact scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Scan publishable working tree
+        run: python scripts/scan_public_safety.py --json --report public-safety-tree.json
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --outdir dist
+
+      - name: Scan built artifacts
+        run: python scripts/scan_public_safety.py --artifacts dist --json --report public-safety-artifacts.json
+
+      - name: Scan desktop bundle if present
+        if: ${{ hashFiles('release/*.dmg', 'release/*.zip', 'release/*.app', 'dist/*.dmg', 'dist/*.zip') != '' }}
+        run: |
+          for artifact in release/*.dmg release/*.zip release/*.app dist/*.dmg dist/*.zip; do
+            [ -e "$artifact" ] || continue
+            python scripts/scan_public_safety.py --artifact "$artifact" --json --report "public-safety-bundle-$(basename "$artifact").json"
+          done
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-safety-reports
+          path: public-safety-*.json
+          if-no-files-found: ignore
+
+  history-scan:
+    name: Full git history scan (manual, report only)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Scan every commit and blob
+        env:
+          FAIL_ON_HISTORY: ${{ inputs.fail_on_history }}
+        run: |
+          set +e
+          if [ "$FAIL_ON_HISTORY" = "true" ]; then
+            python scripts/scan_public_safety.py --history --json --report public-safety-history.json
+          else
+            python scripts/scan_public_safety.py --history --no-fail --json --report public-safety-history.json
+          fi
+          status=$?
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          data = json.load(open("public-safety-history.json"))
+          print("## Full git history public-safety scan")
+          print()
+          print(f"- commits scanned: {data['commits_scanned']}")
+          print(f"- blobs scanned: {data['blobs_scanned']}")
+          print(f"- categories: {data['categories']}")
+          for kind, count in sorted(data["counts_by_category_commits"].items()):
+              print(f"- `{kind}`: {count} commits")
+          print()
+          print("Report-only: a full-history rewrite is a human decision.")
+          PY
+          exit $status
+
+      - name: Upload history report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-safety-history-report
+          path: public-safety-history.json
+          if-no-files-found: ignore
+
+  ci-log-scan:
+    name: CI log scan (manual, report only)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Download recent CI logs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ci-logs
+          for id in $(gh run list --limit 5 --json databaseId --jq '.[].databaseId'); do
+            gh run view "$id" --log > "ci-logs/run-$id.txt" 2>/dev/null || true
+          done
+          ls -la ci-logs
+
+      - name: Scan CI logs
+        run: python scripts/scan_public_safety.py --artifact ci-logs --no-fail --json --report public-safety-ci-logs.json
+
+      - name: Upload CI log report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-safety-ci-log-report
+          path: public-safety-ci-logs.json
+          if-no-files-found: ignore
