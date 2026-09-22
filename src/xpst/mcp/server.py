@@ -698,6 +698,15 @@ TOOLS: list[Tool] = [
                 "media_path": {"type": "string"},
                 "platforms": {"type": "array", "items": {"type": "string"}},
                 "caption": {"type": "string", "default": ""},
+                "text": {
+                    "type": "string",
+                    "default": "",
+                    "description": (
+                        "Body of a text-only post. With no media_path it implies "
+                        "content_type \"text\" (a text post is refused by any destination "
+                        "that has no text path)."
+                    ),
+                },
                 "content_type": {
                     "type": "string",
                     "enum": [item.value for item in CONTENT_TYPES],
@@ -1329,7 +1338,7 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
 
     if dry_run:
         # Same canonical, side-effect-free verdict the CLI and the dashboard use.
-        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService, plan_content_type
 
         plan_payload: dict[str, Any] | None = None
         blockers: list[str] = list(verdict["blockers"])
@@ -1339,7 +1348,9 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                     media_paths=media_paths,
                     target_platforms=targets,
                     base_caption=caption,
-                    content_type=verdict["effective_content_type"],
+                    # Only a real text post (a body and no file) skips the media
+                    # requirement; the legacy "no file at all" shape keeps it.
+                    content_type=plan_content_type(request),
                 )
             ).to_dict()
             blockers.extend(issue["message"] for issue in plan_payload["hard_blockers"])
@@ -2012,12 +2023,9 @@ async def _handle_providers(config: XPSTConfig) -> CallToolResult:
 
 async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> CallToolResult:
     """Run the same side-effect-free preflight the CLI and dashboard use."""
-    from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+    from xpst.services.post_preflight import PostPlanRequest, PostPreflightService, plan_content_type
 
-    media_path = str(arguments.get("media_path") or "").strip()
     platforms = [str(item).lower() for item in (arguments.get("platforms") or []) if str(item).strip()]
-    caption = str(arguments.get("caption") or "")
-    content_type = arguments.get("content_type")
 
     missing = []
     if not platforms:
@@ -2034,23 +2042,21 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
         return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
 
     # The content verdict is the same one the CLI and HTTP surfaces report, so
-    # "can this be posted?" has one answer everywhere.
-    request = ContentRequest.from_legacy(
-        [media_path] if media_path else [],
-        caption,
-        platforms,
-        content_type=content_type,
-    )
+    # "can this be posted?" has one answer everywhere. The arguments go through
+    # the one request parser: `text` with no media is a text post, and `caption`
+    # keeps its legacy meaning (a caption for media).
+    request = ContentRequest.from_payload({**arguments, "platforms": platforms})
     verdict = content_verdict(request)
 
     plan = PostPreflightService(config).plan(
         PostPlanRequest(
-            media_paths=[media_path] if media_path else [],
+            media_paths=list(request.media_paths),
             target_platforms=platforms,
-            base_caption=caption,
+            base_caption=request.caption,
             # A text post carries no file: the media requirement must not be
-            # applied to it, or every text preflight would be blocked.
-            content_type=verdict["effective_content_type"],
+            # applied to it, or every text preflight would be blocked. A request
+            # with neither a file nor a body keeps that requirement.
+            content_type=plan_content_type(request),
         )
     ).to_dict()
     blockers = [issue["message"] for issue in plan["hard_blockers"]] + verdict["blockers"]

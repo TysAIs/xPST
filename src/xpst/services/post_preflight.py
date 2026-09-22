@@ -15,7 +15,13 @@ from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlparse
 
 from xpst.config import EncodingConfig, XPSTConfig
-from xpst.content import ContentType, UnknownContentTypeError, coerce_content_type, text_limit
+from xpst.content import (
+    ContentRequest,
+    ContentType,
+    UnknownContentTypeError,
+    coerce_content_type,
+    text_limit,
+)
 from xpst.media.pipeline import TransformPlan, plan_transform
 from xpst.media.specs import (
     MODALITY_CHECK,
@@ -49,6 +55,20 @@ def content_needs_media(content_type: str | None) -> bool:
         return coerce_content_type(content_type) not in _MEDIA_LESS_CONTENT_TYPES
     except UnknownContentTypeError:
         return True
+
+
+def plan_content_type(request: ContentRequest) -> str | None:
+    """The content type an execution plan should hold ``request`` to, or ``None``.
+
+    Only a type the request actually states counts. A plan may not infer a
+    media-less type from a missing media list: the legacy shape (a caption and no
+    file, nothing stated) is missing its media, and diagnosing it as a refused
+    text post names the wrong problem — and hides the one it has. Surfaces that
+    accept a text body turn it into an explicit ``text`` request first
+    (:meth:`ContentRequest.from_payload`), so the media requirement is lifted only
+    when a body is really there to publish.
+    """
+    return request.effective_content_type.value if request.is_explicit_content_type else None
 
 
 @dataclass(frozen=True)

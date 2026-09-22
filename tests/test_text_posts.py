@@ -518,6 +518,32 @@ def test_capability_document_advertises_text_for_x_and_threads() -> None:
     assert document["declared_but_unimplemented"] == {}
 
 
+def test_typed_text_payload_implies_a_text_post() -> None:
+    """`text` (the typed spelling) with no file *is* a text post; `caption` is not."""
+    typed = ContentRequest.from_payload({"text": X_TEXT, "platforms": ["x"]})
+    assert typed.is_explicit_content_type is True
+    assert typed.effective_content_type is ContentType.TEXT
+
+    legacy = ContentRequest.from_payload({"caption": X_TEXT, "platforms": ["x"]})
+    assert legacy.is_explicit_content_type is False, "a caption is not a stated modality"
+
+    with_media = ContentRequest.from_payload({"text": X_TEXT, "media_paths": ["a.mp4"], "platforms": ["x"]})
+    assert with_media.is_explicit_content_type is False, "with a file, the body is a caption"
+
+
+def test_a_plan_only_honours_a_stated_content_type(config: XPSTConfig) -> None:
+    """A missing file must stay a missing file — not a refused text post."""
+    from xpst.services.post_preflight import plan_content_type
+
+    assert plan_content_type(ContentRequest.from_payload({"caption": "hello", "platforms": ["youtube"]})) is None
+    assert plan_content_type(ContentRequest.from_payload({"text": X_TEXT, "platforms": ["x"]})) == "text"
+
+    plan = PostPreflightService(config).plan(
+        PostPlanRequest(media_paths=[], target_platforms=["youtube"], base_caption="hello")
+    ).to_dict()
+    assert "MEDIA_REQUIRED" in [issue["code"] for issue in plan["hard_blockers"]]
+
+
 def test_preflight_plan_does_not_require_media_for_a_text_post(config: XPSTConfig) -> None:
     plan = PostPreflightService(config).plan(
         PostPlanRequest(
