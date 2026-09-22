@@ -33,7 +33,7 @@ import logging
 import os
 import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -289,7 +289,7 @@ def explain_facts(previous: Any, current: Any) -> list[dict[str, Any]]:
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).isoformat(timespec="microseconds")
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def has_content(media_paths: Sequence[str], caption: str, platforms: Sequence[str]) -> bool:
@@ -361,7 +361,7 @@ class DraftStore:
 
     def _quarantine_corrupt(self) -> None:
         try:
-            target = self.path.with_suffix(f".json.corrupt-{int(datetime.now(UTC).timestamp())}")
+            target = self.path.with_suffix(f".json.corrupt-{int(datetime.now(timezone.utc).timestamp())}")
             os.replace(self.path, target)
             os.chmod(target, 0o600)
         except OSError as exc:  # pragma: no cover - best effort
