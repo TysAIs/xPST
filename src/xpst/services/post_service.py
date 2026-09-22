@@ -316,7 +316,7 @@ class PostService:
 
     def preflight(self, request: PostRequest) -> dict[str, Any]:
         """Run the canonical, side-effect-free preflight for a request."""
-        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService, plan_content_type
 
         blockers: list[str] = []
         if not request.platforms:
@@ -345,7 +345,7 @@ class PostService:
                     base_caption=request.caption,
                     # A text post carries no file, so the media requirement must
                     # not be applied to it (it would block every text post).
-                    content_type=request.effective_content_type.value,
+                    content_type=plan_content_type(request),
                 )
             ).to_dict()
             blockers.extend(issue["message"] for issue in plan["hard_blockers"])

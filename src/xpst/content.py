@@ -773,6 +773,9 @@ class ContentRequest:
         media = tuple(str(item).strip() for item in (raw_media or []) if str(item).strip())[:MAX_MEDIA_ITEMS]
 
         raw_text = data.get("text")
+        # Whether the caller used the *typed* spelling of a body. `caption` is the
+        # legacy spelling (a caption for media) and keeps its old meaning below.
+        typed_text = raw_text is not None and str(raw_text).strip()
         if raw_text is None:
             raw_text = data.get("caption")
 
@@ -797,6 +800,12 @@ class ContentRequest:
                 content_type = coerce_content_type(raw_content_type)
             except UnknownContentTypeError:
                 content_type = None
+        elif typed_text and not media:
+            # The typed spelling of a text post: `text` with no file and no stated
+            # type *is* a text post, not a file-less video request. Resolved here,
+            # in the one request parser, so no surface has to guess it (the legacy
+            # `caption` key keeps its old meaning: a caption for media).
+            content_type = ContentType.TEXT
 
         return cls(
             content_type=content_type,
