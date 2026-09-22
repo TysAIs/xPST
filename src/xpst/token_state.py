@@ -105,6 +105,7 @@ PLATFORM_ORDER: tuple[str, ...] = (
     "instagram",
     "tiktok",
     "threads",
+    "facebook",
     "messenger",
 )
 
@@ -357,6 +358,20 @@ def token_metadata(config: Any, platform: str) -> TokenMetadata:
             configured=bool(token and getattr(account, "threads_user_id", "")),
             # A long-lived Threads token can be exchanged for a fresh one.
             has_refresh_token=token,
+        )
+
+    if platform == "facebook":
+        # Page-scoped: the Page token is the credential, and a Page token
+        # inherits the user token's lifetime, so there is no refresh path of
+        # its own (re-run `xpst auth facebook` when it expires).
+        page_id = bool(getattr(account, "page_id", ""))
+        token = bool(getattr(account, "page_access_token", ""))
+        return TokenMetadata(
+            platform=platform,
+            auth_mode="oauth",
+            enabled=enabled,
+            configured=bool(page_id and token),
+            notes=("Page-scoped token: no refresh path — re-run `xpst auth facebook` when it expires",),
         )
 
     if platform == "messenger":

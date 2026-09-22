@@ -75,6 +75,13 @@ EXPECTED_MATRIX: dict[tuple[str, str], bool] = {
     ("threads", "carousel"): False,
     ("threads", "text"): False,  # declared by Threads, only media_type VIDEO exists
     ("threads", "thread"): False,
+    # Facebook is Page-scoped and, in this wave, declares only feed video: the
+    # photo/text publisher methods exist but are not wired to content types yet.
+    ("facebook", "video"): True,
+    ("facebook", "image"): False,
+    ("facebook", "carousel"): False,
+    ("facebook", "text"): False,
+    ("facebook", "thread"): False,
 }
 
 #: Declared-but-unimplemented: an agent reading the manifest would try these.

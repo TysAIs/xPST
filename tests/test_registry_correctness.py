@@ -8,7 +8,7 @@ entries for 6 platforms).
 
 Post-fix contract:
 - Each physical platform appears exactly once, under its canonical name:
-  youtube, x, instagram, tiktok, threads, messenger.
+  youtube, x, instagram, tiktok, threads, facebook, messenger.
 - auto-discovery never produces duplicate keys and is idempotent.
 - The legacy name ``messengeradapter`` remains resolvable as a backward-compat
   alias (no data migration needed) but is never listed as a separate key.
@@ -20,9 +20,11 @@ from xpst.config import XPSTConfig
 from xpst.platforms.base import PlatformRegistry
 from xpst.platforms.messenger import MessengerAdapter
 
-# The six canonical destination platforms. A physical platform may appear
-# exactly once, under its canonical key.
-CANONICAL_PLATFORMS = {"youtube", "x", "instagram", "tiktok", "threads", "messenger"}
+# The canonical destination platforms. A physical platform may appear exactly
+# once, under its canonical key.
+CANONICAL_PLATFORMS = {
+    "youtube", "x", "instagram", "tiktok", "threads", "facebook", "messenger",
+}
 
 
 def _fresh_registry() -> dict:
@@ -33,7 +35,7 @@ def _fresh_registry() -> dict:
 
 
 def test_auto_discover_registers_each_canonical_platform_exactly_once() -> None:
-    """auto_discover must yield exactly the 6 canonical keys, with no duplicates."""
+    """auto_discover must yield exactly the canonical keys, with no duplicates."""
     original = _fresh_registry()
     try:
         # Run discovery as startup code does. Running it twice must be
@@ -61,6 +63,7 @@ def test_auto_discover_skips_explicitly_registered_subclasses() -> None:
     try:
         # Mirror the module-level register() calls (source of truth), in the
         # same order the modules declare them.
+        from xpst.platforms.facebook import FacebookPageUploader
         from xpst.platforms.instagram import InstagramUploader
         from xpst.platforms.threads import ThreadsUploader
         from xpst.platforms.tiktok import TikTokUploader
@@ -72,6 +75,7 @@ def test_auto_discover_skips_explicitly_registered_subclasses() -> None:
         PlatformRegistry.register("threads", ThreadsUploader)
         PlatformRegistry.register("instagram", InstagramUploader)
         PlatformRegistry.register("tiktok", TikTokUploader)
+        PlatformRegistry.register("facebook", FacebookPageUploader)
         PlatformRegistry.register("messenger", MessengerAdapter)
 
         # Run auto_discover on top (twice — must be idempotent).
@@ -79,7 +83,9 @@ def test_auto_discover_skips_explicitly_registered_subclasses() -> None:
         PlatformRegistry.auto_discover()
 
         names = PlatformRegistry.list_platforms()
-        assert len(names) == 6, f"expected 6 canonical platforms, got {len(names)}"
+        assert len(names) == len(CANONICAL_PLATFORMS), (
+            f"expected {len(CANONICAL_PLATFORMS)} canonical platforms, got {len(names)}"
+        )
         assert set(names) == CANONICAL_PLATFORMS, f"unexpected registry keys: {names}"
         assert "messengeradapter" not in names, "mangled messengeradapter key leaked back in"
     finally:

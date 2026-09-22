@@ -179,6 +179,7 @@ def _config_snapshot(config: XPSTConfig) -> dict[str, Any]:
             "instagram": config.rate_limits.instagram,
             "x": config.rate_limits.x,
             "tiktok": config.rate_limits.tiktok,
+            "facebook": config.rate_limits.facebook,
         },
     }
 

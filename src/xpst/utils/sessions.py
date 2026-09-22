@@ -600,3 +600,81 @@ class SessionManager:
             return {"status": "error", "error": f"API returned {r.status_code}"}
         except Exception as e:
             return {"status": "error", "error": str(e)}
+
+    # ── Facebook Page (Page-scoped) ────────────────────────────────────
+
+    async def get_facebook_page_credentials(self) -> dict[str, str] | None:
+        """Return the stored Facebook Page credentials, or ``None``.
+
+        Facebook publishes as a **Page**, so both halves are required: the Page
+        id and that Page's access token. A partial record is reported as
+        unconfigured rather than half-used.
+
+        Returns:
+            ``{"page_id": ..., "page_access_token": ...}`` or ``None``.
+        """
+        from xpst.platforms.facebook import FACEBOOK_CRED_KEYS
+
+        page_id = self.credentials.retrieve(FACEBOOK_CRED_KEYS["page_id"]) or ""
+        page_token = self.credentials.retrieve(FACEBOOK_CRED_KEYS["page_access_token"]) or ""
+        if page_id and page_token:
+            return {"page_id": page_id, "page_access_token": page_token}
+        return None
+
+    async def store_facebook_credentials(
+        self,
+        page_id: str,
+        page_access_token: str,
+        *,
+        user_token: str = "",
+        app_id: str = "",
+        app_secret: str = "",
+    ) -> None:
+        """Persist Facebook Page credentials in the encrypted CredentialStore.
+
+        Args:
+            page_id: Numeric id of the Page that owns the token.
+            page_access_token: The Page access token every publish call uses.
+            user_token: Long-lived user token used to (re)discover Pages.
+            app_id: BYO Meta app id.
+            app_secret: BYO Meta app secret (code exchange / appsecret_proof).
+        """
+        from xpst.platforms.facebook import FACEBOOK_CRED_KEYS
+
+        self.credentials.store(FACEBOOK_CRED_KEYS["page_id"], page_id)
+        self.credentials.store(FACEBOOK_CRED_KEYS["page_access_token"], page_access_token)
+        for key, value in (
+            ("user_token", user_token),
+            ("app_id", app_id),
+            ("app_secret", app_secret),
+        ):
+            if value:
+                self.credentials.store(FACEBOOK_CRED_KEYS[key], value)
+        logger.info("Facebook Page credentials stored (encrypted)")
+
+    async def check_facebook_health(self) -> dict:
+        """Check Facebook Page health via ``GET /{page_id}`` (no prompts)."""
+        try:
+            creds = await self.get_facebook_page_credentials()
+            if not creds:
+                return {"status": "error", "error": "Facebook Page not configured"}
+            import httpx
+
+            r = httpx.get(
+                f"https://graph.facebook.com/v21.0/{creds['page_id']}",
+                params={
+                    "fields": "id,name,followers_count",
+                    "access_token": creds["page_access_token"],
+                },
+                timeout=10,
+            )
+            if r.status_code == 200:
+                payload = r.json()
+                return {
+                    "status": "ok",
+                    "page_id": str(payload.get("id", "?")),
+                    "name": payload.get("name", "?"),
+                }
+            return {"status": "error", "error": f"API returned {r.status_code}"}
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
