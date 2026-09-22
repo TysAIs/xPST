@@ -114,7 +114,7 @@ def _auth_mode_for(config: XPSTConfig, platform: str) -> str:
         return "source_only"
     if platform == "threads":
         return "oauth"
-    if platform == "messenger":
+    if platform in ("messenger", "facebook"):
         return "oauth"
     if platform == "local":
         return "local"
@@ -228,6 +228,14 @@ def _build_uploaders(config: XPSTConfig) -> dict[str, Any]:
             uploaders["messenger"] = MessengerAdapter(config)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Messenger adapter unavailable: %s", exc)
+
+    if config.facebook.enabled:
+        try:
+            from xpst.platforms.facebook import FacebookPageUploader
+
+            uploaders["facebook"] = FacebookPageUploader(config)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Facebook Page uploader unavailable: %s", exc)
 
     # Same session-manager wiring the engine does (secure auth path).
     session_manager = SessionManager(config.config_dir)
@@ -371,7 +379,7 @@ async def collect_live_auth_status_async(
     tiktok_base["destination_check"] = destination_check
     raw["tiktok"] = tiktok_base
 
-    for name in ("threads", "messenger"):
+    for name in ("threads", "facebook", "messenger"):
         entry = {
             "authenticated": False,
             "session_valid": False,
@@ -474,7 +482,7 @@ def collect_live_auth_status(
     degrades to all-false entries with an error — the command still
     returns honest, backward-compatible JSON instead of crashing.
     """
-    platforms = ("youtube", "x", "instagram", "tiktok", "threads", "messenger", "local")
+    platforms = ("youtube", "x", "instagram", "tiktok", "threads", "facebook", "messenger", "local")
     try:
         return asyncio.run(collect_live_auth_status_async(config, uploaders))
     except Exception as exc:  # noqa: BLE001 — status must never crash

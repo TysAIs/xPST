@@ -283,6 +283,7 @@ account-dependent; use the non-mutating health check after your own setup.
 | TikTok as a source | **Source-only (live-verified)** | TikTok source fetching through the downloader/cookie path was live-checked. Use it to source content for other destinations. |
 | TikTok as a destination | **Not available yet** | Destination publishing awaits external TikTok developer review and approved app credentials. Do not present TikTok destination publishing as ready. |
 | Threads | **Disabled / unauthenticated** | Threads is an opt-in integration and is currently disabled. It is not a live-verified destination. |
+| Facebook Page | **Unauthenticated** | Page-scoped destination via a BYO Meta app (Facebook Login for Business). Implemented and unit-tested; no Meta app is configured in the current live environment. Personal profiles cannot publish. |
 | Messenger | **Disabled / unauthenticated** | Messenger is an opt-in messaging/auto-reply integration and is currently disabled. It is not a video-posting destination. |
 | `pip install xpst` | **Not yet** | The PyPI JSON endpoint currently returns HTTP 404, so the package is not published on PyPI. Use a GitHub release desktop asset or install from source instead. |
 

@@ -89,7 +89,7 @@ def test_provider_catalog_includes_all_providers_and_no_messenger_video_upload(t
     providers = catalog["by_name"]
 
     assert set(providers) == {
-        "youtube", "x", "instagram", "tiktok", "threads", "messenger", "local",
+        "youtube", "x", "instagram", "tiktok", "threads", "messenger", "facebook", "local",
     }
     assert "video_destination" in providers["tiktok"]["roles"]
     assert "source" in providers["tiktok"]["roles"]
