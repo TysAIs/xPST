@@ -217,7 +217,14 @@ class XUploader(PlatformUploader):
                 else "Uses persisted X cookies through twikit; carousel posts are published as threads."
             ),
             extra={
-                "content": ("video", "thread"),
+                # "thread" was declared here with no implementation behind it
+                # (a text-only thread has no sender), so agents read "X supports
+                # threads" and attempted a post that could not work. Multi-media
+                # posts are published as a tweet thread and are declared as
+                # ``carousel`` instead. Re-add "thread" in the same change that
+                # adds the text-thread sender; the content contract refuses a
+                # declared-but-unimplemented type and its test fails on drift.
+                "content": ("video", "carousel"),
                 "max_caption_length": 280,
                 "max_video_duration_seconds": 140,
             },

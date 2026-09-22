@@ -74,9 +74,15 @@ class ThreadsUploader(PlatformUploader):
             auth_mode=AuthMode.OAUTH,
             is_official_api=True,
             docs_url="https://developers.facebook.com/docs/threads",
-            notes="Uploads media and text via the Meta Threads API container publish model.",
+            notes="Uploads media via the Meta Threads API container publish model.",
             extra={
-                "content": ("video", "text"),
+                # "text" was declared here with no implementation behind it: the
+                # adapter only ever builds a ``media_type: VIDEO`` container, so
+                # there is no text path. An agent reading "Threads supports text"
+                # attempted a post that cannot work. Re-add "text" in the same
+                # change that adds the text sender; the content contract fails
+                # its test if a destination declares a type it cannot post.
+                "content": ("video",),
                 "max_caption_length": self.MAX_CAPTION_LENGTH,
                 "max_video_duration_seconds": self.MAX_VIDEO_DURATION_SECONDS,
                 "rate_limit_per_day": self.RATE_LIMIT_PER_DAY,

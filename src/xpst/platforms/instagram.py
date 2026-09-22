@@ -101,7 +101,13 @@ class InstagramUploader(PlatformUploader):
                 else "Uses persisted Instagram sessions through instagrapi; not an official Meta publishing API."
             ),
             extra={
-                "content": ("video", "image", "carousel"),
+                # "image" was declared here with no implementation behind it: the
+                # Graph API path is REELS-only and the instagrapi path uploads
+                # video, so a single-image feed post cannot be published. Re-add
+                # "image" in the same change that adds the image upload; the
+                # content contract fails its test on a declared-but-unimplemented
+                # type.
+                "content": ("video", "carousel"),
                 "max_caption_length": self.MAX_CAPTION_LENGTH,
                 "max_carousel_items": 10,
             },

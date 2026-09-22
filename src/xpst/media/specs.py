@@ -44,6 +44,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from xpst.content import ContentType, implemented_content_types
 from xpst.media.modality import (
     MODALITY_IMAGE,
     MODALITY_VIDEO,
@@ -100,17 +101,48 @@ class PlatformSpec:
         return self.containers
 
 
+def publish_modalities(platform: str) -> tuple[str, ...]:
+    """Modalities ``platform`` can really publish, GENERATED from the contract.
+
+    The publish capability has exactly one source: :mod:`xpst.content`
+    (``DESTINATION_CONTENT_PROFILES[...].implemented``). A destination that
+    implements ``ContentType.IMAGE`` is image-capable here in the same instant,
+    so the offer surface (``/api/media``, the preflight, the CLI) cannot drift
+    from the publish contract. ``image_containers`` remains a per-destination
+    ingest detail that must be filled in the same change (the test suite fails
+    if a destination claims images with no accepted image container).
+    """
+    implemented = implemented_content_types(platform)
+    modalities: list[str] = []
+    if ContentType.VIDEO in implemented:
+        modalities.append(MODALITY_VIDEO)
+    if ContentType.IMAGE in implemented:
+        modalities.append(MODALITY_IMAGE)
+    return tuple(modalities)
+
+
+def _spec(platform: str, **ingest_rules: Any) -> PlatformSpec:
+    """Build a built-in destination spec with its capability generated.
+
+    Only ingest rules are passed here; ``modalities``/``image_containers`` are
+    never hand-written for a built-in destination, so no surface can declare a
+    modality the publish contract does not implement.
+    """
+    return PlatformSpec(modalities=publish_modalities(platform), **ingest_rules)
+
+
 PLATFORM_SPECS: dict[str, PlatformSpec] = {
-    # Image publishing is NOT declared anywhere below on purpose: no adapter has
-    # an image publish path yet (every ``upload()`` validates a video — the
-    # Instagram Graph path is REELS-only, X uploads chunked video, YouTube and
-    # TikTok are video ingests, Threads takes a video URL). Declaring it here
-    # without that path is exactly the "app offers what it hard-rejects" defect
-    # this matrix now protects against. Adding ``MODALITY_IMAGE`` plus
-    # ``image_containers`` here is the single switch that makes a destination
-    # offerable for images everywhere at once (/api/media, preflight, CLI) —
-    # do it in the same PR that adds the adapter's image upload.
-    "youtube": PlatformSpec(
+    # Capability is generated (see ``_spec``): today that is video-only
+    # everywhere, because no adapter has an image publish path (every
+    # ``upload()`` validates a video — the Instagram Graph path is REELS-only, X
+    # uploads chunked video, YouTube and TikTok are video ingests, Threads takes
+    # a video URL). Adding ``ContentType.IMAGE`` to a destination's implemented
+    # set in :mod:`xpst.content` plus its ``image_containers`` here is the
+    # single switch that makes it offerable for images everywhere at once
+    # (/api/media, preflight, CLI) — do it in the same PR as the adapter's image
+    # upload.
+    "youtube": _spec(
+        "youtube",
         display_name="YouTube",
         containers=(".mp4", ".mov"),
         video_codec="h264",
@@ -124,7 +156,8 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         file_size_cap_mb=256 * 1024,
         duration_cap_s=None,
     ),
-    "tiktok": PlatformSpec(
+    "tiktok": _spec(
+        "tiktok",
         display_name="TikTok",
         containers=(".mp4", ".mov"),
         video_codec="h264",
@@ -138,7 +171,8 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         file_size_cap_mb=1024,
         duration_cap_s=600,
     ),
-    "instagram": PlatformSpec(
+    "instagram": _spec(
+        "instagram",
         display_name="Instagram Reels",
         containers=(".mp4", ".mov"),
         video_codec="h264",
@@ -152,7 +186,8 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         file_size_cap_mb=4 * 1024,
         duration_cap_s=900,
     ),
-    "x": PlatformSpec(
+    "x": _spec(
+        "x",
         display_name="X (Twitter)",
         containers=(".mp4", ".mov"),
         video_codec="h264",

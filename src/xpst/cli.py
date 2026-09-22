@@ -35,7 +35,9 @@ from rich.panel import Panel
 from rich.table import Table
 
 from xpst.config import XPSTConfig
+from xpst.content import CONTENT_TYPES, ContentRequest, capability_document, content_verdict
 from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.services.post_service import refusal_envelope
 from xpst.setup_transaction import SetupTransactionService
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
@@ -590,14 +592,33 @@ def watch(ctx: click.Context, interval: int | None, source: str, bidirectional: 
 
 
 @main.command()
-@click.option("--video", "-v", required=True, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
-@click.option("--caption", "-c", required=True, help="Video caption")
+@click.option("--video", "-v", required=False, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
+@click.option("--caption", "-c", required=True, help="Post text/caption")
+@click.option(
+    "--content-type",
+    "content_type",
+    default=None,
+    type=click.Choice([item.value for item in CONTENT_TYPES], case_sensitive=False),
+    help=(
+        "What this post is, in the canonical vocabulary: video/image/carousel/"
+        "text/thread. Defaults to what the media implies. A type the chosen "
+        "destination cannot publish is refused before anything is uploaded."
+    ),
+)
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
 @json_option
 @click.pass_context
-def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: str | None, dry_run: bool, as_json: bool):
-    """Manually post a video or carousel (multiple --video flags)"""
+def post(
+    ctx: click.Context,
+    video: tuple[str, ...],
+    caption: str,
+    content_type: str | None,
+    platforms: str | None,
+    dry_run: bool,
+    as_json: bool,
+):
+    """Manually post a video, carousel, or text (multiple --video flags = carousel)"""
     config = load_config(ctx.obj.get("config_path"))
     quiet = ctx.obj.get("quiet", False)
     setup_logging(
@@ -608,38 +629,74 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
     media_paths = [Path(v) for v in video]
     platform_list = platforms.split(",") if platforms else None
 
+    if not media_paths and not content_type:
+        raise click.UsageError(
+            "Provide --video (a file to post) or --content-type (what this post is, "
+            "e.g. --content-type text)."
+        )
+
+    # Resolve the target list once so the content verdict is decided against the
+    # same destinations the engine would use, without instantiating the engine
+    # (its __init__ performs crash recovery and may write state).
+    targets = platform_list or [
+        name for name, enabled in (
+            ("youtube", config.youtube.enabled),
+            ("x", config.x.enabled),
+            ("instagram", config.instagram.enabled),
+            ("tiktok", config.tiktok.enabled),
+            ("threads", config.threads.enabled),
+        ) if enabled
+    ]
+
+    # ONE content answer, from the contract module: the same request produces
+    # the same verdict on the CLI, in MCP, and over HTTP.
+    request = ContentRequest.from_legacy(media_paths, caption, targets, content_type=content_type)
+    verdict = content_verdict(request)
+
     if dry_run:
-        # Do NOT instantiate CrossPostEngine for a dry run: its __init__
-        # performs crash recovery and may create/rotate state files. Resolve
-        # targets straight from config flags instead.
-        targets = platform_list or [
-            name for name, enabled in (
-                ("youtube", config.youtube.enabled),
-                ("x", config.x.enabled),
-                ("instagram", config.instagram.enabled),
-                ("tiktok", config.tiktok.enabled),
-                ("threads", config.threads.enabled),
-            ) if enabled
-        ]
         info = {
             "dry_run": True,
-            "video": str(media_paths[0]),
+            "video": str(media_paths[0]) if media_paths else None,
             "caption": caption[:80],
             "carousel": len(media_paths) > 1,
             "items": len(media_paths),
             "targets": targets,
+            "content_type": verdict["content_type"] or verdict["effective_content_type"],
+            "effective_content_type": verdict["effective_content_type"],
+            "route": verdict["route"],
+            "content": verdict,
+            "ready": verdict["ok"],
+            "blockers": verdict["blockers"],
         }
         if as_json:
             json_output(info, True)
         else:
             if not quiet:
                 console.print("[bold blue]Dry run — would post:[/bold blue]")
-            console.print(f"  File: {media_paths[0]}")
-            if len(media_paths) > 1:
-                console.print(f"  Carousel: {len(media_paths)} items")
+            if media_paths:
+                console.print(f"  File: {media_paths[0]}")
+                if len(media_paths) > 1:
+                    console.print(f"  Carousel: {len(media_paths)} items")
+            console.print(f"  Content type: {verdict['effective_content_type']}")
             console.print(f"  Caption: {caption[:80]}")
             console.print(f"  Targets: {', '.join(targets)}")
+            for blocker in verdict["blockers"]:
+                console.print(f"  [red]Blocked:[/red] {blocker}")
+        if not verdict["ok"]:
+            sys.exit(EXIT_GENERAL)
         return
+
+    if verdict["blockers"]:
+        # Refused before any upload, by the same rule every other surface uses.
+        # No engine is constructed and nothing is uploaded.
+        envelope = refusal_envelope(request, verdict["blockers"], content=verdict)
+        if as_json:
+            envelope["exit_code"] = EXIT_GENERAL
+            json_output(envelope, True)
+        else:
+            for blocker in verdict["blockers"]:
+                console.print(f"[red]Refused:[/red] {blocker}")
+        sys.exit(EXIT_GENERAL)
 
     if not as_json and not quiet:
         if len(media_paths) > 1:
@@ -674,6 +731,8 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
 
     if as_json:
         out = _result_to_dict(result)
+        out["content_type"] = verdict["effective_content_type"]
+        out["content"] = verdict
         if quota_blocked:
             out["error"] = {
                 "code": "QUOTA_EXHAUSTED",
@@ -1102,6 +1161,53 @@ def providers(ctx: click.Context, as_json: bool):
                 str(manifest["auth_mode"]),
             )
         console.print(table)
+
+
+@main.command()
+@json_option
+@click.pass_context
+def capabilities(ctx: click.Context, as_json: bool):
+    """Show what xPST can publish, per destination, in the canonical vocabulary
+
+    Reads the content contract (the same document the MCP tool
+    ``xpst_capabilities`` and ``GET /api/capabilities`` return), so what a human
+    reads here is exactly what an agent plans against. A content type listed as
+    implemented has real code behind it; a destination that cannot post a type
+    does not declare it.
+    """
+    document = capability_document()
+
+    if as_json:
+        json_output(document, True)
+        return
+
+    if not ctx.obj.get("quiet", False):
+        console.print("[bold blue]What xPST can publish[/bold blue]")
+        console.print("[dim]Vocabulary: " + ", ".join(document["content_types"]) + "[/dim]\n")
+
+    table = Table(title="Declared vs implemented")
+    table.add_column("Destination", style="cyan")
+    table.add_column("Declared")
+    table.add_column("Implemented")
+    table.add_column("Notes")
+    for platform in sorted(document["platforms"]):
+        profile = document["platforms"][platform]
+        declared = ", ".join(profile["declared"]) or "—"
+        implemented = ", ".join(profile["implemented"]) or "—"
+        note = profile.get("note") or ""
+        if profile.get("declared_but_unimplemented"):
+            note = (note + " " if note else "") + (
+                "FALSE DECLARATION: " + ", ".join(profile["declared_but_unimplemented"])
+            )
+        table.add_row(f"{profile['display_name']} ({platform})", declared, implemented, note)
+    console.print(table)
+
+    if document["declared_but_unimplemented"]:
+        console.print(
+            "[red]A destination declares a content type with no implementation: "
+            + ", ".join(f"{platform}={types}" for platform, types in document["declared_but_unimplemented"].items())
+            + "[/red]"
+        )
 
 
 @main.command()

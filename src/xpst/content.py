@@ -425,12 +425,13 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
     "x": _publish_profile(
         "x",
         "X",
-        declared_labels=("video", "thread"),
+        declared_labels=("video", "carousel"),
         implemented=(ContentType.VIDEO, ContentType.CAROUSEL),
         notes={
+            ContentType.TEXT: "not declared: xPST has no text-only sender for X",
             ContentType.THREAD: (
-                "declared as `thread`; a text-only thread has no implementation. "
-                "Multi-media posting works as a tweet thread and is reported as carousel."
+                "not declared: a text-only thread has no sender. Multi-media posting "
+                "works as a tweet thread and is reported as carousel."
             ),
             ContentType.CAROUSEL: "published as a tweet thread, one media item per tweet (upload_carousel)",
         },
@@ -438,10 +439,10 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
     "instagram": _publish_profile(
         "instagram",
         "Instagram Reels",
-        declared_labels=("video", "image", "carousel"),
+        declared_labels=("video", "carousel"),
         implemented=(ContentType.VIDEO, ContentType.CAROUSEL),
         notes={
-            ContentType.IMAGE: "declared as `image`; single-image feed posting is not implemented",
+            ContentType.IMAGE: "not declared: the Graph path is REELS-only and no image publish path exists",
             ContentType.CAROUSEL: "native album upload (2-10 items)",
         },
     ),
@@ -455,9 +456,9 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
     "threads": _publish_profile(
         "threads",
         "Threads",
-        declared_labels=("video", "text"),
+        declared_labels=("video",),
         implemented=(ContentType.VIDEO,),
-        notes={ContentType.TEXT: "declared as `text`; only media_type VIDEO exists, so there is no text path"},
+        notes={ContentType.TEXT: "not declared: the adapter only builds a media_type VIDEO container, so there is no text path"},
     ),
     "messenger": DestinationContentProfile(
         platform="messenger",
@@ -548,6 +549,36 @@ def capability_matrix() -> dict[str, Any]:
         "content_types": [item.value for item in CONTENT_TYPES],
         "publish_destinations": list(PUBLISH_DESTINATIONS),
         "platforms": {platform: profile.to_dict() for platform, profile in DESTINATION_CONTENT_PROFILES.items()},
+    }
+
+
+def capability_document() -> dict[str, Any]:
+    """THE capability document, from one source, for every surface.
+
+    The CLI (``xpst capabilities``), the MCP tool (``xpst_capabilities``) and
+    the HTTP API (``GET /api/capabilities``) all return this mapping verbatim —
+    so the list a human reads and the list an agent plans against cannot drift,
+    and there is exactly one place to add a capability.
+    """
+    matrix = capability_matrix()
+    return {
+        "contract_version": 1,
+        "content_types": matrix["content_types"],
+        "publish_destinations": matrix["publish_destinations"],
+        "platforms": matrix["platforms"],
+        # The publishing path each content type takes once its media requirement
+        # is met. A type that is absent here has no path yet, which is why it is
+        # absent from every destination's ``implemented`` list too.
+        "publish_routes": {
+            item.value: _ROUTE_BY_CONTENT_TYPE.get(item, PUBLISH_ROUTE_UNIMPLEMENTED) for item in CONTENT_TYPES
+        },
+        # No destination may declare a content type it cannot publish. This is
+        # the assertion the surfaces (and the test suite) read as data.
+        "declared_but_unimplemented": {
+            platform: sorted(item.value for item in profile.declared_but_unimplemented)
+            for platform, profile in DESTINATION_CONTENT_PROFILES.items()
+            if profile.declared_but_unimplemented
+        },
     }
 
 
@@ -904,6 +935,23 @@ def validate_content_request(request: ContentRequest) -> tuple[ContentIssue, ...
                     platform=str(name).strip().lower(),
                 )
             )
+            continue
+        # The request shape carries per-destination copy, but no uploader reads
+        # it yet: the engine still publishes the shared text to every
+        # destination. Saying so is the point of this contract — an agent that
+        # passed an override must not believe it was honoured.
+        issues.append(
+            ContentIssue(
+                code="content_type.override_not_applied",
+                message=(
+                    f"The {name} override is accepted and validated, but this build publishes the "
+                    f"shared text to every destination: per-destination copy is not wired to the "
+                    f"uploaders yet."
+                ),
+                severity="warning",
+                platform=str(name).strip().lower(),
+            )
+        )
 
     # An empty target list is the request-shape precondition owned by the
     # preflight service; there is nothing to validate a content type against.
@@ -955,3 +1003,66 @@ UNIMPLEMENTED_PUBLISH_ERROR = (
 def blocking_issues(request: ContentRequest) -> list[ContentIssue]:
     """Just the error findings (with codes/platforms) for structured surfaces."""
     return [issue for issue in validate_content_request(request) if issue.is_error]
+
+
+# ── The surface-facing verdict and route ────────────────────────────────────
+
+
+def content_verdict(request: ContentRequest) -> dict[str, Any]:
+    """The ONE content answer every surface reports for a request.
+
+    CLI, MCP, HTTP and the dashboard all embed this mapping (or the fields it
+    carries) instead of re-deriving a content type, re-checking a destination
+    or re-writing a refusal message. Identical inputs therefore produce
+    byte-identical blockers on every surface; ``tests/test_content_surface_parity.py``
+    asserts exactly that.
+
+    Returns:
+        ``{content_type, effective_content_type, ok, blockers, warnings,
+        content_issues, overrides, route}`` — JSON-serializable, no I/O.
+    """
+    issues = validate_content_request(request)
+    return {
+        "content_type": request.content_type.value if isinstance(request.content_type, ContentType) else None,
+        "effective_content_type": request.effective_content_type.value,
+        "ok": not any(issue.is_error for issue in issues),
+        "blockers": [issue.message for issue in issues if issue.is_error],
+        "warnings": [issue.message for issue in issues if not issue.is_error],
+        "content_issues": [issue.to_dict() for issue in issues],
+        "overrides": {name: override.to_dict() for name, override in request.overrides.items()},
+        "route": publish_route(request),
+    }
+
+
+#: Publishing paths a validated request can take. ``UNIMPLEMENTED`` is a real
+#: answer, not an error: it is how a request that passes capability validation
+#: (a plugin destination, or a type no uploader implements yet) is reported
+#: instead of being uploaded "as a video just in case".
+PUBLISH_ROUTE_VIDEO = "video"
+PUBLISH_ROUTE_CAROUSEL = "carousel"
+PUBLISH_ROUTE_UNIMPLEMENTED = "unimplemented"
+
+#: The publishing path a content type takes once its media requirement is met.
+#: A content type that is absent has no publishing path at all.
+_ROUTE_BY_CONTENT_TYPE: dict[ContentType, str] = {
+    ContentType.VIDEO: PUBLISH_ROUTE_VIDEO,
+    ContentType.CAROUSEL: PUBLISH_ROUTE_CAROUSEL,
+}
+
+
+def publish_route(request: ContentRequest) -> str:
+    """The ONE modality→publishing-path decision shared by every surface.
+
+    Before the content contract this decision was ``if len(paths) > 1`` inside
+    the posting service, with the CLI and MCP each re-deriving it from their own
+    argument shapes. It is now a function of the request's effective content
+    type, so all surfaces route a request the same way.
+    """
+    content_type = request.effective_content_type
+    media = [str(item) for item in request.media if str(item).strip()]
+    route = _ROUTE_BY_CONTENT_TYPE.get(content_type)
+    if route == PUBLISH_ROUTE_VIDEO and len(media) == 1:
+        return route
+    if route == PUBLISH_ROUTE_CAROUSEL and len(media) >= 2:
+        return route
+    return PUBLISH_ROUTE_UNIMPLEMENTED
