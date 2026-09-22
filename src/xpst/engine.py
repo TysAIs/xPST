@@ -22,6 +22,7 @@ Features:
 Refactored to delegate to UploadService and SourceService.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -66,6 +67,25 @@ logger = get_logger(__name__)
 _ENCODED_SUFFIXES = ("_youtube", "_instagram", "_x", "_tiktok", "_threads")
 
 
+def caption_for_destination(
+    platform: str,
+    default: str,
+    per_platform_captions: Mapping[str, str] | None = None,
+) -> str:
+    """The caption one destination gets: its override, else the shared default.
+
+    The mapping is matched case-insensitively and never trimmed, so the copy a
+    user wrote for a destination is the copy the uploader receives verbatim.
+    """
+    if not per_platform_captions:
+        return default
+    key = str(platform).strip().lower()
+    for name, caption in per_platform_captions.items():
+        if str(name).strip().lower() == key:
+            return str(caption)
+    return default
+
+
 @dataclass
 class CrossPostResult:
     """Result of a cross-posting operation.
@@ -91,6 +111,11 @@ class CrossPostResult:
     results: dict[str, UploadResult] = field(default_factory=dict)
     all_success: bool = False
     partial_success: bool = False
+    #: The caption actually handed to each destination's uploader, keyed by
+    #: platform. Populated only for destinations that were attempted, so a
+    #: caller can prove which copy each destination received (per-destination
+    #: overrides make ``caption`` the shared/default text, not what was sent).
+    captions: dict[str, str] = field(default_factory=dict)
 
     def update_status(self) -> None:
         """Recalculate success flags from the current results dict.
@@ -573,6 +598,7 @@ class CrossPostEngine:
         video_path: Path,
         caption: str,
         platforms: list[str] | None = None,
+        per_platform_captions: Mapping[str, str] | None = None,
         visibility: str | None = None,
     ) -> CrossPostResult:
         """Manually post a single video to specified platforms.
@@ -582,8 +608,11 @@ class CrossPostEngine:
 
         Args:
             video_path: Path to the video file on disk.
-            caption: Caption/title for the post.
+            caption: Caption/title for the post (the default for every
+                destination that has no per-destination override).
             platforms: Target platform names. None means all enabled platforms.
+            per_platform_captions: ``{platform: caption}`` overrides. A
+                destination absent from the mapping keeps ``caption``.
             visibility: Optional target visibility (YouTube: ``public``,
                 ``unlisted``, ``private``). Honoured by YouTube only.
 
@@ -617,11 +646,17 @@ class CrossPostEngine:
                 logger.warning(f"Platform {platform_name} not available")
                 continue
 
+            # The copy this destination gets: its own override when the user
+            # wrote one, else the shared caption. Recorded on the result so the
+            # caller can prove what each destination received.
+            platform_caption = caption_for_destination(platform_name, caption, per_platform_captions)
+            result.captions[platform_name] = platform_caption
+
             # Delegate to upload service
             upload_result = await self.upload_service.upload_to_platform(
                 uploader=uploader,
                 video_path=video_path,
-                caption=caption,
+                caption=platform_caption,
                 platform_name=platform_name,
                 video_id=video_id,
                 source_platform="local",
@@ -678,6 +713,7 @@ class CrossPostEngine:
         media_paths: list[Path],
         caption: str,
         platforms: list[str] | None = None,
+        per_platform_captions: Mapping[str, str] | None = None,
     ) -> CrossPostResult:
         """Manually post a carousel/multi-media to specified platforms.
 
@@ -688,8 +724,11 @@ class CrossPostEngine:
 
         Args:
             media_paths: List of paths to images/videos.
-            caption: Caption for the post.
+            caption: Caption for the post (the default for every destination
+                that has no per-destination override).
             platforms: Target platform names. None means all enabled.
+            per_platform_captions: ``{platform: caption}`` overrides. A
+                destination absent from the mapping keeps ``caption``.
 
         Returns:
             CrossPostResult with per-platform outcomes.
@@ -715,11 +754,14 @@ class CrossPostEngine:
                 logger.warning(f"Platform {platform_name} not available")
                 continue
 
+            platform_caption = caption_for_destination(platform_name, caption, per_platform_captions)
+            result.captions[platform_name] = platform_caption
+
             # Delegate to upload service
             upload_result = await self.upload_service.upload_carousel_to_platform(
                 uploader=uploader,
                 media_paths=media_paths,
-                caption=caption,
+                caption=platform_caption,
                 platform_name=platform_name,
                 video_id=video_id,
             )
@@ -781,10 +823,13 @@ class CrossPostEngine:
             return result
 
         media = list(request.resolved_media)
+        # The per-destination copy the user wrote (empty for every destination
+        # that keeps the shared text), so validation and upload use one shape.
+        per_platform_captions = request.per_platform_texts(platforms)
         if content_type is ContentType.VIDEO and len(media) == 1:
-            return await self.post_manual(media[0], request.text, platforms)
+            return await self.post_manual(media[0], request.text, platforms, per_platform_captions)
         if content_type is ContentType.CAROUSEL and len(media) >= 2:
-            return await self.post_manual_carousel(media, request.text, platforms)
+            return await self.post_manual_carousel(media, request.text, platforms, per_platform_captions)
 
         # Validated for this destination (an undeclared/plugin destination) but
         # there is no publishing path for the content type yet.

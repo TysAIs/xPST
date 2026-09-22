@@ -107,9 +107,11 @@ class FakeEngine:
         self.fail = fail or {}
         self.skip = skip or []
         self.calls: list[tuple[str, tuple[str, ...]]] = []
+        self.captions: dict[str, str] = {}
 
-    async def post_manual(self, video_path, caption, platforms=None):  # noqa: ANN001, ANN201
+    async def post_manual(self, video_path, caption, platforms=None, per_platform_captions=None):  # noqa: ANN001, ANN201
         self.calls.append((str(video_path), tuple(platforms or ())))
+        self.captions.update(per_platform_captions or {})
         results: dict[str, Any] = {}
         for platform in platforms or []:
             if platform in self.skip:
@@ -120,8 +122,8 @@ class FakeEngine:
                 results[platform] = FakeUpload(True, platform).result
         return FakePostResult("vid-1", caption, results)
 
-    async def post_manual_carousel(self, media_paths, caption, platforms=None):  # noqa: ANN001, ANN201
-        return await self.post_manual(media_paths[0], caption, platforms)
+    async def post_manual_carousel(self, media_paths, caption, platforms=None, per_platform_captions=None):  # noqa: ANN001, ANN201
+        return await self.post_manual(media_paths[0], caption, platforms, per_platform_captions)
 
 
 def _engine_factory(engine: FakeEngine):
