@@ -267,6 +267,14 @@ Live response shape (per-platform upload results):
 }
 ```
 
+Each per-platform entry also carries `metadata` when the uploader reported
+verifiable facts about what published: an Instagram carousel reports
+`carousel_items` + `item_order`, an X thread reports `thread_items` +
+`item_order` + `tweet_ids`. That is how an agent confirms all N items landed, in
+order, instead of trusting a green `success`. The key is additive — an uploader
+that reported nothing produces no `metadata` key, and it never upgrades a
+failure to success.
+
 ## xpst_backfill
 
 Retries failed or incomplete posts from history. **Live mode posts to real accounts.**

@@ -17,11 +17,19 @@ MCP server, and the web UI:
 Rule 3 is the fix for the shipped defect where a failed Instagram upload was
 still logged as "100% complete": a missing/skipped destination is never
 silently dropped from the response and never counted as success.
+
+Rule 4 follows from rule 2: the row carries the uploader's own
+``metadata`` when it reported any, because "a photo carousel is a carousel with
+all N items in order" is only checkable by the caller if the response says how
+many items published, in what order. Without it every surface reports a green
+post that cannot be verified — the same fabricated-success class as rule 3, one
+layer up. The key is additive and never invented.
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import threading
 from typing import TYPE_CHECKING, Any
@@ -71,11 +79,22 @@ __all__ = [
 
 
 def _upload_to_dict(upload: Any) -> dict[str, Any]:
-    """Serialize one upload result without upgrading a failure to success."""
+    """Serialize one upload result without upgrading a failure to success.
+
+    The uploader's own ``metadata`` travels with the row when it is non-empty,
+    because that is where the verifiable facts live: a carousel reports
+    ``carousel_items`` + ``item_order``, an X thread reports ``thread_items`` +
+    ``item_order`` + ``tweet_ids``. Without it a caller cannot check that an
+    N-item post really published N items in order — it can only see green.
+
+    The key is additive: it is omitted when the uploader reported nothing, so a
+    refused or unverified destination never gains a metadata key, and
+    ``success``/``published`` are decided exactly as before.
+    """
     success = bool(getattr(upload, "success", False))
     outcome = getattr(upload, "outcome", None)
     outcome_value = outcome.value if isinstance(outcome, UploadOutcome) else (str(outcome) if outcome else None)
-    return {
+    row: dict[str, Any] = {
         "success": success,
         "published": success,
         "post_id": getattr(upload, "post_id", None),
@@ -84,6 +103,12 @@ def _upload_to_dict(upload: Any) -> dict[str, Any]:
         "outcome": outcome_value,
         "retryable": getattr(upload, "retryable", None),
     }
+    metadata = getattr(upload, "metadata", None)
+    if isinstance(metadata, dict) and metadata:
+        # Deep copy: the envelope is handed to callers who may mutate it, and it
+        # must not share nested lists (``item_order``) with the live result.
+        row["metadata"] = copy.deepcopy(metadata)
+    return row
 
 
 def serialize_post_attempt(
