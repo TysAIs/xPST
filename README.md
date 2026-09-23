@@ -10,7 +10,7 @@
   <a href="https://www.python.org"><img alt="Python" src="https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green"></a>
   <a href="https://github.com/TysAIs/xPST/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/TysAIs/xPST/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-7-blue"></a>
+  <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-8-blue"></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/os-Linux%20|%20macOS%20|%20Windows-lightgrey"></a>
   <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-40%20tools-orange"></a>
   <a href="#"><img alt="Desktop" src="https://img.shields.io/badge/desktop-PySide6%2FQML-blueviolet"></a>
@@ -44,7 +44,7 @@
 
 **xPST** (Cross-Posting Suite) is a local-first, open-source automation tool that takes a creator's short-form video from one source platform and republishes it to connected destinations. It tracks per-post performance across configured platforms in one place, and feeds the creator's published content into a personal knowledge base that any connected AI agent can semantically query.
 
-xPST includes integrations for **six platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, and (opt-in) Facebook Messenger — but their current availability is not uniform. YouTube, X, and Instagram are live-verified; TikTok is currently source-only; Threads and Messenger are disabled/unauthenticated. See the [capability truth table](docs/INSTALL.md#capability-truth-table) before treating an integration as ready.
+xPST includes integrations for **seven platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, Facebook Pages, and (opt-in) Facebook Messenger — but their current availability is not uniform. YouTube, X, and Instagram are live-verified; TikTok is currently source-only; Threads, Facebook Pages, and Messenger are not authenticated in the current live environment. See the [capability truth table](docs/INSTALL.md#capability-truth-table) before treating an integration as ready.
 
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
@@ -68,7 +68,7 @@ platform API calls you configure. See
 ### Core Cross-Posting
 - **Live-verified integrations** — YouTube, Instagram, and X/Twitter are authenticated and live-checked; publishing still depends on your accounts and API/session state
 - **TikTok source support** — TikTok can currently be used as a source; destination publishing is pending external developer review
-- **Explicitly disabled integrations** — Threads and Messenger remain opt-in and currently unauthenticated/disabled
+- **Explicitly disabled integrations** — Threads, Facebook Pages, and Messenger remain opt-in and currently unauthenticated/disabled
 - **Connected-provider fan-out** — One source video can be sent to destinations that are actually configured and available; see the [capability truth table](docs/INSTALL.md#capability-truth-table)
 - **Smart passthrough** — A probe checks whether the source already satisfies the platform profile and skips the re-encode entirely, saving a generation loss
 - **Circuit breakers** — One platform failing never blocks the others; repeat offenders are disabled and recover automatically
@@ -108,7 +108,7 @@ These numbers are generated from the shipped code, not maintained by hand. `pyth
 | CLI top-level commands | **46** | `xpst.cli.main.commands` |
 | CLI commands including subcommands | **69** | recursive walk of the Click command tree |
 | HTTP routes (dashboard app) | **34** | FastAPI route table (30 xPST routes + 4 framework docs routes) |
-| Supported providers | **7** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
+| Supported providers | **8** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
 
 Regenerate and verify with `python scripts/generate_counts.py --write` / `--check`; the check runs in CI, so these numbers cannot drift silently.
 <!-- END GENERATED SURFACE COUNTS -->
@@ -273,7 +273,7 @@ xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help
 | `xpst onboard` | Guided first-run onboarding for configured platforms (`--dry-run` previews) |
 | `xpst doctor` | Diagnose auth health, quotas and environment; prints a prioritized fix-it checklist |
 | `xpst connect [PLATFORM]` | Streamlined account connection wizard; use `--test` to test existing |
-| `xpst auth [PLATFORM]` | Authenticate with a specific platform (youtube/x/instagram/tiktok/threads) |
+| `xpst auth [PLATFORM]` | Authenticate with a specific platform (youtube/x/instagram/tiktok/threads/facebook/messenger) |
 | `xpst auth status` | Show authentication and quota status for all platforms, with a truthful per-platform badge derived from a live check |
 | `xpst refresh-tokens` | Refresh expiring/expired access tokens in the background (bounded retry, no prompts, no token material printed) |
 | `xpst config show` | Display current configuration as YAML (sensitive values masked) |
@@ -592,6 +592,7 @@ xPST includes six platform integrations, but the live status is not uniform. The
 | X / Twitter | Live-verified (account-dependent) | Cookies (twikit) or API v2 | [docs/setup-x-twitter.md](docs/setup-x-twitter.md) |
 | TikTok | Source-only; destination pending external review | yt-dlp (source) / Content Posting API (not currently available) | [docs/setup-tiktok.md](docs/setup-tiktok.md) |
 | Threads | Disabled / unauthenticated; opt-in destination | Meta Threads API (official) | [docs/setup-threads.md](docs/setup-threads.md) |
+| Facebook Page | Unauthenticated; opt-in destination (BYO Meta app) | Facebook Login for Business → Graph API (official) | [docs/setup-facebook.md](docs/setup-facebook.md) |
 | Messenger | Disabled / unauthenticated; opt-in messaging/auto-reply | Facebook Page Access Token + app secret | [docs/setup-messenger.md](docs/setup-messenger.md) |
 
 ### YouTube (OAuth 2.0 — official API)
@@ -703,6 +704,26 @@ its publish pipeline prepares a local file before an uploader runs and no
 CLI/MCP surface accepts a URL, so **Threads media publishing is not offered at
 all today** — post that content from the Threads app. Text posts need no URL,
 but xPST has no Threads text sender yet, so they are not offered either.
+
+### Facebook Page (Facebook Login for Business — opt-in, currently unauthenticated)
+
+Facebook publishing is **Page-scoped**: the Graph API publishes as a Page you
+administer, and personal profiles have no publishing API at all. The connector is
+implemented and unit-tested but **not authenticated** in the current live
+environment — the steps below are the real connection path, not a readiness claim.
+
+1. Create a Meta app with the **Facebook Login for Business** product at [developers.facebook.com/apps](https://developers.facebook.com/apps)
+2. Grant the app `pages_show_list`, `pages_read_engagement`, and `pages_manage_posts` (Standard Access is enough for your own Pages)
+3. Generate a user access token in the Graph API Explorer
+
+```bash
+xpst auth facebook        # lists your Pages, verifies the Page token, stores it encrypted
+```
+
+xPST never falls back to a personal profile: with no administered Page it fails with
+an explicit error naming the Page requirement. Feed video is the content type this
+wave declares; Reels / photo / text follow in the next wave. See
+[docs/setup-facebook.md](docs/setup-facebook.md).
 
 ### Messenger (opt-in — currently disabled)
 

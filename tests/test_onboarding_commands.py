@@ -19,7 +19,7 @@ from click.testing import CliRunner
 from xpst.cli import main
 from xpst.utils.errors import describe_remediation
 
-PLATFORMS = ["youtube", "tiktok", "x", "instagram", "threads", "messenger"]
+PLATFORMS = ["youtube", "tiktok", "x", "instagram", "threads", "facebook", "messenger"]
 
 
 @pytest.fixture

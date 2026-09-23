@@ -524,6 +524,31 @@ class TestConnectGuide:
         assert "youtube-oauth-production.md" in out
         assert "xpst connect youtube" in out
 
-    def test_guide_rejects_non_youtube_platform(self, runner):
-        result = runner.invoke(main, ["connect", "x", "--guide"])
+    def test_guide_works_for_every_platform(self, runner):
+        """`--guide` renders the wizard's guide for any platform, not just YouTube.
+
+        The non-TTY refusal message points agents at
+        ``xpst connect <platform> --guide``, so this must answer for every
+        platform the wizard knows about.
+        """
+        from xpst.wizard import PLATFORM_GUIDES
+
+        for key in sorted(PLATFORM_GUIDES):
+            result = runner.invoke(main, ["connect", key, "--guide", "--json"])
+            assert result.exit_code == 0, (key, result.output)
+            data = extract_json(result.output)
+            assert data["platform"] == key
+            assert data["steps"], key
+            assert data["next_action"] == f"xpst connect {key}"
+
+    def test_guide_json_for_facebook(self, runner):
+        result = runner.invoke(main, ["connect", "facebook", "--guide", "--json"])
+        assert result.exit_code == 0
+        data = extract_json(result.output)
+        assert data["platform"] == "facebook"
+        assert data["docs_url"].endswith("docs/setup-facebook.md")
+        assert "developers.facebook.com/apps" in " ".join(data["steps"])
+
+    def test_guide_rejects_unknown_platform(self, runner):
+        result = runner.invoke(main, ["connect", "myspace", "--guide"])
         assert result.exit_code == 2

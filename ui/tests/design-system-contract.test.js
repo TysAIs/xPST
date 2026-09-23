@@ -187,10 +187,47 @@ test("create route exposes local preflight and no-network copy", async () => {
 test("home shows a checking state instead of guessing while readiness is pending", async () => {
   const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
   assert.match(dashboard, /readiness_pending/);
-  assert.match(dashboard, /Checking live account readiness/);
+  assert.match(dashboard, /readiness\?\.pending/);
   assert.match(dashboard, /Live account checks are still running\./);
   // bounded polling, never an unbounded loop
   assert.match(dashboard, /pendingPolls < 8/);
+  // The pending verdict itself comes from the engine's readiness document.
+  assert.match(
+    dashboard,
+    /import \{ readinessVerdict, roleLabel \} from "\.\.\/lib\/labels\.js"/
+  );
+  assert.match(dashboard, /const verdict = \$derived\(readinessVerdict\(readiness\)\)/);
+});
+
+test("home renders one distinguishable readiness row per platform role", async () => {
+  const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
+
+  // A row is identified by (platform, role) and the role is RENDERED: a
+  // platform with three roles used to produce three rows that all read
+  // "Instagram / degraded / Review" with nothing telling them apart.
+  assert.match(dashboard, /\{row\.role_label \?\? roleLabel\(row\.role\)\}/);
+  assert.match(dashboard, /aria-label="Readiness roles needing attention"/);
+  assert.match(dashboard, /<StatusBadge status=\{row\.state\} \/>/);
+  // A row with nothing to say is not rendered at all.
+  assert.match(
+    dashboard,
+    /filter\(\(row\) => row && row\.platform && row\.role && row\.state\)/
+  );
+  // The old flat row printed only the state text with no role.
+  assert.doesNotMatch(dashboard, /blocker\.state\.replaceAll/);
+});
+
+test("the readiness verdict is the engine's, shared with the onboarding payload", async () => {
+  const labels = await text(join(UI_ROOT, "src/lib/labels.js"));
+  assert.match(labels, /export function readinessVerdict/);
+  // Rendered from the engine's document, with a fallback only for payloads
+  // that predate the field — no screen invents a second verdict.
+  assert.match(labels, /readiness\?\.verdict/);
+  assert.match(labels, /export function roleLabel/);
+  assert.match(labels, /video_destination: "Destination"/);
+
+  const onboarding = await text(join(UI_ROOT, "src/pages/Onboarding.svelte"));
+  assert.match(onboarding, /readinessVerdict\(readiness\)/);
 });
 
 test("the primary button paints its own background colour pair", async () => {
@@ -200,17 +237,26 @@ test("the primary button paints its own background colour pair", async () => {
   assert.match(rule, /color: var\(--xpst-color-on-primary\)/);
 });
 
-test("home readiness copy never contradicts an offered Create post action", async () => {
+test("home readiness copy comes from the engine verdict, never a local opinion", async () => {
   const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
-  assert.match(dashboard, /readinessDescription/);
-  assert.match(dashboard, /A destination is ready, so posting works\./);
-  assert.match(dashboard, /: "Posting stays unavailable until the blocker below is resolved\."/);
+  // The card copy is the engine's readiness verdict detail, so it cannot
+  // contradict the Create-post action the same payload offers.
+  assert.match(dashboard, /<Card description=\{verdict\.detail\}>/);
+  assert.match(dashboard, /readinessVerdict\(readiness\)/);
+  // No locally invented readiness wording (the engine owns these strings).
+  assert.doesNotMatch(dashboard, /"Needs attention"/);
+  assert.doesNotMatch(dashboard, /Ready to post\./);
 });
 
 test("engine health is labelled as a recorded run, not live truth", async () => {
   const dashboard = await text(join(UI_ROOT, "src/pages/Dashboard.svelte"));
   assert.match(dashboard, /Engine health \(last recorded\)/);
   assert.match(dashboard, /not a live re-check/);
+  // The pill reports the RECORDED status it sits next to (the engine decides
+  // it from the recorded platform block). It used to be flipped to "degraded"
+  // by the live role states, which put a Degraded pill beside its own
+  // "YouTube OK" row; the live verdict is the Readiness card above.
+  assert.match(dashboard, /<StatusBadge status=\{health\?\.status \?\? "unknown"\} \/>/);
 });
 
 test("home uses explicit empty-value copy and actionable recovery links", async () => {
