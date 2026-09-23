@@ -428,9 +428,20 @@ xpst post -v ./img1.jpg -v ./img2.jpg -v ./img3.jpg -c "Swipe to see more!" -p i
 # Dry run
 xpst post -v ./my-video.mp4 -c "Test" --dry-run
 
+# Post unlisted/private instead of public (YouTube only)
+xpst post -v ./my-video.mp4 -c "Test" -p youtube --visibility unlisted
+xpst post -v ./my-video.mp4 -c "Test" -p youtube --visibility private
+
 # JSON output
 xpst post -v ./my-video.mp4 -c "Test" --json
 ```
+
+**Visibility.** `--visibility public|unlisted|private` (default `public`, so
+existing behaviour is unchanged). YouTube honours it by setting the upload's
+`status.privacyStatus`; every other destination ignores it harmlessly. An
+invalid value is rejected by the CLI parser (exit `2`) — it is never silently
+coerced to `public`. This is the supported way to post something you are not
+ready to publish, instead of posting publicly and unpublishing afterwards.
 
 **Example:**
 
@@ -522,6 +533,20 @@ xpst delete abc123 -p instagram,x             # delete from Instagram and X
 xpst delete abc123 --yes                     # skip confirmation
 xpst delete abc123 --json
 ```
+
+**VIDEO_ID accepts three forms.** xPST's internal id, the *platform-side* post
+id as the platform shows it, or the full post URL — the latter two are resolved
+back to xPST's record through stored state:
+
+```bash
+xpst delete RZ6i-0HM5dM -p youtube --yes                       # platform post id
+xpst delete https://youtube.com/shorts/RZ6i-0HM5dM -p youtube --yes  # full URL
+```
+
+An id or URL that does not match any recorded post keeps the truthful
+`unsupported` / not-found outcome — it never reports a deletion that did not
+happen. Use `--soft --visibility unlisted|private` to unpublish (reversibly)
+instead of hard-deleting, YouTube only.
 
 **Example:**
 
