@@ -589,6 +589,105 @@ class AnalyticsCollector:
 
         return {"generated_at": now, "platforms": platforms}
 
+    # ── Outcome report (D5: analytics that mean something) ───────────────
+
+    def _read_state(self) -> dict[str, Any]:
+        """Read ``state.json`` as a mapping, or an empty one when unusable."""
+        state_path = Path(self.config_dir) / "state.json"
+        if not state_path.exists():
+            return {}
+        try:
+            with open(state_path) as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return state if isinstance(state, dict) else {}
+
+    def _platform_has_records(
+        self,
+        platform: str,
+        state: dict[str, Any],
+        snapshot_rows: list[dict[str, Any]],
+        live_rows: list[dict[str, Any]],
+    ) -> bool:
+        """Whether a platform has anything recorded worth verifying against.
+
+        Ownership verification is a platform API call (YouTube) or a state
+        read; doing it for a platform with no recorded posts and no snapshot
+        rows buys nothing, so those render as "no data" without the round
+        trip.
+        """
+        for _, video_data in (state.get("posted_videos") or {}).items():
+            if not isinstance(video_data, dict):
+                continue
+            posted_to = video_data.get("posted_to") or {}
+            if isinstance(posted_to, dict) and isinstance(posted_to.get(platform), dict):
+                return True
+        return any(str(row.get("platform") or "").lower() == platform for row in (*snapshot_rows, *live_rows))
+
+    def outcome_report(self, live_data: dict[str, dict] | None = None) -> dict[str, Any]:
+        """Per-post/per-platform outcome report with recorded-vs-live labels.
+
+        This is the analytics surface every consumer (HTTP, MCP, CLI, UI)
+        renders, so no two surfaces can disagree about a number:
+
+        * outcomes are the publish results xPST actually recorded in
+          ``state.json``, filtered to the verified ownership set (fail closed
+          when ownership cannot be verified);
+        * metrics come from the persisted snapshot store (``recorded``) unless
+          ``live_data`` carries a fresher row from a real collection this run
+          (``live``);
+        * a platform with no metric-bearing owned post returns ``totals:
+          None`` — rendered as "no data", never as a zero.
+
+        Args:
+            live_data: Result of :meth:`collect_all` from this run, when the
+                caller performed a live collection. ``None`` reads recorded
+                snapshots only and never touches the network apart from the
+                ownership check.
+
+        Returns:
+            The report from :func:`xpst.analytics_outcomes.build_outcome_report`.
+        """
+        from xpst.analytics_outcomes import PLATFORM_ORDER, build_outcome_report
+
+        state = self._read_state()
+        try:
+            snapshot_rows = self.store.latest()
+        except Exception as exc:  # defensive — a broken db must not 500 the UI
+            logger.warning("Outcome report snapshot read failed: %s", exc)
+            snapshot_rows = []
+
+        live_rows: list[dict[str, Any]] = [
+            {"platform": platform, "post_id": post_id, **metrics}
+            for platform, posts in (live_data or {}).items()
+            for post_id, metrics in posts.items()
+            if isinstance(metrics, dict)
+        ]
+
+        ownership: dict[str, set[str] | None] = {}
+        for platform in PLATFORM_ORDER:
+            if not self._platform_has_records(platform, state, snapshot_rows, live_rows):
+                continue
+            ownership[platform] = self._get_owned_platform_ids(platform)
+
+        return build_outcome_report(
+            state=state,
+            snapshots=snapshot_rows,
+            owned_ids=ownership,
+            live_rows=live_rows,
+            platforms=PLATFORM_ORDER,
+        )
+
+    async def collect_outcome_report(self, post_ids: dict[str, list[str]] | None = None) -> dict[str, Any]:
+        """Live variant: collect from the platform APIs, then build the report.
+
+        Rows fetched by this run are labelled ``live``; posts whose collection
+        failed keep their recorded snapshot and stay labelled ``recorded``.
+        """
+        data = await self.collect_all(post_ids)
+        return self.outcome_report(live_data=data)
+
     async def collect_all(self, post_ids: dict[str, list[str]] | None = None) -> dict[str, dict]:
         """Collect analytics from all platforms in parallel.
 

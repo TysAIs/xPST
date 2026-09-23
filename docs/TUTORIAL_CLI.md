@@ -197,7 +197,27 @@ xpst auth instagram      # guide Instagram auth setup (Graph API or session)
 xpst auth tiktok         # guide TikTok source setup (destination pending review)
 xpst auth threads        # guide Threads setup (currently disabled)
 xpst auth status         # show auth + quota status for all platforms
+xpst auth status --refresh   # renew due/expiring tokens, then report
+xpst refresh-tokens      # renew due/expiring tokens only (cron-friendly)
 ```
+
+**Truthful badges.** `xpst auth status` never reports a platform as connected
+just because a credential is stored. Each platform carries a badge derived from
+the live check that was just run, plus the timestamp of that check:
+
+| Badge | Meaning |
+|-------|---------|
+| `connected` | a passing live check proved it works right now |
+| `expiring` | still usable, but the access token expires soon (or has expired and xPST is refreshing it) |
+| `needs_reauth` | user action required — run `xpst connect <platform>` |
+| `source_only` | usable as a source only (TikTok download), never as an upload target |
+| `disabled` | switched off in config |
+| `unknown` | no live check ran (or it is older than the freshness window) — deliberately not green |
+
+An automatic refresh path keeps the badge green for tokens xPST renews itself
+(YouTube refresh tokens, Threads/Meta long-lived tokens); a failed refresh is
+recorded and downgrades the badge to `needs_reauth` instead of promising a
+retry that is not happening.
 
 **Instagram auth modes.** The recommended/primary mode is the official Meta Graph
 API (`auth_mode: "graph_api"`, using a `graph_access_token` and `graph_ig_user_id`).
@@ -226,11 +246,12 @@ Stored Credentials: 3
   🔑 instagram_session
 
 Platform Status:
-| Platform  | Auth | Quota (Daily) | Remaining | Details      |
-|-----------|------|---------------|----------|--------------|
-| YouTube   |  ✅  |       5       |     5     | Keyring      |
-| X/Twitter |  ✅  |       5       |     5     | Keyring      |
-| Instagram |  ✅  |       5       |     5     | Keyring      |
+| Platform  | Badge                   | Quota (Daily) | Remaining | Details      |
+|-----------|-------------------------|---------------|-----------|--------------|
+| YouTube   | Connected (checked 8s ago) |    5       |     5     | Keyring      |
+| X/Twitter | Connected (checked 8s ago) |    5       |     5     | Keyring      |
+| Instagram | Needs re-auth           |       5       |     5     | Keyring — Session expired - run 'xpst auth instagram' |
+| TikTok    | Source only             |       5       |     5     | source_only  |
 ```
 
 With `--json`:
@@ -438,6 +459,27 @@ $ xpst post -v ./slide1.jpg -v ./slide2.jpg -v ./slide3.jpg -c "Thread 🧵" -p 
 Posting carousel (3 items) to: x
 
 carousel123 - ✅ Success
+```
+
+**Exit status.** `xpst post` exits non-zero when nothing was published, so
+`xpst post … && echo ok` (and every cron job or agent wrapper that branches on
+the exit status) cannot read a failed post as success:
+
+| Exit | When |
+|------|------|
+| `0` | At least one destination published — **a partial success is a success** — or every destination was already posted (nothing to do) |
+| `4` | Every attempted destination failed for quota / rate-limit reasons |
+| `3` | Every attempted destination failed to authenticate |
+| `10` | No destination was attempted at all, or every attempted destination is unavailable or refused the media (e.g. `THREADS_NEEDS_URL`) |
+| `1` | Every attempted destination failed for any other reason, or for a mix of reasons |
+
+The `--json` payload is unchanged (`all_success`, `partial_success`, and the
+per-platform `success` / `outcome` / `error` fields); a non-zero run also
+carries an `exit_code` field, so a JSON caller never has to guess.
+
+```bash
+xpst post -v ./clip.mp4 -c "…" -p youtube,x --json
+if [ $? -ne 0 ]; then echo "post failed (see per-platform error)"; fi
 ```
 
 ---
@@ -1192,6 +1234,21 @@ xPST uses meaningful exit codes for scripting and agent integration:
 | `3` | `EXIT_AUTH_FAILURE` | Authentication failure |
 | `4` | `EXIT_RATE_LIMIT` | Rate limit exceeded |
 | `10` | `EXIT_PLATFORM_UNAVAILABLE` | Platform unavailable |
+
+**Posting rule (`xpst post`).** A post where nothing was published never exits
+`0`, because the exit status is what scripts and agents branch on. When every
+attempted destination failed, the exit code names the shared reason: `4` for
+quota/rate limits, `3` for authentication, `10` when no destination was
+attempted at all or every destination is unavailable / refused the media
+(e.g. `THREADS_NEEDS_URL`), and `1` for anything else, including a mix of
+reasons. **A partial success exits `0`** (something was published), and so does
+a run where every destination was already posted. The `--json` payload keeps
+its shape — `all_success`, `partial_success`, and per-platform
+`success` / `outcome` / `error` — and a non-zero run adds `exit_code`:
+
+```bash
+xpst post -v ./clip.mp4 -c "…" -p youtube,x --json || echo "post failed"
+```
 
 Use these in shell scripts:
 

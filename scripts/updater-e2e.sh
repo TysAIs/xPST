@@ -95,26 +95,24 @@ build_app() { # $1 = version
     tail -3 "$WORK/build-v$1.log"
 }
 
-write_latest_json() { # $1 = version, $2 = signature file
-    python3 - "$1" "$2" "$E2E_URL" <<'EOF'
-import json, sys
-version, sigfile, base = sys.argv[1], sys.argv[2], sys.argv[3]
-signature = open(sigfile).read().strip()
-manifest = {
-    "version": version,
-    "notes": f"xPST updater E2E release {version}",
-    "pub_date": "2026-08-28T00:00:00Z",
-    "platforms": {
-        "darwin-aarch64": {
-            "signature": signature,
-            "url": f"{base}/xPST.app.tar.gz",
-        }
-    },
-}
-json.dump(manifest, open("/private/tmp/xpst-updater-e2e/serve/updates/latest.json", "w"), indent=2)
-open("/private/tmp/xpst-updater-e2e/serve/updates/latest.json", "a").write("\n")
-print(f"latest.json -> {version} ({base}/xPST.app.tar.gz)")
-EOF
+write_latest_json() { # $1 = version, $2 = signature file, $3 = served tarball
+    # Uses the ONE production manifest generator (scripts/gen-updater-manifest.py)
+    # — the same script the release lane and .github/workflows/publish-updater.yml
+    # run — so the local round-trip exercises the real manifest path rather than a
+    # hand-written JSON blob. The generator reads the trust root from the
+    # committed config and refuses to emit an artifact entry with a missing
+    # signature, so a broken signature can never look like a passing E2E.
+    python3 scripts/gen-updater-manifest.py \
+        --version "$1" \
+        --notes "xPST updater E2E release $1" \
+        --base-url "$E2E_URL" \
+        --output "$MANIFEST" \
+        --config src-tauri/tauri.conf.json \
+        --pub-date "2026-08-28T00:00:00Z" \
+        --platform darwin-aarch64 \
+        --artifact "darwin-aarch64=$3" \
+        --signature "darwin-aarch64=$2"
+    echo "latest.json -> $1 ($E2E_URL/xPST.app.tar.gz)"
 }
 
 # --- 1. build v0.1.0 ----------------------------------------------------------
@@ -129,7 +127,7 @@ cp -R "$APP_BUNDLE_DIR/xPST.app" "$WORK/xPST-0.1.0.app"
 
 # --- 2. serve manifest (v0.1.0 initially) ------------------------------------
 cp "$TAR_GZ" "$SERVE_DIR/xPST.app.tar.gz"
-write_latest_json 0.1.0 "$SIG"
+write_latest_json 0.1.0 "$SIG" "$SERVE_DIR/xPST.app.tar.gz"
 
 echo "== [serve] starting http server on 127.0.0.1:${E2E_PORT} =="
 python3 -m http.server "$E2E_PORT" --bind 127.0.0.1 --directory "$SERVE_DIR" \
@@ -150,7 +148,7 @@ echo "server up: $(curl -fsS "$E2E_URL/updates/latest.json" | head -c 120)..."
 build_app 0.2.0 || exit 4
 [[ -f "$TAR_GZ" && -f "$SIG" ]] || { echo "missing updater artifacts after v0.2.0 build"; exit 5; }
 cp "$TAR_GZ" "$SERVE_DIR/xPST.app.tar.gz"
-write_latest_json 0.2.0 "$SIG"
+write_latest_json 0.2.0 "$SIG" "$SERVE_DIR/xPST.app.tar.gz"
 
 # --- 4. launch v0.1.0 with the updater-check trigger -------------------------
 echo "== [run] launching v0.1.0 with XPST_UPDATER_CHECK=1 =="

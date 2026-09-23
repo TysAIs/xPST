@@ -35,16 +35,23 @@ class ProviderDefinition:
 
 @dataclass(frozen=True)
 class RoleStatus:
-    """Status of one provider/role pair."""
+    """Status of one provider/role pair.
+
+    ``authenticated``, ``session_valid`` and ``live_checked`` are ``None`` when
+    no live probe produced a result for this role.  "Not probed" is not
+    "invalid": a surface that emitted ``False`` here would be asserting a fact
+    it never checked, which is exactly how the offline catalog used to
+    contradict ``xpst auth status``.
+    """
 
     platform: str
     role: ProviderRole
     state: ProviderState
     enabled: bool
-    authenticated: bool = False
-    session_valid: bool = False
+    authenticated: bool | None = None
+    session_valid: bool | None = None
     auth_mode: str = "unknown"
-    live_checked: bool = False
+    live_checked: bool | None = None
     error: str | None = None
     details: Mapping[str, Any] | None = None
 
@@ -72,6 +79,10 @@ class RoleStatus:
 
 # ProviderStatus is a compatibility-friendly public name for RoleStatus.
 ProviderStatus = RoleStatus
+
+# The facts only a live probe can answer.  Their presence in a raw result
+# mapping is what makes a role "probed"; absent means unknown, never False.
+LIVE_FACT_FIELDS: tuple[str, ...] = ("authenticated", "session_valid", "live_checked")
 
 
 SUPPORTED_PROVIDERS: tuple[ProviderDefinition, ...] = (
@@ -285,15 +296,20 @@ def _status_for_role(
     details = role_raw.get("details")
     if not isinstance(details, Mapping):
         details = {}
+    # A live result is any mapping that carries a live fact; the offline path
+    # passes ``{}``.  Unprobed facts stay ``None`` (unknown) rather than
+    # defaulting to ``False``, so no surface can claim a session is invalid
+    # without having probed it.
+    probed = any(field in role_raw for field in LIVE_FACT_FIELDS)
     return RoleStatus(
         platform=name,
         role=role,
         state=state,
         enabled=enabled,
-        authenticated=bool(role_raw.get("authenticated")),
-        session_valid=bool(role_raw.get("session_valid")),
+        authenticated=bool(role_raw.get("authenticated")) if probed else None,
+        session_valid=bool(role_raw.get("session_valid")) if probed else None,
         auth_mode=_auth_mode(config, name, role_raw),
-        live_checked=bool(role_raw.get("live_checked", False)),
+        live_checked=(bool(role_raw.get("live_checked", False)) if probed else None),
         error=role_raw.get("error"),
         details=details,
     )
@@ -359,8 +375,21 @@ def build_canonical_status(
         if definition.name == "tiktok" and "source_check" in raw and _auth_mode(config, "tiktok", raw) == "source_only":
             compat_role = ProviderRole.SOURCE
         compat = statuses[compat_role.value]
+        live_flags = [item.live_checked for item in statuses.values()]
         role_dict = {key: value.to_dict() for key, value in statuses.items()}
+        # The compat fields describe the primary (or, for TikTok source-only,
+        # the source) role.  When that role has no error but the provider is
+        # nonetheless not usable, surface the role error that explains it —
+        # otherwise a payload reads "state: unconfigured, authenticated: true,
+        # error: null", which is a status that contradicts itself.
         error = compat.error
+        if error is None and aggregate not in (ProviderState.READY, ProviderState.DISABLED):
+            error = next((item.error for item in statuses.values() if item.error), None)
+        # Probe classification (see xpst.utils.probe_errors): whether the
+        # provider rejected the credential or the probe simply could not reach
+        # a verdict.  Promoted to the platform level so every consumer can tell
+        # "re-authenticate" apart from "retry" without re-parsing the message.
+        compat_details = compat.details if isinstance(compat.details, Mapping) else {}
         result[definition.name] = {
             "name": definition.name,
             "display_name": definition.display_name,
@@ -373,9 +402,18 @@ def build_canonical_status(
             "auth_mode": compat.auth_mode,
             "authenticated": compat.authenticated,
             "session_valid": compat.session_valid,
-            "live_checked": any(item.live_checked for item in statuses.values()),
+            "live_checked": (
+                True
+                if any(flag is True for flag in live_flags)
+                else None
+                if all(flag is None for flag in live_flags)
+                else False
+            ),
             "error": error,
-            "details": dict(compat.details or {}),
+            "details": dict(compat_details),
+            "probe_class": compat_details.get("probe_class"),
+            "probe_error": compat_details.get("probe_error"),
+            "probe_retryable": compat_details.get("probe_retryable"),
             "enabled": _enabled(config, definition.name),
             "legacy_authenticated": bool(raw.get("credentials_stored")),
         }
@@ -403,6 +441,37 @@ def canonical_status_report(
         "platforms": providers,
         "roles": [role.value for role in (ProviderRole.SOURCE, ProviderRole.VIDEO_DESTINATION, ProviderRole.MESSAGING, ProviderRole.ANALYTICS)],
     }
+
+
+def status_snapshot(config: Any, *, live: bool = True) -> dict[str, Any]:
+    """Return the ONE provider-status document every surface must serve.
+
+    ``live=True`` (the default, and what ``xpst auth status`` means) runs the
+    canonical live probe and returns its verdict.  ``live=False`` returns the
+    offline/config-only view, in which the live-derived facts are ``None``
+    (unknown) rather than ``False``.
+
+    CLI, MCP and the HTTP API all call this instead of assembling their own
+    status payload; a fact therefore has exactly one implementation.
+    """
+    if not live:
+        return canonical_status_report(config, None)
+    from xpst.auth_status import collect_live_auth_status
+
+    return canonical_status_report(config, collect_live_auth_status(config))
+
+
+async def status_snapshot_async(config: Any, *, live: bool = True) -> dict[str, Any]:
+    """Async :func:`status_snapshot` for callers already inside an event loop.
+
+    The MCP tool dispatch is async, so it cannot use the sync wrapper (which
+    calls ``asyncio.run``).  Same document, same probe, one implementation.
+    """
+    if not live:
+        return canonical_status_report(config, None)
+    from xpst.auth_status import collect_live_auth_status_async
+
+    return canonical_status_report(config, await collect_live_auth_status_async(config))
 
 
 def _manifest_for(name: str, config: Any) -> ProviderManifest | None:
@@ -483,6 +552,8 @@ __all__ = [
     "build_canonical_status",
     "canonical_status_report",
     "canonical_provider_catalog",
+    "status_snapshot",
+    "status_snapshot_async",
     "collect_canonical_status_async",
     "collect_canonical_status",
 ]

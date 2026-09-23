@@ -27,6 +27,12 @@ PASSWORD = "synthetic-password-not-real-123"
 #: /oauth/callback cannot carry Basic auth (a browser issues the redirect).
 PUBLIC_PATHS = {"/health", "/metrics", "/bio", "/oauth/callback"}
 
+#: Mutations that are public BY DESIGN because they carry their own
+#: authentication: the Messenger webhook verifies X-Hub-Signature-256 against the
+#: configured app secret (and is fail-closed when it cannot verify the payload),
+#: so it is not covered by the Basic/token middleware.
+PUBLIC_MUTATION_PATHS = {"/webhook/messenger"}
+
 
 @pytest.fixture()
 def password_hash() -> str:
@@ -127,7 +133,9 @@ class TestRouteEnumeration:
 
     def test_we_know_which_routes_are_public(self, authed_client):
         _, app, _ = authed_client
-        protected = {p for p in _http_routes(app) if p not in PUBLIC_PATHS}
+        protected = {
+            p for p in _http_routes(app) if p not in PUBLIC_PATHS and p not in PUBLIC_MUTATION_PATHS
+        }
         # A non-empty protected set is what makes the sweep below meaningful.
         assert protected, "no protected routes found — enumeration is broken"
         assert "/api/summary" in protected
@@ -138,7 +146,7 @@ class TestRouteEnumeration:
         client, app, _ = authed_client
         offenders: dict[str, int] = {}
         for path in _http_routes(app):
-            if path in PUBLIC_PATHS:
+            if path in PUBLIC_PATHS or path in PUBLIC_MUTATION_PATHS:
                 continue
             for method in ("GET", "POST", "PUT", "DELETE"):
                 response = client.request(method, path)

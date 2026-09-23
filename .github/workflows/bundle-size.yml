@@ -1,0 +1,106 @@
+name: Engine bundle size budget
+
+# F3 (kanban t_555d6bc4). The engine sidecar is the second-largest thing we
+# ship: the app is ~192 MB = ffmpeg 87 + engine 95 + yt-dlp 3 + ui 1. This lane
+# builds the sidecar and asserts a *measured* budget against it, naming the
+# components that dominate the payload, so a dependency change cannot silently
+# regrow the bundle (and so the prune is visible as it lands).
+#
+# Scope: the sidecar only. The installed .app / .dmg size gate lives in
+# tauri-release.yml, which triggers on version tags; this lane runs on the pull
+# request that changes the build inputs, where a regression is still cheap.
+#
+# Measured 2026-09-15 (origin/main d896ca90, Python 3.11.15, PyInstaller 6.22.2,
+# macOS arm64, `scripts/build-engine.sh` from a clean clone):
+#   baseline engine 88.85 MB by file bytes (PIL 11.4 + lxml 8.9 + a 25 MB exe)
+#   with the unofficial stack excluded: 64.26 MB  ->  -24.6 MB (-27.7%)
+# The budget below is the baseline plus headroom, so it fails on a *new* heavy
+# dependency or on the unofficial stack (PIL/lxml/twikit/instagrapi, +24.6 MB)
+# coming back — not on PyInstaller's normal build-to-build variance.
+
+on:
+  pull_request:
+    paths:
+      - "pyproject.toml"
+      - "build_engine.spec"
+      - "scripts/build-engine.sh"
+      - "scripts/check_bundle_size.py"
+      - "src/**"
+      - "src-tauri/binaries/**"
+      - ".github/workflows/bundle-size.yml"
+  push:
+    branches: ["main"]
+    paths:
+      - "pyproject.toml"
+      - "build_engine.spec"
+      - "scripts/build-engine.sh"
+      - "scripts/check_bundle_size.py"
+      - "src/**"
+      - "src-tauri/binaries/**"
+      - ".github/workflows/bundle-size.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # F3 completion switch. While B5 (t_5e013fe7) is still in flight the default
+  # config legitimately routes X (cookies -> twikit) and Instagram (session ->
+  # instagrapi) through the unofficial stack, so those modules are *reported*
+  # rather than forbidden. The PR that removes them from `pyproject.toml` and
+  # `build_engine.spec` flips this to "1" and tightens ENGINE_BUDGET_MB to the
+  # pruned number.
+  FORBID_UNOFFICIAL: "0"
+  ENGINE_BUDGET_MB: "95"
+
+jobs:
+  engine-size:
+    name: engine sidecar size budget
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install engine deps
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e ".[full]" pyinstaller
+
+      - name: Build engine sidecar (PyInstaller onedir, plus its /health smoke)
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+        run: |
+          set -euo pipefail
+          export PYTHON="$(command -v python3)"
+          scripts/build-engine.sh
+
+      - name: Assert engine size budget
+        run: |
+          set -euo pipefail
+          FORBID="PIL,lxml,instagrapi,twikit"
+          if [ "${FORBID_UNOFFICIAL}" = "1" ]; then
+            python scripts/check_bundle_size.py \
+              --engine src-tauri/binaries/engine \
+              --max-engine-mb "${ENGINE_BUDGET_MB}" \
+              --forbid "$FORBID" \
+              --budget-json "$RUNNER_TEMP/engine-size.json"
+          else
+            echo "::notice::unofficial-stack prune not enforced yet (B5 in flight): reporting only"
+            python scripts/check_bundle_size.py \
+              --engine src-tauri/binaries/engine \
+              --max-engine-mb "${ENGINE_BUDGET_MB}" \
+              --forbid "$FORBID" --forbid-report-only \
+              --budget-json "$RUNNER_TEMP/engine-size.json"
+          fi
+
+      - name: Upload size report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-size-report
+          path: ${{ runner.temp }}/engine-size.json
+          if-no-files-found: warn

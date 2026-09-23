@@ -31,7 +31,6 @@
     "resources": {
       "../ui/dist": "ui",
       "binaries/engine": "binaries/engine",
-      "binaries/ffmpeg": "binaries/ffmpeg",
       "binaries/ytdlp": "binaries/ytdlp"
     },
     "createUpdaterArtifacts": false,
