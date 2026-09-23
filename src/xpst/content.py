@@ -507,29 +507,43 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
         "YouTube Shorts",
         declared_labels=("video",),
         implemented=(ContentType.VIDEO,),
-        notes={ContentType.VIDEO: "always forced to Shorts (#shorts appended); no long-form path"},
+        notes={
+            ContentType.VIDEO: "always forced to Shorts (#shorts appended); no long-form path",
+            ContentType.CAROUSEL: "no carousel path: a carousel request is refused by name, and nothing is stitched into a video",
+        },
     ),
     "x": _publish_profile(
         "x",
         "X",
-        declared_labels=("video", "thread"),
-        implemented=(ContentType.VIDEO, ContentType.CAROUSEL),
+        declared_labels=("video", "thread", "image"),
+        implemented=(ContentType.VIDEO, ContentType.CAROUSEL, ContentType.IMAGE),
         notes={
             ContentType.THREAD: (
                 "declared as `thread`; a text-only thread has no implementation. "
                 "Multi-media posting works as a tweet thread and is reported as carousel."
             ),
-            ContentType.CAROUSEL: "published as a tweet thread, one media item per tweet (upload_carousel)",
+            ContentType.CAROUSEL: (
+                "published as a tweet thread, one media item per tweet (upload_carousel), in the "
+                "given order; image items are checked against X's image contract before upload"
+            ),
+            ContentType.IMAGE: "single image post (upload_image): JPG/PNG/WEBP, ≤ 5 MB, aspect 1:3–3:1",
         },
     ),
     "instagram": _publish_profile(
         "instagram",
         "Instagram Reels",
         declared_labels=("video", "image", "carousel"),
-        implemented=(ContentType.VIDEO, ContentType.CAROUSEL),
+        implemented=(ContentType.VIDEO, ContentType.CAROUSEL, ContentType.IMAGE),
         notes={
-            ContentType.IMAGE: "declared as `image`; single-image feed posting is not implemented",
-            ContentType.CAROUSEL: "native album upload (2-10 items)",
+            ContentType.IMAGE: (
+                "feed photo (upload_image): JPEG only, ≤ 8 MB, aspect within 4:5–1.91:1; "
+                "the Graph API path needs a public image URL and refuses a local file explicitly"
+            ),
+            ContentType.CAROUSEL: (
+                "native album upload (2-10 items, order preserved); image items are checked against "
+                "Instagram's image contract before the album call; over 10 items or under 2 is refused, "
+                "never truncated"
+            ),
         },
     ),
     "tiktok": _publish_profile(
@@ -538,6 +552,9 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
         declared_labels=("video",),
         implemented=(ContentType.VIDEO,),
         note="video path exists but publishing is blocked by TikTok app review; the connection is source-only",
+        notes={
+            ContentType.CAROUSEL: "no carousel path: a carousel request is refused by name, and nothing is stitched into a video"
+        },
     ),
     "threads": _publish_profile(
         "threads",
@@ -552,6 +569,7 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
                 "uploader yet either, so no media publishing path reaches Threads today"
             ),
             ContentType.TEXT: "declared as `text`; only media_type VIDEO exists, so there is no text path",
+            ContentType.CAROUSEL: "no carousel path: a carousel request is refused by name, and nothing is stitched into a video",
         },
         # The Threads API is URL-fetch only (graph.threads.net/{user-id}/threads takes
         # `video_url`/`image_url`; there is no multipart or resumable upload endpoint).

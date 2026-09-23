@@ -302,6 +302,17 @@ xpst post -v img1.jpg -v img2.jpg -v img3.jpg -c "Carousel post"
 
 # Specific platforms
 xpst post -v video.mp4 -c "Test" -p youtube,instagram
+
+# Post unlisted/private instead of public (YouTube only)
+xpst post -v video.mp4 -c "Test" -p youtube --visibility unlisted
+```
+
+Deleting accepts the platform's own post id or the full post URL, not just
+xPST's internal id:
+
+```bash
+xpst delete RZ6i-0HM5dM -p youtube --yes
+xpst delete https://youtube.com/shorts/RZ6i-0HM5dM -p youtube --yes
 ```
 
 ### Health checks

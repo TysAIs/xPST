@@ -16,8 +16,8 @@ class TestPlatformUploaderCarousel:
         """PlatformUploader should have upload_carousel method."""
         assert hasattr(PlatformUploader, "upload_carousel")
 
-    def test_base_upload_carousel_calls_stitch_and_upload(self):
-        """Default upload_carousel should delegate to _stitch_and_upload."""
+    def test_base_upload_carousel_refuses_instead_of_stitching(self):
+        """Default upload_carousel names the destination and refuses — no stitch."""
 
         class DummyUploader(PlatformUploader):
             async def upload(self, video_path, caption):
@@ -33,6 +33,13 @@ class TestPlatformUploaderCarousel:
 
         # Verify method exists and is callable
         assert asyncio.iscoroutinefunction(uploader.upload_carousel)
+
+        # And that it refuses rather than stitching the items into a video.
+        result = asyncio.run(uploader.upload_carousel([Path("/fake1.jpg"), Path("/fake2.jpg")], "caption"))
+        assert result.success is False
+        assert result.retryable is False
+        assert "dummy cannot publish carousel posts" in (result.error or "")
+        assert "will not stitch" in (result.error or "")
 
 
 class TestInstagramCarousel:
@@ -73,8 +80,8 @@ class TestInstagramCarousel:
 
     @patch("xpst.platforms.instagram.InstagramUploader._get_client")
     @patch.object(PlatformUploader, "_validate_video")
-    def test_upload_carousel_single_falls_back(self, mock_validate, mock_get_client):
-        """Single item carousel should fall back to regular upload."""
+    def test_upload_carousel_single_is_refused_not_uploaded_as_video(self, mock_validate, mock_get_client):
+        """One item is not a carousel: refuse, do not upload it as a Reel."""
         from xpst.config import XPSTConfig
         from xpst.platforms.instagram import InstagramUploader
 
@@ -89,23 +96,34 @@ class TestInstagramCarousel:
         config.instagram.auth_mode = "session"
         uploader = InstagramUploader(config)
 
-        # Single item should call upload() not album_upload()
         media_paths = [Path("/fake1.mp4")]
-        asyncio.run(uploader.upload_carousel(media_paths, "test"))
+        result = asyncio.run(uploader.upload_carousel(media_paths, "test"))
 
-        mock_client.clip_upload.assert_called_once()
+        assert result.success is False
+        assert "IG_CAROUSEL_NEEDS_TWO" in (result.error or "")
+        mock_client.clip_upload.assert_not_called()
         mock_client.album_upload.assert_not_called()
 
-    def test_upload_carousel_truncates_to_10(self):
-        """Instagram carousels should be limited to 10 items."""
+    @patch("xpst.platforms.instagram.InstagramUploader._get_client")
+    def test_upload_carousel_over_the_limit_is_refused_not_truncated(self, mock_get_client):
+        """11 items are refused with the limit named, never silently truncated."""
         from xpst.config import XPSTConfig
         from xpst.platforms.instagram import InstagramUploader
 
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+
         config = XPSTConfig()
+        config.instagram.auth_mode = "session"
         uploader = InstagramUploader(config)
 
-        # Verify truncation logic exists (would need mocking to fully test)
-        assert hasattr(uploader, "upload_carousel")
+        media_paths = [Path(f"/fake{index}.jpg") for index in range(11)]
+        result = asyncio.run(uploader.upload_carousel(media_paths, "test"))
+
+        assert result.success is False
+        assert "IG_CAROUSEL_TOO_MANY_ITEMS" in (result.error or "")
+        assert str(InstagramUploader.MAX_CAROUSEL_ITEMS) in (result.error or "")
+        mock_client.album_upload.assert_not_called()
 
 
 class TestXCarousel:
@@ -148,8 +166,8 @@ class TestXCarousel:
 
     @patch("xpst.platforms.x.XUploader._get_client")
     @patch.object(PlatformUploader, "_validate_video")
-    def test_upload_carousel_single_falls_back(self, mock_validate, mock_get_client):
-        """Single item carousel should fall back to regular upload."""
+    def test_upload_carousel_single_is_refused_not_posted_as_video(self, mock_validate, mock_get_client):
+        """One item is not a thread: refuse, do not fall back to a video post."""
         from xpst.config import XPSTConfig
         from xpst.platforms.x import XUploader
 
@@ -166,8 +184,11 @@ class TestXCarousel:
         media_paths = [Path("/fake1.mp4")]
         result = asyncio.run(uploader.upload_carousel(media_paths, "test"))
 
-        # Single item should use regular upload, not thread
-        assert result.success is True
+        # Single item must be refused, not uploaded as a regular video post
+        assert result.success is False
+        assert "X_THREAD_NEEDS_TWO" in (result.error or "")
+        mock_client.create_tweet.assert_not_called()
+        mock_client.upload_media.assert_not_called()
 
 
 class TestVideoStitching:

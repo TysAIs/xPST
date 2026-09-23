@@ -730,10 +730,18 @@ def _post_exit_code(result: CrossPostResult, requested: list[str] | None) -> int
 @click.option("--video", "-v", required=True, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
 @click.option("--caption", "-c", required=True, help="Video caption")
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
+@click.option(
+    "--visibility",
+    type=click.Choice(["public", "unlisted", "private"]),
+    default="public",
+    show_default=True,
+    help="Post visibility (YouTube honours it; other platforms ignore it)",
+)
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
 @json_option
 @click.pass_context
-def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: str | None, dry_run: bool, as_json: bool):
+def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: str | None,
+         visibility: str, dry_run: bool, as_json: bool):
     """Manually post a video or carousel (multiple --video flags)"""
     config = load_config(ctx.obj.get("config_path"))
     quiet = ctx.obj.get("quiet", False)
@@ -765,6 +773,7 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
             "carousel": len(media_paths) > 1,
             "items": len(media_paths),
             "targets": targets,
+            "visibility": visibility,
         }
         if as_json:
             json_output(info, True)
@@ -776,13 +785,14 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
                 console.print(f"  Carousel: {len(media_paths)} items")
             console.print(f"  Caption: {caption[:80]}")
             console.print(f"  Targets: {', '.join(targets)}")
+            console.print(f"  Visibility: {visibility}")
         return
 
     if not as_json and not quiet:
         if len(media_paths) > 1:
             console.print(f"[bold blue]Posting carousel ({len(media_paths)} items) to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
         else:
-            console.print(f"[bold blue]Posting to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
+            console.print(f"[bold blue]Posting to: {', '.join(platform_list or ['all platforms'])} (visibility: {visibility})[/bold blue]")
 
     engine = CrossPostEngine(config)
 
@@ -802,7 +812,9 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
     if len(media_paths) > 1:
         result = asyncio.run(engine.post_manual_carousel(media_paths, caption, platform_list))
     else:
-        result = asyncio.run(engine.post_manual(media_paths[0], caption, platform_list))
+        result = asyncio.run(
+            engine.post_manual(media_paths[0], caption, platform_list, visibility=visibility)
+        )
 
     quota_blocked = [
         p for p, ur in result.results.items()
@@ -2857,6 +2869,10 @@ def diagnostics(ctx: click.Context, output: str | None, log_lines: int, as_json:
 def delete(ctx: click.Context, video_id: str, platform: str, soft: bool, visibility: str | None,
            yes: bool, dry_run: bool, as_json: bool):
     """Delete a posted video from platforms.
+
+    VIDEO_ID accepts xPST's internal id, the platform-side post id, or a full
+    post URL (e.g. https://youtube.com/shorts/RZ6i-0HM5dM) — the latter two are
+    resolved to the internal record via stored state.
 
     Routes every platform through the Phase-1.2 delete contract: each result
     carries an explicit outcome (deleted / soft_hidden / pending / unsupported)

@@ -298,9 +298,11 @@ xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help
 | `xpst watch --interval 300` | Check every 300 seconds (default: from config) |
 | `xpst post -v VIDEO -c CAPTION` | Manually post a video file; use multiple `-v` for carousel |
 | `xpst post -v v.mp4 -c 'text' -p youtube,x,instagram` | Post to specific platforms only |
+| `xpst post -v v.mp4 -c 'text' -p youtube --visibility unlisted` | Post unlisted/private instead of public (YouTube only; default `public`) |
 | `xpst backfill` | Retry failed or incomplete posts from history |
 | `xpst backfill --dry-run` | Show what would be backfilled without uploading |
 | `xpst delete VIDEO_ID` | Delete a posted video from platforms; use `--platform` to target one |
+| `xpst delete RZ6i-0HM5dM -p youtube` | VIDEO_ID may also be a platform-side post id or a full post URL |
 | `xpst schedule add FILE --caption TEXT --at TIME` | Schedule a post for later publishing |
 | `xpst schedule list` | List all scheduled posts |
 | `xpst schedule remove ID` | Remove a scheduled post by ID |
