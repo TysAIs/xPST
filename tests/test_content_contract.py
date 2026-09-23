@@ -174,6 +174,20 @@ def test_declared_but_unimplemented_content_types_are_reported_as_false(platform
     assert "declared" in message, "a false declaration must be named as such"
 
 
+def test_every_publish_destination_has_a_media_spec() -> None:
+    """A destination that publishes must be describable to the preflight.
+
+    The preflight is what a machine client reads before posting: without a spec
+    it answers UNKNOWN_PLATFORM for a destination the engine will actually
+    publish to, so the plan and the pipeline disagree. Facebook landed that way
+    (#221 added the destination and its uploader, not the spec).
+    """
+    from xpst.media.specs import PLATFORM_SPECS
+
+    missing = sorted(set(PUBLISH_DESTINATIONS) - set(PLATFORM_SPECS))
+    assert missing == [], f"publish destinations with no media spec: {missing}"
+
+
 def test_messenger_is_a_messaging_destination_not_a_publisher() -> None:
     profile = content_profile("messenger")
     assert profile is not None and not profile.is_publishing
