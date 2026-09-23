@@ -24,14 +24,15 @@ The contract pinned here:
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from click.testing import CliRunner
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 import xpst.auth_status as auth_status_module
 import xpst.setup as xpst_setup_module
