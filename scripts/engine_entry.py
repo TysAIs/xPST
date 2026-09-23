@@ -192,6 +192,45 @@ def _watch_parent() -> None:
             os._exit(0)
 
 
+def _start_media_bootstrap() -> None:
+    """Resolve ffmpeg/ffprobe, fetching verified builds when the machine has none.
+
+    The desktop bundle no longer ships ffmpeg (~87 MB of a 192 MB app), so a
+    machine with no ffmpeg of its own needs one download. It runs on a daemon
+    thread: the dashboard must serve /health immediately, and the fetch is only
+    needed once video processing is actually requested. Every line is printed
+    to stderr so the shell log shows exactly what happened.
+    """
+    import os as _os
+
+    if _os.environ.get("XPST_MEDIA_AUTO_FETCH", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return
+
+    def _run() -> None:
+        def _log(line: str) -> None:
+            print(f"xpst-engine: {line}", file=sys.stderr, flush=True)
+
+        try:
+            from xpst.media.binaries import ensure_media_binaries
+
+            report = ensure_media_binaries(log=_log)
+        except Exception as exc:  # noqa: BLE001 - never let this kill the engine
+            print(f"xpst-engine: media bootstrap skipped ({type(exc).__name__}: {exc})", file=sys.stderr, flush=True)
+            return
+        missing = [name for name, info in report.items() if not info["ok"]]
+        if missing:
+            print(
+                "xpst-engine: WARNING: "
+                + ", ".join(missing)
+                + " unavailable — video processing will fail until one is installed "
+                + "(`xpst media fetch`, or set XPST_FFMPEG_PATH / XPST_FFPROBE_PATH).",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    threading.Thread(target=_run, name="xpst-media-bootstrap", daemon=True).start()
+
+
 def start_engine(host: str, port: int, config_dir: str) -> None:
     """Start the dashboard (blocking) after the port pre-flight check.
 
@@ -208,6 +247,7 @@ def start_engine(host: str, port: int, config_dir: str) -> None:
         )
 
     threading.Thread(target=_watch_parent, daemon=True).start()
+    _start_media_bootstrap()
 
     from xpst.dashboard.server import start_dashboard
     from xpst.utils.logger import setup_logging

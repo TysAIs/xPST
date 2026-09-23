@@ -28,7 +28,7 @@ def _stub_ffmpeg_verification(request, monkeypatch):
     detection live in a 'stress' or 'video' module and opt out.
     """
     basename = request.node.fspath.basename
-    if any(k in basename for k in ("stress", "video", "cross_platform")):
+    if any(k in basename for k in ("stress", "video", "cross_platform", "failure_outcomes")):
         return
     from xpst.utils.video import VideoProcessor
 
@@ -59,3 +59,31 @@ def _no_live_auth_warm(monkeypatch):
     exercise the warm path remove this variable explicitly.
     """
     monkeypatch.setenv("XPST_DISABLE_AUTH_WARM", "1")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_connectivity_probe(monkeypatch):
+    """Never let the connectivity probe touch the real network in tests.
+
+    ``xpst doctor`` / ``health`` / ``run`` call ``check_network()``; on a
+    networked CI box that would make their output (and the ``all_clear``
+    verdict) depend on the runner's internet access. Tests that need the
+    offline path re-patch ``xpst.utils.net.check_network`` themselves.
+    """
+    from xpst.utils.net import NetworkStatus
+
+    monkeypatch.setattr(
+        "xpst.utils.net.check_network",
+        lambda *a, **kw: NetworkStatus(online=True, detail="online (test stub)"),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config_dir_env(monkeypatch):
+    """Keep the real ``XPST_CONFIG_DIR`` of the invoking shell out of tests.
+
+    Several modules resolve their default directory from this variable; an
+    ambient value (an installer/e2e lane exporting it) would silently redirect
+    a test's writes away from its ``tmp_path``.
+    """
+    monkeypatch.delenv("XPST_CONFIG_DIR", raising=False)

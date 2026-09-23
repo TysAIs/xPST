@@ -166,18 +166,21 @@ def test_tauri_workflow_asserts_an_installer_exists_and_avoids_gnu_timeout() -> 
     assert "if-no-files-found: error" in workflow
 
 
-def test_tauri_workflow_gates_the_installer_a_stranger_downloads() -> None:
-    """The 200MB gate must measure the download, not the unpacked bundle.
+def test_tauri_workflow_gates_the_app_and_installer_size_budget() -> None:
+    """The size gate measures both the download and the unpacked app.
 
-    Measuring `du -sm xPST.app` failed a 209MB app whose .dmg — the artifact a
-    stranger actually downloads — is smaller, so a shippable installer was
-    blocked. The app size is still reported as a warning so bloat stays visible.
+    Measuring only the installer let 87MB of ffmpeg ride along unnoticed, so the
+    unpacked .app now has a hard budget too — and because a bundle that simply
+    lost its engine would also be small, the engine sidecar is asserted present
+    in the same step.
     """
     workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
 
-    assert "Verify installer size gate" in workflow
+    assert "Verify app/installer size budget" in workflow
     assert "du -sm \"$APP_PATH\"" in workflow
     assert 'INSTALLER=$(find src-tauri/target -path "$PATTERN" -print -quit)' in workflow
-    # The app-size check is a warning, the installer check is the failure.
-    assert "::warning::unpacked xPST.app is" in workflow
-    assert "::error::installer ${SIZE_MB}MB exceeds the 200MB gate" in workflow
+    assert "APP_BUDGET_MB=130" in workflow
+    assert "over the ${APP_BUDGET_MB}MB budget" in workflow
+    assert "must be resolved at runtime" in workflow
+    assert "engine sidecar missing from the app bundle" in workflow
+    assert "::error::installer ${SIZE_MB}MB exceeds the ${INSTALLER_BUDGET_MB}MB budget" in workflow
