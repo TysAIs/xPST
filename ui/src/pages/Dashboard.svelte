@@ -1,36 +1,51 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../lib/api.js";
+  import { bootFailureMessage, loadWhileEngineStarts } from "../lib/engineStartup.js";
   import Card from "../lib/components/Card.svelte";
   import EmptyState from "../lib/components/EmptyState.svelte";
+  import EngineStarting from "../lib/components/EngineStarting.svelte";
   import ErrorState from "../lib/components/ErrorState.svelte";
   import LoadingSkeleton from "../lib/components/LoadingSkeleton.svelte";
   import PlatformBadge from "../lib/components/PlatformBadge.svelte";
   import StatusBadge from "../lib/components/StatusBadge.svelte";
 
+  // Home is the landing view, so it is the first thing painted in a launch —
+  // measured at BOOT_TO_VISIBLE_SECS=0.165 while the engine only answers at
+  // ENGINE_HEALTH_WAIT_SECS=0.690. "starting" is that window: engine coming up,
+  // nothing wrong. A real failure still lands on the error card below.
   let state = $state("loading");
   let pendingPolls = 0;
   let summary = $state(null);
   let health = $state(null);
   let error = $state("");
 
+  function fetchHome() {
+    return Promise.all([api.summary(), api.healthStatus()]);
+  }
+
   async function load() {
     state = "loading";
     error = "";
-    try {
-      const [nextSummary, nextHealth] = await Promise.all([api.summary(), api.healthStatus()]);
-      summary = nextSummary;
-      health = nextHealth;
-      state = "ready";
-      // The engine answers immediately while its live probe runs in the
-      // background; poll a bounded number of times instead of blocking paint.
-      if (nextHealth?.readiness_pending && pendingPolls < 8) {
-        pendingPolls += 1;
-        setTimeout(load, 1200);
-      }
-    } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
+    const result = await loadWhileEngineStarts(fetchHome, {
+      onWaiting: () => {
+        state = "starting";
+      },
+    });
+    if (!result.ok) {
+      error = bootFailureMessage(result);
       state = "error";
+      return;
+    }
+    const [nextSummary, nextHealth] = result.value;
+    summary = nextSummary;
+    health = nextHealth;
+    state = "ready";
+    // The engine answers immediately while its live probe runs in the
+    // background; poll a bounded number of times instead of blocking paint.
+    if (nextHealth?.readiness_pending && pendingPolls < 8) {
+      pendingPolls += 1;
+      setTimeout(load, 1200);
     }
   }
 
@@ -77,6 +92,8 @@
 
 {#if state === "loading"}
   <LoadingSkeleton rows={5} label="Loading home" onRetry={load} />
+{:else if state === "starting"}
+  <EngineStarting />
 {:else if state === "error"}
   <ErrorState message={error} retry={load} />
 {:else}

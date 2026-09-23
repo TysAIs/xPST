@@ -415,6 +415,26 @@ input,
   background: var(--xpst-color-danger-surface);
 }
 
+/* Starting state: the engine is still coming up — not an error, not a
+   skeleton. Styled as the neutral state card with a spinning mark so it reads
+   as "working", never as "broken" (see lib/engineStartup.js). */
+.xpst-state--starting .xpst-state__icon--spin {
+  color: var(--xpst-color-primary);
+  animation: xpst-spin 1.4s linear infinite;
+}
+
+@keyframes xpst-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xpst-state--starting .xpst-state__icon--spin {
+    animation: none;
+  }
+}
+
 .xpst-state__actions {
   display: flex;
   flex-wrap: wrap;

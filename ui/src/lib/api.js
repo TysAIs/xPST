@@ -13,6 +13,24 @@ import { tokenHeaders } from "./auth-token.js";
 const JSON_HEADERS = { Accept: "application/json" };
 
 /**
+ * Error kinds.
+ *
+ * `ENGINE_STARTING` is not a fault: the desktop shell puts the window on screen
+ * (BOOT_TO_VISIBLE ~0.17s) before the engine sidecar answers (~0.69s), so the
+ * first calls of a launch legitimately fail in one of two shapes —
+ *
+ *   * nothing is listening on the engine port yet, so `fetch` throws, or
+ *   * the window is still on the shell's own asset origin, which answers
+ *     `/api/*` with the SPA's HTML, so the body is not the engine's JSON.
+ *
+ * Neither means "this view is broken", so they are classified apart from a
+ * real refusal and rendered as the calm starting state (see
+ * lib/engineStartup.js). `HTTP` covers everything the engine actually answered.
+ */
+export const API_ERROR_ENGINE_STARTING = "engine-starting";
+export const API_ERROR_HTTP = "http";
+
+/**
  * Error carrying the HTTP status and the parsed JSON body.
  *
  * The first-run flow needs the *engine's* reason for a refusal (a 409 from
@@ -20,18 +38,24 @@ const JSON_HEADERS = { Accept: "application/json" };
  * instead of being flattened into a status code string.
  */
 export class ApiError extends Error {
-  constructor(path, status, body, message) {
+  constructor(path, status, body, message, kind = API_ERROR_HTTP) {
     super(message ?? `${path} → HTTP ${status}`);
     this.name = "ApiError";
     this.path = path;
     this.status = status;
     this.body = body ?? null;
+    this.kind = kind;
   }
 
   /** Engine-provided detail string, when present. */
   get detail() {
     const detail = this.body?.detail;
     return typeof detail === "string" ? detail : undefined;
+  }
+
+  /** True while the engine has not answered yet — a launch, not a failure. */
+  get engineStarting() {
+    return this.kind === API_ERROR_ENGINE_STARTING;
   }
 }
 
@@ -50,7 +74,13 @@ async function requestJSON(path, options = {}) {
   try {
     res = await fetch(path, options);
   } catch (cause) {
-    throw new ApiError(path, 0, null, `${path} → engine unreachable (${cause?.message ?? cause})`);
+    throw new ApiError(
+      path,
+      0,
+      null,
+      `${path} → engine unreachable (${cause?.message ?? cause})`,
+      API_ERROR_ENGINE_STARTING
+    );
   }
   if (!res.ok) {
     const body = await readBody(res);
@@ -58,8 +88,47 @@ async function requestJSON(path, options = {}) {
     throw new ApiError(path, res.status, body, detail ?? `${path} → HTTP ${res.status}`);
   }
   const body = await readBody(res);
-  if (body === null) throw new ApiError(path, res.status, null, `${path} → response was not JSON`);
+  if (body === null) {
+    // 2xx without the engine's JSON: the window is still on the shell's asset
+    // origin, so the engine has not taken over yet. Not a broken view.
+    throw new ApiError(
+      path,
+      res.status,
+      null,
+      `${path} → response was not JSON`,
+      API_ERROR_ENGINE_STARTING
+    );
+  }
   return body;
+}
+
+/** True when a failed call only means the engine has not answered yet. */
+export function isEngineStarting(error) {
+  return Boolean(error && typeof error === "object" && error.engineStarting === true);
+}
+
+/**
+ * Copy for a real failure. `ApiError.message` stays the technical string (paths,
+ * statuses) for logs and tests; this is what a person reads, so it never
+ * contains a route path or a "response was not JSON" style internal.
+ */
+export function errorMessage(cause) {
+  if (cause instanceof ApiError) {
+    // The engine's own detail is written for a person ("no video file found",
+    // per-destination blockers) — prefer it over any generic sentence.
+    if (cause.detail) return cause.detail;
+    if (cause.engineStarting) {
+      return "The app is still connecting to its local engine. Give it a moment, then retry.";
+    }
+    if (cause.status === 401 || cause.status === 403) {
+      return "xPST refused this action without its dashboard token. Reopen the desktop app and try again.";
+    }
+    if (cause.status >= 500) {
+      return "The local engine hit an error answering this view. Restart xPST; if it keeps happening, run Diagnostics.";
+    }
+    return "The local engine refused this request. Reload the view, or restart xPST if it keeps happening.";
+  }
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 function getJSON(path) {

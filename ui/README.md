@@ -47,11 +47,15 @@ handled by the browser natively.
   (`first_run_complete: false`) and never hijacks an explicit navigation
 - `src/lib/components/` — reusable `Button`, `Card`, `StatusBadge`,
   `PlatformBadge`, `PlatformIcon`, `EmptyState`, `LoadingSkeleton`,
-  `ErrorState`, `FormField`, `BrandMark`, `Shell`, and `Nav` primitives
+  `EngineStarting`, `ErrorState`, `FormField`, `BrandMark`, `Shell`, and `Nav`
+  primitives
 - `src/pages/*.svelte` — dashboard views plus the first-run flow
 - `src/lib/api.js` — thin fetch client over the `/api` endpoints, the
   `ApiError` (status + parsed body are preserved so a refusal is rendered
-  truthfully), and the route table
+  truthfully), the error classification the UI renders from, and the route table
+- `src/lib/engineStartup.js` — the launch race: while the shell's window is up
+  but the engine sidecar is not answering yet, the landing views show a calm
+  starting state and retry on their own instead of rendering a raw failure
 - `src/lib/firstRun.js` — pure flow logic: destination rows, wizard steps and
   the result classification/wording (`resultTone`, `resultHeadline`)
 - `src/lib/session.js` — session-scoped record of the last post, so `#/result`
@@ -69,6 +73,9 @@ handled by the browser natively.
 - `tests/media-preview.test.js` — composer preview contracts: a selected asset
   produces a preview element, the preview is a URL (never file bytes in the
   page), and the picker/drop degrade honestly outside the app window
+- `tests/engine-startup.test.js` — the launch race: a not-yet-answering engine
+  is a starting state (not a failure), recovery is automatic and bounded, and
+  no user-facing message can contain a route path or raw internals
 
 ## First-run flow
 
@@ -185,4 +192,40 @@ cannot silently mean "the dark theme twice".
 
 This is not a CI gate — CI has no browser — but it is the check that caught the
 `.xpst-button` contrast regression (1.11:1 for the primary CTA in dark mode).
+
+## Startup race (window up before the engine answers)
+
+The shell puts its window on screen first and navigates it to the engine once
+the sidecar answers `/health` (measured on the installed bundle:
+`BOOT_TO_VISIBLE_SECS=0.165`, `ENGINE_HEALTH_WAIT_SECS=0.690`). Every `/api`
+call made in that window fails — nothing is listening yet, and while the page
+is still on the shell's asset origin `/api/*` comes back as the SPA's own HTML.
+The UI renders that as a calm starting state (`EngineStarting`, driven by
+`src/lib/engineStartup.js`) and retries on its own; it never shows the raw
+internal string and never leaves the user on a dead error card.
+
+`scripts/ui_boot_frames.py` proves it against the real built bundle: it serves
+`ui/dist` from an asset host that behaves like the shell (unknown paths,
+including `/api/*`, answer with the SPA's HTML), spawns the real engine
+`--engine-delay-ms` later, drives headless Brave over the Chrome DevTools
+Protocol, and records the rendered main-pane text plus a screenshot per frame.
+It fails when any frame contains raw internals while the engine is starting, or
+when the settled frame is not real Home content.
+
+```bash
+cd ui && npm ci && npm run build && cd ..
+
+# the tree being measured (needs `websocket` — pip install websocket-client —
+# and a python that can import xpst for the engine it spawns: --python)
+PYTHONPATH=$PWD/src <venv python> scripts/ui_boot_frames.py --ui-dist ui/dist --label after
+
+# the pre-fix tree, from a clone of the base commit, for the before/after delta
+PYTHONPATH=$PWD/src <venv python> scripts/ui_boot_frames.py \
+    --ui-dist /tmp/xpst-base/ui/dist --label before
+```
+
+`--modes retry,navigate` covers both paths: `retry` is one page load that must
+recover by itself when the engine answers, `navigate` is the shipped path
+(the tab is navigated to the engine URL once it is healthy). Frames, engine
+logs, and a JSON record land in `--evidence-dir`.
 

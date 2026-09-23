@@ -143,9 +143,11 @@ Use `sm` for fields and compact controls, `md` for buttons, `lg` for cards, and 
 
 ## Components
 
-Primitives expose semantic state and accessible names so pages do not reinvent interaction rules. `Button` has visible focus, disabled, and loading states. `Card` groups content. `StatusBadge` pairs a label with state. `PlatformBadge` identifies a destination with the shared Lucide icon family. `EmptyState`, `LoadingSkeleton`, and `ErrorState` explain what is happening and provide the next safe action. `FormField` always connects its label, hint, and error text. `Shell` and `Nav` preserve a predictable reading order across viewport sizes.
+Primitives expose semantic state and accessible names so pages do not reinvent interaction rules. `Button` has visible focus, disabled, and loading states. `Card` groups content. `StatusBadge` pairs a label with state. `PlatformBadge` identifies a destination with the shared Lucide icon family. `EmptyState`, `LoadingSkeleton`, `ErrorState`, and `EngineStarting` explain what is happening and provide the next safe action. `FormField` always connects its label, hint, and error text. `Shell` and `Nav` preserve a predictable reading order across viewport sizes.
 
 A loading state should reserve the shape of the content and announce a concise status. An error state should say what failed and offer retry when retrying is safe. An empty state should distinguish “nothing exists yet” from “data could not be loaded.”
+
+A starting state is not an error state. The desktop shell shows the window before its local engine answers, so a view that cannot reach `/api/*` yet is *starting*, not broken: it says so calmly, retries on its own, and renders its content as soon as the engine responds. Internal detail — route paths, status codes, parser messages like `/api/summary → response was not JSON` — never reaches the screen; it stays in the technical error object for logs and tests. The error card is reserved for a failure the app cannot wait out.
 
 ## Do's and Don'ts
 
