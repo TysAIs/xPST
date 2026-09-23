@@ -407,7 +407,7 @@ class QuotaManager:
         rl = self._config.rate_limits
         return {
             name: int(getattr(rl, name))
-            for name in ("youtube", "instagram", "x", "tiktok", "threads")
+            for name in ("youtube", "instagram", "x", "tiktok", "threads", "facebook")
             if getattr(rl, name, None) is not None
         }
 

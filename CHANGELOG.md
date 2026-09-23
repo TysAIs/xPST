@@ -50,6 +50,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the composer says the picker is unavailable instead of inventing a path.
 
 ### Fixed
+- **The Home readiness panel no longer shows three identical-looking rows.** A
+  platform holds several roles (source, video destination, analytics), and the
+  panel rendered one row per role while printing only the platform — so the
+  captured Home screen showed `Instagram / degraded / Review` three times with
+  nothing telling the rows apart. Each row now names its role
+  (`Instagram · Destination · Degraded`) and a row with nothing to say is not
+  rendered at all. The rows, the verdict and the copy come from one
+  role-level list, `xpst.readiness.role_readiness`.
+- **One readiness verdict instead of three.** The Home Readiness card said
+  "Needs attention" while `GET /api/onboarding` answered `ready: true` /
+  "Ready to post." — it built its report from the config alone, so a stored but
+  server-rejected Instagram session counted as ready — and the "Engine health
+  (last recorded)" pill said "Degraded" beside its own only row, "YouTube / OK".
+  `/api/onboarding` now renders the same live probe verdict as
+  `xpst doctor`/`xpst auth status` (PR #228's canonical status), both endpoints
+  serve the SAME readiness document (including the `verdict` the UI prints),
+  a destination whose session was rejected is never `destination_ready`, and
+  the recorded-health pill reports the recorded platform block it sits next to.
 - **Undefined design token** — `--xpst-color-primary-soft` was referenced by
   the selected/hover states but never defined in `tokens.css`, so those states
   silently rendered transparent in both themes. Defined for light, dark-theme

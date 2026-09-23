@@ -9,6 +9,7 @@
   import LoadingSkeleton from "../lib/components/LoadingSkeleton.svelte";
   import PlatformBadge from "../lib/components/PlatformBadge.svelte";
   import StatusBadge from "../lib/components/StatusBadge.svelte";
+  import { readinessVerdict, roleLabel } from "../lib/labels.js";
 
   // Home is the landing view, so it is the first thing painted in a launch —
   // measured at BOOT_TO_VISIBLE_SECS=0.165 while the engine only answers at
@@ -64,20 +65,23 @@
   const platformHealth = $derived(Object.entries(health?.platforms ?? {}));
   const hasPosts = $derived(Number(summary?.total_posts ?? 0) > 0);
   const canCreatePost = $derived(Boolean(health?.can_create_post));
-  const readinessPending = $derived(Boolean(health?.readiness_pending));
+  const readinessPending = $derived(Boolean(health?.readiness_pending || health?.readiness?.pending));
+  const readiness = $derived(health?.readiness ?? null);
 
-  // "Some roles need attention" is not the same as "you cannot post": a single
-  // ready destination is enough, so the copy must not claim posting is blocked
-  // while a Create-post action is offered.
-  const readinessDescription = $derived(
-    health?.readiness?.ready
-      ? "A destination is available for the next post."
-      : canCreatePost
-        ? "A destination is ready, so posting works. The roles below still need attention."
-        : "Posting stays unavailable until the blocker below is resolved."
+  // The verdict (pill label + copy) is decided by the ENGINE — the same
+  // `readiness` document `/api/health-status` and `/api/onboarding` both serve
+  // (src/xpst/readiness.py). Re-deriving it here is how one screen ended up
+  // showing three contradictory readiness/health verdicts.
+  const verdict = $derived(readinessVerdict(readiness));
+
+  // One row per (platform, role). The role is part of the row's identity: a
+  // platform with three roles used to render three identical "Instagram"
+  // rows. A row with nothing to say (no state, or a role that is ready) is
+  // not rendered at all.
+  const readinessRows = $derived(
+    (readiness?.blockers ?? []).filter((row) => row && row.platform && row.role && row.state),
   );
   const nextAction = $derived(health?.next_action ?? { kind: "review", label: "Review readiness", role: "video_destination" });
-  const readinessBlockers = $derived(health?.readiness?.blockers ?? []);
 </script>
 
 <header class="xpst-page-header">
@@ -100,20 +104,18 @@
   <section class="xpst-section" aria-labelledby="readiness-heading">
     <div class="xpst-section__heading">
       <h2 id="readiness-heading">Readiness</h2>
-      <StatusBadge
-        status={readinessPending ? "unknown" : health?.readiness?.ready ? "healthy" : "degraded"}
-        label={readinessPending ? "Checking…" : health?.readiness?.ready ? "Ready" : "Needs attention"}
-      />
+      <StatusBadge status={verdict.status} label={verdict.label} />
     </div>
-    <Card description={readinessPending ? "Checking live account readiness — nothing is claimed until the answer is known." : readinessDescription}>
+    <Card description={verdict.detail}>
       {#if readinessPending}
         <p class="xpst-card__description">Live account checks are still running.</p>
-      {:else if readinessBlockers.length}
-        <ul class="xpst-settings-list" aria-label="Readiness blockers">
-          {#each readinessBlockers.slice(0, 5) as blocker (`${blocker.platform}:${blocker.role}`)}
+      {:else if readinessRows.length}
+        <ul class="xpst-settings-list" aria-label="Readiness roles needing attention">
+          {#each readinessRows as row (`${row.platform}:${row.role}`)}
             <li class="xpst-inline-meta">
-              <PlatformBadge platform={blocker.platform} size={16} />
-              <span>{blocker.state.replaceAll("_", " ")}</span>
+              <PlatformBadge platform={row.platform} size={16} />
+              <span class="xpst-inline-meta__role">{row.role_label ?? roleLabel(row.role)}</span>
+              <StatusBadge status={row.state} />
               <a class="xpst-inline-link" href="#/accounts">Review</a>
             </li>
           {/each}
