@@ -726,9 +726,36 @@ def _post_exit_code(result: CrossPostResult, requested: list[str] | None) -> int
     return codes.pop() if len(codes) == 1 else EXIT_GENERAL
 
 
+def _parse_caption_for(values: tuple[str, ...]) -> dict[str, str]:
+    """Parse repeatable ``--caption-for PLATFORM=TEXT`` into ``{platform: text}``.
+
+    The text is never trimmed or otherwise changed: a per-destination caption is
+    sent verbatim, exactly like ``--caption``. A value without ``=`` (or with an
+    empty platform) is a usage error, reported instead of silently posting the
+    shared caption to a destination the user thought they had customized.
+    """
+    captions: dict[str, str] = {}
+    for raw in values:
+        platform, separator, text = str(raw).partition("=")
+        if not separator or not platform.strip():
+            raise click.BadParameter(f"expected PLATFORM=TEXT, got {raw!r}")
+        captions[platform.strip().lower()] = text
+    return captions
+
+
 @main.command()
 @click.option("--video", "-v", required=True, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
 @click.option("--caption", "-c", required=True, help="Video caption")
+@click.option(
+    "--caption-for",
+    "caption_for",
+    multiple=True,
+    metavar="PLATFORM=TEXT",
+    help=(
+        "Different caption for one destination (repeatable), e.g. "
+        "--caption-for x='short copy'. Destinations without one use --caption."
+    ),
+)
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
 @click.option(
     "--visibility",
@@ -740,8 +767,16 @@ def _post_exit_code(result: CrossPostResult, requested: list[str] | None) -> int
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
 @json_option
 @click.pass_context
-def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: str | None,
-         visibility: str, dry_run: bool, as_json: bool):
+def post(
+    ctx: click.Context,
+    video: tuple[str, ...],
+    caption: str,
+    caption_for: tuple[str, ...],
+    platforms: str | None,
+    visibility: str,
+    dry_run: bool,
+    as_json: bool,
+):
     """Manually post a video or carousel (multiple --video flags)"""
     config = load_config(ctx.obj.get("config_path"))
     quiet = ctx.obj.get("quiet", False)
@@ -750,6 +785,7 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
         log_file=config.monitoring.log_file,
     )
 
+    per_platform_captions = _parse_caption_for(caption_for)
     media_paths = [Path(v) for v in video]
     platform_list = platforms.split(",") if platforms else None
 
@@ -770,6 +806,9 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
             "dry_run": True,
             "video": str(media_paths[0]),
             "caption": caption[:80],
+            "captions": {
+                target: per_platform_captions.get(target.strip().lower(), caption) for target in targets
+            },
             "carousel": len(media_paths) > 1,
             "items": len(media_paths),
             "targets": targets,
@@ -784,6 +823,9 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
             if len(media_paths) > 1:
                 console.print(f"  Carousel: {len(media_paths)} items")
             console.print(f"  Caption: {caption[:80]}")
+            for target, text in info["captions"].items():
+                if target.strip().lower() in per_platform_captions:
+                    console.print(f"  Caption for {target}: {text[:80]}")
             console.print(f"  Targets: {', '.join(targets)}")
             console.print(f"  Visibility: {visibility}")
         return
@@ -810,10 +852,18 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
             )
 
     if len(media_paths) > 1:
-        result = asyncio.run(engine.post_manual_carousel(media_paths, caption, platform_list))
+        result = asyncio.run(
+            engine.post_manual_carousel(media_paths, caption, platform_list, per_platform_captions)
+        )
     else:
         result = asyncio.run(
-            engine.post_manual(media_paths[0], caption, platform_list, visibility=visibility)
+            engine.post_manual(
+                media_paths[0],
+                caption,
+                platform_list,
+                per_platform_captions,
+                visibility=visibility,
+            )
         )
 
     quota_blocked = [
@@ -826,6 +876,10 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
 
     if as_json:
         out = _result_to_dict(result)
+        # The copy each destination actually received, so a per-destination
+        # override is visible in the machine-readable outcome.
+        if result.captions:
+            out["captions"] = dict(result.captions)
         if quota_blocked:
             out["error"] = {
                 "code": "QUOTA_EXHAUSTED",

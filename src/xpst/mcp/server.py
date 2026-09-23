@@ -244,7 +244,11 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="xpst_post",
-        description="Manually post a local video file or carousel to platforms",
+        description=(
+            "Manually post a local video file or carousel to platforms. "
+            "overrides writes a different caption per destination "
+            '(e.g. {"x": {"text": "short copy"}}); destinations without one use caption.'
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -255,7 +259,17 @@ TOOLS: list[Tool] = [
                 },
                 "caption": {
                     "type": "string",
-                    "description": "Caption for the post",
+                    "description": "Caption for the post (the default for every destination without an override)",
+                },
+                "overrides": {
+                    "type": "object",
+                    "description": (
+                        "Per-destination caption overrides: {\"x\": \"short copy\"} or "
+                        "{\"x\": {\"text\": \"short copy\"}}. A destination not listed "
+                        "keeps caption. An override over that destination's own limit "
+                        "is refused in preflight, naming the destination."
+                    ),
+                    "additionalProperties": {"type": ["string", "object"]},
                 },
                 "platforms": {
                     "type": "array",
@@ -650,7 +664,8 @@ TOOLS: list[Tool] = [
         name="xpst_preflight",
         description=(
             "Run the canonical side-effect-free post preflight for local media and targets "
-            "(media, caption, destination readiness); never uploads and never touches the network"
+            "(media, per-destination caption, destination readiness); never uploads and never "
+            "touches the network"
         ),
         inputSchema={
             "type": "object",
@@ -658,6 +673,15 @@ TOOLS: list[Tool] = [
                 "media_path": {"type": "string"},
                 "platforms": {"type": "array", "items": {"type": "string"}},
                 "caption": {"type": "string", "default": ""},
+                "overrides": {
+                    "type": "object",
+                    "description": (
+                        "Per-destination caption overrides: {\"threads\": \"short copy\"} or "
+                        "{\"threads\": {\"text\": \"short copy\"}}. Checked against each "
+                        "destination's own limit."
+                    ),
+                    "additionalProperties": {"type": ["string", "object"]},
+                },
             },
             "required": ["media_path", "platforms"],
             "additionalProperties": False,
@@ -1243,6 +1267,24 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
     dry_run = args.get("dry_run", False)
     carousel_paths = args.get("carousel_paths", [])
 
+    # Per-destination copy, parsed by the shared contract parser so MCP accepts
+    # exactly the shape the HTTP API and the CLI accept.
+    from xpst.content import ContentContractError, parse_destination_texts
+
+    try:
+        overrides = parse_destination_texts(args.get("overrides"))
+    except ContentContractError as exc:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "ok": False,
+                    "error": f"Invalid overrides payload: {exc}",
+                    "overrides_accepted": "{\"x\": \"caption\"} or {\"x\": {\"text\": \"caption\"}}",
+                }, indent=2),
+            )],
+        )
+
     if dry_run:
         # Same canonical, side-effect-free verdict the CLI and the dashboard use.
         from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
@@ -1257,6 +1299,7 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                     media_paths=media_paths,
                     target_platforms=targets,
                     base_caption=args["caption"],
+                    per_platform_captions=overrides,
                 )
             ).to_dict()
             blockers = [issue["message"] for issue in plan_payload["hard_blockers"]]
@@ -1270,6 +1313,9 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                     "dry_run": True,
                     "video": args["video_path"],
                     "caption": args["caption"][:100],
+                    "captions": {
+                        target: overrides.get(target, args["caption"]) for target in targets
+                    },
                     "carousel": len(carousel_paths) > 0,
                     "targets": targets,
                     "ready": not blockers and bool(plan_payload and plan_payload["ready"]),
@@ -1288,17 +1334,25 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
             media_paths=media_paths,
             caption=args["caption"],
             platforms=args.get("platforms"),
+            per_platform_captions=overrides,
         )
     else:
         result = await engine.post_manual(
             video_path=Path(args["video_path"]),
             caption=args["caption"],
             platforms=args.get("platforms"),
+            per_platform_captions=overrides,
         )
+    payload = _serialize_result(result)
+    # Report the copy each destination actually received, so an override is
+    # visible in the outcome rather than only in the request.
+    sent = getattr(result, "captions", None)
+    if isinstance(sent, dict) and sent:
+        payload["captions"] = dict(sent)
     return CallToolResult(
         content=[TextContent(
             type="text",
-            text=json.dumps(_serialize_result(result), indent=2, default=str),
+            text=json.dumps(payload, indent=2, default=str),
         )],
     )
 
@@ -1910,11 +1964,23 @@ async def _handle_providers(config: XPSTConfig) -> CallToolResult:
 
 async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> CallToolResult:
     """Run the same side-effect-free preflight the CLI and dashboard use."""
+    from xpst.content import ContentContractError, parse_destination_texts
     from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
 
     media_path = str(arguments.get("media_path") or "").strip()
     platforms = [str(item).lower() for item in (arguments.get("platforms") or []) if str(item).strip()]
     caption = str(arguments.get("caption") or "")
+    try:
+        overrides = parse_destination_texts(arguments.get("overrides"))
+    except ContentContractError as exc:
+        payload = {
+            "ok": False,
+            "ready": False,
+            "blockers": [f"Invalid overrides payload: {exc}"],
+            "warnings": [],
+            "network_calls": False,
+        }
+        return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
 
     missing = []
     if not platforms:
@@ -1935,6 +2001,7 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
             media_paths=[media_path] if media_path else [],
             target_platforms=platforms,
             base_caption=caption,
+            per_platform_captions=overrides,
         )
     ).to_dict()
     payload = {
@@ -1942,6 +2009,8 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
         "ready": plan["ready"],
         "blockers": [issue["message"] for issue in plan["hard_blockers"]],
         "warnings": [issue["message"] for issue in plan["warnings"]],
+        "caption": caption,
+        "captions": {platform: overrides.get(platform, caption) for platform in platforms},
         "plan": plan,
         "network_calls": False,
     }
