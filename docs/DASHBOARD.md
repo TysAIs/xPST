@@ -173,7 +173,7 @@ Point your Facebook Page's webhook URL at
 ## Analytics Payload
 
 The dashboard's analytics layer (`src/xpst/dashboard/analytics.py`) collects
-per-post engagement from YouTube, Instagram, X, and TikTok APIs and caches
+per-post engagement from YouTube, Instagram, X, and TikTok (TikTok via the source-side downloader metadata path; TikTok publishing itself is not available yet) and caches
 snapshots in `~/.xpst/analytics.db`. The desktop app (`xpst app`) and the MCP
 server (`xpst_analytics`, `xpst_cross_post_analytics`) share this data.
 

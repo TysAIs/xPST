@@ -500,3 +500,63 @@ def collect_live_auth_status(
         # gets a non-green badge for the same reason the collection failed.
         attach_badge_truth(config, canonical)
         return canonical
+
+
+#: Facts a platform-level health entry carries, in display order.  Every one of
+#: them comes from the canonical entry — no surface may invent its own version.
+PLATFORM_HEALTH_FIELDS: tuple[str, ...] = (
+    "authenticated",
+    "session_valid",
+    "live_checked",
+    "state",
+    "auth_mode",
+    "enabled",
+    "error",
+    "details",
+    "probe_class",
+    "probe_error",
+    "probe_retryable",
+    "session_age_days",
+    "badge",
+    "token_state",
+    "badge_reason",
+    "checked_at",
+    "checked_at_iso",
+    "check_age_seconds",
+)
+
+
+def platform_health_entries(
+    canonical: dict[str, dict[str, Any]],
+    platforms: tuple[str, ...] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Platform-level health entries derived from canonical status.
+
+    One implementation for every surface that reports "is this account
+    connected": ``xpst health`` used to run its own per-platform probes through
+    the engine while ``xpst doctor``/``auth status`` rendered the canonical
+    collector, so the same box could report different verdicts for the same
+    account (see ``tests/test_status_surface_agreement.py``).
+
+    Args:
+        canonical: Output of :func:`collect_live_auth_status` (or the async form).
+        platforms: Provider names to include, in order. Defaults to every
+            provider except the local source.
+
+    Returns:
+        ``{platform: {fact: value}}`` containing only the fields the canonical
+        entry actually carries — an absent fact stays absent rather than being
+        filled in with a guess.
+    """
+    names = platforms if platforms is not None else tuple(
+        name for name in canonical if name != "local"
+    )
+    entries: dict[str, dict[str, Any]] = {}
+    for name in names:
+        entry = canonical.get(name)
+        if not isinstance(entry, dict):
+            continue
+        entries[name] = {
+            field: entry[field] for field in PLATFORM_HEALTH_FIELDS if field in entry
+        }
+    return entries
