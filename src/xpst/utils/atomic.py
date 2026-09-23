@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import time
 from os import PathLike
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -41,3 +42,44 @@ def replace_with_retry(
             if attempt >= len(backoff):
                 raise
             sleep(backoff[attempt])
+
+
+def write_text_atomic(
+    path: str | PathLike[str],
+    text: str,
+    *,
+    mode: int = 0o600,
+) -> None:
+    """Write ``text`` to ``path`` atomically, owner-only by default.
+
+    Creates a sibling temp file with ``mode`` (0600 by default — every xPST
+    file that carries tokens or account details must not be world-readable),
+    fsyncs it, then publishes it via :func:`replace_with_retry`.  A failure
+    part-way through leaves the previous file untouched and removes the temp
+    file, so a crash, a full disk or a transient Windows lock can never
+    truncate a user's config.
+
+    Raises:
+        OSError: When the write or the rename genuinely fails (caller decides
+            whether that is fatal).
+    """
+    path = Path(path)
+    tmp_path = path.parent / f".{path.name}.tmp.{os.getpid()}"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0)
+    fd = os.open(tmp_path, flags, mode)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        replace_with_retry(tmp_path, path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except OSError:
+            pass
+        raise
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass

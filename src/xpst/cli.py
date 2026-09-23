@@ -441,14 +441,33 @@ def run(ctx: click.Context, source: str, bidirectional: bool, dry_run: bool, as_
         ctx.exit(1)
         return
 
+    # Connectivity is reported (never assumed): on a host with no network the
+    # source fetch cannot work and no upload can succeed, and a bare
+    # "username not configured" is a misleading explanation.
+    from xpst.utils.net import check_network
+
+    network = check_network()
+    if not network.online and not quiet:
+        console.print(
+            f"[bold red]xPST is offline:[/bold red] {network.detail}"
+        )
+        if not dry_run:
+            console.print(
+                "[dim]Nothing will be posted during this run. Local state is "
+                "readable; retry once connectivity returns.[/dim]"
+            )
+
     try:
-        _run_check_and_post(engine, source, bidirectional, dry_run, as_json, quiet)
+        _run_check_and_post(
+            engine, source, bidirectional, dry_run, as_json, quiet, network=network
+        )
     finally:
         # Always release so a one-shot `run` never leaves a stale pidfile.
         engine.release_pidfile()
 
 
-def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool, as_json: bool, quiet: bool) -> None:
+def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool, as_json: bool, quiet: bool,
+                        network: Any = None) -> None:
     """Execute a single check-and-post cycle.
 
     Extracted from the ``run`` command so the pidfile guard in ``run`` can
@@ -459,12 +478,14 @@ def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool,
     if source == "all":
         bidirectional = True
 
+    network_payload = network.to_dict() if network is not None else None
+
     if dry_run:
         if bidirectional:
             monitor = engine._get_monitor()
             new_posts = asyncio.run(monitor.check_all_sources(5))
             if as_json:
-                json_output({"dry_run": True, "posts": [{"source": p.source_platform, "video_id": p.video_id, "caption": p.caption[:50], "targets": list(p.target_platforms)} for p in new_posts]}, True)
+                json_output({"dry_run": True, "network": network_payload, "posts": [{"source": p.source_platform, "video_id": p.video_id, "caption": p.caption[:50], "targets": list(p.target_platforms)} for p in new_posts]}, True)
             elif new_posts:
                 if not quiet:
                     console.print("[bold blue]Dry run — would cross-post:[/bold blue]")
@@ -477,7 +498,7 @@ def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool,
             videos = asyncio.run(engine.source_service.fetch_new_videos(source, 5))
             new_videos = engine.source_service.filter_new(videos, engine.state, engine._platforms) if videos else []
             if as_json:
-                json_output({"dry_run": True, "videos": [{"video_id": v.video_id, "caption": v.caption[:50], "targets": list(engine._platforms.keys())} for v in new_videos]}, True)
+                json_output({"dry_run": True, "network": network_payload, "videos": [{"video_id": v.video_id, "caption": v.caption[:50], "targets": list(engine._platforms.keys())} for v in new_videos]}, True)
             elif new_videos:
                 if not quiet:
                     console.print("[bold blue]Dry run — would post:[/bold blue]")
@@ -498,15 +519,16 @@ def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool,
         results = asyncio.run(engine.check_and_post(source=source))
 
     if not results:
+        status = "offline_no_network" if (network_payload and not network_payload["online"]) else "no_new_videos"
         if as_json:
-            json_output({"status": "no_new_videos", "results": []}, True)
+            json_output({"status": status, "network": network_payload, "results": []}, True)
         elif not quiet:
             console.print("[green]No new videos to post[/green]")
         return
 
     if as_json:
         out = [_result_to_dict(r) for r in results]
-        json_output({"status": "ok", "results": out}, True)
+        json_output({"status": "ok", "network": network_payload, "results": out}, True)
     else:
         for result in results:
             _display_result(result)
@@ -1122,10 +1144,23 @@ def health(ctx: click.Context, as_json: bool):
     engine = CrossPostEngine(config)
     health_data = asyncio.run(engine.check_health())
     health_data["sessions"] = _session_health(config)
+    # Connectivity: without it every "not authenticated"/timeout below is
+    # ambiguous, so state the network answer explicitly and first.
+    from xpst.utils.net import check_network
+
+    network = check_network()
+    health_data["network"] = network.to_dict()
 
     if as_json:
         json_output(health_data, True)
         return
+
+    if not network.online:
+        console.print(
+            f"[bold red]⚠️  OFFLINE:[/bold red] {network.detail}\n"
+            "[dim]xPST is running from local state; every platform check "
+            "below is limited until connectivity returns.[/dim]\n"
+        )
 
     # ── Stored sessions (G53: expired sessions fail silently otherwise) ──
     console.print("[bold]Stored Sessions:[/bold]")
@@ -1862,11 +1897,17 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     # fetched on first use (~/.xpst/bin). A bare `shutil.which` reported
     # "not found" for GUI-launched apps whose minimal PATH misses
     # /opt/homebrew/bin and for the fetched build.
-    from xpst.utils.platform import resolve_ffmpeg_path, resolve_ffprobe_path
+    from xpst.utils.net import check_network
+    from xpst.utils.platform import (
+        resolve_ffmpeg_path,
+        resolve_ffprobe_path,
+        resolve_ytdlp_path,
+    )
 
     ffmpeg_path = resolve_ffmpeg_path()
     ffprobe_path = resolve_ffprobe_path()
-    yt_dlp_path = shutil.which("yt-dlp")
+    ytdlp_path = resolve_ytdlp_path()
+    network = check_network()
     environment: list[dict[str, Any]] = [
         {
             "name": "ffmpeg",
@@ -1882,9 +1923,27 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
         },
         {
             "name": "yt-dlp",
-            "ok": bool(yt_dlp_path),
-            "detail": yt_dlp_path or "not found on PATH",
-            "fix": None if yt_dlp_path else "Install yt-dlp (e.g. `brew install yt-dlp` or `pipx install yt-dlp`).",
+            "ok": bool(ytdlp_path),
+            "detail": str(ytdlp_path) if ytdlp_path else (
+                "yt-dlp not found on PATH, in XPST_YTDLP_PATH or in the bundled "
+                "media directory"
+            ),
+            "fix": None if ytdlp_path else (
+                "Install yt-dlp (e.g. `brew install yt-dlp` or "
+                "`pipx install yt-dlp`) or set XPST_YTDLP_PATH to the "
+                "yt-dlp binary."
+            ),
+        },
+        {
+            "name": "network",
+            "ok": network.online,
+            "detail": network.detail,
+            "fix": None if network.online else (
+                "Connect this machine to the internet (check Wi-Fi/VPN/"
+                "firewall/DNS). xPST can start and read local state offline, "
+                "but nothing can be downloaded or posted until connectivity "
+                "returns."
+            ),
         },
     ]
     try:
@@ -1897,7 +1956,10 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
         "name": "config dir",
         "ok": env_ok,
         "detail": str(config.config_dir),
-        "fix": None if env_ok else f"Ensure {config.config_dir} is writable.",
+        "fix": None if env_ok else (
+            f"Ensure {config.config_dir} is writable (chmod u+rwx), or set "
+            f"XPST_CONFIG_DIR to a writable directory."
+        ),
     })
     for entry in environment:
         if not entry["ok"]:
