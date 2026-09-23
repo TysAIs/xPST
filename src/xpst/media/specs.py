@@ -212,6 +212,25 @@ PLATFORM_SPECS["threads"] = replace(
     image_aspect_min=None,
     image_aspect_max=None,
 )
+# Facebook Page video (Page-scoped publishing via ``/{page-id}/videos``). Like
+# Threads it publishes video only, so it declares no image modality. Without an
+# entry here the preflight answered UNKNOWN_PLATFORM for a destination the
+# engine happily publishes to — a verdict that disagreed with the pipeline,
+# which is the one thing a preflight may never do.
+PLATFORM_SPECS["facebook"] = PlatformSpec(
+    display_name="Facebook Page",
+    containers=(".mp4", ".mov"),
+    video_codec="h264",
+    pix_fmt="yuv420p",
+    long_edge=1920,
+    fps_cap=60,
+    audio_codec="aac",
+    audio_rate=44100,
+    lufs=-14.0,
+    max_video_bitrate_bps=10_000_000,
+    file_size_cap_mb=10 * 1024,
+    duration_cap_s=14_400,
+)
 
 
 @dataclass
