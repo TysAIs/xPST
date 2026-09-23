@@ -54,6 +54,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the selected/hover states but never defined in `tokens.css`, so those states
   silently rendered transparent in both themes. Defined for light, dark-theme
   and `prefers-color-scheme: dark`.
+- **`xpst health` and `xpst doctor` can no longer disagree about who is
+  connected.** `health` probed platforms through the engine while `doctor`
+  rendered the canonical collector, so one machine could answer
+  `instagram: session expired, re-run connect` and `instagram: ready` for the
+  same account minutes apart (the old `doctor` only checked that a session
+  *file existed*). Both now render one implementation —
+  `xpst.auth_status.platform_health_entries` — and the platform block of
+  `xpst_health` (MCP) does the same. TikTok's source-only state stops reading
+  as "not authenticated" in `health` while every other surface says
+  `source_only`.
+- **A failed live probe is no longer reported as an expiry it never proved.**
+  Every Instagram probe failure — transport errors, `429`/`5xx`, challenges and
+  Instagram's anti-bot 302 redirect loop — used to print "Instagram session
+  expired or invalid. Re-run: xpst connect instagram (username/password
+  required for re-login)", a diagnosis nothing had observed and one that sends
+  the user into the ban-risky password path. Probe failures are now classified
+  (`xpst.utils.probe_errors`): a provider rejection (Instagram's
+  `403 login_required` + "You've been logged out") keeps the re-login
+  instruction and carries the provider's raw response; anything unproven is
+  reported as an **unverified** probe (raw error + retry, `badge: unknown`, not
+  `needs_reauth`) on every surface — `health`, `doctor`, `auth status`, MCP and
+  the web UI. The raw error is no longer discarded at `logger.debug`.
 ### Added
 - **Honest token state + truthful badges** — `xpst auth status --json` now
   reports, per platform, a `token_state` / `badge` (`connected`, `expiring`,

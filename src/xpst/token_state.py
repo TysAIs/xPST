@@ -55,6 +55,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from xpst.utils.probe_errors import PROBE_UNVERIFIED
+
 # ── token states ────────────────────────────────────────────────────────────
 
 TOKEN_STATE_VALID = "valid"
@@ -482,6 +484,18 @@ def derive_token_state(
             state = TOKEN_STATE_UNCONFIGURED
             reason = f"no credentials configured — {failure}"
             action = f"xpst connect {platform}"
+        elif str(entry.get("probe_class") or "") == PROBE_UNVERIFIED:
+            # The probe failed without proving the credential is dead: a
+            # transport error, a challenge, or an anti-bot redirect.  Not green
+            # (nothing was verified) and not ``needs_reauth`` either — sending
+            # the user to re-authenticate for a failure that may clear on its
+            # own is what pushed them into a ban-risky password login.
+            state = TOKEN_STATE_UNKNOWN
+            reason = (
+                "live check could not verify the account (unverified probe "
+                f"result, not a proven expiry) — {failure}"
+            )
+            action = "xpst health"
         elif has_refresh and not refresh_failed:
             state = TOKEN_STATE_EXPIRED_REFRESHABLE
             reason = f"access token expired ({failure}); a refresh token is available and xPST will refresh automatically"

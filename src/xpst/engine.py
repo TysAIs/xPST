@@ -1229,11 +1229,19 @@ class CrossPostEngine:
         result.update_status()
         return result
 
-    async def check_health(self) -> dict[str, Any]:
+    async def check_health(self, *, include_platforms: bool = True) -> dict[str, Any]:
         """Check health of all sources, platforms, and subsystems.
 
         Performs connectivity tests on each platform (without uploading)
         and collects circuit breaker states, quota status, and state stats.
+
+        Args:
+            include_platforms: Probe the engine's own uploaders and fill the
+                ``platforms`` block. Pass ``False`` when the caller renders
+                platform auth from the canonical collector
+                (:func:`xpst.auth_status.platform_health_entries`) — otherwise
+                the same account would be probed twice and could be reported
+                with two different verdicts.
 
         Returns:
             Health status dict with keys: ``sources``, ``platforms``,
@@ -1261,29 +1269,30 @@ class CrossPostEngine:
 
         # Check platforms (connectivity test, no uploads)
         all_known_platforms = {"youtube", "instagram", "x", "tiktok", "threads"}
-        for name, uploader in self._platforms.items():
-            try:
-                platform_health = await uploader.check_health()
-                health["platforms"][name] = {
-                    "authenticated": platform_health.authenticated,
-                    "session_valid": platform_health.session_valid,
-                    "error": platform_health.error,
-                    "details": platform_health.details,
-                }
-            except Exception as e:
+        if include_platforms:
+            for name, uploader in self._platforms.items():
+                try:
+                    platform_health = await uploader.check_health()
+                    health["platforms"][name] = {
+                        "authenticated": platform_health.authenticated,
+                        "session_valid": platform_health.session_valid,
+                        "error": platform_health.error,
+                        "details": platform_health.details,
+                    }
+                except Exception as e:
+                    health["platforms"][name] = {
+                        "authenticated": False,
+                        "session_valid": False,
+                        "error": str(e),
+                    }
+
+            # Report disabled platforms (not initialized but known)
+            for name in all_known_platforms - set(self._platforms.keys()):
                 health["platforms"][name] = {
                     "authenticated": False,
                     "session_valid": False,
-                    "error": str(e),
+                    "error": "disabled",
+                    "details": {},
                 }
-
-        # Report disabled platforms (not initialized but known)
-        for name in all_known_platforms - set(self._platforms.keys()):
-            health["platforms"][name] = {
-                "authenticated": False,
-                "session_valid": False,
-                "error": "disabled",
-                "details": {},
-            }
 
         return health
