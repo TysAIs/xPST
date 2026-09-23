@@ -35,7 +35,13 @@ from rich.panel import Panel
 from rich.table import Table
 
 from xpst.config import XPSTConfig
-from xpst.content import CONTENT_TYPES, ContentRequest, capability_document, content_verdict
+from xpst.content import (
+    CONTENT_TYPES,
+    PUBLISH_ROUTE_TEXT,
+    ContentRequest,
+    capability_document,
+    content_verdict,
+)
 from xpst.engine import CrossPostEngine, CrossPostResult
 from xpst.services.post_service import refusal_envelope
 from xpst.setup_transaction import SetupTransactionService
@@ -593,7 +599,17 @@ def watch(ctx: click.Context, interval: int | None, source: str, bidirectional: 
 
 @main.command()
 @click.option("--video", "-v", required=False, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
-@click.option("--caption", "-c", required=True, help="Post text/caption")
+@click.option("--caption", "-c", required=False, default=None, help="Post text/caption (required with --video)")
+@click.option(
+    "--text",
+    "-t",
+    default=None,
+    help=(
+        "Text of a text-only post (no media). Equivalent to --caption with "
+        "--content-type text; `xpst post --text \"...\" -p x,threads` publishes a "
+        "text post to every destination that has a text path."
+    ),
+)
 @click.option(
     "--content-type",
     "content_type",
@@ -605,14 +621,15 @@ def watch(ctx: click.Context, interval: int | None, source: str, bidirectional: 
         "destination cannot publish is refused before anything is uploaded."
     ),
 )
-@click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
+@click.option("--platforms", "--platform", "-p", default=None, help="Comma-separated platforms (default: all)")
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
 @json_option
 @click.pass_context
 def post(
     ctx: click.Context,
     video: tuple[str, ...],
-    caption: str,
+    caption: str | None,
+    text: str | None,
     content_type: str | None,
     platforms: str | None,
     dry_run: bool,
@@ -629,11 +646,21 @@ def post(
     media_paths = [Path(v) for v in video]
     platform_list = platforms.split(",") if platforms else None
 
+    # --text is the text-post spelling of --caption; both name the same body.
+    body = text if text is not None else (caption or "")
+
+    if not media_paths and not content_type and text is not None:
+        # `--text` with no file IS a text post: state it rather than inferring
+        # it, so the content verdict and the route agree on every surface.
+        content_type = "text"
+
     if not media_paths and not content_type:
         raise click.UsageError(
-            "Provide --video (a file to post) or --content-type (what this post is, "
-            "e.g. --content-type text)."
+            "Provide --video (a file to post), --text (a text post), or "
+            "--content-type (what this post is, e.g. --content-type text)."
         )
+    if media_paths and not body.strip():
+        raise click.UsageError("Provide --caption for the media you are posting.")
 
     # Resolve the target list once so the content verdict is decided against the
     # same destinations the engine would use, without instantiating the engine
@@ -650,14 +677,15 @@ def post(
 
     # ONE content answer, from the contract module: the same request produces
     # the same verdict on the CLI, in MCP, and over HTTP.
-    request = ContentRequest.from_legacy(media_paths, caption, targets, content_type=content_type)
+    request = ContentRequest.from_legacy(media_paths, body, targets, content_type=content_type)
     verdict = content_verdict(request)
 
     if dry_run:
         info = {
             "dry_run": True,
             "video": str(media_paths[0]) if media_paths else None,
-            "caption": caption[:80],
+            "caption": body[:80],
+            "text": body[:80],
             "carousel": len(media_paths) > 1,
             "items": len(media_paths),
             "targets": targets,
@@ -678,7 +706,7 @@ def post(
                 if len(media_paths) > 1:
                     console.print(f"  Carousel: {len(media_paths)} items")
             console.print(f"  Content type: {verdict['effective_content_type']}")
-            console.print(f"  Caption: {caption[:80]}")
+            console.print(f"  Caption: {body[:80]}")
             console.print(f"  Targets: {', '.join(targets)}")
             for blocker in verdict["blockers"]:
                 console.print(f"  [red]Blocked:[/red] {blocker}")
@@ -701,6 +729,8 @@ def post(
     if not as_json and not quiet:
         if len(media_paths) > 1:
             console.print(f"[bold blue]Posting carousel ({len(media_paths)} items) to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
+        elif verdict["route"] == PUBLISH_ROUTE_TEXT:
+            console.print(f"[bold blue]Posting text to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
         else:
             console.print(f"[bold blue]Posting to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
 
@@ -719,10 +749,12 @@ def post(
                 "manual post proceeds."
             )
 
-    if len(media_paths) > 1:
-        result = asyncio.run(engine.post_manual_carousel(media_paths, caption, platform_list))
+    if verdict["route"] == PUBLISH_ROUTE_TEXT:
+        result = asyncio.run(engine.post_text(body, platform_list))
+    elif len(media_paths) > 1:
+        result = asyncio.run(engine.post_manual_carousel(media_paths, body, platform_list))
     else:
-        result = asyncio.run(engine.post_manual(media_paths[0], caption, platform_list))
+        result = asyncio.run(engine.post_manual(media_paths[0], body, platform_list))
 
     quota_blocked = [
         p for p, ur in result.results.items()

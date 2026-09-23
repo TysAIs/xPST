@@ -1096,11 +1096,11 @@ def create_api_router(
         """
         from xpst.config import XPSTConfig
         from xpst.content import ContentRequest, content_verdict
-        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService, plan_content_type
 
         media_path = str(payload.get("media_path") or "").strip()
-        caption = str(payload.get("caption") or "")
-        content_type = payload.get("content_type")
+        # `text` is the text-post spelling of `caption`; both name the same body.
+        caption = str(payload.get("text") or payload.get("caption") or "")
         platforms = [
             str(item).lower()
             for item in (payload.get("platforms") or [])
@@ -1114,15 +1114,11 @@ def create_api_router(
             request_blockers.append("Choose at least one destination platform.")
 
         # One content verdict, from the contract module: the same request gets
-        # the same answer here, in the CLI, and over MCP.
-        verdict = content_verdict(
-            ContentRequest.from_legacy(
-                [media_path] if media_path else [],
-                caption,
-                platforms,
-                content_type=content_type,
-            )
-        )
+        # the same answer here, in the CLI, and over MCP. The payload goes through
+        # the one request parser, so `text` (a text post) is read the same way
+        # here as over MCP and in the CLI.
+        request = ContentRequest.from_payload(payload)
+        verdict = content_verdict(request)
 
         plan: dict[str, Any] | None = None
         canonical_blockers: list[str] = []
@@ -1138,6 +1134,11 @@ def create_api_router(
                     media_paths=[media_path] if media_path else [],
                     target_platforms=platforms,
                     base_caption=caption,
+                    # A text post carries no file, so the media requirement must
+                    # not be applied to it (it would block every text preflight);
+                    # a request with neither a file nor a body keeps that
+                    # requirement instead of being read as a refused text post.
+                    content_type=plan_content_type(request),
                 )
             ).to_dict()
             canonical_blockers = [issue["message"] for issue in plan["hard_blockers"]]
