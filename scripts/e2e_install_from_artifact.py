@@ -386,14 +386,18 @@ def bundle_info(app: Path) -> dict[str, Any]:
 
 
 def classify_bundle(app: Path) -> tuple[str, dict[str, bool]]:
-    """Identify Tauri versus the legacy PySide/QML desktop stack."""
+    """Identify the Tauri shell versus a pre-Tauri PySide/QML desktop build."""
     resources = app / "Contents" / "Resources"
     tauri_markers = {
         "ui_index": (resources / "ui" / "index.html").is_file(),
         "engine": (resources / "binaries" / "engine" / "xpst-engine").is_file(),
     }
     legacy_markers = {
-        "qml_main": (resources / "xpst" / "desktop_app" / "qml" / "main.qml").is_file(),
+        # Pre-Tauri desktop bundles linked PySide6 and shipped the QML UI. This
+        # marker is deliberately a property of the BUNDLE (a framework that a
+        # Tauri build never contains) rather than a path inside the source
+        # tree of an app this repository no longer builds, so the harness can
+        # still name a wrong (legacy) published artifact.
         "pyside6": (app / "Contents" / "Frameworks" / "PySide6").exists(),
     }
     if all(tauri_markers.values()):
@@ -1432,7 +1436,7 @@ def main(argv: list[str] | None = None) -> int:
                 "bundle": bundle,
                 "stack": {"name": stack, "markers": markers},
                 "packaged_ui": {
-                    "present": markers.get("ui_index", False) or markers.get("qml_main", False),
+                    "present": markers.get("ui_index", False) or markers.get("pyside6", False),
                     "http_served": ui["ok"],
                     "markers": markers,
                 },

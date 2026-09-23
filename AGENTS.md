@@ -7,10 +7,10 @@
 ```bash
 cd ~/XPST
 source .venv/bin/activate
-python -m xpst --help          # CLI with 40 commands
+python -m xpst --help          # CLI with 45 commands
 python -m xpst run             # Run the cross-posting engine
 python -m xpst dashboard       # Start FastAPI dashboard (port 8080)
-python -m xpst app             # Launch PySide6/QML desktop app (command was renamed from `desktop`)
+python -m xpst app             # Launch the installed desktop app (Tauri shell)
 python -m pytest tests/        # full suite (1555 passed, 2 skipped)
 ```
 
@@ -18,13 +18,13 @@ python -m pytest tests/        # full suite (1555 passed, 2 skipped)
 
 | Layer | Location | Responsibility |
 |-------|----------|----------------|
-| **CLI** | `src/xpst/cli.py` | 40 commands, `--json`, `--dry-run`, structured exit codes |
+| **CLI** | `src/xpst/cli.py` | 45 commands, `--json`, `--dry-run`, structured exit codes |
 | **Engine** | `src/xpst/engine.py` | `CrossPostEngine` orchestrator (check_and_post, backfill, delete_post, health) |
 | **Platforms** | `src/xpst/platforms/` | YouTube, X, Instagram uploaders (auth via SessionManager) |
 | **Sources** | `src/xpst/sources/` | TikTok, Instagram Reels, Local files |
 | **State** | `src/xpst/state_store.py` + `state_manager.py` | Atomic I/O + business logic (thread-safe) |
 | **Config** | `src/xpst/config.py` | Pydantic settings, bcrypt dashboard auth, auto-migration v1→v4 |
-| **Desktop** | `src/xpst/desktop_app/` | PySide6/QML (8 core pages + onboarding/detail panel), splash, i18n, plugins |
+| **Desktop** | `src-tauri/` + `ui/` | Tauri 2 shell over the Svelte dashboard UI, with the Python engine as a sidecar; `xpst app` launches it |
 | **Dashboard** | `src/xpst/dashboard/server.py` | FastAPI + WebSocket, bcrypt auth |
 | **MCP** | `src/xpst/mcp/server.py` | 40 tools (post, health, config, state, platforms, scheduling incl. cancel, targeted failure retry, analytics, KB, captions, ideas, bio, transcripts, search, Messenger DM + comment auto-reply) |
 
@@ -34,7 +34,7 @@ python -m pytest tests/        # full suite (1555 passed, 2 skipped)
 - **Enterprise-grade quality** — 1555 passed, 2 skipped, thread-safe, encrypted credentials, bcrypt passwords
 - **Agent-friendly CLI** — Auto-JSON on non-TTY, `--quiet`, `--dry-run`, exit codes 0/1/2/3/4/10
 - **No hardcoded secrets** — All via `~/.xpst/` or env vars
-- **Apple-like UI standard** — Light/dark mode, Inter font, accessibility (Accessible.role/name)
+- **Apple-like UI standard** — Light/dark mode, Inter font, accessible landmarks/labels in the dashboard UI (`ui/`)
 
 ## Non-Negotiables
 
@@ -52,8 +52,9 @@ python -m pytest tests/        # full suite (1555 passed, 2 skipped)
 python -m pytest tests/test_state.py tests/test_config.py tests/test_monitor.py -v
 python -m pytest tests/test_hardening.py -v
 
-# Build
-./build.sh macos          # PyInstaller .app bundle
+# Build the desktop app (Tauri shell + Python engine sidecar)
+scripts/build-engine.sh                  # engine sidecar
+cd src-tauri && cargo tauri build        # shell + installer for this OS
 
 # Code quality
 ruff check src/
@@ -63,7 +64,7 @@ mypy src/xpst/
 ## Environment
 
 - Python 3.11+ (venv at `~/XPST/.venv/`)
-- PySide6, FastAPI, authlib, httpx, bcrypt, cryptography, pydantic-settings
+- FastAPI, authlib, httpx, bcrypt, cryptography, pydantic-settings
 - FFmpeg on PATH (or set `XPST_FFMPEG_PATH`)
 
 ## Memory Notes (persistent)

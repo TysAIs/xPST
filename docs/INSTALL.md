@@ -8,7 +8,10 @@ filename shown there.
 ## Read this before downloading
 
 The latest published release currently visible is **v1.1.0**. Its desktop
-artifacts were built from an older tag than the current `main` branch. Treat the
+artifacts were built from an older tag than the current `main` branch, and they
+are the retired PySide6/QML app (a 1.1.0-era build), not the Tauri shell that
+`main` builds today. Newer releases publish the Tauri installers (`.dmg`,
+NSIS `.exe`/`.msi`, `.deb`/`.AppImage`) instead. Treat the
 release as a published build, not as proof that the current branch is packaged.
 The macOS signing and notarization status is **not proven**. Verify the checksum
 before opening any downloaded artifact.

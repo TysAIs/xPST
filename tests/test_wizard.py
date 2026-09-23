@@ -280,7 +280,7 @@ def test_youtube_gcp_guide_publish_to_production_warning():
     assert "docs/youtube-oauth-production.md" in text
 
 
-def test_youtube_gcp_guide_desktop_app_and_secrets_path():
+def test_youtube_gcp_guide_desktop_client_and_secrets_path():
     text = _yt_guide_text()
     assert "Desktop app" in text
     assert (

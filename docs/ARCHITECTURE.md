@@ -37,7 +37,7 @@ live availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-t
 │  │  Anti-Bot Pacing │ Quota Manager │ Credential Store  │   │
 │  └──────────────────────────────────────────────────────┘   │
 │                                                              │
-│  Surfaces: CLI (38 cmds) │ Desktop (10 QML pages)          │
+│  Surfaces: CLI (45 cmds) │ Desktop shell (Tauri + engine)  │
 │            Dashboard (FastAPI) │ MCP Server (40 tools)      │
 └─────────────────────────────────────────────────────────────┘
 ```
