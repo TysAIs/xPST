@@ -175,6 +175,16 @@ DEFAULT_CONFIG = {
             "comment_reply_enabled": False,
             "comment_platforms": ["instagram", "facebook"],
         },
+        "facebook": {
+            "enabled": False,
+            "page_id": "",
+            "page_name": "",
+            "page_access_token": "",
+            "app_id": "",
+            "app_secret": "",
+            "graph_user_token": "",
+            "login_config_id": "",
+        },
         "local": {
             "path": "",
         },
@@ -264,6 +274,7 @@ DEFAULT_CONFIG = {
         "x": 5,
         "tiktok": 5,
         "threads": 5,
+        "facebook": 5,
     },
     "bio": {
         "handle": "",
@@ -399,6 +410,41 @@ class MessengerAccountConfig(AccountConfig):
 
 
 @dataclass
+class FacebookPageAccountConfig(AccountConfig):
+    """Facebook Page account config — Page-scoped publishing, OPT-IN.
+
+    Facebook has no publishing API for personal profiles: the Graph API only
+    publishes as a Page, so this account is page-scoped by construction. It is
+    reachable only through a BYO Meta app (Facebook Login for Business with
+    Standard Access), which is why it is disabled until ``xpst auth facebook``
+    completes.
+
+    Disabled by default; the adapter stays idle until ``enabled`` is set and a
+    Page access token exists. Tokens/secrets live encrypted in the
+    CredentialStore; these fields are a write-through convenience.
+
+    Fields:
+        enabled: Master on/off switch (default False).
+        page_id: Numeric ID of the Page that owns the token (never a user id).
+        page_name: Page display name (for status/UI; never used for posting).
+        page_access_token: Convenience fallback; CredentialStore is primary.
+        app_id: Meta App ID of the BYO app (informational).
+        app_secret: App secret (code exchange / appsecret_proof); CredentialStore is primary.
+        graph_user_token: Long-lived user token used to (re)discover Pages.
+        login_config_id: Optional Facebook Login for Business configuration id.
+    """
+
+    enabled: bool = False
+    page_id: str = ""
+    page_name: str = ""
+    page_access_token: str = ""
+    app_id: str = ""
+    app_secret: str = ""
+    graph_user_token: str = ""
+    login_config_id: str = ""
+
+
+@dataclass
 class LocalAccountConfig:
     """Local file source configuration"""
     path: str = ""
@@ -521,6 +567,7 @@ class RateLimitConfig:
     x: int = 5
     tiktok: int = 5
     threads: int = 5
+    facebook: int = 5
 
 
 @dataclass
@@ -546,6 +593,7 @@ class XPSTConfig:
     instagram: InstagramAccountConfig = field(default_factory=InstagramAccountConfig)
     threads: ThreadsAccountConfig = field(default_factory=ThreadsAccountConfig)
     messenger: MessengerAccountConfig = field(default_factory=MessengerAccountConfig)
+    facebook: FacebookPageAccountConfig = field(default_factory=FacebookPageAccountConfig)
     local: LocalAccountConfig = field(default_factory=LocalAccountConfig)
 
     # Video processing
@@ -839,6 +887,26 @@ class XPSTConfig:
                     )
                 config.messenger.proxy = ms.get("proxy", config.messenger.proxy)
 
+        # Facebook Page (Page-scoped publishing via Facebook Login for Business)
+        if "accounts" in file_config and "facebook" in file_config["accounts"]:
+            fb = file_config["accounts"]["facebook"]
+            if fb and isinstance(fb, dict):
+                config.facebook.enabled = fb.get("enabled", config.facebook.enabled)
+                config.facebook.page_id = fb.get("page_id", config.facebook.page_id)
+                config.facebook.page_name = fb.get("page_name", config.facebook.page_name)
+                config.facebook.page_access_token = fb.get(
+                    "page_access_token", config.facebook.page_access_token
+                )
+                config.facebook.app_id = fb.get("app_id", config.facebook.app_id)
+                config.facebook.app_secret = fb.get("app_secret", config.facebook.app_secret)
+                config.facebook.graph_user_token = fb.get(
+                    "graph_user_token", config.facebook.graph_user_token
+                )
+                config.facebook.login_config_id = fb.get(
+                    "login_config_id", config.facebook.login_config_id
+                )
+                config.facebook.proxy = fb.get("proxy", config.facebook.proxy)
+
         # Local
         if "accounts" in file_config and "local" in file_config["accounts"]:
             local_cfg = file_config["accounts"]["local"]
@@ -903,6 +971,7 @@ class XPSTConfig:
                 config.rate_limits.x = rl.get("x", config.rate_limits.x)
                 config.rate_limits.tiktok = rl.get("tiktok", config.rate_limits.tiktok)
                 config.rate_limits.threads = rl.get("threads", config.rate_limits.threads)
+                config.rate_limits.facebook = rl.get("facebook", config.rate_limits.facebook)
 
         # Bio (link-in-bio page)
         if "bio" in file_config:
@@ -1294,6 +1363,17 @@ class XPSTConfig:
                     "reply_rules": self.messenger.reply_rules,
                     "proxy": self.messenger.proxy,
                 },
+                "facebook": {
+                    "enabled": self.facebook.enabled,
+                    "page_id": self.facebook.page_id,
+                    "page_name": self.facebook.page_name,
+                    "page_access_token": self.facebook.page_access_token,
+                    "app_id": self.facebook.app_id,
+                    "app_secret": self.facebook.app_secret,
+                    "graph_user_token": self.facebook.graph_user_token,
+                    "login_config_id": self.facebook.login_config_id,
+                    "proxy": self.facebook.proxy,
+                },
                 "local": {
                     "path": self.local.path,
                 },
@@ -1391,6 +1471,7 @@ class XPSTConfig:
                 "x": self.rate_limits.x,
                 "tiktok": self.rate_limits.tiktok,
                 "threads": self.rate_limits.threads,
+                "facebook": self.rate_limits.facebook,
             },
             "bio": {
                 "handle": self.bio.handle,
