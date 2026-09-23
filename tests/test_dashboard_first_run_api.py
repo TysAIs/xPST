@@ -107,9 +107,11 @@ class FakeEngine:
         self.fail = fail or {}
         self.skip = skip or []
         self.calls: list[tuple[str, tuple[str, ...]]] = []
+        #: Image posts recorded separately, so a test can prove which engine
+        #: method the request reached (video vs carousel vs image).
+        self.image_calls: list[tuple[str, tuple[str, ...]]] = []
 
-    async def post_manual(self, video_path, caption, platforms=None):  # noqa: ANN001, ANN201
-        self.calls.append((str(video_path), tuple(platforms or ())))
+    def _results(self, platforms) -> dict[str, Any]:  # noqa: ANN001
         results: dict[str, Any] = {}
         for platform in platforms or []:
             if platform in self.skip:
@@ -118,10 +120,19 @@ class FakeEngine:
                 results[platform] = FakeUpload(False, platform, self.fail[platform]).result
             elif platform in self.succeeds:
                 results[platform] = FakeUpload(True, platform).result
-        return FakePostResult("vid-1", caption, results)
+        return results
+
+    async def post_manual(self, video_path, caption, platforms=None):  # noqa: ANN001, ANN201
+        self.calls.append((str(video_path), tuple(platforms or ())))
+        return FakePostResult("vid-1", caption, self._results(platforms))
 
     async def post_manual_carousel(self, media_paths, caption, platforms=None):  # noqa: ANN001, ANN201
         return await self.post_manual(media_paths[0], caption, platforms)
+
+    async def post_manual_image(self, image_path, caption, platforms=None):  # noqa: ANN001, ANN201
+        """The image route: a single picture, recorded apart from the video path."""
+        self.image_calls.append((str(image_path), tuple(platforms or ())))
+        return FakePostResult("img-1", caption, self._results(platforms))
 
 
 def _engine_factory(engine: FakeEngine):
@@ -474,6 +485,48 @@ def test_post_reports_a_published_upload_truthfully(tmp_path: Path) -> None:
     assert destination["success"] is True
     assert destination["post_url"] == "https://example.invalid/post-1"
     assert engine.calls, "a real post must reach the engine"
+
+
+def test_post_routes_a_single_image_to_the_image_path(tmp_path: Path) -> None:
+    """The API surface follows the content type: one image is an image post.
+
+    Before this card the same request could only fail ("image is not
+    publishable"), and a surface that offered it was the A2 trap: an offer the
+    post path hard-rejects. It now reaches ``post_manual_image`` — not
+    ``post_manual`` — so nothing is ever handed to the video encoder.
+    """
+    config_dir = _post_config(
+        tmp_path,
+        instagram={
+            "enabled": True,
+            "auth_mode": "graph_api",
+            "graph_access_token": "fixture-token",
+            "graph_ig_user_id": "1",
+        },
+    )
+    engine = FakeEngine(succeeds=["instagram"])
+    photo = tmp_path / "media" / "photo.jpg"
+    photo.write_bytes(
+        b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+        + b"\xff\xc0\x00\x11\x08"
+        + (1080).to_bytes(2, "big")
+        + (1080).to_bytes(2, "big")
+        + bytes([3, 1, 0x11, 0, 2, 0x11, 1, 3, 0x11, 1])
+        + b"\xff\xd9"
+    )
+    with _open_app(tmp_path, config_dir, engine_factory=_engine_factory(engine)) as client:
+        response = client.post(
+            "/api/post",
+            json={"media_paths": [str(photo)], "caption": "hello", "platforms": ["instagram"]},
+        )
+
+    data = response.json()
+    assert data["blockers"] == [], data.get("plan")
+    assert response.status_code == 200, data
+    assert data["content_type"] == "image"
+    assert data["ok"] is True, data.get("blockers")
+    assert engine.image_calls == [(str(photo), ("instagram",))]
+    assert engine.calls == [], "an image must not go down the video path"
 
 
 def test_post_never_reports_success_when_the_upload_failed(tmp_path: Path) -> None:
