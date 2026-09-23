@@ -12,6 +12,17 @@ pytest.importorskip("PySide6", reason="desktop extra not installed")
 from xpst.config import XPSTConfig
 from xpst.desktop_app.backend import AppController
 
+#: A JPEG whose header declares 1080x1080 (the picker classifies by extension,
+#: the preflight reads these dimensions — neither needs a real photo).
+_JPEG_HEADER_BYTES = (
+    b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+    + b"\xff\xc0\x00\x11\x08"
+    + (1080).to_bytes(2, "big")
+    + (1080).to_bytes(2, "big")
+    + bytes([3, 1, 0x11, 0, 2, 0x11, 1, 3, 0x11, 1])
+    + b"\xff\xd9"
+)
+
 
 def test_desktop_check_for_updates_returns_component_status():
     raw = AppController.checkForUpdates(SimpleNamespace())
@@ -184,17 +195,18 @@ def test_desktop_repair_readiness_creates_local_folders(_which, _ffmpeg, _ytdlp,
     assert controller._engine is None
 
 
-def test_desktop_video_picker_never_offers_an_image(tmp_path):
+def test_desktop_video_picker_offers_only_files_a_destination_can_publish(tmp_path):
     """The Compose picker lists only postable files, and says what it skipped.
 
-    Before this, ``getLocalVideos`` returned images as selectable items with
-    ``type: "image"``; picking one reached the post preflight only to be
-    hard-rejected (an image has no publish path at any destination).
+    It reads the same capability table as the post preflight: an image is offered
+    now that Instagram and X have an image publish path (before, picking one
+    reached the preflight only to be hard-rejected), and anything no destination
+    can publish is still reported in ``skipped`` with its reason.
     """
     folder = tmp_path / "media"
     folder.mkdir()
     (folder / "clip.mp4").write_bytes(b"\x00" * 1024)
-    (folder / "photo.jpg").write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 32)
+    (folder / "photo.jpg").write_bytes(_JPEG_HEADER_BYTES)
 
     raw = AppController.getLocalVideos(
         SimpleNamespace(_config=None, getThumbnail=lambda _path: ""), str(folder)
@@ -202,8 +214,30 @@ def test_desktop_video_picker_never_offers_an_image(tmp_path):
     data = json.loads(raw)
 
     assert data["ok"] is True
+    assert sorted(item["name"] for item in data["videos"]) == ["clip.mp4", "photo.jpg"]
+    assert {item["type"] for item in data["videos"]} == {"video", "image"}
+    assert data.get("skipped_count", 0) == 0
+
+
+def test_desktop_video_picker_reports_what_no_destination_can_publish(tmp_path, monkeypatch):
+    """The skip path survives: a modality nobody accepts is named, not dropped."""
+    from dataclasses import replace
+
+    from xpst.media.specs import PLATFORM_SPECS
+
+    for name, spec in PLATFORM_SPECS.items():
+        monkeypatch.setitem(PLATFORM_SPECS, name, replace(spec, modalities=("video",), image_containers=()))
+    folder = tmp_path / "media"
+    folder.mkdir()
+    (folder / "clip.mp4").write_bytes(b"\x00" * 1024)
+    (folder / "photo.jpg").write_bytes(_JPEG_HEADER_BYTES)
+
+    raw = AppController.getLocalVideos(
+        SimpleNamespace(_config=None, getThumbnail=lambda _path: ""), str(folder)
+    )
+    data = json.loads(raw)
+
     assert [item["name"] for item in data["videos"]] == ["clip.mp4"]
-    assert all(item["type"] == "video" for item in data["videos"])
     assert data["skipped_count"] == 1
     assert data["skipped"][0]["name"] == "photo.jpg"
     assert data["skipped"][0]["type"] == "image"

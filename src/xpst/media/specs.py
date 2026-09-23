@@ -26,6 +26,17 @@ that modality run. A JPEG is no longer measured against the video container and
 video-stream rules; when its destination cannot publish images it produces ONE
 error that names the destination instead of a pair of raw spec violations.
 
+Image rules are per-destination and enforced in two places from this one table:
+the preflight (`verify_media` → hard blocker) and the uploader itself (an image
+that would be rejected is refused *before* any upload call, in the same words).
+The numbers are the published ingest contracts:
+
+- Instagram feed photos: JPEG only, ≤ 8 MB, aspect ratio within 4:5–1.91:1
+  (developers.facebook.com/documentation/instagram-platform/content-publishing
+  and .../reference/ig-user/media "Image Specifications").
+- X images: JPG/PNG/WEBP, ≤ 5 MB, aspect ratio between 1:3 and 3:1
+  (docs.x.com/x-api/media/quickstart/best-practices — media limits).
+
 The `modalities` field below is the DECLARED publish capability and must stay
 honest in both directions:
 
@@ -41,9 +52,10 @@ honest in both directions:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+from xpst.media.image_header import read_image_dimensions
 from xpst.media.modality import (
     MODALITY_IMAGE,
     MODALITY_VIDEO,
@@ -88,10 +100,20 @@ class PlatformSpec:
     # Image suffixes this destination accepts — only meaningful, and only
     # allowed to be non-empty, when MODALITY_IMAGE is declared above.
     image_containers: tuple[str, ...] = ()
+    # Still-image ceilings. ``image_file_size_cap_mb`` falls back to
+    # ``file_size_cap_mb`` when unset; ``image_aspect_*`` are width/height
+    # bounds (None = the destination publishes any aspect ratio).
+    image_file_size_cap_mb: int | None = None
+    image_aspect_min: float | None = None
+    image_aspect_max: float | None = None
 
     def supports(self, modality: str) -> bool:
         """Whether this destination can publish ``modality`` today."""
         return modality in self.modalities
+
+    def image_size_cap_mb(self) -> int | None:
+        """Byte ceiling for a still image at this destination."""
+        return self.image_file_size_cap_mb if self.image_file_size_cap_mb is not None else self.file_size_cap_mb
 
     def containers_for(self, modality: str) -> tuple[str, ...]:
         """Acceptable file suffixes for ``modality`` at this destination."""
@@ -101,15 +123,11 @@ class PlatformSpec:
 
 
 PLATFORM_SPECS: dict[str, PlatformSpec] = {
-    # Image publishing is NOT declared anywhere below on purpose: no adapter has
-    # an image publish path yet (every ``upload()`` validates a video — the
-    # Instagram Graph path is REELS-only, X uploads chunked video, YouTube and
-    # TikTok are video ingests, Threads takes a video URL). Declaring it here
-    # without that path is exactly the "app offers what it hard-rejects" defect
-    # this matrix now protects against. Adding ``MODALITY_IMAGE`` plus
-    # ``image_containers`` here is the single switch that makes a destination
-    # offerable for images everywhere at once (/api/media, preflight, CLI) —
-    # do it in the same PR that adds the adapter's image upload.
+    # A destination declares MODALITY_IMAGE only in the same PR as its adapter's
+    # image upload (``upload_image``), because this flag is the single switch
+    # that makes a destination offerable for images everywhere at once
+    # (/api/media, preflight, CLI, desktop picker). Instagram and X have that
+    # path; YouTube, TikTok and Threads do not.
     "youtube": PlatformSpec(
         display_name="YouTube",
         containers=(".mp4", ".mov"),
@@ -151,6 +169,13 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         max_video_bitrate_bps=10_000_000,
         file_size_cap_mb=4 * 1024,
         duration_cap_s=900,
+        # Feed photo (single image). Meta publishes JPEG only, 8 MB maximum,
+        # aspect ratio within 4:5–1.91:1.
+        modalities=(MODALITY_VIDEO, MODALITY_IMAGE),
+        image_containers=(".jpg", ".jpeg"),
+        image_file_size_cap_mb=8,
+        image_aspect_min=4 / 5,
+        image_aspect_max=1.91,
     ),
     "x": PlatformSpec(
         display_name="X (Twitter)",
@@ -165,10 +190,28 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         max_video_bitrate_bps=12_000_000,
         file_size_cap_mb=512,
         duration_cap_s=140,
+        # Single image post: ≤ 5 MB, JPG/PNG/WEBP, aspect ratio 1:3–3:1.
+        modalities=(MODALITY_VIDEO, MODALITY_IMAGE),
+        image_containers=(".jpg", ".jpeg", ".png", ".webp"),
+        image_file_size_cap_mb=5,
+        image_aspect_min=1 / 3,
+        image_aspect_max=3.0,
     ),
 }
-# Threads ships Instagram's profile (same upload pipeline).
-PLATFORM_SPECS["threads"] = PLATFORM_SPECS["instagram"]
+# Threads ingests through the same video pipeline as Instagram, but it is NOT
+# Instagram: the Threads adapter publishes video only (its container is
+# ``media_type: VIDEO``). It therefore gets Instagram's video profile without
+# Instagram's image capability — a copy, not an alias, so adding a modality to
+# one of them can never silently hand the other a capability it lacks.
+PLATFORM_SPECS["threads"] = replace(
+    PLATFORM_SPECS["instagram"],
+    display_name="Threads",
+    modalities=(MODALITY_VIDEO,),
+    image_containers=(),
+    image_file_size_cap_mb=None,
+    image_aspect_min=None,
+    image_aspect_max=None,
+)
 
 
 @dataclass
@@ -278,47 +321,144 @@ def _check_file_size(path: Path, spec: PlatformSpec, checks: list[Check]) -> Non
     )
 
 
+def _check_image_file_size(path: Path, platform: str, spec: PlatformSpec, checks: list[Check]) -> None:
+    """Still-image size — a destination rejects above its own image cap → ERROR."""
+    cap = spec.image_size_cap_mb()
+    if cap is None:
+        return
+    try:
+        size_mb = path.stat().st_size / (1024 * 1024)
+    except OSError:
+        return
+    _add(
+        checks,
+        "file_size",
+        size_mb <= cap,
+        f"{size_mb:.1f} MB vs {destination_display_name(platform)} image cap {cap} MB"
+        if size_mb > cap
+        else f"{size_mb:.1f} MB vs cap {cap} MB",
+        error_level="error",
+    )
+
+
+def _image_aspect_error(
+    platform: str,
+    spec: PlatformSpec,
+    *,
+    width: int,
+    height: int,
+) -> str | None:
+    """Destination-named complaint about an image's aspect ratio, or None.
+
+    Only destinations that publish a bounded aspect range get a rule; the
+    message says who refuses, what they need, and what this file is.
+    """
+    if not width or not height or spec.image_aspect_min is None or spec.image_aspect_max is None:
+        return None
+    ratio = width / height
+    if spec.image_aspect_min - 1e-6 <= ratio <= spec.image_aspect_max + 1e-6:
+        return None
+    destination = destination_display_name(platform)
+    return (
+        f"{destination} needs an image between {spec.image_aspect_min:.2f}:1 and "
+        f"{spec.image_aspect_max:.2f}:1 (width:height); this one is {width}x{height} "
+        f"({ratio:.2f}:1). Crop or resize it and try again."
+    )
+
+
 def _verify_image(path: Path, platform: str, spec: PlatformSpec, checks: list[Check]) -> MediaReport:
     """Checks that apply to a still image at a destination that publishes them.
 
     No video-stream, codec, fps, faststart, or loudness rule is meaningful for a
     still image, so none of them run here — that is the whole point of the
     modality split.
+
+    The pixel size comes from the image header (``xpst.media.image_header``) for
+    the formats that carry it, so the aspect and dimension rules hold even on a
+    machine with no ffmpeg; ffprobe is only the fallback for anything else.
     """
     report = MediaReport(path=str(path), platform=platform, checks=checks)
     suffix = normalize_suffix(path)
     accepted = spec.containers_for(MODALITY_IMAGE)
+    destination = destination_display_name(platform)
     _add(
         checks,
         "container",
         suffix in accepted,
-        f"{suffix or '(none)'} vs accepted {', '.join(accepted) or '(none)'}",
+        f"{destination} does not publish {suffix or 'that file type'} images: it accepts "
+        f"{', '.join(accepted) or '(none)'}. Convert the file and try again."
+        if suffix not in accepted
+        else f"{suffix} is an accepted {destination} image format",
         error_level="error",
     )
 
-    try:
-        info = get_video_info_standalone(path)
-        report.probe = info
-    except Exception as e:  # noqa: BLE001 - pre-flight must never block on a probe hiccup
-        checks.append(Check(name="probe", status="warn", detail=f"ffprobe failed ({e}); spec not verified"))
+    dimensions = read_image_dimensions(path)
+    read_by = "header"
+    if dimensions is None:
+        # Unknown or unusual container: ask ffprobe, exactly like the video path.
+        try:
+            info = get_video_info_standalone(path)
+            report.probe = info
+            stream = next(
+                (item for item in info.get("streams", []) if item.get("codec_type") == "video"),
+                None,
+            )
+            if stream is not None:
+                width = int(stream.get("width") or 0)
+                height = int(stream.get("height") or 0)
+                if width > 0 and height > 0:
+                    dimensions = (width, height)
+                    read_by = "ffprobe"
+        except Exception as e:  # noqa: BLE001 - pre-flight must never block on a probe hiccup
+            checks.append(
+                Check(name="probe", status="warn", detail=f"could not size this image (header and ffprobe both failed: {e})")
+            )
+
+    if dimensions is None:
+        if not any(check.name == "probe" for check in checks):
+            checks.append(
+                Check(
+                    name="probe",
+                    status="warn",
+                    detail="image dimensions unreadable; the dimension and aspect rules were not verified",
+                )
+            )
+        _check_image_file_size(path, platform, spec, checks)
         return report
 
-    stream = next(
-        (item for item in info.get("streams", []) if item.get("codec_type") == "video"),
-        None,
+    width, height = dimensions
+    if not isinstance(report.probe, dict) or read_by == "header":
+        # Keep the ffprobe-shaped contract (``format`` dict + ``streams``) that
+        # every consumer already reads, so a header-read image behaves exactly
+        # like a probed one downstream.
+        report.probe = {
+            "format": {"format_name": "image"},
+            "streams": [{"codec_type": "video", "width": width, "height": height}],
+            "read_by": read_by,
+        }
+    long_edge = max(width, height)
+    _add(
+        checks,
+        "dimensions",
+        0 < long_edge <= spec.long_edge,
+        f"{width}x{height} (long edge {long_edge}) vs max {spec.long_edge}",
     )
-    if stream is not None:
-        width = int(stream.get("width") or 0)
-        height = int(stream.get("height") or 0)
-        long_edge = max(width, height)
-        _add(
-            checks,
-            "dimensions",
-            0 < long_edge <= spec.long_edge,
-            f"{width}x{height} (long edge {long_edge}) vs max {spec.long_edge}",
-        )
-    _check_file_size(path, spec, checks)
+    aspect_error = _image_aspect_error(platform, spec, width=width, height=height)
+    if aspect_error is not None:
+        checks.append(Check(name="aspect_ratio", status="error", detail=aspect_error))
+    _check_image_file_size(path, platform, spec, checks)
     return report
+
+
+def image_rejection_reasons(path: Path, platform: str) -> tuple[str, ...]:
+    """Destination-named reasons this image cannot be published *before* upload.
+
+    The uploader calls this so a file the preflight would hard-reject is refused
+    locally, in the same words the preflight uses, instead of being sent to a
+    platform that will fail it. Empty tuple = publishable.
+    """
+    report = verify_media(path, platform, check_loudness=False, modality=MODALITY_IMAGE)
+    return tuple(check.detail for check in report.errors)
 
 
 def verify_media(
@@ -561,13 +701,25 @@ def modality_unsupported_message(
     file_label = f"{'an' if modality[:1].lower() in 'aeiou' else 'a'} {modality} file"
     if suffix:
         file_label += f" ({suffix})"
+    accepting = destination_display_names(modality)
+    advice = (
+        " Choose an image format your destinations accept, or a video file."
+        if modality == MODALITY_IMAGE
+        else " Choose a different file."
+    )
+
+    if destination is None and accepting:
+        # No destination was named and the file IS publishable somewhere: the
+        # "no destination can accept it" premise would be false, so name who can
+        # take it instead of contradicting the second half of the sentence.
+        return f"{file_label[0].upper()}{file_label[1:]} can be posted to {', '.join(accepting)}.{advice}"
+
     head = (
         f"{destination} cannot accept {file_label}"
         if destination
         else f"No destination can accept {file_label}"
     )
 
-    accepting = destination_display_names(modality)
     if accepting:
         # Somebody can take it — say who, and stay out of the way.
         tail = f" It can be posted to {', '.join(accepting)}."
@@ -576,11 +728,6 @@ def modality_unsupported_message(
     else:
         tail = " xPST cannot publish this file type yet."
 
-    advice = (
-        " Choose a video file, or convert the image to a video first."
-        if modality == MODALITY_IMAGE
-        else " Choose a different file."
-    )
     return f"{head}.{tail}{advice}"
 
 
