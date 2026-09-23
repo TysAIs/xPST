@@ -24,6 +24,7 @@ TAURI_CONF = REPO_ROOT / "src-tauri" / "tauri.conf.json"
 LIB_RS = REPO_ROOT / "src-tauri" / "src" / "lib.rs"
 FETCH_SCRIPT = REPO_ROOT / "scripts" / "fetch-media-binaries.sh"
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tauri-release.yml"
+BOOT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "boot-budget.yml"
 
 
 def test_tauri_config_does_not_bundle_ffmpeg() -> None:
@@ -80,13 +81,21 @@ def test_release_lane_asserts_the_app_size_budget() -> None:
     assert "exit 1" in workflow
 
 
-def test_release_lane_no_longer_asserts_bundled_ffmpeg() -> None:
-    workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+def test_lanes_no_longer_assert_bundled_ffmpeg() -> None:
+    """No build lane may assert a bundled ffmpeg — that design is gone.
 
-    assert "test -x src-tauri/binaries/ffmpeg/ffmpeg" not in workflow
-    assert "test -f src-tauri/binaries/ffmpeg/ffmpeg.exe" not in workflow
-    # ...and it refuses to build if one shows up in the bundle inputs.
-    assert "src-tauri/binaries/ffmpeg/ffmpeg" in workflow
+    boot-budget.yml shipped with a stale `test -x src-tauri/binaries/ffmpeg/
+    ffmpeg` copied from the pre-unbundling release lane, which failed the lane
+    on every PR that touched its paths. Both lanes are checked here so a stale
+    copy cannot come back through the other one.
+    """
+    for lane in (RELEASE_WORKFLOW, BOOT_WORKFLOW):
+        workflow = lane.read_text(encoding="utf-8")
+
+        assert "test -x src-tauri/binaries/ffmpeg/ffmpeg" not in workflow, lane
+        assert "test -f src-tauri/binaries/ffmpeg/ffmpeg.exe" not in workflow, lane
+        # ...and each refuses to build if one shows up in the bundle inputs.
+        assert "src-tauri/binaries/ffmpeg/ffmpeg" in workflow, lane
 
 
 def test_engine_entry_auto_fetches_media_binaries() -> None:
