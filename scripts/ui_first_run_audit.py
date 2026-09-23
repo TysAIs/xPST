@@ -78,7 +78,7 @@ def browser_path() -> str:
 def load_axe(cache: pathlib.Path) -> str | None:
     if not cache.exists() or cache.stat().st_size < 100_000:
         try:
-            urllib.request.urlretrieve(AXE_URL, cache)
+            urllib.request.urlretrieve(AXE_URL, cache)  # nosec B310 - AXE_URL is a hardcoded https:// CDN constant
         except Exception as exc:  # noqa: BLE001 - a11y is best effort
             print(f"WARN: axe-core unavailable ({exc}); accessibility pass skipped")
             return None
@@ -575,7 +575,7 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=0, help="engine port (0 = spare port)")
     parser.add_argument("--cdp-port", type=int, default=9337)
     parser.add_argument("--settle", type=float, default=2.0, help="seconds to wait after each navigation")
-    parser.add_argument("--out", default="/tmp/xpst-first-run-audit/report.json")
+    parser.add_argument("--out", default="/tmp/xpst-first-run-audit/report.json")  # nosec B108 - throwaway report dir
     args = parser.parse_args()
     return asyncio.run(audit(args))
 
