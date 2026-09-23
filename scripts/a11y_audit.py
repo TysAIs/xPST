@@ -62,7 +62,7 @@ def _axe_payload(path: str | None) -> str:
     import urllib.request
 
     AXE_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(AXE_URL, timeout=60) as response:  # noqa: S310
+    with urllib.request.urlopen(AXE_URL, timeout=60) as response:  # noqa: S310  # nosec B310 - AXE_URL is a hardcoded https:// CDN constant
         payload = response.read().decode()
     AXE_CACHE.write_text(payload)
     return payload
@@ -86,7 +86,7 @@ async def _audit(args) -> int:
     requests, websockets = _imports()
     axe = _axe_payload(args.axe)
     devtools = f"http://127.0.0.1:{args.devtools_port}"
-    profile = f"/tmp/xpst-a11y-{os.getpid()}"
+    profile = f"/tmp/xpst-a11y-{os.getpid()}"  # nosec B108 - throwaway headless-browser profile dir
     browser = subprocess.Popen(  # noqa: S603
         [
             args.brave,

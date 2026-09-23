@@ -22,8 +22,8 @@ Size strategy (target: shell .app total <= 120 MB):
       lazy-imported only by offline transcription, which the engine never calls.
     - numpy/pandas/scipy/matplotlib/torch excluded: never imported by the
       dashboard code path.
-    - googleapiclient static discovery docs stripped except youtube.v3 and
-      youtubeAnalytics.v2 (same approach as build_macos.spec).
+    - googleapiclient static discovery docs stripped except youtube.v3
+      (same approach as build_macos.spec).
 
 Build:
     scripts/build-engine.sh
@@ -94,10 +94,9 @@ a = Analysis(
 
 # googleapiclient.discovery_cache ships static discovery docs for ~every
 # Google API (~96MB). Keep only the docs the dashboard actually builds
-# services for (youtube v3, youtubeAnalytics v2).
+# services for (youtube v3).
 _KEEP_DOCS = (
     "discovery_cache/documents/youtube.v3.json",
-    "discovery_cache/documents/youtubeAnalytics.v2.json",
 )
 a.datas = [
     entry_

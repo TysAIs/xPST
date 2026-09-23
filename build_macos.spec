@@ -122,10 +122,9 @@ a = Analysis(
 # discovery_cache.get_static_doc() — so it is NOT in excludes. Instead, keep
 # only the docs the app actually builds services for (grep src/ for
 # "build(...)"): youtube v3 (platforms/youtube.py, connect.py,
-# utils/sessions.py, analytics.py, dashboard/analytics.py) and
-# youtubeAnalytics v2 (dashboard/analytics.py). All other APIs' docs are
-# stripped from the collected data files.
-_KEEP_DOCS = ("discovery_cache/documents/youtube.v3.json", "discovery_cache/documents/youtubeAnalytics.v2.json")
+# utils/sessions.py, analytics.py, dashboard/analytics.py). All other APIs'
+# docs are stripped from the collected data files.
+_KEEP_DOCS = ("discovery_cache/documents/youtube.v3.json",)
 a.datas = [
     entry
     for entry in a.datas

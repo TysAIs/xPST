@@ -125,6 +125,65 @@ def _error_payload(code: str, message: str, **extra: object) -> dict:
     return payload
 
 
+# Canonical zero-destination refusal shared by `run`, `watch`, `serve` and
+# `post`. The code and message come from the preflight service so the CLI, the
+# MCP server and the HTTP API refuse with the *same* error instead of three
+# hand-written sentences. Exit code 2 is the documented "bad configuration"
+# slot; no new code is introduced.
+NO_DESTINATIONS_HINT = (
+    "Enable a destination (xpst connect) or pass --platforms youtube,x,instagram."
+)
+
+
+def _refuse_no_destinations(ctx: click.Context, as_json: bool, quiet: bool) -> None:
+    """Refuse the command: nothing would be published, so nothing is started."""
+    from xpst.services.post_preflight import NO_DESTINATIONS_CODE, NO_DESTINATIONS_MESSAGE
+
+    if as_json:
+        payload = _error_payload(
+            NO_DESTINATIONS_CODE, NO_DESTINATIONS_MESSAGE, hint=NO_DESTINATIONS_HINT
+        )
+        payload["status"] = "refused"
+        payload["blockers"] = [NO_DESTINATIONS_MESSAGE]
+        payload["exit_code"] = EXIT_CONFIG_ERROR
+        json_output(payload, True)
+    elif not quiet:
+        console.print(f"[bold red]Error:[/bold red] {NO_DESTINATIONS_MESSAGE}")
+        console.print("  Nothing would be published, so xPST did not start a run.")
+        console.print(f"  {NO_DESTINATIONS_HINT}")
+    ctx.exit(EXIT_CONFIG_ERROR)
+
+
+def _resolved_destinations(config, requested: list[str] | None = None) -> list[str]:
+    """Resolve a post's destinations without building an engine.
+
+    ``requested`` of ``None`` means "every destination enabled in config" — the
+    same contract the engine's ``platforms=None`` carries, resolved by the
+    canonical service so the CLI cannot disagree with MCP or HTTP about "all".
+    """
+    from xpst.services.post_preflight import resolve_destinations
+
+    return resolve_destinations(config, requested)
+
+
+def _engine_can_publish(engine: CrossPostEngine, targets: list[str]) -> bool:
+    """True when at least one resolved destination has a live uploader.
+
+    ``engine._platforms`` holds only the uploaders that actually initialised, so
+    this is the authoritative "would anything be published" check — a platform
+    enabled in config whose uploader failed to import cannot publish either.
+
+    An engine that exposes no uploader map (a test double, a stand-in) is not
+    treated as empty: the config-level resolution already ran above and this
+    check is the refinement, so an unknown engine shape must not refuse a run on
+    its own.
+    """
+    platforms = getattr(engine, "_platforms", None)
+    if not isinstance(platforms, dict):
+        return True
+    return any(name in platforms for name in targets)
+
+
 def _maybe_show_onboarding_hint(config, as_json: bool, quiet: bool) -> None:
     """Defensive first-run nudge for `run`/`status`.
 
@@ -429,7 +488,21 @@ def run(ctx: click.Context, source: str, bidirectional: bool, dry_run: bool, as_
 
     _maybe_show_onboarding_hint(config, as_json, quiet)
 
+    # Guard before the engine exists: a run with no destination publishes
+    # nothing, and building the engine would touch crash-recovery state for a
+    # cycle that cannot do anything. This used to report "No new videos to
+    # post" and exit 0 — an empty run that looked like a completed one.
+    targets = _resolved_destinations(config)
+    if not targets:
+        _refuse_no_destinations(ctx, as_json, quiet)
+
     engine = CrossPostEngine(config)
+
+    # Second, authoritative check: the uploaders that actually initialised.
+    # A destination enabled in config whose uploader failed to load cannot
+    # publish either, so the run is refused rather than started empty.
+    if not _engine_can_publish(engine, targets):
+        _refuse_no_destinations(ctx, as_json, quiet)
 
     # Single-instance guard via the shared pidfile helper (prevents
     # double-posting when another run/watch/serve instance is active).
@@ -553,11 +626,21 @@ def watch(ctx: click.Context, interval: int | None, source: str, bidirectional: 
     if source == "all":
         bidirectional = True
 
+    # A watch loop with no destination can never publish anything: refuse at
+    # startup instead of looping forever on an empty run (same canonical
+    # refusal the one-shot `run` and the MCP surface return).
+    watch_targets = _resolved_destinations(config)
+    if not watch_targets:
+        _refuse_no_destinations(ctx, as_json=False, quiet=ctx.obj.get("quiet", False))
+
     check_interval = interval or config.schedule.check_interval
     mode_label = "Bidirectional" if bidirectional else f"Source: {source}"
     console.print(f"[bold blue]xPST - {mode_label} watching every {check_interval}s (Ctrl+C to stop)[/bold blue]")
 
     engine = CrossPostEngine(config)
+
+    if not _engine_can_publish(engine, watch_targets):
+        _refuse_no_destinations(ctx, as_json=False, quiet=ctx.obj.get("quiet", False))
 
     # Crash recovery check on startup
     _check_crash_recovery(engine)
@@ -753,19 +836,18 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
     media_paths = [Path(v) for v in video]
     platform_list = platforms.split(",") if platforms else None
 
+    # Resolve destinations once, canonically: an explicit --platforms wins
+    # (blank names dropped), otherwise every destination enabled in config.
+    # An empty result is the meaningless-run case and is refused below — in
+    # dry-run too, so the plan and the run can never disagree.
+    targets = _resolved_destinations(config, platform_list)
+
     if dry_run:
         # Do NOT instantiate CrossPostEngine for a dry run: its __init__
         # performs crash recovery and may create/rotate state files. Resolve
         # targets straight from config flags instead.
-        targets = platform_list or [
-            name for name, enabled in (
-                ("youtube", config.youtube.enabled),
-                ("x", config.x.enabled),
-                ("instagram", config.instagram.enabled),
-                ("tiktok", config.tiktok.enabled),
-                ("threads", config.threads.enabled),
-            ) if enabled
-        ]
+        if not targets:
+            _refuse_no_destinations(ctx, as_json, quiet)
         info = {
             "dry_run": True,
             "video": str(media_paths[0]),
@@ -795,6 +877,13 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
             console.print(f"[bold blue]Posting to: {', '.join(platform_list or ['all platforms'])} (visibility: {visibility})[/bold blue]")
 
     engine = CrossPostEngine(config)
+
+    # Nothing can be published unless a resolved destination has a live
+    # uploader: a requested platform that is disabled (or whose uploader failed
+    # to load) is silently skipped by the engine, which used to produce a
+    # "successful" run with zero uploads.
+    if not _engine_can_publish(engine, targets):
+        _refuse_no_destinations(ctx, as_json, quiet)
 
     # Route through the shared pidfile helper: a manual post may run even
     # while a daemon/watch instance holds the pidfile (advisory semantics —
@@ -2985,6 +3074,13 @@ def serve(ctx: click.Context, no_dashboard: bool, port: int | None, host: str, i
         log_level=config.monitoring.log_level,
         log_file=config.monitoring.log_file,
     )
+
+    # The supervisor would run a scheduler loop that can never publish: refuse
+    # at startup with the same canonical error as `run`/`watch`/`post` rather
+    # than supervise a permanently empty pipeline.
+    if not _resolved_destinations(config):
+        _refuse_no_destinations(ctx, as_json=ctx.obj.get("json", False), quiet=ctx.obj.get("quiet", False))
+
     from xpst.serve import run_serve
 
     chosen_source = source or "tiktok"
