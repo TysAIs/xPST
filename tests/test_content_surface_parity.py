@@ -251,7 +251,9 @@ def test_text_post_is_refused_identically_by_cli_mcp_and_http(
     verdict = cli_payload["content"]
     assert verdict["ok"] is False
     assert verdict["effective_content_type"] == "text"
-    assert verdict["route"] == "unimplemented"
+    # The text *route* exists (post_text); what refuses here is the destination:
+    # YouTube has no text path, which is the destination-level blocker below.
+    assert verdict["route"] == "text"
     assert verdict["blockers"], "a text post to YouTube must say why it cannot run"
 
     for surface, payload in (("cli", cli_payload), ("mcp", mcp_payload), ("http", http_payload)):
@@ -346,8 +348,12 @@ def test_video_post_is_validated_identically_by_cli_mcp_and_http(
 def test_no_surface_claims_a_modality_the_contract_does_not_implement(
     config: XPSTConfig, config_path: Path, client: TestClient
 ) -> None:
-    """Threads/text and Instagram/image are refused, not silently accepted."""
-    for platform, content_type in (("threads", "text"), ("instagram", "image"), ("x", "thread")):
+    """Instagram/image and X/thread are refused, not silently accepted.
+
+    (Threads/text is no longer in this list: ``post_text`` implements it, which
+    ``tests/test_text_posts.py`` proves on both destinations.)
+    """
+    for platform, content_type in (("instagram", "image"), ("x", "thread")):
         request = {"caption": "hello", "content_type": content_type, "platforms": [platform]}
         engine = _stub_engine(config)
         mcp_payload = _mcp_post(config, dict(request), engine)

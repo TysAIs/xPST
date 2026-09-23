@@ -22,7 +22,7 @@ Features:
 Refactored to delegate to UploadService and SourceService.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -31,6 +31,7 @@ from xpst.anti_bot import AntiBotProtection
 from xpst.config import XPSTConfig
 from xpst.content import (
     PUBLISH_ROUTE_CAROUSEL,
+    PUBLISH_ROUTE_TEXT,
     PUBLISH_ROUTE_VIDEO,
     UNIMPLEMENTED_PUBLISH_ERROR,
     ContentIssue,
@@ -761,6 +762,108 @@ class CrossPostEngine:
 
     # ── Typed content requests (the content_type contract) ──────────────
 
+    async def post_text(
+        self,
+        text: str,
+        platforms: list[str] | None = None,
+        *,
+        per_destination: Mapping[str, str] | None = None,
+    ) -> CrossPostResult:
+        """Post a text-only status to specified platforms (no media).
+
+        The cheapest complete modality: no source fetch, no ffmpeg, no encode,
+        no media upload — one API call per destination that implements
+        ``post_text``. Validation and the modality→route decision stay in
+        :mod:`xpst.content`; this method only performs the publish and records
+        the outcome (state + analytics) exactly like a video post.
+
+        Args:
+            text: the post's text.
+            platforms: target platform names. None means all enabled platforms.
+            per_destination: optional ``{platform: text}`` overrides. A
+                destination present here gets its own text instead of ``text``
+                (the per-destination copy the content contract validates).
+
+        Returns:
+            CrossPostResult with one row per requested destination.
+        """
+        if platforms is None:
+            platforms = list(self._platforms.keys())
+
+        overrides = {str(name).strip().lower(): value for name, value in (per_destination or {}).items()}
+        # A stable identity for the post so it appears in state/analytics under
+        # one id: the text itself is the content, so hash it (a video post keys
+        # on its file fingerprint instead).
+        import hashlib
+
+        identity_source = text or "".join(sorted(overrides.values()))
+        text_id = f"text-{hashlib.sha256(identity_source.encode('utf-8')).hexdigest()[:8]}"
+
+        result = CrossPostResult(video_id=text_id, caption=text)
+
+        for platform_name in platforms:
+            if self.shutdown_handler.should_shutdown:
+                logger.info("Shutdown requested, stopping text post")
+                break
+
+            uploader = self._platforms.get(platform_name)
+            if not uploader:
+                logger.warning(f"Platform {platform_name} not available")
+                continue
+
+            body = overrides.get(str(platform_name).strip().lower(), text)
+
+            upload_result = await self.upload_service.upload_text_to_platform(
+                uploader=uploader,
+                text=body,
+                platform_name=platform_name,
+                video_id=text_id,
+                source_platform="local",
+            )
+            result.results[platform_name] = upload_result
+
+            if upload_result.is_published:
+                self.notifier.notify_upload_success(
+                    platform=platform_name,
+                    video_id=text_id,
+                    post_url=upload_result.post_url or "",
+                )
+            elif upload_result.error != "Circuit breaker open" and "QUOTA_EXHAUSTED" not in (upload_result.error or ""):
+                self.notifier.notify_upload_failure(
+                    platform=platform_name,
+                    video_id=text_id,
+                    error=upload_result.error or "Unknown error",
+                )
+
+        # Record the cross-post group (B1) so a text post also aggregates as one
+        # analytics entry across the destinations it reached.
+        platforms_data = [
+            {
+                "platform": platform_name,
+                "post_id": upload_result.post_id,
+                "url": upload_result.post_url,
+            }
+            for platform_name, upload_result in result.results.items()
+            if upload_result.is_published
+        ]
+        if platforms_data:
+            try:
+                from xpst.analytics_store import AnalyticsStore
+
+                AnalyticsStore().record_cross_post_group(
+                    content_hash=text_id,
+                    video_id=text_id,
+                    caption=text,
+                    source_url="",
+                    platforms=platforms_data,
+                )
+            except Exception as exc:  # noqa: BLE001 — analytics must never block posting
+                logger.warning("Failed to record cross-post group: %s", exc)
+
+        result.update_status()
+        self.state.save()
+        return result
+
     async def post_request(self, request: ContentRequest) -> CrossPostResult:
         """Publish one typed content request from the content-type contract.
 
@@ -803,6 +906,16 @@ class CrossPostEngine:
             return await self.post_manual(media[0], request.text, platforms)
         if route == PUBLISH_ROUTE_CAROUSEL:
             return await self.post_manual_carousel(media, request.text, platforms)
+        if route == PUBLISH_ROUTE_TEXT:
+            # Per-destination copy is honoured here: the text route is the one
+            # route that reads it (a video post still publishes the shared
+            # caption, which validation reports as a warning).
+            per_destination = {
+                platform: request.text_for(platform)
+                for platform in platforms
+                if request.override_for(platform) is not None
+            }
+            return await self.post_text(request.text, platforms, per_destination=per_destination or None)
 
         # Validated for this destination (an undeclared/plugin destination) but
         # there is no publishing path for the content type yet.

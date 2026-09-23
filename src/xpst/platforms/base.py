@@ -691,6 +691,68 @@ class PlatformUploader(ABC):
             if output_path is not None:
                 output_path.unlink(missing_ok=True)
 
+    async def post_text(self, text: str) -> UploadResult:
+        """Publish a text-only post (no media).
+
+        Override in subclasses that have a real text path (see
+        ``IMPLEMENTATION_METHODS`` in :mod:`xpst.content`, which only calls a
+        destination's text post *implemented* when this method is overridden).
+
+        The default is an explicit, destination-naming failure — never a silent
+        skip and never a fabricated success. The content contract refuses a text
+        post to a destination without this path before any uploader is built, so
+        reaching here means a caller bypassed the contract.
+
+        Args:
+            text: the post's text.
+
+        Returns:
+            UploadResult with the published post id/url, or an explicit failure.
+        """
+        return UploadResult(
+            success=False,
+            error=(
+                f"{self.platform_name.upper()}_TEXT_UNSUPPORTED: {self.platform_name} has no "
+                f"text-post path in xPST."
+            ),
+            platform=self.platform_name,
+            retryable=False,
+        )
+
+    def _text_limit_violation(self, text: str) -> UploadResult | None:
+        """Return an explicit refusal when ``text`` is empty or past the limit.
+
+        The limit comes from :data:`xpst.content.TEXT_LIMITS` — one source,
+        imported here so a sender can never enforce a different number than
+        preflight does — and an over-limit post is **refused, never truncated**:
+        a silently shortened post is a post the user never approved.
+
+        Returns:
+            ``None`` when the text is publishable, otherwise the refusal result.
+        """
+        from xpst.content import text_limit
+
+        limit = text_limit(self.platform_name)
+        if not text.strip():
+            return UploadResult(
+                success=False,
+                error=f"{self.platform_name.upper()}_TEXT_EMPTY: a text post cannot be empty.",
+                platform=self.platform_name,
+                retryable=False,
+            )
+        if limit is not None and len(text) > limit:
+            return UploadResult(
+                success=False,
+                error=(
+                    f"{self.platform_name.upper()}_TEXT_TOO_LONG: {len(text)} characters exceeds "
+                    f"the {limit}-character limit for {self.platform_name}; xPST will not truncate "
+                    f"a post. Shorten the text."
+                ),
+                platform=self.platform_name,
+                retryable=False,
+            )
+        return None
+
     def _validate_video(self, video_path: Path) -> None:
         """Validate that a video file exists, is non-empty, and within size limits.
 

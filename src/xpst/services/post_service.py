@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 from xpst.content import (
     MAX_MEDIA_ITEMS,
     PUBLISH_ROUTE_CAROUSEL,
+    PUBLISH_ROUTE_TEXT,
     PUBLISH_ROUTE_UNIMPLEMENTED,
     UNIMPLEMENTED_PUBLISH_ERROR,
     ContentRequest,
@@ -315,7 +316,7 @@ class PostService:
 
     def preflight(self, request: PostRequest) -> dict[str, Any]:
         """Run the canonical, side-effect-free preflight for a request."""
-        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService, plan_content_type
 
         blockers: list[str] = []
         if not request.platforms:
@@ -342,6 +343,9 @@ class PostService:
                     media_paths=list(request.media_paths),
                     target_platforms=list(request.platforms),
                     base_caption=request.caption,
+                    # A text post carries no file, so the media requirement must
+                    # not be applied to it (it would block every text post).
+                    content_type=plan_content_type(request),
                 )
             ).to_dict()
             blockers.extend(issue["message"] for issue in plan["hard_blockers"])
@@ -429,6 +433,19 @@ class PostService:
         try:
             if route == PUBLISH_ROUTE_CAROUSEL:
                 result: CrossPostResult = await engine.post_manual_carousel(paths, request.caption, list(request.platforms))
+            elif route == PUBLISH_ROUTE_TEXT:
+                # The text route: one text per destination, so per-destination
+                # overrides are honoured here (they are validated for text).
+                per_destination = {
+                    platform: request.text_for(platform)
+                    for platform in request.platforms
+                    if request.override_for(platform) is not None
+                }
+                result = await engine.post_text(
+                    request.caption,
+                    list(request.platforms),
+                    per_destination=per_destination or None,
+                )
             else:
                 result = await engine.post_manual(paths[0], request.caption, list(request.platforms))
         except Exception as exc:  # noqa: BLE001 - the caller must see the failure
