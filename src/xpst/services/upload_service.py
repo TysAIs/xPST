@@ -951,7 +951,16 @@ class UploadService:
             info = self.video_processor.get_video_info(cached_path)
         except Exception:  # noqa: BLE001 - unprobeable cache is a corrupt cache
             return False
-        if _pick_video_stream(info.get("streams", [])) is None:
+        stream = _pick_video_stream(info.get("streams", []))
+        if stream is None:
+            return False
+        # The pipeline only ever produces H.264 (libx264 or a hardware H.264
+        # encoder; every platform profile demands it). A cache file whose video
+        # stream probes as any other codec was not produced by this pipeline —
+        # the platform check would have rejected it before upload, and the next
+        # encode would silently overwrite the cache anyway. Serve nothing that
+        # does not match what we would have encoded.
+        if (stream.get("codec_name") or "").lower() not in ("h264", "avc"):
             return False
         try:
             return cached_path.stat().st_mtime >= source_path.stat().st_mtime
