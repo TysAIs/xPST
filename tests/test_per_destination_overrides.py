@@ -209,8 +209,13 @@ async def test_post_manual_carousel_sends_each_destination_its_own_caption(
         [first, second], "shared caption", ["youtube", "x"], {"x": "x-only"}
     )
 
-    assert isolated_engine.upload_service.captions == {"youtube": "shared caption", "x": "x-only"}
+    # YouTube cannot publish a carousel at all: #223's named refusal fires
+    # before the upload service is reached, so youtube never receives a
+    # caption — the row says it was refused, nothing was stitched.
+    assert isolated_engine.upload_service.captions == {"x": "x-only"}
     assert result.captions["x"] == "x-only"
+    youtube_row = result.results["youtube"]
+    assert youtube_row.success is False and "youtube does not support carousel" in (youtube_row.error or "")
 
 
 @pytest.mark.asyncio
