@@ -220,7 +220,10 @@ fn forward_drag_drop(app: &tauri::AppHandle, event: &tauri::DragDropEvent) {
             log(&format!("DRAG_DROP_EVAL_FAILED phase={phase} error={e}"));
             return;
         }
-        log(&format!("DRAG_DROP_FORWARDED phase={phase} count={}", paths.len()));
+        log(&format!(
+            "DRAG_DROP_FORWARDED phase={phase} count={}",
+            paths.len()
+        ));
     }
 }
 
@@ -938,7 +941,10 @@ mod tests {
         let a = mint_ui_token();
         let b = mint_ui_token();
         assert_eq!(a.len(), 64, "4 x 16 hex chars");
-        assert!(a.chars().all(|c| c.is_ascii_hexdigit()), "token must be hex");
+        assert!(
+            a.chars().all(|c| c.is_ascii_hexdigit()),
+            "token must be hex"
+        );
         assert_ne!(a, b, "each launch must get its own token");
     }
 
@@ -963,7 +969,11 @@ mod tests {
             redact_url("http://127.0.0.1:51234/#/compose"),
             "http://127.0.0.1:51234/#/compose"
         );
-        assert_eq!(redact_url("http://127.0.0.1:51234/"), "http://127.0.0.1:51234/");
+        assert_eq!(
+            redact_url("http://127.0.0.1:51234/"),
+            "http://127.0.0.1:51234/"
+        );
+    }
     // ── Composer media: native drop forwarding + the picker's ACL grant ──
 
     #[test]
@@ -977,8 +987,12 @@ mod tests {
         // The paths survive as JSON: the page receives exactly what was dropped.
         let payload_start = script.find('[').expect("payload");
         let payload_end = script.rfind(']').expect("payload end") + 1;
-        let parsed: Vec<String> = serde_json::from_str(&script[payload_start..payload_end]).expect("json");
-        assert_eq!(parsed, vec![paths[0].to_string_lossy(), paths[1].to_string_lossy()]);
+        let parsed: Vec<String> =
+            serde_json::from_str(&script[payload_start..payload_end]).expect("json");
+        assert_eq!(
+            parsed,
+            vec![paths[0].to_string_lossy(), paths[1].to_string_lossy()]
+        );
         // A file name can never escape the call and execute as code.
         assert_eq!(script.matches('"').count() % 2, 0);
         assert!(!script.contains("take \"1\""));
@@ -1018,9 +1032,15 @@ mod tests {
             permissions.iter().any(|p| p == "dialog:default"),
             "the dialog plugin permission is missing: {permissions:?}"
         );
-        assert!(capability.windows.iter().any(|w| w == "main"), "the grant must target the main window");
+        assert!(
+            capability.windows.iter().any(|w| w == "main"),
+            "the grant must target the main window"
+        );
 
-        let remote = capability.remote.as_ref().expect("remote urls are required for an engine-served UI");
+        let remote = capability
+            .remote
+            .as_ref()
+            .expect("remote urls are required for an engine-served UI");
         let patterns: Vec<RemoteUrlPattern> = remote
             .urls
             .iter()
