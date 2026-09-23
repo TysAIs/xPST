@@ -86,6 +86,13 @@ class CredentialStore:
         self.config_dir = Path(config_dir).expanduser()
         self.creds_dir = self.config_dir / "credentials"
         self.creds_dir.mkdir(parents=True, exist_ok=True)
+        # Credentials directory stays owner-only: the files inside are 0600, but
+        # a world-readable 0755 directory still exposes *which* providers are
+        # configured (filenames carry the key names) to any local user.
+        try:
+            os.chmod(self.creds_dir, 0o700)
+        except OSError:
+            pass
         self._keyring_index_file = self.creds_dir / "_keyring_index.json"
         # Per-install secret + salt used to derive the fallback Fernet key.
         self._secret_file = self.creds_dir / ".fallback_secret"

@@ -1,0 +1,155 @@
+name: Boot budget
+
+# Cold-boot regression gate for the packaged desktop app.
+#
+# WHY THIS EXISTS: the app is judged by how it feels when it opens, and build
+# size changes (unbundled ffmpeg, pruned engine) are supposed to make that
+# feel better. Without a number and a gate, a startup regression ships silently.
+#
+# WHAT IT DOES: builds the real macOS bundle the way the release lane does
+# (engine sidecar + media binaries + Tauri app), then boots that bundle
+# `inputs.runs` times as a cold process and enforces perf/boot-budget.json.
+# The failure message carries the measured samples, so a red run is actionable
+# without reading the logs.
+#
+# The build steps below intentionally mirror the macOS lane of
+# .github/workflows/tauri-release.yml. That lane enforces the same budget on the
+# bundle it publishes; if you change how the bundle is built, change it in both.
+#
+# Triggers: pull requests that can move startup (shell, UI, engine bundle
+# inputs, the budget itself) and manual dispatch. workflow_dispatch accepts
+# report_only=true to capture a baseline on a NEW host class without failing
+# (the harness refuses to gate a host class that has no committed budget).
+
+on:
+  pull_request:
+    paths:
+      - "src-tauri/**"
+      - "ui/**"
+      - "build_engine.spec"
+      - "scripts/build-engine.sh"
+      - "scripts/fetch-media-binaries.sh"
+      - "scripts/measure_boot.py"
+      - "perf/boot-budget.json"
+      - ".github/workflows/boot-budget.yml"
+  workflow_dispatch:
+    inputs:
+      report_only:
+        description: "Measure and report without enforcing the budget (baseline capture)"
+        type: boolean
+        default: false
+      runs:
+        description: "Number of cold boots to measure"
+        type: string
+        default: "3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: boot-budget-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: cold boot vs budget (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build Svelte UI
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install Python engine deps (sidecar build)
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -e ".[full]" pyinstaller
+
+      - name: Build engine sidecar (PyInstaller onedir)
+        run: |
+          set -euo pipefail
+          PYTHON="$(command -v python3 || command -v python)"
+          export PYTHON
+          scripts/build-engine.sh
+          test -f ui/dist/index.html || { echo "::error::ui/dist/index.html missing"; exit 1; }
+          test -f src-tauri/binaries/engine/xpst-engine || {
+            echo "::error::engine sidecar missing"
+            ls -la src-tauri/binaries/engine || true
+            exit 1
+          }
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
+
+      - name: Fetch media binaries (ffmpeg/ffprobe/yt-dlp)
+        run: |
+          set -euo pipefail
+          chmod +x scripts/fetch-media-binaries.sh
+          scripts/fetch-media-binaries.sh macos-arm64
+          test -x src-tauri/binaries/ffmpeg/ffmpeg
+          test -x src-tauri/binaries/ytdlp/yt-dlp
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version 2.11.4 --locked
+
+      - name: Build Tauri app bundle
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          # See tauri-release.yml: an empty APPLE_* variable is not the same as
+          # an absent one and makes codesign fail with `no identity found`.
+          for var in APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!var:-}" ] || unset "$var" || true
+          done
+          cargo tauri build --target aarch64-apple-darwin --bundles app
+
+      - name: Cold-boot measurement + budget gate
+        env:
+          # workflow_dispatch only; absent (empty string) on pull_request runs.
+          REPORT_ONLY: ${{ github.event.inputs.report_only }}
+          RUNS: ${{ github.event.inputs.runs }}
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find src-tauri/target -type d -path "*release*" -name "xPST.app" -print -quit)
+          test -n "$APP_PATH" || { echo "::error::xPST.app not found — the boot gate would have silently no-op'd"; exit 1; }
+          ARGS=""
+          [ "$REPORT_ONLY" = "true" ] && ARGS="--report-only"
+          RUNS="${RUNS:-3}"
+          echo "measuring $APP_PATH for $RUNS cold boots (report_only=${REPORT_ONLY:-false})"
+          python scripts/measure_boot.py \
+            --app "$APP_PATH" \
+            --runs "$RUNS" \
+            $ARGS \
+            --json-out "$RUNNER_TEMP/boot-samples.json" | tee "$RUNNER_TEMP/boot-report.txt"
+
+      - name: Upload boot samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-samples-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/boot-samples.json
+            ${{ runner.temp }}/boot-report.txt
+          if-no-files-found: warn

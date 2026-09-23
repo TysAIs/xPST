@@ -123,10 +123,8 @@ src-tauri/target/
 src-tauri/binaries/engine/*
 !src-tauri/binaries/engine/.gitkeep
 src-tauri/binaries/xpst-engine-*
-# Bundled media binaries (ffmpeg/ffprobe/yt-dlp) are fetched by
+# Bundled media binaries (yt-dlp only) are fetched by
 # scripts/fetch-media-binaries.sh — never commit multi-MB binaries.
-src-tauri/binaries/ffmpeg/*
-!src-tauri/binaries/ffmpeg/.gitkeep
 src-tauri/binaries/ytdlp/*
 !src-tauri/binaries/ytdlp/.gitkeep
 # Provenance record written by fetch-media-binaries.sh (build evidence, never a

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Verify or re-pin scripts/media-binaries.lock against the upstream releases.
 
-The lock file is what makes a release lane reproducible: every ffmpeg/ffprobe/
-yt-dlp input is named by an immutable url plus the SHA-256 of the exact file
-that url serves, and scripts/fetch-media-binaries.sh refuses to bundle anything
-else. This tool is the supported way to keep that file honest.
+The lock file is what makes a release lane reproducible: every media binary the
+bundle ships (today that is yt-dlp only - ffmpeg/ffprobe are resolved at runtime
+and pinned in ``src/xpst/media/binaries.py``) is named by an immutable url plus
+the SHA-256 of the exact file that url serves, and
+scripts/fetch-media-binaries.sh refuses to bundle anything else. This tool is the
+supported way to keep that file honest.
 
     # CI / pre-release review: does every pinned url still serve the pinned bytes?
     scripts/update-media-binaries-lock.py --check

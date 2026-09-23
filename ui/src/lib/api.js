@@ -3,6 +3,12 @@
 // proxies /api/* to the engine (see vite.config.js); in production the
 // FastAPI server mounts this bundle and serves the API from the same origin.
 // Basic auth (when configured) is handled by the browser natively.
+//
+// Mutating routes additionally require the dashboard API token, which this
+// module attaches from lib/auth-token.js (never from the served HTML). Read
+// routes work without it, so the UI is never locked out.
+
+import { tokenHeaders } from "./auth-token.js";
 
 const JSON_HEADERS = { Accept: "application/json" };
 
@@ -57,13 +63,13 @@ async function requestJSON(path, options = {}) {
 }
 
 function getJSON(path) {
-  return requestJSON(path, { headers: JSON_HEADERS });
+  return requestJSON(path, { headers: { ...JSON_HEADERS, ...tokenHeaders() } });
 }
 
 function postJSON(path, payload) {
   return requestJSON(path, {
     method: "POST",
-    headers: { ...JSON_HEADERS, "Content-Type": "application/json" },
+    headers: { ...JSON_HEADERS, ...tokenHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify(payload ?? {}),
   });
 }
@@ -71,6 +77,11 @@ function postJSON(path, payload) {
 export const api = {
   /** Aggregate summary stats for dashboard cards. */
   summary: () => getJSON("/api/summary"),
+  /**
+   * Per-post/per-platform outcomes, labelled recorded vs live. Pass
+   * `live=true` to run a real collection first (slower; uses API quota).
+   */
+  outcomeReport: (live = false) => getJSON(`/api/analytics/outcomes${live ? "?live=1" : ""}`),
   /** Per-video list for the Videos page. */
   videos: () => getJSON("/api/videos"),
   /** Engine health + live auth liveness per platform. */
@@ -81,6 +92,8 @@ export const api = {
   settings: () => getJSON("/api/settings"),
   /** Persisted schedule entries (read-only; never starts the scheduler). */
   schedules: () => getJSON("/api/schedules"),
+  /** Renew due/expiring tokens now (bounded retry; no-op when nothing is due). */
+  refreshTokens: () => postJSON("/api/refresh-tokens", {}),
   /** Recorded posting failures with truthful recovery metadata. */
   activity: () => getJSON("/api/activity"),
   /** Verified local library items. */
