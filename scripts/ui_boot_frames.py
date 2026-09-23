@@ -83,13 +83,13 @@ def free_port() -> int:
 
 def http_json(url: str, method: str = "GET") -> dict:
     request = urllib.request.Request(url, method=method)
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310 - loopback probe built by this script
         return json.loads(response.read().decode())
 
 
 def port_answers(port: int, path: str = "/health") -> bool:
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=1) as response:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=1) as response:  # nosec B310 - loopback probe built by this script
             response.read(64)
             return True
     except Exception:  # noqa: BLE001 - "not yet" is the normal answer here
@@ -161,7 +161,7 @@ class ShellAssetHandler(BaseHTTPRequestHandler):
         # Engine-backed route: proxy as soon as the engine answers, otherwise
         # behave exactly like the shell's asset origin (SPA fallback HTML).
         try:
-            upstream = urllib.request.urlopen(
+            upstream = urllib.request.urlopen(  # nosec B310 - loopback proxy to the engine built by this script
                 f"http://127.0.0.1:{self.server.engine_port}{self.path}", timeout=15
             )
             body = upstream.read()
@@ -184,7 +184,7 @@ class ShellAssetHandler(BaseHTTPRequestHandler):
                 method="POST",
                 headers={"Content-Type": self.headers.get("Content-Type", "application/json")},
             )
-            with urllib.request.urlopen(request, timeout=15) as upstream:
+            with urllib.request.urlopen(request, timeout=15) as upstream:  # nosec B310 - loopback proxy to the engine built by this script
                 body = upstream.read()
                 kind = upstream.headers.get("Content-Type", "application/json")
                 self._record(
@@ -378,7 +378,7 @@ def capture_run(args, mode: str, engine_cmd: list[str]) -> dict:
                 time.sleep(sleep_for)
         cdp.close()
         try:
-            urllib.request.urlopen(
+            urllib.request.urlopen(  # nosec B310 - loopback probe to the local CDP endpoint
                 urllib.request.Request(
                     f"http://127.0.0.1:{args.cdp_port}/json/close/{target['id']}", method="GET"
                 ),
@@ -456,7 +456,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ui-dist", default="ui/dist", help="built UI bundle to serve")
     parser.add_argument("--label", default="run", help="name for the evidence files")
     parser.add_argument("--json-out", default=None, help="write the run records here")
-    parser.add_argument("--evidence-dir", default="/tmp/xpst-boot-frames")
+    parser.add_argument("--evidence-dir", default="/tmp/xpst-boot-frames")  # nosec B108 - throwaway evidence dir
     parser.add_argument("--brave", default=BRAVE_DEFAULT)
     parser.add_argument("--cdp-port", type=int, default=9333)
     parser.add_argument("--engine-port", type=int, default=0, help="0 picks a free port")
@@ -472,7 +472,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--repo-src", default=str(pathlib.Path(__file__).resolve().parent.parent / "src"))
     parser.add_argument("--python", default=sys.executable)
-    parser.add_argument("--config-dir", default="/tmp/xpst-boot-frames/config")
+    parser.add_argument("--config-dir", default="/tmp/xpst-boot-frames/config")  # nosec B108 - throwaway profile dir
     return parser
 
 
