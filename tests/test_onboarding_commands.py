@@ -173,15 +173,29 @@ class TestDoctor:
         issue_platforms = {i["platform"] for i in data["issues"] if i["platform"]}
         assert issue_platforms == set(PLATFORMS)
 
-    def test_missing_ffmpeg_is_reported(self, runner, config_file, stub_healthy, monkeypatch):
+    def test_missing_ffmpeg_is_reported(self, runner, config_file, stub_healthy, monkeypatch, tmp_path):
+        """Doctor must report a genuinely absent ffmpeg and how to get one.
+
+        ffmpeg is no longer bundled, so the check has three sources to rule out:
+        the env override, a system install (PATH + the well-known locations a
+        GUI-launched app probes), and the copy xPST fetches on first use.
+        """
         monkeypatch.delenv("XPST_FFMPEG_PATH", raising=False)
         monkeypatch.setattr(shutil, "which", lambda name: None)
+        # doctor resolves ffmpeg through the same chain the runtime uses
+        # (env override -> PATH -> bundled/well-known locations), so the
+        # "nothing anywhere" case must blank out the whole chain.
+        monkeypatch.setattr("xpst.utils.platform.resolve_ffmpeg_path", lambda: None)
+        monkeypatch.setattr("xpst.utils.platform.system_media_dirs", lambda: [])
+        monkeypatch.setenv("XPST_MEDIA_BIN_DIR", str(tmp_path / "empty-bin"))
         result = runner.invoke(main, ["doctor", "--json"])
         assert result.exit_code != 0
         data = json.loads(result.output)
         ffmpeg = next(e for e in data["environment"] if e["name"] == "ffmpeg")
         assert ffmpeg["ok"] is False
         assert "ffmpeg" in ffmpeg["fix"].lower()
+        assert "XPST_FFMPEG_PATH" in ffmpeg["fix"]
+        assert "xpst media fetch" in ffmpeg["fix"]
 
     def test_platform_filter_limits_report(self, runner, config_file, stub_broken):
         result = runner.invoke(main, ["doctor", "youtube", "--json"])

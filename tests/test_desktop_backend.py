@@ -182,3 +182,39 @@ def test_desktop_repair_readiness_creates_local_folders(_which, _ffmpeg, _ytdlp,
     assert data["ok"] is True
     assert (tmp_path / "downloads").exists()
     assert controller._engine is None
+
+
+def test_desktop_video_picker_never_offers_an_image(tmp_path):
+    """The Compose picker lists only postable files, and says what it skipped.
+
+    Before this, ``getLocalVideos`` returned images as selectable items with
+    ``type: "image"``; picking one reached the post preflight only to be
+    hard-rejected (an image has no publish path at any destination).
+    """
+    folder = tmp_path / "media"
+    folder.mkdir()
+    (folder / "clip.mp4").write_bytes(b"\x00" * 1024)
+    (folder / "photo.jpg").write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 32)
+
+    raw = AppController.getLocalVideos(
+        SimpleNamespace(_config=None, getThumbnail=lambda _path: ""), str(folder)
+    )
+    data = json.loads(raw)
+
+    assert data["ok"] is True
+    assert [item["name"] for item in data["videos"]] == ["clip.mp4"]
+    assert all(item["type"] == "video" for item in data["videos"])
+    assert data["skipped_count"] == 1
+    assert data["skipped"][0]["name"] == "photo.jpg"
+    assert data["skipped"][0]["type"] == "image"
+    assert "image" in data["hint"]
+
+
+def test_desktop_video_picker_reports_a_missing_folder(tmp_path):
+    raw = AppController.getLocalVideos(
+        SimpleNamespace(_config=None, getThumbnail=lambda _path: ""), str(tmp_path / "nope")
+    )
+    data = json.loads(raw)
+
+    assert data["ok"] is False
+    assert data["videos"] == []

@@ -2,9 +2,9 @@
 
 The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, run posting workflows, and query the personal content knowledge base without scraping CLI text.
 
-This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). The current registry contains **38 tools: 32 `xpst_*` + 2 `messenger_*` + 4 `kb_*`**, including the canonical capability, readiness, browser-free auth plan, resumable setup tools, the failure/activity recovery tool, and the canonical post preflight.
+This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). The current registry contains **40 tools: 34 `xpst_*` + 2 `messenger_*` + 4 `kb_*`**, including the canonical capability, readiness, browser-free auth plan, resumable setup tools, the failure/activity recovery tools (list + targeted retry), scheduling incl. cancel, and the canonical post preflight.
 
-xPST posts to six destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger (messaging/auto-reply) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
+xPST posts to the destinations enabled by your configuration — YouTube, Instagram, and X/Twitter are the live-verified destinations (TikTok publishing is not available yet and awaits external TikTok developer review; Threads and Messenger are opt-in integrations, currently disabled/unauthenticated — see the [INSTALL.md capability truth table](INSTALL.md#capability-truth-table)) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
 
 ## Setup
 
@@ -30,7 +30,7 @@ You can also start the server with `xpst-mcp` or `xpst mcp`.
 1. Use `dry_run: true` first and show the user what would happen.
 2. Get explicit user confirmation before a live `xpst_run` or `xpst_post`.
 3. `xpst_backfill` also performs live uploads when not in dry-run mode.
-4. `xpst_delete` removes local post records; deleting a record for content that is still live on a platform can cause the engine to consider it "new" again. Treat it as destructive.
+4. `xpst_delete` removes **local post records only** — it never deletes the post on the platform (`platform_deleted: false` in every response). Deleting a record for content that is still live on a platform can cause the engine to consider it "new" again. Treat it as destructive, and use the CLI `xpst delete <video_id>` when the user actually wants the post taken down.
 
 Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers`, `xpst_config_show`, `xpst_auth_status`) never initialize the posting engine and are safe to call. `xpst_auth_start` is also side-effect-free: it returns a human action plan and never opens a browser or accepts secrets.
 
@@ -54,11 +54,13 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_activity` | List recorded platform failures with targeted retry or review actions (read-o… | No | — |
 | `xpst_schedule_list` | List scheduled posts (pending, completed, failed) with times and targets | No | — |
 | `xpst_schedule_add` | Schedule a post for later: local video file + caption + ISO-8601 time, option… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_schedule_cancel` | Cancel a scheduled post by entry id — the MCP equivalent of `xpst schedule re… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_failures_retry` | Retry ONE recorded upload failure, identified by video_id + platform — the MC… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_health` | Test connectivity to all platforms and sources (no uploads) | No | — |
 | `xpst_status` | Show cross-posting statistics and health status | No | — |
 | `xpst_backfill` | Retry failed or incomplete posts from history | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No | — |
-| `xpst_auth_status` | Show authentication status for all platforms | No | — |
+| `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No | — |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No | — |
 | `xpst_capabilities` | Return the canonical role-aware provider and capability contract without netw… | No | — |
 | `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets… | No | — |
@@ -66,7 +68,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or acce… | No | — |
 | `xpst_providers` | List supported content sources and posting destinations with capabilities | No | — |
 | `xpst_disconnect` | Disconnect a platform: remove its stored account credentials (tokens, cookies… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
-| `xpst_delete` | Delete a post record from state | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_delete` | Delete a post RECORD from local xPST state only (operation=delete_record, sco… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `messenger_send` | Send a text message to a Messenger recipient (page-scoped PSID) via the Meta… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `messenger_set_rules` | Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->re… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_messenger_check_comments` | Fetch recent comments on an Instagram or Facebook post and auto-reply per the… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
@@ -79,7 +81,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_setup_resume` | Resume setup with safe step state or caller-verified readiness | No | — |
 | `xpst_setup_reset` | Reset the shared setup transaction and its recovery copies | No | — |
 
-Registry size: **38 tools**.
+Registry size: **40 tools**.
 <!-- END GENERATED TOOL INDEX -->
 
 ---
@@ -294,7 +296,7 @@ Live response shape:
 
 ## xpst_delete
 
-Removes a post **record** from local state. This is state-only: it does NOT call any platform's delete API (use the CLI `xpst delete` for live deletion). Removing a record can make previously-posted content look "new" to the engine again, so confirm with the user.
+Removes a post **record** from local state. This is state-only: it does NOT call any platform's delete API and the live post **stays up and publicly visible** (use the CLI `xpst delete` for live deletion). Every response carries `"scope": "local_state_only"` and `"platform_deleted": false` so an agent cannot mistake this for a platform deletion. Removing a record can make previously-posted content look "new" to the engine again, so confirm with the user.
 
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
@@ -310,7 +312,9 @@ Example call:
 Example response:
 
 ```json
-{ "video_id": "7301234567890", "platform": "all", "removed": ["youtube", "x"], "success": true }
+{ "ok": true, "video_id": "7301234567890", "platform": "all", "removed": ["youtube", "x"], "success": true,
+  "operation": "delete_record", "scope": "local_state_only", "platform_deleted": false,
+  "note": "Local xPST state only — the post on the platform was NOT deleted and is still publicly visible. Use the CLI `xpst delete <video_id>` to delete on the platform." }
 ```
 
 ## messenger_send

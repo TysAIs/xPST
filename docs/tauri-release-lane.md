@@ -1,8 +1,9 @@
 # The Tauri release lane (`.github/workflows/tauri-release.yml`)
 
 This workflow builds the real, downloadable xPST desktop app: a Tauri 2 shell
-with the Python engine sidecar and the media binaries, for every platform we
-claim to support.
+with the Python engine sidecar, for every platform we claim to support. (The
+only bundled media binary is the yt-dlp zipapp; ffmpeg/ffprobe are resolved at
+runtime, not bundled.)
 
 ## Lanes
 
@@ -17,17 +18,24 @@ Every lane runs the same ordered steps and fails closed at each one:
 1. `python scripts/verify_release_version.py` - one version source.
 2. `npm ci && npm run build` (Svelte UI).
 3. engine sidecar via `scripts/build-engine.sh` (PyInstaller onedir), asserted to exist.
-4. media binaries via `scripts/fetch-media-binaries.sh` - **pinned and
-   checksummed** ([docs/media-binary-provenance.md](media-binary-provenance.md));
-   the lane then asserts the provenance record exists, covers ffmpeg/ffprobe/
-   yt-dlp and contains no `UNPINNED` entry.
+4. bundled media binary (the yt-dlp zipapp) via
+   `scripts/fetch-media-binaries.sh` - **pinned and checksummed**
+   ([docs/media-binary-provenance.md](media-binary-provenance.md)); the lane then
+   runs `scripts/verify-media-binaries-provenance.sh` over the record, which
+   fails on an `UNPINNED` entry or a bundled binary with no pinned row. A failed
+   yt-dlp fetch is loud but non-fatal (the engine bundles the `yt_dlp` module).
 5. `cargo tauri build --bundles <lane bundles>`.
 6. assert the lane's installer really exists (no silent empty upload).
-7. installer size gate (<= 200MB on the file a stranger downloads).
+7. size budget on the built artifacts: the unpacked macOS `.app` must stay
+   <= 130MB and the installer a stranger downloads <= 150MB, and the bundle must
+   carry no ffmpeg/ffprobe binary while still containing the engine sidecar.
 8. upload the per-target artifact (`if-no-files-found: error`).
-9. boot smoke for the lane: macOS app stays up 15s; Linux `.AppImage` runs under
-   xvfb and spawns the `xpst-engine` sidecar; Windows silently installs the NSIS
-   setup, launches it and requires the sidecar.
+9. boot proof for the lane: macOS runs the cold-boot harness
+   (`scripts/measure_boot.py`, 3 runs, enforced against `perf/boot-budget.json`,
+   which also proves the engine sidecar answered `/health` and was reaped on
+   exit); Linux runs the real `.AppImage` under xvfb and spawns the
+   `xpst-engine` sidecar; Windows silently installs the NSIS setup, launches it
+   and requires the sidecar.
 10. tag builds only: resolve + assert the release asset list, then publish.
 
 ## Triggers
@@ -111,6 +119,6 @@ Signing is optional and never changes *what* is built:
   (which resolves a specific asset) rather than assuming.
 - **No signing/notarization secrets are configured**, so released installers are
   unsigned.
-- **macOS has a single pinned media-binary source.** If that asset disappears
-  the lane goes red with a named reason rather than falling back to an
-  unverifiable build (see the provenance doc).
+- **The macOS yt-dlp pin is a single source.** If that asset disappears the lane
+  reports it loudly but still succeeds (the engine bundles the `yt_dlp` module);
+  an unverified fallback is never bundled (see the provenance doc).

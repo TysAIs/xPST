@@ -1,41 +1,48 @@
 #!/usr/bin/env bash
-# Fetch the media binaries (ffmpeg/ffprobe/yt-dlp) that `cargo tauri build`
-# bundles into the xPST desktop app. They are NOT committed to git (see
-# .gitignore) - run this before building, locally and in CI.
+# Fetch the media binary that the desktop bundle still ships: yt-dlp.
+#
+# ffmpeg / ffprobe are deliberately NOT fetched or bundled any more (~87 MB of a
+# 192 MB app, and the flaky mirror behind that download is what kept the Tauri
+# release lane red). The engine resolves them at runtime in a strict order:
+#   XPST_FFMPEG_PATH > system ffmpeg > a pinned, checksum-verified copy fetched
+#   on first use (see src/xpst/media/binaries.py, surfaced as `xpst media
+#   fetch`). A machine that already has ffmpeg downloads nothing.
+#
+# yt-dlp stays bundled because it is a ~3 MB zipapp with no system equivalent;
+# the engine's bundled `yt_dlp` Python module remains the primary path, so a
+# failed yt-dlp fetch is a warning, not a lane failure.
 #
 # PROVENANCE CONTRACT (see scripts/media-binaries.lock)
 #   * every download comes from an IMMUTABLE versioned url, never `latest`;
 #   * every download is checked against the SHA-256 recorded in the lock file
 #     and is REFUSED if the bytes do not match - a rotated or tampered upstream
 #     asset is a loud, named failure, never a silently different release;
-#   * when several locked candidates exist for one artifact (Windows/Linux
-#     have a second pinned source) the first healthy one wins, so a single
-#     unavailable mirror cannot fail the lane while the artifact stays pinned;
+#   * when several locked candidates exist for one artifact the first healthy
+#     one wins, so a single unavailable mirror cannot fail the lane while the
+#     artifact stays pinned;
 #   * a partial/corrupt transfer cannot be installed: the checksum is verified
 #     before anything is unpacked, and the unpacked binary is sanity-checked;
 #   * a provenance record (url + expected + installed sha256 + byte size) is
-#     written next to the binaries and printed, so a release states exactly
-#     what it shipped.
+#     written next to the binary and printed, so a release states exactly what
+#     it shipped.
 #
 # There is deliberately NO unpinned fallback: an unverified binary must never
 # end up inside a release. For local development only,
-# XPST_ALLOW_UNPINNED_MEDIA=1 permits using an ffmpeg/ffprobe already on PATH;
-# it is recorded as UNPINNED in the provenance file (the release lane asserts
-# that file contains no UNPINNED line).
+# XPST_ALLOW_UNPINNED_MEDIA=1 permits using a yt-dlp already on PATH; it is
+# recorded as UNPINNED in the provenance file (the release lane asserts that
+# file contains no UNPINNED line).
 #
 # Usage: scripts/fetch-media-binaries.sh [macos-arm64|macos-x64|win-x64|linux-x64|linux-arm64]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOCK="${MEDIA_BINARIES_LOCK:-$ROOT/scripts/media-binaries.lock}"
-FF_DIR="$ROOT/src-tauri/binaries/ffmpeg"
 YTDLP_DIR="$ROOT/src-tauri/binaries/ytdlp"
 PROVENANCE="${MEDIA_BINARIES_PROVENANCE:-$ROOT/src-tauri/binaries/PROVENANCE.txt}"
-# Shared download cache: two artifacts can come out of one archive (the BtbN
-# tarball carries both ffmpeg and ffprobe), so the same pinned url is fetched
-# once per run.
+# Shared download cache keyed by checksum, so a re-run (or a second candidate
+# for the same artifact) never downloads the same pinned bytes twice.
 CACHE="${MEDIA_BINARIES_CACHE:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/xpst-media-binaries}"
-mkdir -p "$FF_DIR" "$YTDLP_DIR" "$CACHE"
+mkdir -p "$YTDLP_DIR" "$CACHE"
 rm -f "$PROVENANCE"
 : >"$PROVENANCE"
 
@@ -44,7 +51,7 @@ rm -f "$PROVENANCE"
 : "${FETCH_RETRY_DELAY:=2}"    # curl backoff + our inter-round delay, seconds
 : "${FETCH_ROUNDS:=2}"         # script-level rounds (round 2 resumes partials)
 : "${FETCH_CONNECT_TIMEOUT:=20}"
-: "${FETCH_MAX_TIME:=1800}"    # a pinned ffmpeg asset is ~80MB
+: "${FETCH_MAX_TIME:=900}"     # a pinned yt-dlp asset is ~3MB
 
 log()  { printf '%s\n' "$*" >&2; }
 warn() { printf 'WARN: %s\n' "$*" >&2; }
@@ -92,6 +99,14 @@ sha256_of() {
 }
 
 # download <url> <dest>: retried, resumed, fail-closed transfers.
+# Two layers of resilience:
+#   1. curl retries each transfer (--retry --retry-all-errors --retry-delay
+#      --retry-connrefused) so a flaky mirror / truncation (curl exit 18) is
+#      retried before we give up on the URL;
+#   2. our round loop then re-attempts the URL with `--continue-at -` to resume
+#      the partial file, discarding it if the server has no byte-range support.
+# --fail makes an HTTP error status a hard failure; the caller additionally
+# verifies the checksum, so a partial transfer can never be installed.
 download() {
   local url="$1" dest="$2"
   local round=1 rc=0 note="" opts=()
@@ -127,36 +142,23 @@ download() {
   done
 }
 
-# verify_binary <path> <label>: non-empty and looks like a Mach-O/ELF/PE file.
-verify_binary() {
-  local path="$1" label="$2"
-  if [[ ! -s "$path" ]]; then
-    warn "$label: downloaded file is empty or missing"
-    return 1
-  fi
-  if command -v file >/dev/null 2>&1; then
-    local kind
-    kind="$(file -b "$path" 2>/dev/null || true)"
-    case "$kind" in
-      *Mach-O*|*ELF*|*"PE32"*) : ;;
-      *) warn "$label: rejected partial/foreign transfer ($kind)"; return 1 ;;
-    esac
-  fi
-  chmod +x "$path"
-  return 0
-}
-
 # verify_ytdlp <path> <label>: yt-dlp ships either as a python-zipapp
 # (`#!/usr/bin/env python3`, what the macOS/Linux x64 lanes bundle) or as a
-# standalone PE/ELF/Mach-O build (Windows, linux-arm64), so the ffmpeg magic
+# standalone PE/ELF/Mach-O build (Windows, linux-arm64), so a Mach-O/ELF magic
 # rule does not apply - but a truncated transfer still must not be installed.
 verify_ytdlp() {
-  local path="$1" label="$2"
+  local path="$1" label="$2" size
   if [[ ! -s "$path" ]]; then
-    warn "$label: downloaded file is empty or missing"
+    warn "$label: download is empty — rejecting partial transfer"
     return 1
   fi
   if head -c 2 "$path" | grep -q '#!'; then
+    # A zipapp is never this small; a tiny one is a truncated transfer.
+    size="$(wc -c < "$path" | tr -d ' ')"
+    if [[ "$size" -lt 1000000 ]]; then
+      warn "$label: only ${size} bytes — rejecting partial transfer"
+      return 1
+    fi
     chmod +x "$path"
     return 0
   fi
@@ -173,7 +175,10 @@ verify_ytdlp() {
 }
 
 # extract_member <archive> <kind> <member> <outdir>
-# Unpacks a checked archive and copies the requested member out of it.
+# Unpacks a checked archive and copies the requested member out of it. The lock
+# format supports archive candidates (kind zip/tar.xz) even though yt-dlp is
+# currently a raw download, so a future pinned artifact in an archive needs no
+# new machinery.
 extract_member() {
   local archive="$1" kind="$2" member="$3" outdir="$4"
   local tmp="$CACHE/.unpack.$$"
@@ -253,12 +258,7 @@ install_candidate() {
     *) warn "$artifact: unknown kind $kind"; return 1 ;;
   esac
 
-  if [[ "$artifact" == "yt-dlp" ]]; then
-    if ! verify_ytdlp "$staged" "$artifact"; then
-      rm -f "$staged"
-      return 1
-    fi
-  elif ! verify_binary "$staged" "$artifact"; then
+  if ! verify_ytdlp "$staged" "$artifact"; then
     rm -f "$staged"
     return 1
   fi
@@ -286,7 +286,7 @@ fetch_artifact() {
   while IFS= read -r line; do
     lines+=("$line")
   done < <(awk -F'\t' -v p="$platform" -v a="$artifact" \
-             'NF >= 6 && $1 == p && $2 == a' "$LOCK")
+           'NF >= 6 && $1 == p && $2 == a' "$LOCK")
   if [[ ${#lines[@]} -eq 0 ]]; then
     warn "$artifact: no pinned candidate in $(basename "$LOCK") for platform $platform"
   fi
@@ -312,11 +312,10 @@ fetch_artifact() {
 
   local cand
   for cand in "${lines[@]+"${lines[@]}"}"; do
-    local kind member
+    local kind member expected url
     expected="$(printf '%s' "$cand" | cut -f5)"
     kind="$(printf '%s' "$cand" | cut -f3)"
     member="$(printf '%s' "$cand" | cut -f4)"
-    local url
     url="$(printf '%s' "$cand" | cut -f6)"
     if install_candidate "$artifact" "$destfile" "$kind" "$member" "$expected" "$url"; then
       return 0
@@ -326,7 +325,7 @@ fetch_artifact() {
 
   # Local development escape hatch only - never used by the release lanes.
   if [[ "${XPST_ALLOW_UNPINNED_MEDIA:-}" == "1" ]]; then
-    local bare="${artifact}"
+    local bare="$artifact"
     [[ "$platform" == "win-x64" ]] && bare="$artifact.exe"
     local onpath
     onpath="$(command -v "$bare" 2>/dev/null || true)"
@@ -358,78 +357,97 @@ case "$platform" in
 esac
 [[ -f "$LOCK" ]] || die "lock file not found: $LOCK"
 
+case "$platform" in
+  macos-arm64|macos-x64) YTDLP_NAME=yt-dlp ;;
+  win-x64) YTDLP_NAME=yt-dlp.exe ;;
+  linux-x64|linux-arm64) YTDLP_NAME=yt-dlp ;;
+esac
+
+# The zipapp ships with `#!/usr/bin/env python3`, but macOS system python3 is
+# often < 3.10 (unsupported by yt-dlp), so re-shebang to a >=3.10 interpreter
+# when one is available. The engine's bundled yt_dlp module remains the primary
+# path; this zipapp is the CLI fallback surfaced via XPST_YTDLP_PATH.
+fix_ytdlp_shebang() {
+  local f="$1" interpreter="$2" tmp
+  tmp="$f.tmpshebang"
+  { printf '#!%s\n' "$interpreter"; tail -n +2 "$f"; } > "$tmp" && mv "$tmp" "$f" && chmod +x "$f"
+}
+
 FAILED=()
-fetch_artifact ffmpeg "$FF_DIR" || FAILED+=(ffmpeg)
-fetch_artifact ffprobe "$FF_DIR" || FAILED+=(ffprobe)
 fetch_artifact yt-dlp "$YTDLP_DIR" || FAILED+=(yt-dlp)
 
-# macOS/Linux x64 yt-dlp is the python-zipapp with `#!/usr/bin/env python3`;
-# the system python3 on macOS is often < 3.10 (unsupported by yt-dlp), so
-# re-shebang to a >=3.10 interpreter when one is available. The engine's
-# bundled yt_dlp module remains the primary path for xPST itself.
-if [[ "$platform" == "macos-arm64" || "$platform" == "macos-x64" ]] && [[ -x "$YTDLP_DIR/yt-dlp" ]]; then
-  if head -c 2 "$YTDLP_DIR/yt-dlp" | grep -q '#!'; then
-    fix_ytdlp_shebang() {
-      local f="$1" interpreter="$2" tmp
-      tmp="$f.tmpshebang"
-      { printf '#!%s\n' "$interpreter"; tail -n +2 "$f"; } > "$tmp" && mv "$tmp" "$f" && chmod +x "$f"
-    }
-    ytdlp_before="$(sha256_of "$YTDLP_DIR/yt-dlp")"
-    if command -v python3.10 >/dev/null 2>&1; then
-      fix_ytdlp_shebang "$YTDLP_DIR/yt-dlp" /usr/bin/env\ python3.10
-    elif [[ "$(python3 -c 'import sys; print(sys.version_info[:2] >= (3,10))' 2>/dev/null)" == "True" ]]; then
-      : # system python3 is already >= 3.10
-    elif [[ -x /opt/homebrew/bin/python3 ]]; then
-      fix_ytdlp_shebang "$YTDLP_DIR/yt-dlp" /opt/homebrew/bin/python3
-    fi
-    # The rewritten shebang changes the file, so the provenance record must
-    # describe the bytes that actually ship - never the pre-edit download.
-    if [[ "$(sha256_of "$YTDLP_DIR/yt-dlp")" != "$ytdlp_before" ]]; then
-      rewrite_ytdlp_provenance() {
-        local tmp="$PROVENANCE.tmp" line tab=$'	'
-        while IFS= read -r line; do
-          [[ "$line" == *"${tab}yt-dlp${tab}"* ]] && continue
-          printf '%s\n' "$line" >> "$tmp"
-        done < "$PROVENANCE"
-        printf 'pinned\t%s\tyt-dlp\tsha256=%s\tinstalled_sha256=%s\tbytes=%s\turl=%s\tshebang_rewritten=1\n' \
-          "$platform" "$(awk -F'\t' -v p="$platform" '$1==p && $2=="yt-dlp" {print $5}' "$LOCK" | head -n1)" \
-          "$(sha256_of "$YTDLP_DIR/yt-dlp")" "$(wc -c < "$YTDLP_DIR/yt-dlp" | tr -d ' ')" \
-          "$(awk -F'\t' -v p="$platform" '$1==p && $2=="yt-dlp" {print $6}' "$LOCK" | head -n1)" >> "$tmp"
-        mv -f "$tmp" "$PROVENANCE"
+if [[ "$platform" == macos-* ]] && [[ -x "$YTDLP_DIR/yt-dlp" ]] && head -c 2 "$YTDLP_DIR/yt-dlp" | grep -q '#!'; then
+  ytdlp_before="$(sha256_of "$YTDLP_DIR/yt-dlp")"
+  if command -v python3.10 >/dev/null 2>&1; then
+    fix_ytdlp_shebang "$YTDLP_DIR/yt-dlp" /usr/bin/env\ python3.10
+  elif [[ "$(python3 -c 'import sys; print(sys.version_info[:2] >= (3,10))' 2>/dev/null)" == "True" ]]; then
+    : # system python3 is already >= 3.10
+  elif [[ -x /opt/homebrew/bin/python3 ]]; then
+    fix_ytdlp_shebang "$YTDLP_DIR/yt-dlp" /opt/homebrew/bin/python3
+  fi
+  # The rewritten shebang changes the file, so the provenance record must
+  # describe the bytes that actually ship - never the pre-edit download. The
+  # existing row is edited in place (its kind, url and locked hash are kept), so
+  # an UNPINNED local fallback stays UNPINNED instead of being laundered into a
+  # pinned-looking row.
+  if [[ "$(sha256_of "$YTDLP_DIR/yt-dlp")" != "$ytdlp_before" ]]; then
+    tmp="$PROVENANCE.tmp"
+    tab=$'\t'
+    rm -f "$tmp"
+    awk -F'\t' -v OFS='\t' -v h="$(sha256_of "$YTDLP_DIR/yt-dlp")" \
+        -v b="$(wc -c < "$YTDLP_DIR/yt-dlp" | tr -d ' ')" -v t="$tab" '
+      index($0, t "yt-dlp" t) {
+        rewritten = 0
+        for (i = 1; i <= NF; i++) {
+          if ($i ~ /^installed_sha256=/) $i = "installed_sha256=" h
+          else if ($i ~ /^bytes=/) $i = "bytes=" b
+          else if ($i == "shebang_rewritten=1") rewritten = 1
+        }
+        row = $0
+        if (!rewritten) row = row OFS "shebang_rewritten=1"
+        print row
+        next
       }
-      rewrite_ytdlp_provenance
-    fi
+      { print }
+    ' "$PROVENANCE" > "$tmp"
+    mv -f "$tmp" "$PROVENANCE"
   fi
 fi
 
-# ---------------------------------------------------------------------------
-# Loud, actionable failure report (instead of a bare `curl: (18)`).
-# ---------------------------------------------------------------------------
-if [[ ${#FAILED[@]} -gt 0 ]]; then
+if [[ ! -e "$YTDLP_DIR/$YTDLP_NAME" ]]; then
   {
     echo
     echo "=============================================================="
-    echo "MEDIA BINARY FETCH FAILED ($platform)"
-    echo "Could not obtain: ${FAILED[*]}"
-    echo
+    echo "YT-DLP FETCH FAILED ($platform)"
     echo "Every pinned candidate below was tried with retries, backoff,"
     echo "partial-transfer detection and resume; all of them failed:"
     for src in "${TRIED[@]+"${TRIED[@]}"}"; do
       echo "  - $src"
     done
     echo
+    echo "The app still works: the engine's bundled yt_dlp module is the"
+    echo "primary path for xPST itself."
     echo "Candidates come from scripts/media-binaries.lock. A pinned url that"
     echo "is gone means the lock is stale, not that the release is flaky:"
     echo "  scripts/update-media-binaries-lock.py --check"
-    echo "For local development only, XPST_ALLOW_UNPINNED_MEDIA=1 lets an"
-    echo "ffmpeg/ffprobe already on PATH be used instead (recorded as UNPINNED;"
-    echo "the release lane refuses such a build)."
+    echo "For local development only, XPST_ALLOW_UNPINNED_MEDIA=1 lets a"
+    echo "yt-dlp already on PATH be used instead (recorded as UNPINNED; the"
+    echo "release lane refuses such a build)."
+    echo "Retry with: scripts/fetch-media-binaries.sh $platform"
     echo "=============================================================="
   } >&2
-  exit 1
 fi
 
-echo "media binaries ready ($platform, checksums verified against scripts/media-binaries.lock):"
-ls -lh "$FF_DIR" "$YTDLP_DIR"
+if [[ -e "$YTDLP_DIR/$YTDLP_NAME" ]]; then
+  echo "media binaries ready ($platform, checksums verified against scripts/media-binaries.lock):"
+  ls -lh "$YTDLP_DIR"
+else
+  echo "media binaries ready ($platform): no yt-dlp zipapp bundled"
+fi
+
+echo "note: ffmpeg/ffprobe are intentionally NOT bundled — the engine uses a system"
+echo "      ffmpeg, or fetches a pinned checksum-verified build on first use"
+echo "      (python -m xpst media fetch / the desktop app does this automatically)."
 echo "--- provenance record: $PROVENANCE ---"
 cat "$PROVENANCE"
+exit 0

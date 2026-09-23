@@ -13,6 +13,12 @@
     invalid: AlertCircle,
     disabled: MinusCircle,
     unknown: CircleHelp,
+    // Honest token-state badges (xpst.token_state) — rendered verbatim so the
+    // UI never has to guess a colour for "expiring" or "source only".
+    connected: CheckCircle2,
+    expiring: AlertTriangle,
+    needs_reauth: AlertCircle,
+    source_only: MinusCircle,
   };
 
   let { status = "unknown", label = undefined } = $props();
