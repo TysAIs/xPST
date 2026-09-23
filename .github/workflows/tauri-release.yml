@@ -387,28 +387,32 @@ jobs:
             src-tauri/target/**/bundle/deb/*.deb
           if-no-files-found: error
 
-      - name: "Smoke boot (macOS) — app launches and stays up"
+      - name: "Cold-boot measurement + budget gate (macOS)"
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
           APP_PATH=$(find src-tauri/target -type d -path "*release*" -name "xPST.app" -print -quit)
-          test -n "$APP_PATH" || { echo "::error::xPST.app not found — smoke would have silently no-op'd"; exit 1; }
-          # macOS ships no GNU `timeout`, so bound the wait with a watchdog
-          # instead of `timeout 60 ...`.
-          BIN=$(ls "$APP_PATH/Contents/MacOS/"*)
-          LOG="$RUNNER_TEMP/xpst-smoke-boot.log"
-          "$BIN" > "$LOG" 2>&1 &
-          APP_PID=$!
-          sleep 15
-          if ! kill -0 $APP_PID 2>/dev/null; then
-            echo "::error::App exited during smoke boot"
-            cat "$LOG" || true
-            exit 1
-          fi
-          kill $APP_PID 2>/dev/null || true
-          echo "--- smoke boot log (first 40 lines) ---"
-          head -40 "$LOG" || true
-          echo "PASS: macOS app stayed up for 15s"
+          test -n "$APP_PATH" || { echo "::error::xPST.app not found — the boot gate would have silently no-op'd"; exit 1; }
+          # This replaces the old "launch it and sleep 15s" smoke: reaching
+          # BOOT_TO_READY_SECS already proves the app came up AND that the engine
+          # sidecar answered /health, and the harness additionally asserts the
+          # sidecar is reaped on exit (no leftover xpst-engine). The numbers are
+          # then enforced against perf/boot-budget.json, so a startup regression
+          # fails the lane that publishes bundles instead of shipping quietly.
+          python scripts/measure_boot.py \
+            --app "$APP_PATH" \
+            --runs 3 \
+            --json-out "$RUNNER_TEMP/boot-samples.json" | tee "$RUNNER_TEMP/boot-report.txt"
+
+      - name: "Upload cold-boot samples (macOS)"
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-samples-${{ github.run_id }}-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/boot-samples.json
+            ${{ runner.temp }}/boot-report.txt
+          if-no-files-found: warn
 
       - name: "Smoke boot (Linux) — the real .AppImage runs under xvfb with the engine sidecar"
         if: runner.os == 'Linux'
