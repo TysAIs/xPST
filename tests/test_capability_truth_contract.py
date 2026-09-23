@@ -155,7 +155,12 @@ def test_run_payload_reports_failure_truthfully() -> None:
     assert payload["succeeded"] == 1
     assert payload["failed"] == 1
 
-    # Nothing to do is not a failure, and a clean run is reported as success.
-    assert _run_payload([])["ok"] is True
+    # Main's newer rule wins on the empty run: a run that attempted nothing is
+    # NOT reported as success (`ok` is derived from provably published uploads,
+    # and "nothing ran" is not success). The counts still prove it did nothing,
+    # and a clean run is reported as success.
+    assert _run_payload([])["ok"] is False
+    assert _run_payload([])["attempted"] == 0
+    assert _run_payload([])["uploads"] == 0
     assert _run_payload([published])["ok"] is True
     assert _run_payload([published])["failed"] == 0

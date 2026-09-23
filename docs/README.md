@@ -383,9 +383,9 @@ xpst config import < backup.yaml
 |------|------|-------------|
 | 0 | EXIT_SUCCESS | Success |
 | 1 | EXIT_GENERAL | General error |
-| 2 | EXIT_AUTH_FAILURE | Authentication failed |
-| 3 | EXIT_RATE_LIMIT | Rate limited by platform |
-| 4 | EXIT_CONFIG_ERROR | Configuration error |
+| 2 | EXIT_CONFIG_ERROR | Configuration error (also Click usage errors) |
+| 3 | EXIT_AUTH_FAILURE | Authentication failed |
+| 4 | EXIT_RATE_LIMIT | Rate limited by platform |
 | 10 | EXIT_PLATFORM_UNAVAILABLE | Platform API unavailable |
 
 ### JSON Output
@@ -414,7 +414,7 @@ xpst mcp
 
 ### Available Tools
 
-xPST exposes 38 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
+xPST exposes 40 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 
 | Tool | Description |
 |------|-------------|
@@ -423,9 +423,11 @@ xPST exposes 38 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 | `xpst_health` | Platform health check |
 | `xpst_status` | Statistics |
 | `xpst_backfill` | Retry failed posts |
+| `xpst_failures_retry` | Retry one recorded failure (video_id + platform) |
+| `xpst_schedule_cancel` | Cancel a scheduled post (local schedule store only) |
 | `xpst_config_show` | Show configuration |
 | `xpst_auth_status` | Auth status |
-| `xpst_delete` | Delete post from platform |
+| `xpst_delete` | Remove local post record (does **not** delete the live post) |
 | `xpst_capabilities` | Canonical role-aware capability catalog |
 | `xpst_readiness` | Local readiness checks and blockers |
 | `xpst_auth_start` | Browser-free human authentication action plan |
@@ -490,10 +492,17 @@ xpst dashboard --port 9000 --host 127.0.0.1
 
 ### Authentication
 
-Basic auth with `dashboard_username` and bcrypt `dashboard_password_hash` from config.
+Read-only endpoints use Basic auth with `dashboard_username` and bcrypt
+`dashboard_password_hash` from config (open on loopback when neither is set).
+
+Every **mutating** endpoint (`POST /api/post`, `/api/connect/{platform}`,
+`/api/onboarding*`, `/api/preflight`, `/bio/edit`) always requires the dashboard
+API token, whether or not Basic auth is configured — loopback is not an
+authorisation boundary. Print it with `xpst auth api-token` and send it as
+`Authorization: Bearer <token>` or `X-API-Token: <token>`.
 
 ```bash
-# Set password
+# Set password (protects reads too)
 xpst config set monitoring.dashboard_password mypassword
 ```
 
@@ -544,7 +553,7 @@ xpst/
 │   ├── sessions.py     # SessionManager (auth consolidation)
 │   ├── video.py        # FFmpeg encoding per platform
 │   └── platform.py     # Cross-platform paths
-├── mcp/                # MCP server (38 tools)
+├── mcp/                # MCP server (40 tools)
 │   └── server.py       # stdio MCP server with audit logging
 ├── dashboard/          # Web API dashboard
 │   ├── server.py       # FastAPI server

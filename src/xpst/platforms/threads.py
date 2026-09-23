@@ -12,7 +12,12 @@ Upload specs:
 - Rate limit: 250 posts / 24 hours
 - Media: MP4 up to 1 GB, max 300 seconds
 - Text: 500-character limit
-- Threads requires media accessible via a public URL (URL-based upload)
+- Media must already be hosted at a public URL: the Threads API *retrieves*
+  ``video_url``/``image_url`` and has no binary or resumable upload endpoint, so
+  a local file can never be published. xPST has no server to host one, so the
+  refusal is declared once in :mod:`xpst.content` (``MediaTransport.PUBLIC_URL``)
+  and reported before any network call — by the preflight plan, by request
+  validation, and by this uploader.
 
 Docs: https://developers.facebook.com/docs/threads
 """
@@ -22,6 +27,7 @@ from pathlib import Path
 import httpx
 
 from xpst.config import XPSTConfig
+from xpst.content import media_transport_blocker
 from xpst.platforms.base import (
     DeleteOutcome,
     DeleteResult,
@@ -82,6 +88,9 @@ class ThreadsUploader(PlatformUploader):
                 # them yet, and an agent that reads this capability list would
                 # otherwise attempt an operation that cannot work.
                 "content": ("video",),
+                # Declared, drift-checked capability: this destination retrieves
+                # media from a public URL and cannot accept an uploaded file.
+                "media_transport": "public_url",
                 "max_caption_length": self.MAX_CAPTION_LENGTH,
                 "max_video_duration_seconds": self.MAX_VIDEO_DURATION_SECONDS,
                 "rate_limit_per_day": self.RATE_LIMIT_PER_DAY,
@@ -158,10 +167,11 @@ class ThreadsUploader(PlatformUploader):
     async def upload(self, video_path: Path, caption: str) -> UploadResult:
         """Upload a video to Threads via the container publish model.
 
-        Threads requires media accessible via a public URL. When
-        ``video_path`` is an http(s) URL, it is used directly. Local file
-        paths are rejected with a guidance message — the tunnel solution
-        will be added separately.
+        Threads retrieves the media from a public URL. When ``video_path`` is an
+        http(s) URL it is used directly. A local path is refused — with the code
+        and wording declared in :mod:`xpst.content` — because the API has no
+        upload endpoint and xPST has no server to host the file. The refusal
+        happens before any request, so nothing is sent, and nothing is invented.
 
         Flow:
         1. POST /v1.0/{threads_user_id}/threads — create media container
@@ -178,6 +188,21 @@ class ThreadsUploader(PlatformUploader):
         if len(caption) > self.MAX_CAPTION_LENGTH:
             caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
 
+        video_str = str(video_path)
+
+        # The media-transport rule is declared once, in the destination profile
+        # (xpst.content); this uploader reports that same code and wording
+        # instead of holding its own copy that could drift from the preflight.
+        transport_issue = media_transport_blocker(self.platform_name, [video_str])
+        if transport_issue is not None:
+            logger.info("Threads: refusing local media %s before any request", video_str)
+            return UploadResult(
+                success=False,
+                error=f"{transport_issue.code}: {transport_issue.message}",
+                platform="threads",
+                retryable=False,
+            )
+
         try:
             token = await self._get_access_token()
         except ValueError as e:
@@ -192,20 +217,6 @@ class ThreadsUploader(PlatformUploader):
             return UploadResult(
                 success=False,
                 error="THREADS_NOT_CONFIGURED: threads_user_id is required.",
-                platform="threads",
-            )
-
-        video_str = str(video_path)
-
-        # Threads requires a public URL — local files can't be uploaded directly
-        if not video_str.startswith(("http://", "https://")):
-            return UploadResult(
-                success=False,
-                error=(
-                    "THREADS_NEEDS_URL: Meta Threads API requires a public video URL. "
-                    "Host the video on a CDN/S3 and provide the URL. "
-                    "Local file tunnel support will be added separately."
-                ),
                 platform="threads",
             )
 
