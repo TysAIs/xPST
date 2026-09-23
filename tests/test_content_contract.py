@@ -56,12 +56,12 @@ EXPECTED_MATRIX: dict[tuple[str, str], bool] = {
     ("youtube", "text"): False,
     ("youtube", "thread"): False,
     ("x", "video"): True,
-    ("x", "image"): False,
+    ("x", "image"): True,  # single image post (upload_image: twikit or v1.1 media + v2 tweet)
     ("x", "carousel"): True,  # published as a tweet thread, one media per tweet
     ("x", "text"): False,
     ("x", "thread"): False,  # declared by X, no text-thread implementation
     ("instagram", "video"): True,
-    ("instagram", "image"): False,  # declared by Instagram, no feed-photo path
+    ("instagram", "image"): True,  # feed photo (upload_image: instagrapi or the Graph image container)
     ("instagram", "carousel"): True,
     ("instagram", "text"): False,
     ("instagram", "thread"): False,
@@ -80,7 +80,6 @@ EXPECTED_MATRIX: dict[tuple[str, str], bool] = {
 #: Declared-but-unimplemented: an agent reading the manifest would try these.
 FALSE_DECLARATIONS: tuple[tuple[str, str], ...] = (
     ("x", "thread"),
-    ("instagram", "image"),
     ("threads", "text"),
 )
 
@@ -405,6 +404,17 @@ def test_unsupported_message_names_the_destination_and_the_supported_types() -> 
 
 VIDEO_BYTES = b"\x00" * 4096
 
+#: A JPEG whose header declares 1080x1080 — the real dimensions the preflight
+#: reads (no ffmpeg, no photo of anybody).
+_JPEG_HEADER_BYTES = (
+    b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+    + b"\xff\xc0\x00\x11\x08"
+    + (1080).to_bytes(2, "big")
+    + (1080).to_bytes(2, "big")
+    + bytes([3, 1, 0x11, 0, 2, 0x11, 1, 3, 0x11, 1])
+    + b"\xff\xd9"
+)
+
 
 def _make_engine(tmp_path: Path) -> Any:
     from xpst.config import XPSTConfig
@@ -588,22 +598,36 @@ def test_service_keeps_the_legacy_video_flow_ready(tmp_path: Path) -> None:
     assert verdict["content_issues"] == []
 
 
-def test_service_refuses_an_unimplemented_content_type_without_calling_the_engine(tmp_path: Path) -> None:
+def test_service_refuses_an_image_for_a_video_only_destination_without_calling_the_engine(
+    tmp_path: Path,
+) -> None:
+    """A destination that cannot publish images is refused, engine untouched.
+
+    Before this card the same request was refused because *no* destination had an
+    image path; the refusal must now be about the destination, by name.
+    """
     from xpst.services.post_service import PostRequest
 
     engine = MagicMock()
     engine.post_manual = AsyncMock()
     engine.post_manual_carousel = AsyncMock()
+    engine.post_manual_image = AsyncMock()
     service = _post_service(tmp_path, engine)
+    photo = tmp_path / "media" / "photo.jpg"
+    photo.write_bytes(_JPEG_HEADER_BYTES)
 
     envelope = service.execute(
-        PostRequest.from_payload({"content_type": "image", "media": ["a.jpg"], "platforms": ["instagram"]})
+        PostRequest.from_payload(
+            {"content_type": "image", "media": [str(photo)], "caption": "hi", "platforms": ["youtube"]}
+        )
     )
 
     assert envelope["ok"] is False
     assert envelope["content_type"] == "image"
-    assert engine.post_manual.await_count == 0 and engine.post_manual_carousel.await_count == 0
-    assert "instagram" in envelope["blockers"][0]
+    assert engine.post_manual.await_count == 0
+    assert engine.post_manual_carousel.await_count == 0
+    assert engine.post_manual_image.await_count == 0
+    assert any("youtube" in blocker for blocker in envelope["blockers"]), envelope["blockers"]
 
 
 def test_service_reports_the_content_type_in_the_envelope(tmp_path: Path) -> None:

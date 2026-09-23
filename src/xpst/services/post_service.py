@@ -211,9 +211,9 @@ class PostService:
             config: loaded :class:`~xpst.config.XPSTConfig`.
             config_dir: overrides ``config.config_dir`` when set.
             engine_factory: test seam — a callable returning an engine-like
-                object exposing ``post_manual`` / ``post_manual_carousel``.
-                Production callers leave this ``None`` and get the real
-                :class:`~xpst.engine.CrossPostEngine`.
+                object exposing ``post_manual`` / ``post_manual_carousel`` /
+                ``post_manual_image``. Production callers leave this ``None``
+                and get the real :class:`~xpst.engine.CrossPostEngine`.
         """
         self.config = config
         self.config_dir = str(config_dir or getattr(config, "config_dir", "") or "")
@@ -324,9 +324,12 @@ class PostService:
 
         content_type = request.effective_content_type
         paths = list(request.resolved_media)
-        if not (content_type is ContentType.VIDEO and len(paths) == 1) and not (
-            content_type is ContentType.CAROUSEL and len(paths) >= 2
-        ):
+        has_publish_path = (
+            (content_type is ContentType.VIDEO and len(paths) == 1)
+            or (content_type is ContentType.IMAGE and len(paths) == 1)
+            or (content_type is ContentType.CAROUSEL and len(paths) >= 2)
+        )
+        if not has_publish_path:
             # No uploader implements this content type (validation catches the
             # destinations we know about; this is the safety net for a
             # third-party destination and guarantees nothing is uploaded as a
@@ -350,6 +353,8 @@ class PostService:
         try:
             if content_type is ContentType.CAROUSEL:
                 result: CrossPostResult = await engine.post_manual_carousel(paths, request.caption, list(request.platforms))
+            elif content_type is ContentType.IMAGE:
+                result = await engine.post_manual_image(paths[0], request.caption, list(request.platforms))
             else:
                 result = await engine.post_manual(paths[0], request.caption, list(request.platforms))
         except Exception as exc:  # noqa: BLE001 - the caller must see the failure
