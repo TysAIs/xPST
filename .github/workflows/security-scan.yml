@@ -1,0 +1,149 @@
+name: Security scan
+
+# Dedicated supply-chain / secret gate. Deliberately separate from ci.yml so a
+# security failure is visible on its own check and can be made a required
+# status context without depending on the whole test matrix.
+#
+# NOTE (learned the hard way in this repo): do NOT put `${{ runner.* }}` or
+# `${{ steps.* }}` in a workflow- or job-level `env:` block — those contexts do
+# not exist there and GitHub silently rejects the whole file as invalid
+# (the run shows zero jobs and `gh run view --log` answers "log not found").
+# Use $RUNNER_TEMP / plain shell variables inside `run:` instead.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: Secret scan (gitleaks, else local regex scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # gitleaks scans history, not just the working tree
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Preferred scanner: the checksum-verified gitleaks release binary.
+      # The sha256 below is the upstream value from
+      # gitleaks_8.30.1_checksums.txt — it is verified before execution.
+      - name: Secret scan
+        shell: bash
+        run: |
+          set -uo pipefail
+          GITLEAKS_VERSION="8.30.1"
+          GITLEAKS_SHA256="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+          ARCHIVE="$RUNNER_TEMP/gitleaks.tar.gz"
+          URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+
+          if curl -fsSL --retry 3 --retry-all-errors --max-time 120 "$URL" -o "$ARCHIVE"; then
+            if echo "${GITLEAKS_SHA256}  ${ARCHIVE}" | sha256sum -c -; then
+              mkdir -p "$RUNNER_TEMP/gitleaks"
+              tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP/gitleaks" gitleaks
+              echo "gitleaks v${GITLEAKS_VERSION} (checksum verified)"
+              "$RUNNER_TEMP/gitleaks/gitleaks" version
+              "$RUNNER_TEMP/gitleaks/gitleaks" detect \
+                --source . \
+                --redact \
+                --no-banner \
+                --exit-code 1 \
+                --report-format sarif \
+                --report-path "$RUNNER_TEMP/gitleaks-results.sarif"
+            else
+              echo "::error::gitleaks archive failed its sha256 check — refusing to run it"
+              exit 1
+            fi
+          else
+            echo "::warning::gitleaks could not be downloaded (offline runner) — using the local regex scanner instead"
+            python scripts/scan_secrets.py --fail-on-findings
+          fi
+
+      - name: Upload gitleaks SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-sarif
+          path: ${{ runner.temp }}/gitleaks-results.sarif
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # Always run the deterministic local scanner too: it covers the token
+      # shapes specific to this project (Meta app secret, Telegram bot token,
+      # Discord webhook) and works with no network at all.
+      - name: Local secret scan (deterministic fallback, always runs)
+        run: python scripts/scan_secrets.py --fail-on-findings
+
+  python-security:
+    name: Bandit + pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install scanners (pinned)
+        run: |
+          # pip itself is audited by the pip-audit step below, so it must be a
+          # version with no open advisories: 25.2 carries 12 (PYSEC-2026-1795/96,
+          # -2875/76, -196, -3721 and duplicates). 26.2.1 audits clean.
+          python -m pip install --upgrade "pip==26.2.1"
+          python -m pip install "bandit==1.9.4" "pip-audit==2.10.1"
+
+      # -ll = report MEDIUM and above and exit non-zero if any is found;
+      # -x keeps vendored/node_modules paths out of the scan.
+      - name: Bandit (pinned 1.9.4)
+        run: |
+          bandit -r src/xpst scripts \
+            -x "*/node_modules/*,*/ui/dist/*" \
+            -ll \
+            --format json \
+            --output "$RUNNER_TEMP/bandit.json"
+
+      # pip-audit audits the INSTALLED dependency set against PyPI advisories.
+      #
+      # `--strict` is deliberately NOT used here: it fails the whole run when any
+      # dependency cannot be audited, and the local editable project (`xpst`,
+      # installed by `pip install -e .`) is not a PyPI package. Verified on CI:
+      # `--strict` fails with "xpst: Dependency not found on PyPI and could not
+      # be audited". `--skip-editable` states that skip explicitly, and the exit
+      # code is then driven by real advisories — which is the gate we want.
+      - name: pip-audit (pinned 2.10.1)
+        run: |
+          python -m pip install -e . --quiet
+          python -m pip_audit --skip-editable --progress-spinner off
+
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: ${{ runner.temp }}/bandit.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  public-safety:
+    name: Public-safety scan (committed files)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Public safety scan
+        run: python scripts/scan_public_safety.py --json

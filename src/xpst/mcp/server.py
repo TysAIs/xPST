@@ -1018,6 +1018,106 @@ def _guardrail_block(name: str, arguments: dict[str, Any]) -> CallToolResult | N
     return None
 
 
+# Argument names across every MCP tool that carry a filesystem path. A tool
+# argument is attacker-influenced: an MCP client (or an LLM reading untrusted
+# content) chooses it, so a path must be confined the same way a CLI path is.
+_PATH_ARG_NAMES = frozenset(
+    {
+        "video_path",
+        "carousel_paths",
+        "media_path",
+        "media_paths",
+        "file_path",
+        "path",
+        "output_path",
+    }
+)
+
+# Argument names that carry a URL xPST will fetch.
+# "source" is deliberately included: it is a URL for ``kb_add`` (knowledge-base
+# ingest) and a bare platform name for ``xpst_run`` — the ``://`` check in
+# ``_argument_shape_block`` skips the latter, so only real URLs are validated.
+_URL_ARG_NAMES = frozenset(
+    {
+        "url",
+        "webhook_url",
+        "callback_url",
+        "source_url",
+        "media_url",
+        "source",
+    }
+)
+
+
+def _iter_arg_values(arguments: dict[str, Any], names: frozenset[str]):
+    """Yield ``(argument_name, value)`` for string / list-of-string args."""
+    for key, value in arguments.items():
+        if key not in names:
+            continue
+        if isinstance(value, str):
+            yield key, value
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                if isinstance(item, str):
+                    yield key, item
+
+
+def _argument_shape_block(name: str, arguments: dict[str, Any]) -> CallToolResult | None:
+    """Validate path and URL arguments for EVERY tool, before dispatch.
+
+    Applied to all tools (not just mutating ones): ``xpst_post``,
+    ``xpst_run``, ``xpst_schedule_add`` and the knowledge base all take a path
+    or a URL from the caller. A rejected argument returns an ``isError`` result
+    describing which argument failed — never a traceback and never a secret.
+    """
+    import os
+
+    from xpst.utils.net_guard import BlockedURLError, validate_public_url
+    from xpst.utils.path_guard import PathConfinementError, confine_media_path
+
+    # Explicit, documented opt-out for users whose media genuinely lives outside
+    # the default roots (or who already pass XPST_MEDIA_ROOTS).
+    if os.environ.get("XPST_MCP_ALLOW_ANY_PATH", "").lower() in {"1", "true", "yes"}:
+        return None
+
+    def _reject(argument: str, reason: str) -> CallToolResult:
+        logger.warning("MCP argument refused: tool=%s argument=%s reason=%s", name, argument, reason)
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(
+                type="text",
+                text=f"Blocked: {name} argument '{argument}' was refused — {reason}. "
+                     "Media paths must live inside the xPST config dir or a user media "
+                     "folder (override with XPST_MEDIA_ROOTS); URLs must be public http(s).",
+            )],
+        )
+
+    try:
+        for argument, value in _iter_arg_values(arguments, _PATH_ARG_NAMES):
+            try:
+                confine_media_path(value, must_exist=False)
+            except PathConfinementError as exc:
+                return _reject(argument, str(exc))
+            except Exception as exc:  # noqa: BLE001 - never crash the tool call
+                return _reject(argument, f"unusable path ({type(exc).__name__})")
+
+        for argument, value in _iter_arg_values(arguments, _URL_ARG_NAMES):
+            # Only look at URL-shaped values: some tools pass a bare platform
+            # name or a knowledge-base label in a 'source'-like field.
+            if "://" not in value:
+                continue
+            try:
+                validate_public_url(value)
+            except BlockedURLError as exc:
+                return _reject(argument, str(exc))
+            except Exception as exc:  # noqa: BLE001 - never crash the tool call
+                return _reject(argument, f"unusable URL ({type(exc).__name__})")
+    except Exception as exc:  # noqa: BLE001 - validation must never break the server
+        logger.warning("MCP argument validation errored (allowing through): %s", exc)
+
+    return None
+
+
 _SETUP_TOOL_NAMES = {
     "xpst_setup_start",
     "xpst_setup_status",
@@ -1076,6 +1176,14 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         log_tool_invocation(name, arguments, "blocked_by_guardrail",
                             (_time.monotonic() - _start) * 1000, False, "guardrail_block")
         return blocked
+
+    # Validate path/URL arguments for EVERY tool (not just mutating ones) before
+    # anything touches the filesystem or the network.
+    malformed = _argument_shape_block(name, arguments)
+    if malformed is not None:
+        log_tool_invocation(name, arguments, "blocked_by_argument_validation",
+                            (_time.monotonic() - _start) * 1000, False, "argument_block")
+        return malformed
 
     engine_tools = {
         "xpst_run", "xpst_post", "xpst_health", "xpst_status", "xpst_backfill", "xpst_delete",
