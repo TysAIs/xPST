@@ -172,17 +172,38 @@ class YouTubeUploader(PlatformUploader):
         service = build("youtube", "v3", static_discovery=True, **build_kwargs)
         return service
 
-    async def upload(self, video_path: Path, caption: str) -> UploadResult:
+    async def upload(
+        self,
+        video_path: Path,
+        caption: str,
+        *,
+        visibility: str | None = None,
+    ) -> UploadResult:
         """Upload a video to YouTube Shorts.
 
         Args:
             video_path: Path to video file
             caption: Video caption (used as title + description)
+            visibility: YouTube ``privacyStatus`` — ``public`` (default),
+                ``unlisted``, or ``private``.
 
         Returns:
             UploadResult with video ID and URL
         """
         from googleapiclient.http import MediaFileUpload
+
+        target_visibility = (visibility or "public").strip().lower()
+        if target_visibility not in ("public", "unlisted", "private"):
+            logger.error("Invalid YouTube visibility %r", visibility)
+            return UploadResult(
+                success=False,
+                error=(
+                    f"Invalid YouTube visibility {visibility!r}: must be one of "
+                    "public, unlisted, private"
+                ),
+                platform="youtube",
+                retryable=False,
+            )
 
         self._validate_video(video_path)
 
@@ -212,7 +233,7 @@ class YouTubeUploader(PlatformUploader):
                     "categoryId": self.DEFAULT_CATEGORY,
                 },
                 "status": {
-                    "privacyStatus": "public",
+                    "privacyStatus": target_visibility,
                     "selfDeclaredMadeForKids": False,
                 },
             }
