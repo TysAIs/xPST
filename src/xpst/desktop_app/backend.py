@@ -2102,6 +2102,16 @@ class AppController(QObject):
             # Bandit B310: only permit http(s) schemes — never file:/ftp:/custom.
             if urlparse(url).scheme not in {"http", "https"}:
                 return ""
+            # SSRF guard: the URL can come from state/lineup data, and an
+            # http://127.0.0.1:8080/... or 169.254.169.254 target would fetch
+            # the dashboard itself or cloud metadata into a cached file.
+            from xpst.utils.net_guard import BlockedURLError, validate_public_url
+
+            try:
+                validate_public_url(url)
+            except BlockedURLError as exc:
+                logger.debug("Remote thumbnail URL refused: %s", exc)
+                return ""
             req = urllib.request.Request(url, headers={"User-Agent": "xPST/1.0 (+https://tysais.github.io/xPST/)"})
             # nosec B310: scheme validated above to http/https only.
             with urllib.request.urlopen(req, timeout=15) as resp:  # nosec B310

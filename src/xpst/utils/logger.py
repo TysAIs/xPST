@@ -19,6 +19,8 @@ import logging.handlers
 import sys
 from pathlib import Path
 
+from xpst.utils.redaction import RedactingFormatter, install_handler_redaction
+
 try:
     import structlog  # noqa: F401
     HAS_STRUCTLOG = True
@@ -96,11 +98,11 @@ def setup_logging(
         if enable_json and HAS_STRUCTLOG:
             # Use structlog for JSON output
             file_handler.setFormatter(
-                logging.Formatter("%(message)s")
+                RedactingFormatter("%(message)s")
             )
         else:
             file_handler.setFormatter(
-                logging.Formatter(
+                RedactingFormatter(
                     "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
                     datefmt="%Y-%m-%d %H:%M:%S",
                 )
@@ -108,10 +110,23 @@ def setup_logging(
 
         root_logger.addHandler(file_handler)
 
+    # Handler-level redaction is what covers records that PROPAGATE from child
+    # loggers (e.g. xpst.platforms.instagram) — logger-level filters do not run
+    # for propagated records. Together with the filter installed by get_logger
+    # this closes both directions.
+    for _handler in root_logger.handlers:
+        install_handler_redaction(_handler)
+
 
 def get_logger(name: str) -> logging.Logger:
     """
-    Get a logger instance.
+    Get a logger instance, with secret redaction attached.
+
+    Every logger handed out here carries a ``RedactionFilter`` so that a token,
+    cookie, session id or Authorization header can never reach a log file —
+    including via ``httpx``/``urllib`` exception strings that embed the full
+    request URL (which is how the Meta Graph API access token used to leak on a
+    failed upload). See :mod:`xpst.utils.redaction`.
 
     Args:
         name: Logger name (usually module path)
@@ -119,7 +134,11 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         Logger instance
     """
-    return logging.getLogger(name)
+    from xpst.utils.redaction import install_redaction_filter
+
+    logger = logging.getLogger(name)
+    install_redaction_filter(logger)
+    return logger
 
 
 def _parse_size(size_str: str) -> int:

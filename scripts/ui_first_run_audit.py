@@ -38,6 +38,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 import requests
@@ -77,8 +78,14 @@ def browser_path() -> str:
 
 def load_axe(cache: pathlib.Path) -> str | None:
     if not cache.exists() or cache.stat().st_size < 100_000:
+        # AXE_URL is a hardcoded https constant with no caller input, but pin the
+        # scheme anyway: urlretrieve would happily follow a file:/ URL if the
+        # constant were ever changed, and the download must stay network-only.
+        if urllib.parse.urlsplit(AXE_URL).scheme != "https":
+            print(f"WARN: refusing non-https axe source {AXE_URL!r}; accessibility pass skipped")
+            return None
         try:
-            urllib.request.urlretrieve(AXE_URL, cache)
+            urllib.request.urlretrieve(AXE_URL, cache)  # nosec B310 - scheme pinned to https above
         except Exception as exc:  # noqa: BLE001 - a11y is best effort
             print(f"WARN: axe-core unavailable ({exc}); accessibility pass skipped")
             return None
@@ -575,7 +582,10 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=0, help="engine port (0 = spare port)")
     parser.add_argument("--cdp-port", type=int, default=9337)
     parser.add_argument("--settle", type=float, default=2.0, help="seconds to wait after each navigation")
-    parser.add_argument("--out", default="/tmp/xpst-first-run-audit/report.json")
+    parser.add_argument(
+        "--out",
+        default=str(pathlib.Path(tempfile.gettempdir()) / "xpst-first-run-audit" / "report.json"),
+    )
     args = parser.parse_args()
     return asyncio.run(audit(args))
 
