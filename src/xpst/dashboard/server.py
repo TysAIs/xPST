@@ -11,10 +11,16 @@ Endpoints:
     GET /health   — aggregated platform health check
     GET /metrics  — Prometheus text-format metrics
     GET /state    — current xPST state summary
-    GET /api/*    — web-UI JSON API (see xpst.dashboard.api; Basic-auth
-                    protected like /state — never added to the exempt set)
+    GET /api/*    — web-UI JSON API (see xpst.dashboard.api; read-only routes
+                    are Basic-auth protected when a dashboard login is
+                    configured and never require the API token)
+    POST /api/*   — mutating routes (post / connect / onboarding / preflight):
+                    ALWAYS require the xPST API token or the dashboard Basic
+                    login (see xpst.dashboard.auth) — loopback is not an
+                    authorisation boundary
     GET /bio      — public, mobile-first link-in-bio page
-    GET/POST /bio/edit — auth-protected link-in-bio editor
+    GET/POST /bio/edit — admin link-in-bio editor (Basic auth, or ?token= when
+                    no dashboard login is configured)
     POST /oauth/callback — xpst:// deep-link OAuth redirect intake (Tauri
         shell forwarding; auth-exempt like /health)
 
@@ -25,7 +31,6 @@ string index below so the Tauri shell still boots without a UI build.
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import importlib.metadata
@@ -164,11 +169,16 @@ def _ui_dist_dir() -> Path | None:
     return None
 
 
-def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
+def _create_app(config_dir: str = "~/.xpst", *, ui_token: str | None = None) -> FastAPI:
     """Create the FastAPI application with all endpoints.
 
     Args:
         config_dir: Path to xPST config directory for reading state.
+        ui_token: Optional per-launch token accepted in addition to the
+            persisted API token (``xpst ui`` hands its browser session one so
+            mutating routes work without ever writing the token to the URL of a
+            shared server). The desktop shell passes the same value through
+            ``XPST_UI_TOKEN``.
 
     Returns:
         Configured FastAPI app instance.
@@ -363,61 +373,84 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
     app.add_middleware(CSPHeaderMiddleware)
 
     username, password_hash = _load_dashboard_auth(config_dir)
-    if username and password_hash:
-        from starlette.middleware.base import BaseHTTPMiddleware
+    basic_configured = bool(username and password_hash)
 
-        class BasicAuthMiddleware(BaseHTTPMiddleware):
-            async def dispatch(self, request: Request, call_next):
-                # Skip auth for health, metrics, the public bio page, and the
-                # OAuth callback (browser redirects / the Tauri shell cannot
-                # attach Basic auth). /bio/edit stays protected (admin only).
-                if request.url.path in ("/health", "/metrics", "/bio", "/oauth/callback"):
+    # ── Auth middleware ─────────────────────────────────────────────────
+    # Reads keep their previous behaviour (Basic auth when configured, open
+    # otherwise, with the documented exempt set). Mutations ALWAYS require a
+    # credential: loopback is not an authorisation boundary, so an
+    # unauthenticated POST /api/post, /api/connect/{platform} or /api/onboarding*
+    # from any process on the machine (or any page in the user's browser) must
+    # 401. The API token is generated on first run and stored in the encrypted
+    # credential store; see xpst.dashboard.auth for the full model.
+    from starlette.middleware.base import BaseHTTPMiddleware
+
+    from xpst.dashboard.auth import (
+        MUTATING_METHODS,
+        READ_EXEMPT_PATHS,
+        TOKEN_READ_PATHS,
+        accepted_tokens,
+        basic_is_valid,
+        mutation_authorized,
+        path_is_public_mutation,
+        token_from_request,
+        token_is_valid,
+        unauthorized_response,
+    )
+
+    try:
+        api_tokens = accepted_tokens(config_dir, extra=[ui_token] if ui_token else [])
+    except Exception as exc:  # noqa: BLE001 - never leave mutations open
+        api_tokens = set()
+        logger.error("Dashboard API token unavailable (%s); mutations will 401.", exc)
+    app.state.xpst_api_tokens = api_tokens
+    app.state.xpst_dashboard_auth = (username, password_hash)
+    # uvicorn logs the raw request path; the editor form's ?token= must not
+    # reach the console/CI log.
+    from xpst.dashboard.auth import install_access_log_redaction
+
+    install_access_log_redaction()
+
+    class AuthMiddleware(BaseHTTPMiddleware):
+        """Basic auth for reads (when configured) plus a token for mutations."""
+
+        async def dispatch(self, request: Request, call_next):
+            path = request.url.path
+            if request.method.upper() in MUTATING_METHODS:
+                # Public-by-design mutations (OAuth deep-link redirect,
+                # Messenger webhook intake) carry their own validation.
+                if path_is_public_mutation(path):
                     return await call_next(request)
+                if mutation_authorized(
+                    request,
+                    accepted=api_tokens,
+                    username=username,
+                    password_hash=password_hash,
+                ):
+                    return await call_next(request)
+                return unauthorized_response(request, basic_configured=basic_configured)
 
-                auth_header = request.headers.get("Authorization", "")
-                if not auth_header.startswith("Basic "):
-                    return JSONResponse(
-                        {"detail": "Not authenticated"},
-                        status_code=401,
-                        headers={"WWW-Authenticate": 'Basic realm="xPST Dashboard"'},
-                    )
-
-                try:
-                    decoded = base64.b64decode(auth_header.split(" ", 1)[1]).decode("utf-8")
-                    user, pwd = decoded.split(":", 1)
-                except Exception:
-                    return JSONResponse(
-                        {"detail": "Invalid authentication"},
-                        status_code=401,
-                        headers={"WWW-Authenticate": 'Basic realm="xPST Dashboard"'},
-                    )
-
-                # Verify password using bcrypt
-                import bcrypt
-
-                password_ok = False
-                try:
-                    if password_hash and password_hash.startswith("$2b$"):
-                        password_ok = bcrypt.checkpw(pwd.encode(), password_hash.encode())
-                    elif password_hash:
-                        # Legacy sha256: format - verify and migrate
-                        legacy_hash = "sha256:" + hashlib.sha256(pwd.encode("utf-8")).hexdigest()
-                        if legacy_hash == password_hash:
-                            password_ok = True
-                except Exception:
-                    password_ok = False
-
-                if user != username or not password_ok:
-                    return JSONResponse(
-                        {"detail": "Invalid credentials"},
-                        status_code=401,
-                        headers={"WWW-Authenticate": 'Basic realm="xPST Dashboard"'},
-                    )
-
+            # Read-only traffic: unchanged from the pre-token behaviour, except
+            # for the admin form at /bio/edit, which requires the token when no
+            # dashboard login is configured (its save route is a mutation).
+            if path in READ_EXEMPT_PATHS:
                 return await call_next(request)
+            if basic_configured:
+                if basic_is_valid(request.headers.get("Authorization", ""), username, password_hash):
+                    return await call_next(request)
+                if path in TOKEN_READ_PATHS and token_is_valid(token_from_request(request), api_tokens):
+                    return await call_next(request)
+                return unauthorized_response(request, basic_configured=True)
+            if path in TOKEN_READ_PATHS:
+                if token_is_valid(token_from_request(request), api_tokens):
+                    return await call_next(request)
+                return unauthorized_response(request, basic_configured=False)
+            return await call_next(request)
 
-        app.add_middleware(BasicAuthMiddleware)
+    app.add_middleware(AuthMiddleware)
+    if basic_configured:
         logger.info("Dashboard auth enabled for user: %s", username)
+    logger.info("Mutating routes require the API token (%d credential(s) accepted).", len(api_tokens))
 
     _setup_messenger_webhook(app, config_dir)
     _setup_bio_routes(app, config_dir)
@@ -439,6 +472,31 @@ def _create_app(config_dir: str = "~/.xpst") -> FastAPI:
 def bio_url(host: str = "127.0.0.1", port: int = 8080) -> str:
     """Return the public URL of the link-in-bio page."""
     return f"http://{host}:{port}/bio"
+
+
+def bio_edit_url(host: str = "127.0.0.1", port: int = 8080, token: str | None = None) -> str:
+    """Return the link-in-bio editor URL, carrying the API token when given.
+
+    The editor form is a plain HTML form: when no dashboard login is configured
+    the only way it can authenticate is a token in the query string, so the URL
+    handed to a human (``xpst bio``) includes it. Anyone who can run the CLI as
+    this user already has the credential.
+    """
+    base = f"http://{host}:{port}/bio/edit"
+    if not token:
+        return base
+    return f"{base}?token={urllib.parse.quote(token, safe='')}"
+
+
+def _bio_edit_redirect(request: Request, *, saved: bool) -> str:
+    """Return the post-save redirect target, preserving a query-string token."""
+    params = []
+    token = (request.query_params.get("token") or "").strip()
+    if token:
+        params.append(f"token={urllib.parse.quote(token, safe='')}")
+    if saved:
+        params.append("saved=1")
+    return "/bio/edit" + (f"?{'&'.join(params)}" if params else "")
 
 
 def _setup_bio_routes(app: FastAPI, config_dir: str) -> None:
@@ -470,13 +528,21 @@ def _setup_bio_routes(app: FastAPI, config_dir: str) -> None:
             )
 
     @app.get("/bio/edit", name="bio_edit_form", include_in_schema=False, response_model=None)
-    def bio_edit_form() -> HTMLResponse:
-        """Serve the auth-protected link-in-bio editor form."""
+    def bio_edit_form(request: Request) -> HTMLResponse:
+        """Serve the auth-protected link-in-bio editor form.
+
+        When the caller authenticated with the API token in the query string
+        (the browser path used when no dashboard login is configured) the token
+        is threaded through the form action and the post-save redirect, because
+        a plain HTML form cannot carry a request header.
+        """
+        query_token = (request.query_params.get("token") or "").strip()
+        action = "/bio/edit" + (f"?token={urllib.parse.quote(query_token, safe='')}" if query_token else "")
         try:
             from xpst.dashboard.bio import render_bio_edit_page
 
             config = _load_config()
-            return HTMLResponse(render_bio_edit_page(config))
+            return HTMLResponse(render_bio_edit_page(config, form_action=action))
         except Exception as exc:
             logger.warning("Bio edit form render failed: %s", exc)
             return HTMLResponse(
@@ -510,8 +576,8 @@ def _setup_bio_routes(app: FastAPI, config_dir: str) -> None:
             config.save()
         except Exception as exc:
             logger.warning("Bio save failed: %s", exc)
-            return RedirectResponse("/bio/edit", status_code=303)
-        return RedirectResponse("/bio/edit?saved=1", status_code=303)
+            return RedirectResponse(_bio_edit_redirect(request, saved=False), status_code=303)
+        return RedirectResponse(_bio_edit_redirect(request, saved=True), status_code=303)
 
 
 def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
@@ -643,6 +709,7 @@ def start_dashboard(
     port: int = 8080,
     host: str = "127.0.0.1",
     config_dir: str = "~/.xpst",
+    ui_token: str | None = None,
 ) -> None:
     """Start the xPST dashboard API server.
 
@@ -660,6 +727,9 @@ def start_dashboard(
             dashboard on the network; a warning is logged when doing so
             without configured authentication.
         config_dir: Path to xPST config directory for reading state.
+        ui_token: Optional per-launch token accepted in addition to the
+            persisted API token (the desktop shell's ``XPST_UI_TOKEN`` is
+            picked up automatically; this argument covers direct callers).
     """
     logger.info("Starting xPST API Dashboard on http://%s:%d", host, port)
 
@@ -668,15 +738,31 @@ def start_dashboard(
         if not (username and password_hash):
             logger.warning(
                 "Dashboard is binding to a non-loopback address (%s) without "
-                "authentication configured. The state, analytics, and history "
-                "endpoints are exposed to the network without credentials. Set "
-                "dashboard_username and dashboard_password_hash in your config, "
+                "authentication configured. Read-only endpoints are exposed to "
+                "the network without credentials. Mutating endpoints always "
+                "require the API token. Set dashboard_username and "
+                "dashboard_password_hash in your config to also protect reads, "
                 "or bind to 127.0.0.1.",
                 host,
             )
 
-    app = _create_app(config_dir)
+    app = _create_app(config_dir, ui_token=ui_token)
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+def ui_url(base_url: str, ui_token: str | None = None) -> str:
+    """Return the web-UI URL, optionally carrying a token in the fragment.
+
+    The token goes in the URL *fragment* for two reasons: a fragment is never
+    sent to the server (so it cannot reach an access log, unlike ``?token=``),
+    and the SPA strips it from the address bar as soon as it boots. This is the
+    only place the token is handed to a browser session; nothing is ever
+    embedded in a served page.
+    """
+    base = base_url.rstrip("/")
+    if not ui_token:
+        return base + "/"
+    return f"{base}/#xpst_token={urllib.parse.quote(ui_token, safe='')}"
 
 
 def serve_ui(
@@ -685,6 +771,7 @@ def serve_ui(
     config_dir: str = "~/.xpst",
     open_browser: bool = True,
     on_started: Callable[[str], None] | None = None,
+    ui_token: str | None = None,
 ) -> None:
     """Start the local web UI: dashboard server + optional default-browser launch.
 
@@ -705,19 +792,30 @@ def serve_ui(
         on_started: Optional callback invoked with the UI URL after the
             server has bound its socket and is accepting connections. It is
             used to print the machine-readable readiness line (URL + PID)
-            for scripts/MCP and is never invoked if startup fails.
+            for scripts/MCP and is never invoked if startup fails. The URL it
+            receives carries no token (mutating-route clients use
+            ``xpst auth api-token``); the browser is opened separately with a
+            per-launch fragment token.
+        ui_token: Optional per-launch token for the browser session. A fresh
+            one is minted when omitted.
     """
     import threading
     import webbrowser
 
-    app = _create_app(config_dir)
+    from xpst.dashboard.auth import generate_token
+
+    ui_token = ui_token or generate_token()
+    app = _create_app(config_dir, ui_token=ui_token)
+    # Readiness/log URL: unchanged shape (scripts and the Tauri smoke harness
+    # parse it) and never carrying the token. Only the browser gets the
+    # tokenised fragment URL.
     url = f"http://{host}:{port}"
 
     if open_browser:
 
         def _open_browser() -> None:
             try:
-                webbrowser.open(url)
+                webbrowser.open(ui_url(url, ui_token))
             except Exception as exc:
                 logger.warning("Failed to open browser at %s: %s", url, exc)
 

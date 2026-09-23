@@ -479,14 +479,23 @@ class FakeProviderTransport(FakeProvider):
     platform = "faithful"
 
 
+# The router's mutating routes carry the dashboard auth guard
+# (``Depends(require_api_token)``), so the API client authenticates exactly like
+# a desktop client: with the dashboard API token. Without one the start/cancel
+# calls must 401 — there is no anonymous path that writes a credential.
+API_TOKEN = "test-in-app-signin-token"
+API_HEADERS = {"X-API-Token": API_TOKEN}
+
+
 def _api_client(config_dir, manager, monkeypatch):
     """App with ONLY the /api router, wired to a fake-provider manager."""
     from xpst.dashboard.api import create_api_router
 
+    monkeypatch.setenv("XPST_API_TOKEN", API_TOKEN)
     monkeypatch.setattr(auth_flow, "get_auth_flow_manager", lambda key="default": manager)
     app = FastAPI()
     app.include_router(create_api_router(str(config_dir)))
-    return TestClient(app)
+    return TestClient(app, headers=API_HEADERS)
 
 
 @pytest.fixture()
@@ -538,6 +547,29 @@ def test_api_unknown_platform_is_404_and_unknown_session_is_404(api_env):
     assert client.post("/api/auth/signin/nope/cancel", json={}).status_code == 404
 
 
+def test_api_signin_mutations_need_the_dashboard_token(tmp_path, monkeypatch):
+    """Starting or cancelling a sign-in is a mutation: no token, no session.
+
+    Main's fail-closed dashboard guard survives the merge — the in-app Sign in
+    control must not become the one anonymous route that writes a credential.
+    """
+    from xpst.dashboard.api import create_api_router
+
+    provider = FakeProviderTransport()
+    manager, _p, _urls, _now = make_manager(provider)
+    monkeypatch.delenv("XPST_API_TOKEN", raising=False)
+    monkeypatch.delenv("XPST_UI_TOKEN", raising=False)
+    monkeypatch.setattr(auth_flow, "get_auth_flow_manager", lambda key="default": manager)
+
+    app = FastAPI()
+    app.include_router(create_api_router(str(tmp_path)))
+    anonymous = TestClient(app)
+
+    assert anonymous.post("/api/auth/signin/faithful", json={}).status_code == 401
+    assert anonymous.post("/api/auth/signin/some-session/cancel", json={}).status_code == 401
+    assert provider.exchanges == []
+
+
 def test_api_reports_unavailable_platforms_with_the_reason(tmp_path, monkeypatch):
     """Instagram/Threads/X must refuse in-app with the honest blocker, not a fake consent page."""
     manager = AuthFlowManager(providers=default_providers(), opener=lambda url: (True, "Brave Browser"))
@@ -567,7 +599,10 @@ def test_deep_link_callback_route_reaches_the_waiting_session(tmp_path, monkeypa
     cfg_dir.mkdir()
     (cfg_dir / "config.yaml").write_text("version: 4\naccounts: {}\n", encoding="utf-8")
 
-    client = TestClient(_create_app(str(cfg_dir)))
+    app = _create_app(str(cfg_dir))
+    # ``_create_app`` mints/loads the dashboard API token; the mutating sign-in
+    # routes require it, so this client carries the same header the UI sends.
+    client = TestClient(app, headers={"X-API-Token": sorted(app.state.xpst_api_tokens)[0]})
     started = client.post("/api/auth/signin/faithful", json={}).json()
     state = manager._sessions[started["session_id"]].state_value
 

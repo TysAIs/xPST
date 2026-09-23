@@ -42,7 +42,10 @@ async def test_readiness_returns_stable_report_without_engine_start(tmp_path: Pa
 
     assert not result.isError
     payload = server.json.loads(result.content[0].text)
-    assert payload["ok"] is True
+    # `ok` must mirror the readiness verdict instead of being a constant: an
+    # agent that read ok=True while readiness.ready was False reported a setup
+    # that cannot post as ready.
+    assert payload["ok"] is payload["readiness"]["ready"]
     assert payload["contract_version"] == 1
     assert isinstance(payload["readiness"]["ready"], bool)
     assert "checks" in payload["readiness"]

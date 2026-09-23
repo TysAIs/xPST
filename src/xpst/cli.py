@@ -23,6 +23,7 @@ import json as _json
 import os
 import shutil
 import sys
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
@@ -440,14 +441,33 @@ def run(ctx: click.Context, source: str, bidirectional: bool, dry_run: bool, as_
         ctx.exit(1)
         return
 
+    # Connectivity is reported (never assumed): on a host with no network the
+    # source fetch cannot work and no upload can succeed, and a bare
+    # "username not configured" is a misleading explanation.
+    from xpst.utils.net import check_network
+
+    network = check_network()
+    if not network.online and not quiet:
+        console.print(
+            f"[bold red]xPST is offline:[/bold red] {network.detail}"
+        )
+        if not dry_run:
+            console.print(
+                "[dim]Nothing will be posted during this run. Local state is "
+                "readable; retry once connectivity returns.[/dim]"
+            )
+
     try:
-        _run_check_and_post(engine, source, bidirectional, dry_run, as_json, quiet)
+        _run_check_and_post(
+            engine, source, bidirectional, dry_run, as_json, quiet, network=network
+        )
     finally:
         # Always release so a one-shot `run` never leaves a stale pidfile.
         engine.release_pidfile()
 
 
-def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool, as_json: bool, quiet: bool) -> None:
+def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool, as_json: bool, quiet: bool,
+                        network: Any = None) -> None:
     """Execute a single check-and-post cycle.
 
     Extracted from the ``run`` command so the pidfile guard in ``run`` can
@@ -458,12 +478,14 @@ def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool,
     if source == "all":
         bidirectional = True
 
+    network_payload = network.to_dict() if network is not None else None
+
     if dry_run:
         if bidirectional:
             monitor = engine._get_monitor()
             new_posts = asyncio.run(monitor.check_all_sources(5))
             if as_json:
-                json_output({"dry_run": True, "posts": [{"source": p.source_platform, "video_id": p.video_id, "caption": p.caption[:50], "targets": list(p.target_platforms)} for p in new_posts]}, True)
+                json_output({"dry_run": True, "network": network_payload, "posts": [{"source": p.source_platform, "video_id": p.video_id, "caption": p.caption[:50], "targets": list(p.target_platforms)} for p in new_posts]}, True)
             elif new_posts:
                 if not quiet:
                     console.print("[bold blue]Dry run — would cross-post:[/bold blue]")
@@ -476,7 +498,7 @@ def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool,
             videos = asyncio.run(engine.source_service.fetch_new_videos(source, 5))
             new_videos = engine.source_service.filter_new(videos, engine.state, engine._platforms) if videos else []
             if as_json:
-                json_output({"dry_run": True, "videos": [{"video_id": v.video_id, "caption": v.caption[:50], "targets": list(engine._platforms.keys())} for v in new_videos]}, True)
+                json_output({"dry_run": True, "network": network_payload, "videos": [{"video_id": v.video_id, "caption": v.caption[:50], "targets": list(engine._platforms.keys())} for v in new_videos]}, True)
             elif new_videos:
                 if not quiet:
                     console.print("[bold blue]Dry run — would post:[/bold blue]")
@@ -497,15 +519,16 @@ def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool,
         results = asyncio.run(engine.check_and_post(source=source))
 
     if not results:
+        status = "offline_no_network" if (network_payload and not network_payload["online"]) else "no_new_videos"
         if as_json:
-            json_output({"status": "no_new_videos", "results": []}, True)
+            json_output({"status": status, "network": network_payload, "results": []}, True)
         elif not quiet:
             console.print("[green]No new videos to post[/green]")
         return
 
     if as_json:
         out = [_result_to_dict(r) for r in results]
-        json_output({"status": "ok", "results": out}, True)
+        json_output({"status": "ok", "network": network_payload, "results": out}, True)
     else:
         for result in results:
             _display_result(result)
@@ -586,6 +609,121 @@ def watch(ctx: click.Context, interval: int | None, source: str, bidirectional: 
                 _time.sleep(60)
     finally:
         engine.release_pidfile()
+
+
+# ── Post exit status: a failed post must not read as success ────────────────
+# ``xpst post`` reports the outcome twice: the JSON payload is the detailed
+# report, the exit status is the verdict. Shell scripts and agents branch on
+# the verdict (`xpst post … && echo ok`), so a post where nothing was published
+# must not exit 0. One rule, documented in docs/TUTORIAL_CLI.md:
+#
+#   0   at least one attempted destination published — a partial success is a
+#       success — or every destination was already posted (idempotent no-op)
+#   4   every attempted destination failed for quota / rate-limit reasons
+#   3   every attempted destination failed to authenticate
+#   10  no destination was attempted at all, or every attempted destination is
+#       unavailable or refused the media (e.g. THREADS_NEEDS_URL)
+#   1   every attempted destination failed for any other reason, including a
+#       mix of reasons
+#
+# The families below match the provider error codes the uploaders emit as
+# "CODE: message" plus their plain-language variants. Order matters: quota is
+# checked before auth, because "quota exceeded" never means re-authenticate.
+_POST_RATE_MARKERS = (
+    "QUOTA_EXHAUSTED",
+    "RATE_LIMITED",
+    "RATE_LIMIT",
+    "TOO MANY REQUESTS",
+    "429",
+)
+_POST_AUTH_MARKERS = (
+    "AUTH_EXPIRED",
+    "AUTH_FAILURE",
+    "AUTHENTICATION",
+    "SESSION_EXPIRED",
+    "INVALID_GRANT",
+    "NOT_CONFIGURED",
+    "UNAUTHORIZED",
+    "TOKEN EXPIRED",
+    "LOGIN REQUIRED",
+    "CREDENTIALS",
+    "401",
+)
+_POST_UNAVAILABLE_MARKERS = (
+    "NEEDS_URL",
+    "UNSUPPORTED",
+    "NOT SUPPORTED",
+    "UNAVAILABLE",
+    "NOT AVAILABLE",
+    "DISABLED",
+)
+
+_POST_EXIT_CODE_LABELS = {
+    EXIT_GENERAL: "post failed",
+    EXIT_AUTH_FAILURE: "authentication failed",
+    EXIT_RATE_LIMIT: "quota or rate limit reached",
+    EXIT_PLATFORM_UNAVAILABLE: "destination unavailable",
+}
+
+
+def _post_failure_exit_code(error: str | None) -> int:
+    """Map one destination's failure text to the exit-code family it belongs to."""
+
+    text = (error or "").upper()
+    for markers, code in (
+        (_POST_RATE_MARKERS, EXIT_RATE_LIMIT),
+        (_POST_AUTH_MARKERS, EXIT_AUTH_FAILURE),
+        (_POST_UNAVAILABLE_MARKERS, EXIT_PLATFORM_UNAVAILABLE),
+    ):
+        if any(marker in text for marker in markers):
+            return code
+    return EXIT_GENERAL
+
+
+def _post_failure_message(exit_code: int) -> str:
+    """One-line human summary of why a post published nothing."""
+
+    return (
+        f"nothing was published — {_POST_EXIT_CODE_LABELS.get(exit_code, 'post failed')} "
+        f"(exit code {exit_code})."
+    )
+
+
+def _post_exit_code(result: CrossPostResult, requested: list[str] | None) -> int:
+    """Exit code for one ``xpst post`` run — the single rule above.
+
+    Args:
+        result: the CrossPostResult the engine returned.
+        requested: the platform names the caller asked for, or None for
+            "all enabled platforms" (the engine then decides).
+
+    Returns:
+        The exit code the CLI should terminate with.
+    """
+
+    rows = result.results
+    if not rows:
+        # Nothing was attempted (no destination was available/enabled), so
+        # nothing was posted: a failure, not a silent success.
+        return EXIT_PLATFORM_UNAVAILABLE
+
+    attempted = [p for p, ur in rows.items() if "already_posted" not in (ur.metadata or {})]
+    if not attempted:
+        # Every destination was already posted — nothing to do, nothing failed.
+        return EXIT_SUCCESS
+    if any(rows[p].success for p in attempted):
+        # A partial success is a success; the per-platform detail is in the report.
+        return EXIT_SUCCESS
+
+    codes = {_post_failure_exit_code(rows[p].error) for p in attempted}
+
+    # A requested destination with no result row was never attempted at all
+    # (its uploader is not available) — that failed the caller too.
+    requested_norm = {name.strip().lower() for name in (requested or []) if name.strip()}
+    if requested_norm - {name.strip().lower() for name in rows}:
+        codes.add(EXIT_PLATFORM_UNAVAILABLE)
+
+    return codes.pop() if len(codes) == 1 else EXIT_GENERAL
 
 
 @main.command()
@@ -671,6 +809,9 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
         if not ur.success and "QUOTA_EXHAUSTED" in (ur.error or "")
     ]
 
+    # The verdict: one rule for every post path (see _post_exit_code above).
+    exit_code = _post_exit_code(result, platform_list)
+
     if as_json:
         out = _result_to_dict(result)
         if quota_blocked:
@@ -679,7 +820,8 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
                 "message": "Daily upload quota exhausted; no upload was attempted",
                 "platforms": quota_blocked,
             }
-            out["exit_code"] = EXIT_RATE_LIMIT
+        if exit_code != EXIT_SUCCESS:
+            out["exit_code"] = exit_code
         json_output(out, True)
     else:
         _display_result(result)
@@ -689,15 +831,15 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
                 f"{', '.join(quota_blocked)}. No upload was attempted. "
                 f"Quota resets at midnight.[/red]"
             )
+        elif exit_code != EXIT_SUCCESS and not quiet:
+            console.print(f"[red]Error:[/red] {_post_failure_message(exit_code)}")
 
-    # Exit non-zero when every target platform was quota-blocked so scripts,
-    # schedulers, and MCP callers can detect the failure instead of missing it.
-    attempted = [p for p, ur in result.results.items() if "already_posted" not in (ur.metadata or {})]
-    if attempted and all(
-        not result.results[p].success and "QUOTA_EXHAUSTED" in (result.results[p].error or "")
-        for p in attempted
-    ):
-        sys.exit(EXIT_RATE_LIMIT)
+    # Exit non-zero when nothing was published, so scripts, schedulers, and
+    # MCP/agent wrappers detect the failure instead of reading a failed post as
+    # success. A partial success still exits 0; the per-platform detail lives in
+    # the JSON payload (unchanged).
+    if exit_code != EXIT_SUCCESS:
+        sys.exit(exit_code)
 
 
 @main.command("verify-media")
@@ -757,10 +899,18 @@ def verify_media_cmd(
         media_item = platform_plan.media[0]
         checks = [Check(**check) for check in media_item.media_spec.get("checks", [])]
         known_codes = {check.name for check in checks}
+        # A hard blocker is added only when it carries a fact the spec checks do
+        # not already show. Matching on the message as well as the code matters
+        # for checks whose preflight code differs from the check name
+        # (``modality`` → ``MEDIA_MODALITY_UNSUPPORTED``): without it the same
+        # refusal was printed twice.
+        known_messages = {check.detail for check in checks}
         checks.extend(
             Check(name=issue.code, status="error", detail=issue.message)
             for issue in platform_plan.hard_blockers
-            if issue.media_path == str(media_path) and issue.code not in known_codes
+            if issue.media_path == str(media_path)
+            and issue.code not in known_codes
+            and issue.message not in known_messages
         )
         reports.append(
             MediaReport(
@@ -1111,12 +1261,33 @@ def health(ctx: click.Context, as_json: bool):
         console.print("[dim]Testing connectivity to all platforms (no uploads)...[/dim]\n")
 
     engine = CrossPostEngine(config)
-    health_data = asyncio.run(engine.check_health())
+    # Platform auth facts come from the canonical live probe that every other
+    # surface renders from (``auth status``, ``doctor``, MCP, HTTP). ``health``
+    # used to probe platforms on its own path, which let it report a different
+    # verdict than ``doctor`` for the same account on the same box; the engine
+    # is still asked for sources/quotas/state/circuit breakers.
+    from xpst.auth_status import collect_live_auth_status, platform_health_entries
+
+    health_data = asyncio.run(engine.check_health(include_platforms=False))
+    health_data["platforms"] = platform_health_entries(collect_live_auth_status(config))
     health_data["sessions"] = _session_health(config)
+    # Connectivity: without it every "not authenticated"/timeout below is
+    # ambiguous, so state the network answer explicitly and first.
+    from xpst.utils.net import check_network
+
+    network = check_network()
+    health_data["network"] = network.to_dict()
 
     if as_json:
         json_output(health_data, True)
         return
+
+    if not network.online:
+        console.print(
+            f"[bold red]⚠️  OFFLINE:[/bold red] {network.detail}\n"
+            "[dim]xPST is running from local state; every platform check "
+            "below is limited until connectivity returns.[/dim]\n"
+        )
 
     # ── Stored sessions (G53: expired sessions fail silently otherwise) ──
     console.print("[bold]Stored Sessions:[/bold]")
@@ -1761,6 +1932,7 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     """
     from xpst.connect import test_connections
     from xpst.utils.errors import describe_remediation
+    from xpst.utils.probe_errors import PROBE_INVALID_CREDENTIALS, PROBE_UNVERIFIED
 
     config = load_config(ctx.obj.get("config_path"))
 
@@ -1805,11 +1977,29 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
         canonical_info = canonical.get(p, {})
         connected = bool(canonical_info.get("authenticated", ok))
         disabled = canonical_info.get("state") == "disabled" and canonical_results is not None
+        probe_class = canonical_info.get("probe_class")
+        probe_error = canonical_info.get("probe_error")
         if connected or disabled:
             problem = None
             fix = None
+        elif creds_present and probe_class == PROBE_UNVERIFIED:
+            # The probe failed without proving the credential is dead (network
+            # error, challenge, anti-bot redirect). Report that honestly and ask
+            # for a retry — "token expired, re-run connect" would send the user
+            # into a credential re-entry for a failure that may clear on its own.
+            problem = (
+                "Live check could not verify this account — the probe failed "
+                "without proving the credential is dead: "
+                f"{probe_error or 'unclassified probe failure'}"
+            )
+            fix = f"Retry: xpst health (only run `xpst connect {p}` if it keeps failing)"
         elif creds_present:
-            problem = "Credentials found but the health check failed — token may be expired or revoked."
+            problem = (
+                "Credentials found but the health check failed — the provider "
+                f"rejected them: {probe_error}"
+                if probe_class == PROBE_INVALID_CREDENTIALS and probe_error
+                else "Credentials found but the health check failed — token may be expired or revoked."
+            )
             fix = describe_remediation(p, "token expired") or f"xpst connect {p}"
         else:
             problem = "Not connected."
@@ -1824,6 +2014,9 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
                 "auth_mode", getattr(getattr(config, p, None), "auth_mode", None)
             ),
             "session_age_days": session.get("age_days"),
+            "probe_class": probe_class,
+            "probe_error": probe_error,
+            "probe_retryable": canonical_info.get("probe_retryable"),
             "problem": problem,
             "fix": fix,
             "quota": {
@@ -1848,19 +2041,58 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
             })
 
     # 3. Environment prerequisites.
-    ffmpeg_path = os.environ.get("XPST_FFMPEG_PATH") or shutil.which("ffmpeg")
+    # Route through resolve_*_path so the check agrees with what the engine
+    # actually uses: XPST_*_PATH override > system install > the copy xPST
+    # fetched on first use (~/.xpst/bin). A bare `shutil.which` reported
+    # "not found" for GUI-launched apps whose minimal PATH misses
+    # /opt/homebrew/bin and for the fetched build.
+    from xpst.utils.net import check_network
+    from xpst.utils.platform import (
+        resolve_ffmpeg_path,
+        resolve_ffprobe_path,
+        resolve_ytdlp_path,
+    )
+
+    ffmpeg_path = resolve_ffmpeg_path()
+    ffprobe_path = resolve_ffprobe_path()
+    ytdlp_path = resolve_ytdlp_path()
+    network = check_network()
     environment: list[dict[str, Any]] = [
         {
             "name": "ffmpeg",
             "ok": bool(ffmpeg_path),
-            "detail": ffmpeg_path or "not found on PATH (set XPST_FFMPEG_PATH)",
-            "fix": None if ffmpeg_path else "Install ffmpeg (e.g. `brew install ffmpeg`) or set XPST_FFMPEG_PATH.",
+            "detail": ffmpeg_path or "not found (xPST can download a verified static build)",
+            "fix": None if ffmpeg_path else "Run `xpst media fetch`, install ffmpeg (e.g. `brew install ffmpeg`), or set XPST_FFMPEG_PATH.",
+        },
+        {
+            "name": "ffprobe",
+            "ok": bool(ffprobe_path),
+            "detail": ffprobe_path or "not found (xPST can download a verified static build)",
+            "fix": None if ffprobe_path else "Run `xpst media fetch`, install ffmpeg (e.g. `brew install ffmpeg`), or set XPST_FFPROBE_PATH.",
         },
         {
             "name": "yt-dlp",
-            "ok": bool(shutil.which("yt-dlp")),
-            "detail": shutil.which("yt-dlp") or "not found on PATH",
-            "fix": None if shutil.which("yt-dlp") else "Install yt-dlp (e.g. `brew install yt-dlp` or `pipx install yt-dlp`).",
+            "ok": bool(ytdlp_path),
+            "detail": str(ytdlp_path) if ytdlp_path else (
+                "yt-dlp not found on PATH, in XPST_YTDLP_PATH or in the bundled "
+                "media directory"
+            ),
+            "fix": None if ytdlp_path else (
+                "Install yt-dlp (e.g. `brew install yt-dlp` or "
+                "`pipx install yt-dlp`) or set XPST_YTDLP_PATH to the "
+                "yt-dlp binary."
+            ),
+        },
+        {
+            "name": "network",
+            "ok": network.online,
+            "detail": network.detail,
+            "fix": None if network.online else (
+                "Connect this machine to the internet (check Wi-Fi/VPN/"
+                "firewall/DNS). xPST can start and read local state offline, "
+                "but nothing can be downloaded or posted until connectivity "
+                "returns."
+            ),
         },
     ]
     try:
@@ -1873,7 +2105,10 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
         "name": "config dir",
         "ok": env_ok,
         "detail": str(config.config_dir),
-        "fix": None if env_ok else f"Ensure {config.config_dir} is writable.",
+        "fix": None if env_ok else (
+            f"Ensure {config.config_dir} is writable (chmod u+rwx), or set "
+            f"XPST_CONFIG_DIR to a writable directory."
+        ),
     })
     for entry in environment:
         if not entry["ok"]:
@@ -1933,9 +2168,17 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
 
 @main.command()
 @click.argument("platform", required=False)
+@click.option(
+    "--refresh",
+    "refresh",
+    is_flag=True,
+    help="Refresh due/expiring tokens first (bounded retry), then report status",
+)
+@click.option("--rotate", is_flag=True,
+              help="With `api-token`: generate a new API token, invalidating the old one")
 @json_option
 @click.pass_context
-def auth(ctx: click.Context, platform: str | None, as_json: bool):
+def auth(ctx: click.Context, platform: str | None, refresh: bool, rotate: bool, as_json: bool):
     """Authenticate with a platform or check auth status.
 
     Usage:
@@ -1944,9 +2187,14 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         xpst auth instagram   # Authenticate with Instagram
         xpst auth tiktok      # Authenticate with TikTok
         xpst auth status      # Show auth status for all platforms
+        xpst auth status --refresh   # Refresh expiring tokens, then report
     """
     if platform is None or platform == "status":
-        _show_auth_status(ctx, as_json)
+        _show_auth_status(ctx, as_json, refresh=refresh)
+        return
+
+    if platform in ("api-token", "api_token"):
+        _show_api_token(ctx, as_json, rotate=rotate)
         return
 
     valid_platforms = {"tiktok", "youtube", "x", "instagram", "threads", "messenger"}
@@ -1974,7 +2222,44 @@ def auth(ctx: click.Context, platform: str | None, as_json: bool):
         _auth_messenger(config)
 
 
-def _show_auth_status(ctx: click.Context, as_json: bool):
+def _show_api_token(ctx: click.Context, as_json: bool, *, rotate: bool = False) -> None:
+    """Print (or replace) the local dashboard API token.
+
+    Every mutating dashboard route (``POST /api/post``,
+    ``POST /api/connect/{platform}``, ``POST /api/onboarding*`` and the
+    link-in-bio form save) requires this token. Loopback is not an authorisation
+    boundary, so an unauthenticated write from any process on the machine — or
+    any page open in a browser — is refused with 401. The token is generated on
+    the first run and stored in the encrypted credential store, never in
+    ``config.yaml``.
+    """
+    from xpst.dashboard.auth import ensure_api_token, rotate_api_token
+
+    config = load_config(ctx.obj.get("config_path"))
+    config_dir = config.config_dir
+    try:
+        token = rotate_api_token(config_dir) if rotate else ensure_api_token(config_dir)
+    except Exception as exc:  # noqa: BLE001 - surface the reason, never a traceback
+        console.print(f"[red]Could not access the dashboard API token: {exc}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    if as_json:
+        json_output({"config_dir": config_dir, "api_token": token, "rotated": rotate}, True)
+        return
+
+    console.print(f"[bold blue]Dashboard API token[/bold blue] [dim]({config_dir})[/dim]")
+    click.echo(token)
+    console.print(
+        "[dim]Send it as `Authorization: Bearer <token>` or `X-API-Token: <token>` "
+        "on mutating endpoints (POST /api/post, /api/connect/<platform>, "
+        "/api/onboarding*). Read-only endpoints stay open.[/dim]"
+    )
+    if rotate:
+        console.print("[yellow]Rotated — previously issued tokens no longer work.[/yellow]")
+
+
+def _show_auth_status(ctx: click.Context, as_json: bool, refresh: bool = False):
     """Show authentication and quota status for all platforms."""
     config = load_config(ctx.obj.get("config_path"))
 
@@ -1985,18 +2270,44 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
     stored_keys = cred_store.list_keys()
     storage_type = "OS Keychain" if cred_store._use_keyring else "File Storage (fallback)"
 
+    # Optional bounded refresh BEFORE probing, so a token that is due is
+    # renewed first and the badge below tells the truth about the refreshed
+    # state. Skipped entirely when nothing is due (no network, no side effect).
+    refresh_report: dict = {}
+    if refresh:
+        from xpst.token_refresh import refresh_due_tokens, save_refresh_report
+
+        refresh_report = refresh_due_tokens(config)
+        save_refresh_report(config, refresh_report)
+        if not as_json:
+            if not refresh_report:
+                console.print("[dim]No token was due for refresh.[/dim]")
+            for name, item in refresh_report.items():
+                if item.get("ok"):
+                    console.print(f"[green]Refreshed {name} access token[/green]")
+                else:
+                    console.print(f"[red]Refresh failed for {name}: {item.get('error')}[/red]")
+
     # Live session validation — same validators `xpst health` uses (engine
     # check_health / _live_auth pattern, PRs #66/#70). Fails closed per
     # platform with an `error` detail; never prompts or opens a browser.
+    # Every entry carries a badge derived from that probe plus the
+    # `checked_at` timestamp it is based on (see xpst.token_state) — this JSON
+    # is the single source of truth the web UI/desktop/MCP render from.
     from xpst.auth_status import collect_live_auth_status
 
     live = collect_live_auth_status(config)
+
+    def _entry(plat: str) -> dict:
+        info = live.get(plat)
+        return info if isinstance(info, dict) else {}
 
     if as_json:
         data: dict = {
             "credential_storage": storage_type,
             "stored_credentials": stored_keys,
             "platforms": {},
+            "badges": {},
         }
         yt_creds = cred_store.retrieve("youtube_token")
         x_creds = cred_store.retrieve_json("x_cookies")
@@ -2026,27 +2337,72 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
                 # Live validation wins over file presence — an expired
                 # session file must not report authenticated: true.
                 entry.update(live_info)
-            else:
-                # threads/messenger: presence-only (no live validator in
-                # scope for this command).
-                entry["authenticated"] = stored
+            elif plat != "local":
+                # No live entry at all: presence is explicitly NOT proof, so
+                # derive a non-green badge rather than reporting connected.
+                from xpst.token_state import derive_token_state, token_metadata
+
+                entry["authenticated"] = False
                 entry["live_checked"] = False
+                entry.update(
+                    derive_token_state(
+                        plat,
+                        {"configured": stored, "live_checked": False},
+                        token_metadata(config, plat),
+                    )
+                )
             data["platforms"][plat] = entry
+            if entry.get("badge"):
+                data["badges"][plat] = entry["badge"]
         data["providers"] = data["platforms"]
         data["roles"] = ["source", "video_destination", "messaging", "analytics"]
+        abs_checked = [
+            float(entry["checked_at"])
+            for entry in data["platforms"].values()
+            if isinstance(entry.get("checked_at"), (int, float))
+        ]
+        data["checked_at"] = max(abs_checked) if abs_checked else None
+        if data["checked_at"] is not None:
+            from xpst.token_state import iso_timestamp
+
+            data["checked_at_iso"] = iso_timestamp(data["checked_at"])
+        if refresh:
+            data["refresh"] = refresh_report
         json_output(data, True)
         return
 
+    def _badge_cell(plat: str) -> str:
+        """Render the platform's badge (never green unless live-proven)."""
+        from xpst.token_state import BADGE_LABELS, GREEN_BADGES
+
+        info = _entry(plat)
+        badge = str(info.get("badge") or "unknown")
+        label = str(info.get("badge_label") or BADGE_LABELS.get(badge, badge))
+        color = {
+            "connected": "green",
+            "expiring": "yellow",
+            "needs_reauth": "red",
+            "source_only": "cyan",
+        }.get(badge, "dim")
+        age = info.get("check_age_seconds")
+        stamp = ""
+        if isinstance(age, (int, float)) and badge in GREEN_BADGES:
+            from xpst.token_state import humanize_seconds
+
+            stamp = f" [dim](checked {humanize_seconds(age)} ago)[/dim]"
+        return f"[{color}]{label}[/{color}]{stamp}"
+
     def _live_detail(plat: str, base: str) -> str:
-        """Append the live-check error to a table Details cell (if any)."""
-        info = live.get(plat)
-        if (
-            info
-            and info.get("live_checked")
-            and not info.get("authenticated")
-            and info.get("error")
-        ):
-            return f"{base} — {info['error']}"
+        """Append the live-check error / badge reason to a table Details cell."""
+        from xpst.token_state import GREEN_BADGES
+
+        info = _entry(plat)
+        if info.get("badge") in GREEN_BADGES:
+            return base
+        reason = info.get("badge_reason") or info.get("error")
+        if info.get("live_checked") or reason:
+            if reason:
+                return f"{base} — {reason}"
         return base
 
     console.print("[bold blue]xPST Authentication Status[/bold blue]\n")
@@ -2062,7 +2418,7 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
 
     table = Table(show_header=True, header_style="bold")
     table.add_column("Platform")
-    table.add_column("Auth")
+    table.add_column("Badge")
     table.add_column("Quota (Daily)")
     table.add_column("Remaining")
     table.add_column("Details")
@@ -2070,12 +2426,10 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
     # YouTube
     yt_creds = cred_store.retrieve("youtube_token")
     yt_file = Path(config.youtube.client_secrets).expanduser()
-    yt_live = live.get("youtube", {})
-    yt_auth = "✅" if (yt_live.get("authenticated") if yt_live.get("live_checked") else (yt_creds or yt_file.exists())) else "❌"
     yt_quota = quota_mgr.get_remaining("youtube")
     table.add_row(
         "YouTube",
-        yt_auth,
+        _badge_cell("youtube"),
         str(quota_mgr.quotas.get("youtube", {}).daily_limit if hasattr(quota_mgr.quotas.get("youtube", {}), "daily_limit") else "N/A"),
         str(yt_quota.get("daily", "N/A")),
         _live_detail("youtube", "Keyring" if yt_creds else ("File" if yt_file.exists() else "Not configured")),
@@ -2084,12 +2438,10 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
     # X/Twitter
     x_creds = cred_store.retrieve_json("x_cookies")
     x_file = Path(config.x.cookies_file).expanduser()
-    x_live = live.get("x", {})
-    x_auth = "✅" if (x_live.get("authenticated") if x_live.get("live_checked") else (x_creds or x_file.exists())) else "❌"
     x_quota = quota_mgr.get_remaining("x")
     table.add_row(
         "X/Twitter",
-        x_auth,
+        _badge_cell("x"),
         str(quota_mgr.quotas.get("x", {}).daily_limit if hasattr(quota_mgr.quotas.get("x", {}), "daily_limit") else "N/A"),
         str(x_quota.get("daily", "N/A")),
         _live_detail("x", "Keyring" if x_creds else ("File" if x_file.exists() else "Not configured")),
@@ -2098,25 +2450,21 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
     # Instagram
     ig_creds = cred_store.retrieve_json("instagram_session")
     ig_file = Path(config.instagram.session_file).expanduser()
-    ig_live = live.get("instagram", {})
-    ig_auth = "✅" if (ig_live.get("authenticated") if ig_live.get("live_checked") else (ig_creds or ig_file.exists())) else "❌"
     ig_quota = quota_mgr.get_remaining("instagram")
     table.add_row(
         "Instagram",
-        ig_auth,
+        _badge_cell("instagram"),
         str(quota_mgr.quotas.get("instagram", {}).daily_limit if hasattr(quota_mgr.quotas.get("instagram", {}), "daily_limit") else "N/A"),
         str(ig_quota.get("daily", "N/A")),
         _live_detail("instagram", "Keyring" if ig_creds else ("File" if ig_file.exists() else "Not configured")),
     )
 
     # TikTok
-    tt_creds = cred_store.retrieve_json("tiktok_cookies")
-    tt_live = live.get("tiktok", {})
-    tt_auth = "✅" if (tt_live.get("authenticated") if tt_live.get("live_checked") else bool(tt_creds)) else "❌"
+    tt_live = _entry("tiktok")
     tt_quota = quota_mgr.get_remaining("tiktok")
     table.add_row(
         "TikTok",
-        tt_auth,
+        _badge_cell("tiktok"),
         str(quota_mgr.quotas.get("tiktok", {}).daily_limit if hasattr(quota_mgr.quotas.get("tiktok", {}), "daily_limit") else "N/A"),
         str(tt_quota.get("daily", "N/A")),
         _live_detail("tiktok", str(tt_live.get("auth_mode", "source_only"))),
@@ -2124,39 +2472,171 @@ def _show_auth_status(ctx: click.Context, as_json: bool):
 
     # Threads
     threads_creds = cred_store.retrieve("threads_access_token")
-    threads_token = bool(threads_creds or config.threads.graph_access_token)
-    threads_auth = "✅" if threads_token else "❌"
     threads_quota = quota_mgr.get_remaining("threads")
     table.add_row(
         "Threads",
-        threads_auth,
+        _badge_cell("threads"),
         str(quota_mgr.quotas.get("threads", {}).daily_limit if hasattr(quota_mgr.quotas.get("threads", {}), "daily_limit") else "N/A"),
         str(threads_quota.get("daily", "N/A")),
-        "Keyring" if threads_creds else ("Config" if config.threads.graph_access_token else "Not configured"),
+        _live_detail("threads", "Keyring" if threads_creds else ("Config" if config.threads.graph_access_token else "Not configured")),
     )
 
     # Messenger
     messenger_creds = cred_store.retrieve("messenger_page_token")
-    messenger_token = bool(messenger_creds or config.messenger.page_access_token)
-    messenger_auth = "✅" if messenger_token else "❌"
     messenger_quota = quota_mgr.get_remaining("messenger")
     messenger_detail = "Not configured"
-    if messenger_token:
+    if messenger_creds or config.messenger.page_access_token:
         messenger_detail = "Auto-reply" if config.messenger.auto_reply else "Messaging"
     table.add_row(
         "Messenger",
-        messenger_auth,
+        _badge_cell("messenger"),
         str(quota_mgr.quotas.get("messenger", {}).daily_limit if hasattr(quota_mgr.quotas.get("messenger", {}), "daily_limit") else "N/A"),
         str(messenger_quota.get("daily", "N/A")),
-        messenger_detail,
+        _live_detail("messenger", messenger_detail),
     )
 
     console.print(table)
+
+    checked = [
+        float(e["checked_at"])
+        for e in live.values()
+        if isinstance(e, dict) and isinstance(e.get("checked_at"), (int, float))
+    ]
+    if checked:
+        from xpst.token_state import humanize_seconds
+
+        age = max(0.0, time.time() - max(checked))
+        console.print(
+            f"\n[dim]Badges come from a live check taken {humanize_seconds(age)} ago. "
+            "A stored credential is never enough for a green badge — run "
+            "`xpst auth status --refresh` to renew expiring tokens.[/dim]"
+        )
 
 
 # ──────────────────────────────────────────────
 # Other Commands
 # ──────────────────────────────────────────────
+
+def _render_outcome_table(report: dict) -> None:
+    """Render the outcome report: per platform, per metric, labelled source.
+
+    A platform with no metric-bearing owned post prints "No data" rather than
+    zeros, and every populated row says whether the numbers are ``Live``
+    (fetched this run) or ``Recorded`` (last persisted snapshot).
+    """
+    table = Table(title="Platform Analytics")
+    table.add_column("Platform", style="cyan")
+    table.add_column("Posts", style="white")
+    table.add_column("Views", style="green")
+    table.add_column("Likes", style="red")
+    table.add_column("Comments", style="magenta")
+    table.add_column("Shares", style="blue")
+    table.add_column("Source", style="yellow")
+
+    totals: dict[str, int] = {}
+    counted_posts = 0
+    for platform, entry in report.get("platforms", {}).items():
+        totals_row = entry.get("totals")
+        if not entry.get("has_data") or not totals_row:
+            table.add_row(platform.title(), "—", "—", "—", "—", "—", "No data")
+            continue
+        counted_posts += int(entry.get("posts_with_metrics") or 0)
+        for key, value in totals_row.items():
+            totals[key] = totals.get(key, 0) + int(value)
+        available = set(entry.get("metrics_available") or [])
+
+        def cell(key: str, row: dict = totals_row, avail: set = available) -> str:
+            if key not in avail or row.get(key) is None:
+                return "—"
+            return f"{int(row[key]):,}"
+
+        table.add_row(
+            platform.title(),
+            str(entry.get("posts_with_metrics") or 0),
+            cell("views"),
+            cell("likes"),
+            cell("comments"),
+            cell("shares"),
+            str(entry.get("data_source_label") or "No data"),
+        )
+
+    if totals:
+        table.add_section()
+        table.add_row(
+            "[bold]TOTAL[/bold]",
+            f"[bold]{counted_posts}[/bold]",
+            f"[bold]{totals.get('views', 0):,}[/bold]",
+            f"[bold]{totals.get('likes', 0):,}[/bold]",
+            f"[bold]{totals.get('comments', 0):,}[/bold]",
+            f"[bold]{totals.get('shares', 0):,}[/bold]",
+            "[bold]Owned posts only[/bold]",
+        )
+
+    console.print(table)
+
+    excluded = (report.get("diagnostics") or {}).get("unowned_ids_excluded") or []
+    if excluded:
+        console.print(
+            f"[dim]Excluded {len(excluded)} id(s) not verified as owned by this account.[/dim]"
+        )
+
+
+@main.command("refresh-tokens")
+@click.option("--platform", "platform", default=None, help="Only this platform (default: every platform that is due)")
+@click.option("--force", is_flag=True, help="Refresh even when the token is not expired/near expiry")
+@click.option("--max-attempts", default=3, show_default=True, type=click.IntRange(1, 10), help="Bounded retry attempts per platform")
+@click.option("--deadline", default=30.0, show_default=True, type=float, help="Wall-clock seconds of retry budget per platform")
+@json_option
+@click.pass_context
+def refresh_tokens(
+    ctx: click.Context,
+    platform: str | None,
+    force: bool,
+    max_attempts: int,
+    deadline: float,
+    as_json: bool,
+):
+    """Refresh expiring/expired access tokens (bounded retry, no prompts).
+
+    Nothing happens when no token is due, so this is safe to run from cron or
+    before a scheduled post. Failures are bounded, recorded (0600) and never
+    print credential material.
+    """
+    from xpst.token_refresh import refresh_due_tokens, save_refresh_report
+
+    config = load_config(ctx.obj.get("config_path"))
+    platforms = [platform] if platform else None
+    report = refresh_due_tokens(
+        config,
+        platforms=platforms,
+        force=force,
+        max_attempts=max_attempts,
+        deadline=deadline,
+    )
+    save_refresh_report(config, report)
+
+    if as_json:
+        json_output(
+            {"refreshed": report, "attempted": sorted(report), "count": len(report)},
+            True,
+        )
+        return
+
+    if not report:
+        console.print("[dim]No token was due for refresh.[/dim]")
+        return
+    for name, item in report.items():
+        if item.get("ok"):
+            console.print(f"[green]Refreshed {name} access token[/green] ({item.get('reason')})")
+        else:
+            console.print(f"[red]Refresh failed for {name}[/red]: {item.get('error')}")
+    failed = [name for name, item in report.items() if not item.get("ok")]
+    if failed:
+        console.print(
+            f"\n[yellow]Still broken: {', '.join(failed)}. Reconnect with "
+            f"`xpst connect {failed[0]}`.[/yellow]"
+        )
+
 
 @main.group(invoke_without_command=True)
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
@@ -2219,11 +2699,11 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
     total_ids = sum(len(v) for v in post_ids.values())
     if total_ids == 0:
         if as_json:
-            click.echo(
-                _json.dumps(collector.build_report({}, requested=post_ids), indent=2)
-            )
+            report = collector.build_report({}, requested=post_ids)
+            report["outcome_report"] = collector.outcome_report()
+            click.echo(_json.dumps(report, indent=2, default=str))
         else:
-            console.print("[yellow]No posts found in state. Run `xpst run` first.[/yellow]")
+            _render_outcome_table(collector.outcome_report())
         return
 
     if not as_json:
@@ -2232,66 +2712,33 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
     # Collect analytics
     data = asyncio.run(collector.collect_all(post_ids))
 
+    # D5: the outcome report is the single source of the numbers shown here.
+    # Rows fetched by the collection above are labelled "live"; anything read
+    # from the snapshot store is labelled "recorded"; a platform with no
+    # metric-bearing owned post says "no data" instead of printing zeros.
+    outcome_report = collector.outcome_report(live_data=data)
+
     # G24: machine-readable output for agents/scripts. Phase 1.1 contract:
     # an aggregate report — per platform: as-of timestamp, metrics available
     # vs missing, and values (architecture §2.5) — never fabricated zeros.
     if as_json:
-        click.echo(_json.dumps(collector.build_report(data, requested=post_ids), indent=2, default=str))
+        report = collector.build_report(data, requested=post_ids)
+        report["outcome_report"] = outcome_report
+        click.echo(_json.dumps(report, indent=2, default=str))
         return
 
-    # Display summary table
-    table = Table(title="Platform Analytics")
-    table.add_column("Platform", style="cyan")
-    table.add_column("Posts", style="white")
-    table.add_column("Views", style="green")
-    table.add_column("Likes", style="red")
-    table.add_column("Comments", style="magenta")
-    table.add_column("Shares", style="blue")
+    _render_outcome_table(outcome_report)
 
-    totals = {"posts": 0, "views": 0, "likes": 0, "comments": 0, "shares": 0}
-    for platform, posts_data in data.items():
-        posts = len(posts_data)
-        views = sum(m.get("views", 0) for m in posts_data.values())
-        likes = sum(m.get("likes", 0) for m in posts_data.values())
-        comments = sum(m.get("comments", 0) for m in posts_data.values())
-        shares = sum(m.get("shares", 0) for m in posts_data.values())
-
-        totals["posts"] += posts
-        totals["views"] += views
-        totals["likes"] += likes
-        totals["comments"] += comments
-        totals["shares"] += shares
-
-        table.add_row(
-            platform.title(),
-            str(posts),
-            f"{views:,}",
-            f"{likes:,}",
-            f"{comments:,}",
-            f"{shares:,}",
-        )
-
-    table.add_section()
-    table.add_row(
-        "[bold]TOTAL[/bold]",
-        f"[bold]{totals['posts']}[/bold]",
-        f"[bold]{totals['views']:,}[/bold]",
-        f"[bold]{totals['likes']:,}[/bold]",
-        f"[bold]{totals['comments']:,}[/bold]",
-        f"[bold]{totals['shares']:,}[/bold]",
-    )
-
-    console.print(table)
-
-    # Top posts detail
-    all_posts = []
-    for platform, posts_data in data.items():
-        for _post_id, metrics in posts_data.items():
-            metrics["platform"] = platform
-            all_posts.append(metrics)
+    # Top posts detail: owned posts with metrics, newest capture first.
+    all_posts = [
+        {**outcome, "platform": platform}
+        for platform, entry in outcome_report["platforms"].items()
+        for outcome in entry["outcomes"]
+        if outcome.get("metrics")
+    ]
 
     if all_posts:
-        all_posts.sort(key=lambda p: p.get("views", 0), reverse=True)
+        all_posts.sort(key=lambda p: (p.get("metrics") or {}).get("views") or 0, reverse=True)
         console.print("\n[bold]Top Posts by Views:[/bold]")
         detail_table = Table(show_header=True, header_style="bold")
         detail_table.add_column("#", style="dim")
@@ -2300,15 +2747,18 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
         detail_table.add_column("Views", style="green")
         detail_table.add_column("Likes", style="red")
         detail_table.add_column("Comments", style="magenta")
+        detail_table.add_column("Source")
 
         for i, p in enumerate(all_posts[:10], 1):
+            metrics = p.get("metrics") or {}
             detail_table.add_row(
                 str(i),
                 p["platform"].title(),
                 str(p.get("post_id", ""))[:20],
-                f"{p.get('views', 0):,}",
-                f"{p.get('likes', 0):,}",
-                f"{p.get('comments', 0):,}",
+                f"{metrics.get('views'):,}" if metrics.get("views") is not None else "—",
+                f"{metrics.get('likes'):,}" if metrics.get("likes") is not None else "—",
+                f"{metrics.get('comments'):,}" if metrics.get("comments") is not None else "—",
+                "Live" if p.get("metric_source") == "live" else "Recorded",
             )
 
         console.print(detail_table)
@@ -2542,15 +2992,29 @@ def dashboard(ctx: click.Context, port: int, host: str, api_only: bool):
 @json_option
 @click.pass_context
 def bio(ctx: click.Context, port: int, host: str, as_json: bool):
-    """Print your Link-in-Bio page URL (start the dashboard with `xpst dashboard` first)"""
-    from xpst.dashboard.server import bio_url
+    """Print your Link-in-Bio page URL (start the dashboard with `xpst dashboard` first)
 
+    Also prints the admin editor URL with the dashboard API token attached: the
+    editor is a plain HTML form, so that token is what authorises its writes
+    when no dashboard username/password is configured.
+    """
+    from xpst.dashboard.auth import ensure_api_token
+    from xpst.dashboard.server import bio_edit_url, bio_url
+
+    config = load_config(ctx.obj.get("config_path"))
     url = bio_url(host=host, port=port)
+    try:
+        edit_url = bio_edit_url(host=host, port=port, token=ensure_api_token(config.config_dir))
+    except Exception as exc:  # noqa: BLE001 - the public URL is still useful
+        logger.debug("Could not read the dashboard API token: %s", exc)
+        edit_url = bio_edit_url(host=host, port=port)
+
     if as_json:
-        json_output({"url": url}, True)
+        json_output({"url": url, "edit_url": edit_url}, True)
         return
     console.print(f"[bold blue]Link-in-Bio:[/bold blue] {url}")
-    console.print("[dim]Start the dashboard with `xpst dashboard`, then share this URL.[/dim]")
+    console.print(f"[bold blue]Edit page:[/bold blue] {edit_url}")
+    console.print("[dim]Start the dashboard with `xpst dashboard`, then share the public URL.[/dim]")
 
 
 # ──────────────────────────────────────────────
@@ -3229,75 +3693,61 @@ def failures_list(ctx: click.Context, as_json: bool) -> None:
 @json_option
 @click.pass_context
 def failures_retry(ctx: click.Context, video_id: str, platform: str, as_json: bool) -> None:
-    """Retry one failed upload by re-posting its source file."""
+    """Retry one failed upload by re-posting its source file.
+
+    The verdict (target resolution, error code, whether the destination
+    accepted the post) comes from
+    :mod:`xpst.services.recovery_service`, which the MCP ``xpst_failures_retry``
+    tool calls too — the two surfaces cannot disagree about what happened.
+    """
     import asyncio as _asyncio
-    from pathlib import Path as _Path
 
     from xpst.engine import CrossPostEngine
+    from xpst.services import recovery_service
     from xpst.state import StateManager
 
     config = load_config(ctx.obj.get("config_path"))
-    sm = StateManager(config.config_dir)
-    video = sm.get_video(video_id)
-    if video is None:
-        if as_json:
-            json_output(_error_payload(
-                "VIDEO_NOT_FOUND", f"Unknown video id: {video_id}", video_id=video_id), True)
-        else:
-            console.print(f"[red]Unknown video id: {video_id}[/red]")
-        raise SystemExit(1)
-    if not video.get("errors", {}).get(platform):
-        if as_json:
-            json_output(_error_payload(
-                "NO_RECORDED_FAILURE",
-                f"{video_id} has no recorded failure on {platform}.",
-                video_id=video_id, platform=platform), True)
-        else:
-            console.print(f"[yellow]{video_id} has no recorded failure on {platform}.[/yellow]")
-        raise SystemExit(1)
 
-    # Find a local file to re-post: the original download if it survives.
-    download_dir = _Path(config.video.download_dir).expanduser()
-    candidates = sorted(download_dir.glob(f"*{video_id.split(':')[-1]}*"))
-    candidates = [p for p in candidates if p.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm"}]
-    if not candidates:
-        message = (
-            f"No local file for {video_id} in {download_dir}. "
-            "Re-run the source cycle (`xpst run`) or post manually with `xpst post`."
-        )
-        if as_json:
-            json_output(_error_payload("NO_LOCAL_FILE", message,
-                                       video_id=video_id, platform=platform), True)
-        else:
-            console.print(f"[red]No local file for {video_id} in {download_dir}.[/red] "
-                          "Re-run the source cycle (`xpst run`) or post manually with `xpst post`.")
-        raise SystemExit(1)
-
-    engine = CrossPostEngine(config)
-    if as_json:
-        click.echo(f"Retrying {video_id} on {platform}...", err=True)
-    else:
-        console.print(f"Retrying {video_id} on {platform} from {candidates[0].name}...")
-    result = _asyncio.run(
-        engine.post_manual(candidates[0], video.get("caption") or "", [platform])
+    # Resolve the target BEFORE constructing the engine: CrossPostEngine.__init__
+    # runs crash recovery and can create/rotate state files, which a retry that
+    # is going to be refused must never do.
+    plan = recovery_service.plan_failure_retry(
+        config, StateManager(config.config_dir), video_id, platform
     )
-    upload = result.results.get(platform)
-    if upload and upload.success:
-        sm.clear_dead_letter_queue(video_id)
-        sm.save()
+
+    if plan.ok:
         if as_json:
-            json_output({"ok": True, "video_id": video_id, "platform": platform,
-                         "post_url": upload.post_url or None}, True)
+            click.echo(f"Retrying {video_id} on {platform}...", err=True)
         else:
-            console.print(f"[green]Retry succeeded[/green]: {upload.post_url or 'posted'}")
+            assert plan.media_path is not None
+            console.print(f"Retrying {video_id} on {platform} from {plan.media_path.name}...")
+        engine = CrossPostEngine(config)
+        payload = _asyncio.run(recovery_service.execute_failure_retry(engine, plan))
     else:
-        error = upload.error if upload else "no result"
+        payload = plan.to_payload()
+
+    error = payload.get("error") or {}
+
+    if payload["ok"]:
         if as_json:
-            json_output(_error_payload("RETRY_FAILED", str(error or "retry failed"),
-                                       video_id=video_id, platform=platform), True)
+            json_output(payload, True)
         else:
-            console.print(f"[red]Retry failed[/red]: {error}")
-        raise SystemExit(1)
+            console.print(f"[green]Retry succeeded[/green]: {payload.get('post_url') or 'posted'}")
+        return
+
+    message = str(error.get("message") or "retry failed")
+    if as_json:
+        json_output(
+            {**payload, **_error_payload(
+                str(error.get("code") or "RETRY_FAILED"), message,
+                video_id=video_id, platform=platform)},
+            True,
+        )
+    elif payload.get("attempted"):
+        console.print(f"[red]Retry failed[/red]: {message}")
+    else:
+        console.print(f"[red]{message}[/red]")
+    raise SystemExit(1)
 
 
 @main.group()
@@ -3955,41 +4405,49 @@ def schedule_list(ctx: click.Context, as_json: bool):
 @json_option
 @click.pass_context
 def schedule_remove(ctx: click.Context, entry_id: str, dry_run: bool, as_json: bool):
-    """Remove a scheduled post by ID"""
-    from xpst.schedule_manager import ScheduleManager
+    """Remove a scheduled post by ID
 
-    manager = ScheduleManager()
+    Removal is a local schedule-store operation only — it never un-posts
+    content that has already been published. The verdict comes from
+    :mod:`xpst.services.recovery_service`, which the MCP
+    ``xpst_schedule_cancel`` tool calls too.
+    """
+    from xpst.services import recovery_service
+
+    payload = recovery_service.cancel_scheduled_post(None, entry_id, dry_run=dry_run)
+
     if dry_run:
-        entry = next((e for e in manager.list() if e.get("id") == entry_id), None)
-        plan = {
-            "dry_run": True,
-            "entry_id": entry_id,
-            "found": entry is not None,
-            "entry": entry,
-        }
         if as_json:
-            json_output(plan, True)
+            json_output(payload, True)
         else:
             if not ctx.obj.get("quiet", False):
                 console.print("[bold blue]Dry run — would remove:[/bold blue]")
+            entry = payload.get("entry")
             if entry:
-                console.print(f"  ID: [bold]{entry_id}[/bold] — {entry.get('caption', '')[:60]}")
+                console.print(
+                    f"  ID: [bold]{entry_id}[/bold] — {entry.get('caption', '')[:60]}"
+                )
             else:
                 console.print(f"  ID: [bold]{entry_id}[/bold] — [yellow]not found[/yellow]")
         return
 
-    if manager.remove(entry_id):
+    if payload["ok"]:
+        # Legacy key kept for already-shipped consumers (`removed`: entry id).
+        payload["removed"] = entry_id
         if as_json:
-            json_output({"ok": True, "removed": entry_id}, True)
+            json_output(payload, True)
         else:
             console.print(f"[green]✓ Removed scheduled post [bold]{entry_id}[/bold][/green]")
+        return
+
+    error = payload.get("error") or {}
+    message = str(error.get("message") or f"Post not found: {entry_id}")
+    if as_json:
+        json_output({**payload, **_error_payload(
+            str(error.get("code") or "POST_NOT_FOUND"), message, entry_id=entry_id)}, True)
     else:
-        if as_json:
-            json_output(_error_payload(
-                "POST_NOT_FOUND", f"Post not found: {entry_id}", entry_id=entry_id), True)
-        else:
-            console.print(f"[red]Post not found:[/red] {entry_id}")
-        sys.exit(EXIT_GENERAL)
+        console.print(f"[red]Post not found:[/red] {entry_id}")
+    sys.exit(EXIT_GENERAL)
 
 
 @schedule.command("run")
@@ -5420,6 +5878,81 @@ def search(ctx: click.Context, query: str, limit: int, as_json: bool):
             console.print(f"  • {point}{score_str}")
         if not result.get("hits"):
             console.print("[dim]No results found.[/dim]")
+
+
+@main.group()
+def media():
+    """Local media helper binaries (ffmpeg / ffprobe).
+
+    xPST no longer ships ffmpeg inside the desktop app (~87 MB of a 192 MB
+    bundle). It uses the ffmpeg already on your machine, and only downloads a
+    verified static build — once, with a checksum — when there is none.
+    """
+
+
+@media.command("status")
+@json_option
+def media_status(as_json: bool):
+    """Show which ffmpeg/ffprobe xPST will use, and where it came from.
+
+        xpst media status
+        xpst media status --json
+    """
+    from xpst.media.binaries import media_bin_dir, media_binary_status
+
+    status = media_binary_status()
+    payload = {
+        "bin_dir": str(media_bin_dir()),
+        "binaries": status,
+        "ok": all(item["ok"] for item in status.values()),
+    }
+    if as_json:
+        json_output(payload, True)
+        return
+    for name, item in status.items():
+        if item["ok"]:
+            console.print(f"[green]✓[/green] [bold]{name}[/bold] ({item['source']}): {item['path']}")
+        else:
+            console.print(f"[yellow]•[/yellow] [bold]{name}[/bold]: not found")
+    if not payload["ok"]:
+        console.print(
+            "[dim]Run [bold]xpst media fetch[/bold] to download a verified static build, "
+            "or install ffmpeg (macOS: brew install ffmpeg).[/dim]"
+        )
+
+
+@media.command("fetch")
+@click.option("--binary", "binaries", multiple=True, type=click.Choice(["ffmpeg", "ffprobe"]),
+              help="Fetch only this binary (repeatable; default: both)")
+@json_option
+def media_fetch(binaries: tuple[str, ...], as_json: bool):
+    """Download ffmpeg/ffprobe into ~/.xpst/bin (resumable, checksum-verified).
+
+    Only needed on a machine with no ffmpeg of its own. Nothing is downloaded
+    when a system ffmpeg (or XPST_FFMPEG_PATH) already resolves.
+    """
+    from xpst.media.binaries import MEDIA_BINARIES, ensure_media_binaries, media_bin_dir
+
+    names = binaries or MEDIA_BINARIES
+    report = ensure_media_binaries(names=names, fetch=True, log=lambda line: console.print(f"[dim]{line}[/dim]"))
+    failures = {name: info for name, info in report.items() if not info["ok"]}
+    payload = {
+        "bin_dir": str(media_bin_dir()),
+        "binaries": report,
+        "ok": not failures,
+    }
+    if as_json:
+        json_output(payload, True)
+        if failures:
+            sys.exit(EXIT_GENERAL)
+        return
+    for name, item in report.items():
+        if item["ok"]:
+            console.print(f"[green]✓[/green] [bold]{name}[/bold] ready: {item['path']}")
+        else:
+            console.print(f"[red]✗[/red] [bold]{name}[/bold] unavailable: {item.get('error')}")
+    if failures:
+        sys.exit(EXIT_GENERAL)
 
 
 if __name__ == "__main__":
