@@ -113,6 +113,32 @@ token + HMAC signature).
 | `GET /bio` | — | Public link-in-bio page (meant to be shared). |
 | `GET/POST /bio/edit` | Basic or `?token=` | Admin editor for the link-in-bio page. |
 
+### One readiness verdict (`/api/health-status` and `/api/onboarding`)
+
+The Home Readiness panel and the onboarding wizard must not answer the same
+question differently, so both endpoints embed the SAME `readiness` document,
+built by `xpst.readiness.build_readiness_report(config, live_status=<canonical
+probe>)`:
+
+- `roles` — one entry per ENABLED provider role (`platform`, `role`,
+  `role_label`, `state`, `ready`, `session_valid`, `live_checked`, `error`).
+  A row is identified by `(platform, role)`; a screen that prints only
+  `platform` renders three indistinguishable rows for a three-role platform.
+- `blockers` — the `roles` that are not ready (what a panel should list).
+- `verdict` — `{status, label, detail}`: the pill text and the copy. The UI
+  renders these strings; it never re-derives a verdict of its own.
+- `pending` — `true` when no live probe has answered yet. `ready` is then
+  `false` and `roles` is empty: a stored credential is never published as a
+  ready destination.
+
+`live_status` is the canonical probe output (the same mapping
+`/api/health-status.auth`, `xpst auth status` and `xpst doctor` render). With
+no live answer the states are the config-only ones and `live_checked` is
+`null`/`false` on every role, so "a credential file exists" never reads as
+"verified". `GET /api/health-status.status`/`platforms` is the *recorded*
+engine-health block only — it is not flipped by the live probe, so its pill
+always matches its own rows.
+
 ### `/health` example
 
 ```json
