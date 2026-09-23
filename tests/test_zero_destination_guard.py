@@ -19,6 +19,7 @@ import asyncio
 import json
 from typing import TYPE_CHECKING, Any
 
+import pytest
 from click.testing import CliRunner
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -42,6 +43,17 @@ if TYPE_CHECKING:
 # The canonical message is asserted by hand (not imported) so a change to the
 # wording has to be a deliberate change to this contract, not a silent edit.
 MESSAGE = "Choose at least one destination platform."
+
+# Every mutating ``/api`` route carries the dashboard auth guard, so the HTTP
+# cases below authenticate exactly like a desktop client (the token the engine
+# accepts, supplied through XPST_API_TOKEN) instead of calling anonymously.
+API_TOKEN = "test-zero-destination-token"
+API_HEADERS = {"X-API-Token": API_TOKEN}
+
+
+@pytest.fixture(autouse=True)
+def _dashboard_api_token(monkeypatch):
+    monkeypatch.setenv("XPST_API_TOKEN", API_TOKEN)
 
 _PLATFORM_NAMES = ("youtube", "x", "instagram", "tiktok", "threads")
 
@@ -215,7 +227,7 @@ def test_http_post_and_preflight_report_the_canonical_error(tmp_path: Path) -> N
     app.include_router(create_api_router(str(tmp_path)))
     media = _media(tmp_path)
 
-    with TestClient(app) as client:
+    with TestClient(app, headers=API_HEADERS) as client:
         posted = client.post("/api/post", json={"media_paths": [str(media)], "caption": "hi"})
         planned = client.post("/api/preflight", json={"media_path": str(media), "caption": "hi"})
 
@@ -245,7 +257,7 @@ def test_every_surface_refuses_with_one_identical_error(tmp_path: Path) -> None:
 
     app = FastAPI()
     app.include_router(create_api_router(str(tmp_path)))
-    with TestClient(app) as client:
+    with TestClient(app, headers=API_HEADERS) as client:
         http_error = client.post(
             "/api/preflight", json={"media_path": str(media), "caption": "hi"}
         ).json()["error"]

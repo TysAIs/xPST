@@ -24,23 +24,29 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
-from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from xpst.platforms.base import UploadOutcome
+from xpst.content import (
+    MAX_MEDIA_ITEMS,
+    UNIMPLEMENTED_PUBLISH_ERROR,
+    ContentRequest,
+    ContentType,
+    validate_content_request,
+)
+from xpst.platforms.base import UploadOutcome, UploadResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from xpst.config import XPSTConfig
     from xpst.engine import CrossPostResult
 
 logger = logging.getLogger(__name__)
 
-# Upper bound on a single manual post's media list (the CLI accepts a repeatable
-# --video for carousels; the web UI sends one).
-MAX_MEDIA_ITEMS = 10
+# The typed publish request is defined once, in xpst.content (the contract
+# module). This alias keeps `from xpst.services.post_service import PostRequest`
+# working for existing callers while there is only one type behind the name.
+PostRequest = ContentRequest
 
 # A destination that was requested but produced no upload result at all. This is
 # the truthful text the UI renders instead of a fabricated success row.
@@ -49,42 +55,19 @@ NO_RESULT_ERROR = (
     "Connect and enable the destination, then try again."
 )
 
+# A content type the engine has no publishing path for yet. Reported per
+# destination (named in the message) and never counted as a success. The
+# message itself lives in the contract module so every surface says the same
+# thing.
+UNIMPLEMENTED_CONTENT_ERROR = UNIMPLEMENTED_PUBLISH_ERROR
 
-@dataclass(frozen=True)
-class PostRequest:
-    """A manual post request as received from an API caller."""
-
-    media_paths: list[str] = field(default_factory=list)
-    caption: str = ""
-    platforms: list[str] = field(default_factory=list)
-
-    @classmethod
-    def from_payload(cls, payload: dict[str, Any] | None) -> PostRequest:
-        """Build a request from a JSON payload, normalizing types.
-
-        Unknown keys are ignored; platform names are lower-cased and deduped in
-        request order so the response rows match what the caller asked for.
-        """
-        data = payload or {}
-        raw_media = data.get("media_paths")
-        if raw_media is None:
-            single = data.get("media_path")
-            raw_media = [single] if single else []
-        if isinstance(raw_media, str):
-            raw_media = [raw_media]
-        media_paths = [str(item).strip() for item in (raw_media or []) if str(item).strip()]
-
-        seen: dict[str, None] = {}
-        for item in data.get("platforms") or []:
-            name = str(item).strip().lower()
-            if name:
-                seen.setdefault(name, None)
-
-        return cls(
-            media_paths=media_paths[:MAX_MEDIA_ITEMS],
-            caption=str(data.get("caption") or ""),
-            platforms=list(seen),
-        )
+__all__ = [
+    "MAX_MEDIA_ITEMS",
+    "NO_RESULT_ERROR",
+    "PostRequest",
+    "PostService",
+    "serialize_post_attempt",
+]
 
 
 def _upload_to_dict(upload: Any) -> dict[str, Any]:
@@ -105,10 +88,11 @@ def _upload_to_dict(upload: Any) -> dict[str, Any]:
 
 def serialize_post_attempt(
     *,
-    requested: list[str],
+    requested: Sequence[str],
     results: dict[str, Any] | None = None,
     video_id: str = "",
     caption: str = "",
+    content_type: str | None = None,
     dry_run: bool = False,
     blockers: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -119,6 +103,9 @@ def serialize_post_attempt(
         results: ``{platform: UploadResult}`` from the engine, if the post ran.
         video_id: engine-assigned id (empty for a dry run).
         caption: the caption that was sent.
+        content_type: the content type that was posted (``video``/``image``/
+            ``carousel``/``text``/``thread``), so every surface reports the same
+            modality vocabulary the request used.
         dry_run: True when nothing was uploaded. A dry run reports per
             destination ``success: None`` ("not attempted") rather than a
             failure, because no upload was attempted at all.
@@ -196,6 +183,7 @@ def serialize_post_attempt(
         "uploaded": bool(uploaded) and not dry_run,
         "video_id": video_id,
         "caption": caption,
+        "content_type": content_type,
         "requested": list(requested),
         "destinations": destinations,
         "uploaded_count": len(uploaded),
@@ -247,6 +235,15 @@ class PostService:
         if not request.media_paths:
             blockers.append("Choose a video file before posting.")
 
+        # Content-type validation against the real capability table. A
+        # media-less payload that states no content type is the existing
+        # "no file chosen" case, not a text post, so it keeps the legacy
+        # blocker alone instead of being reported as a refused text post.
+        content_issues: tuple[Any, ...] = ()
+        if request.media_paths or request.is_explicit_content_type:
+            content_issues = validate_content_request(request)
+            blockers.extend(issue.message for issue in content_issues if issue.is_error)
+
         plan: dict[str, Any] | None = None
         try:
             plan = PostPreflightService(self.config).plan(
@@ -266,6 +263,8 @@ class PostService:
             "blockers": blockers,
             "error": (plan or {}).get("error"),
             "plan": plan,
+            "content_type": request.effective_content_type.value,
+            "content_issues": [issue.to_dict() for issue in content_issues],
             "network_calls": False,
         }
 
@@ -276,6 +275,7 @@ class PostService:
             requested=request.platforms,
             results={},
             caption=request.caption,
+            content_type=request.effective_content_type.value,
             dry_run=True,
             blockers=verdict["blockers"],
         ) | {
@@ -294,6 +294,29 @@ class PostService:
 
         return CrossPostEngine(self.config)
 
+    def _unimplemented_envelope(self, request: PostRequest, content_type: ContentType) -> dict[str, Any]:
+        """Report a content type with no publishing path, per destination."""
+        results = {
+            platform: UploadResult(
+                success=False,
+                outcome=UploadOutcome.FAILED,
+                error=UNIMPLEMENTED_CONTENT_ERROR.format(platform=platform, content_type=content_type.value),
+                platform=platform,
+                retryable=False,
+            )
+            for platform in request.platforms
+        }
+        envelope = serialize_post_attempt(
+            requested=request.platforms,
+            results=results,
+            caption=request.caption,
+            content_type=content_type.value,
+            dry_run=False,
+        )
+        envelope["ready"] = True
+        envelope["blocked"] = True
+        return envelope
+
     async def execute_async(self, request: PostRequest) -> dict[str, Any]:
         """Run the real upload path and return the truthful envelope."""
         verdict = self.preflight(request)
@@ -302,6 +325,7 @@ class PostService:
                 requested=request.platforms,
                 results={},
                 caption=request.caption,
+                content_type=request.effective_content_type.value,
                 dry_run=False,
                 blockers=verdict["blockers"],
             ) | {
@@ -311,6 +335,18 @@ class PostService:
                 "error": verdict["error"],
             }
 
+        content_type = request.effective_content_type
+        paths = list(request.resolved_media)
+        if not (content_type is ContentType.VIDEO and len(paths) == 1) and not (
+            content_type is ContentType.CAROUSEL and len(paths) >= 2
+        ):
+            # No uploader implements this content type (validation catches the
+            # destinations we know about; this is the safety net for a
+            # third-party destination and guarantees nothing is uploaded as a
+            # video "just in case").
+            logger.warning("No publishing path for %s posts; refusing to upload", content_type.value)
+            return self._unimplemented_envelope(request, content_type)
+
         try:
             engine = self._build_engine()
         except Exception as exc:  # noqa: BLE001 - a dead engine is a failed post
@@ -319,24 +355,23 @@ class PostService:
                 requested=request.platforms,
                 results={},
                 caption=request.caption,
+                content_type=content_type.value,
                 dry_run=False,
                 blockers=[f"Posting engine unavailable: {str(exc)[:200]}"],
             ) | {"ready": True, "blocked": True}
 
-        paths = [Path(item).expanduser() for item in request.media_paths]
         try:
-            if len(paths) > 1:
-                result: CrossPostResult = await engine.post_manual_carousel(
-                    paths, request.caption, request.platforms
-                )
+            if content_type is ContentType.CAROUSEL:
+                result: CrossPostResult = await engine.post_manual_carousel(paths, request.caption, list(request.platforms))
             else:
-                result = await engine.post_manual(paths[0], request.caption, request.platforms)
+                result = await engine.post_manual(paths[0], request.caption, list(request.platforms))
         except Exception as exc:  # noqa: BLE001 - the caller must see the failure
             logger.error("Manual post failed before producing results: %s", exc)
             return serialize_post_attempt(
                 requested=request.platforms,
                 results={},
                 caption=request.caption,
+                content_type=content_type.value,
                 dry_run=False,
                 blockers=[f"Post failed: {str(exc)[:200]}"],
             ) | {"ready": True, "blocked": False}
@@ -346,6 +381,7 @@ class PostService:
             results=dict(getattr(result, "results", {}) or {}),
             video_id=str(getattr(result, "video_id", "") or ""),
             caption=str(getattr(result, "caption", request.caption) or ""),
+            content_type=content_type.value,
             dry_run=False,
         )
         envelope["ready"] = True

@@ -1,6 +1,6 @@
 # xPST MCP (Model Context Protocol) Tutorial
 
-> **Complete guide** to using xPST's 38 MCP tools with AI agents. Drive the entire cross-posting workflow from Claude Desktop, Cursor, or any MCP-compatible client.
+> **Complete guide** to using xPST's 40 MCP tools with AI agents. Drive the entire cross-posting workflow from Claude Desktop, Cursor, or any MCP-compatible client.
 
 ---
 
@@ -19,7 +19,7 @@
 
 ## What is MCP?
 
-The **Model Context Protocol** (MCP) is an open standard that lets AI assistants interact with external tools and data sources. xPST exposes 38 MCP tools that let any MCP-compatible AI agent:
+The **Model Context Protocol** (MCP) is an open standard that lets AI assistants interact with external tools and data sources. xPST exposes 40 MCP tools that let any MCP-compatible AI agent:
 
 - Fetch and post videos across platforms
 - Check platform health and auth status
@@ -101,7 +101,7 @@ If running from a source checkout:
 
 ## Tool Reference
 
-xPST exposes 38 MCP tools across five groups: core operations, analytics & insights, content & knowledge, configuration & scheduling, and the knowledge base. The provider registry includes posting paths for YouTube, Instagram, X/Twitter, TikTok, and Threads, but current availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-table) for the live-verified, source-only, and disabled states.
+xPST exposes 40 MCP tools across five groups: core operations, analytics & insights, content & knowledge, configuration & scheduling, and the knowledge base. The provider registry includes posting paths for YouTube, Instagram, X/Twitter, TikTok, and Threads, but current availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-table) for the live-verified, source-only, and disabled states.
 
 ### Core Operations (6 tools)
 
@@ -407,7 +407,7 @@ List all knowledge areas and their entries.
 Set `XPST_MCP_READONLY=true` to restrict the MCP server to read-only tools only:
 
 - ✅ `xpst_status`, `xpst_health`, `xpst_analytics`, `xpst_cross_post_analytics`, `xpst_followers`, `xpst_best_time`, `xpst_security_audit`, `xpst_suggest_caption`, `xpst_transcript`, `xpst_search`, `xpst_config_show`, `xpst_auth_status`, `xpst_providers`, `xpst_schedule_list`, `kb_query`, `kb_areas`
-- ❌ `xpst_run`, `xpst_post`, `xpst_delete`, `xpst_backfill`, `xpst_schedule_add`, `kb_add`, `kb_organize`
+- ❌ `xpst_run`, `xpst_post`, `xpst_delete`, `xpst_backfill`, `xpst_schedule_add`, `xpst_schedule_cancel`, `xpst_failures_retry`, `messenger_send`, `messenger_set_rules`, `xpst_messenger_check_comments`, `xpst_disconnect`, `kb_add`, `kb_organize`
 
 ### Confirmation Mode
 
@@ -419,7 +419,7 @@ The following tools are classified as **mutating** (can change state):
 
 - `xpst_run` — Posts videos
 - `xpst_post` — Posts videos
-- `xpst_delete` — Deletes posts
+- `xpst_delete` — Removes local post **records** only (the live post stays up; use the CLI `xpst delete` for platform deletion)
 - `xpst_backfill` — Retries failed posts
 - `xpst_schedule_add` — Creates schedules
 - `kb_add` — Adds to knowledge base

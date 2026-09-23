@@ -15,8 +15,15 @@ from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import urlparse
 
 from xpst.config import EncodingConfig, XPSTConfig
+from xpst.content import MediaTransport, content_profile, media_transport_blocker
 from xpst.media.pipeline import TransformPlan, plan_transform
-from xpst.media.specs import PLATFORM_SPECS, Check, MediaReport, verify_media
+from xpst.media.specs import (
+    MODALITY_CHECK,
+    PLATFORM_SPECS,
+    Check,
+    MediaReport,
+    verify_media,
+)
 from xpst.utils.quota import QuotaManager
 from xpst.utils.video import VideoProcessor
 
@@ -493,7 +500,12 @@ class PostPreflightService:
     ) -> MediaFilePlan:
         display_path = str(raw_path)
         if _is_url(display_path):
-            if platform != "threads":
+            # A URL is only usable by a destination that fetches media itself;
+            # every other uploader needs the bytes and would be handed a string
+            # it cannot open. The answer comes from the destination's declared
+            # media transport, not from a platform name spelled out here.
+            profile = content_profile(platform)
+            if profile is None or profile.media_transport is not MediaTransport.PUBLIC_URL:
                 issue = PreflightIssue(
                     "REMOTE_MEDIA_UNSUPPORTED",
                     "Only a local media path is supported for this platform.",
@@ -543,19 +555,31 @@ class PostPreflightService:
             elif check.status == "warn":
                 warnings.append(issue)
 
-        if platform == "threads":
-            blockers.append(
-                PreflightIssue(
-                    "THREADS_NEEDS_URL",
-                    "Meta Threads requires a publicly reachable video URL; local files are unavailable to the uploader.",
-                    "blocker",
-                    display_path,
+        # A destination that cannot publish this file's modality at all is
+        # already fully explained by the one modality blocker: do not stack a
+        # second, unrelated blocker on top (the user cannot act on "Threads
+        # needs a public URL" for a file Threads would refuse anyway).
+        modality_blocked = any(check.name == MODALITY_CHECK and check.status == "error" for check in report.checks)
+
+        # The media-transport verdict comes from the destination's own profile
+        # (xpst.content) — the same declaration the engine's request validation
+        # and the uploader read — so the plan can never promise a local file a
+        # destination would then refuse, and no network call is made to find out.
+        if not modality_blocked:
+            transport_issue = media_transport_blocker(platform, [display_path])
+            if transport_issue is not None:
+                blockers.append(
+                    PreflightIssue(
+                        transport_issue.code,
+                        transport_issue.message,
+                        "blocker",
+                        display_path,
+                    )
                 )
-            )
 
         duration, aspect_ratio = _probe_dimensions(report)
         transform = None
-        if request.include_transform:
+        if request.include_transform and not modality_blocked:
             transform = self._transform(path, platform, config)
 
         return MediaFilePlan(
@@ -583,6 +607,13 @@ class PostPreflightService:
             severity = "warning"
         else:
             return None
+        # The modality check carries its own plain-language, destination-naming
+        # message (specs.modality_unsupported_message) and is a capability
+        # verdict, not a spec comparison — give it a dedicated code so a client
+        # can branch on "this destination cannot take this file type" without
+        # parsing prose. It is the only media issue raised for such a file.
+        if check.name == MODALITY_CHECK:
+            return PreflightIssue("MEDIA_MODALITY_UNSUPPORTED", check.detail, "blocker", media_path)
         return PreflightIssue(code, check.detail, severity, media_path)
 
     def _transform(self, path: Path, platform: str, config: XPSTConfig) -> TransformPlan:

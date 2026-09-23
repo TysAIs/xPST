@@ -11,6 +11,7 @@ import asyncio
 import json
 from typing import TYPE_CHECKING
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -18,6 +19,16 @@ from xpst.config import XPSTConfig
 from xpst.dashboard.api import create_api_router
 from xpst.mcp.server import TOOLS, _handle_preflight
 from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+
+# The API surface of the preflight contract is a mutating route (POST), so it
+# needs the dashboard API token; MCP calls the service in-process and does not.
+API_TOKEN = "preflight-parity-token"
+API_HEADERS = {"X-API-Token": API_TOKEN}
+
+
+@pytest.fixture(autouse=True)
+def _api_token_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XPST_API_TOKEN", API_TOKEN)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -27,7 +38,7 @@ def _api_preflight(config_dir: Path, payload: dict) -> dict:
     app = FastAPI()
     app.include_router(create_api_router(str(config_dir)))
     with TestClient(app) as client:
-        response = client.post("/api/preflight", json=payload)
+        response = client.post("/api/preflight", json=payload, headers=API_HEADERS)
     assert response.status_code == 200
     return response.json()
 

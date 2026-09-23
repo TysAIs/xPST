@@ -82,6 +82,14 @@ def _engine_factory(succeed: bool):
     return factory
 
 
+# The engine refuses every mutating route without the dashboard API token, so
+# this harness authenticates like a real client: XPST_API_TOKEN is the operator
+# override the CLI/MCP path uses (the desktop shell hands its webview a
+# per-launch XPST_UI_TOKEN instead — see tests/test_dashboard_mutation_auth.py).
+E2E_API_TOKEN = "e2e-api-token"
+E2E_HEADERS = {"X-API-Token": E2E_API_TOKEN}
+
+
 def _free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -130,6 +138,7 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XPST_DISABLE_AUTH_WARM", "1")
+    monkeypatch.setenv("XPST_API_TOKEN", E2E_API_TOKEN)
     return home
 
 
@@ -185,6 +194,7 @@ def test_first_run_flow_end_to_end_publishes_and_reports_the_truth(e2e_env: dict
         saved = requests.post(
             f"{base}/api/onboarding",
             json={"local": {"path": media_dir}, "destinations": {"youtube": True}},
+            headers=E2E_HEADERS,
             timeout=10,
         ).json()
         assert saved["ok"] is True
@@ -196,7 +206,9 @@ def test_first_run_flow_end_to_end_publishes_and_reports_the_truth(e2e_env: dict
         chosen = next(item for item in media["items"] if item["name"] == "first-run.mp4")
 
         # 4. Connect: the destination is verified through the canonical probe.
-        connect = requests.post(f"{base}/api/connect/youtube", json={"dry_run": True}, timeout=20).json()
+        connect = requests.post(
+            f"{base}/api/connect/youtube", json={"dry_run": True}, headers=E2E_HEADERS, timeout=20
+        ).json()
         assert connect["connected"] is True
         assert connect["enabled"] is True
 
@@ -207,13 +219,15 @@ def test_first_run_flow_end_to_end_publishes_and_reports_the_truth(e2e_env: dict
         }
 
         # 5. Plan first (dry run): ready, nothing uploaded.
-        plan = requests.post(f"{base}/api/post", json={**post_body, "dry_run": True}, timeout=20).json()
+        plan = requests.post(
+            f"{base}/api/post", json={**post_body, "dry_run": True}, headers=E2E_HEADERS, timeout=20
+        ).json()
         assert plan["ok"] is True, plan["blockers"]
         assert plan["uploaded"] is False
         assert plan["destinations"][0]["success"] is None
 
         # 6. Post for real: the engine reports one published destination.
-        posted = requests.post(f"{base}/api/post", json=post_body, timeout=60)
+        posted = requests.post(f"{base}/api/post", json=post_body, headers=E2E_HEADERS, timeout=60)
         assert posted.status_code == 200, posted.text
         result = posted.json()
         assert result["ok"] is True
@@ -226,7 +240,7 @@ def test_first_run_flow_end_to_end_publishes_and_reports_the_truth(e2e_env: dict
         assert result["video_id"]
 
         # 7. Finish onboarding: the wizard is not offered again.
-        finished = requests.post(f"{base}/api/onboarding/complete", timeout=10).json()
+        finished = requests.post(f"{base}/api/onboarding/complete", headers=E2E_HEADERS, timeout=10).json()
         assert finished["first_run_complete"] is True
         after = requests.get(f"{base}/api/onboarding", timeout=10).json()
         assert after["show_wizard"] is False
@@ -262,6 +276,7 @@ def test_first_run_flow_reports_a_failed_upload_as_failed(e2e_env: dict[str, Any
                 "caption": "this upload will be rejected",
                 "platforms": ["youtube"],
             },
+            headers=E2E_HEADERS,
             timeout=60,
         )
 
@@ -296,6 +311,7 @@ def test_post_is_refused_before_the_engine_when_no_destination_is_configured(
         response = requests.post(
             f"{engine.base_url}/api/post",
             json={"media_paths": [str(media)], "caption": "hi", "platforms": ["youtube"]},
+            headers=E2E_HEADERS,
             timeout=30,
         )
 
@@ -306,3 +322,47 @@ def test_post_is_refused_before_the_engine_when_no_destination_is_configured(
     assert result["blockers"], "a refusal must carry the reason"
     assert result["destinations"][0]["success"] is False
     assert "nothing was uploaded" in result["destinations"][0]["error"]
+
+
+def test_mutating_routes_refuse_an_unauthenticated_desktop_request(e2e_env: dict[str, Any]) -> None:
+    """The deskop flow over real HTTP: reads stay open, writes fail closed.
+
+    This is the regression guard for the shipped hole: ``POST /api/post``,
+    ``POST /api/connect/{platform}`` and ``POST /api/onboarding*`` used to run
+    with no credential at all unless a dashboard username/password happened to
+    be configured, so any process on the machine could trigger a real post.
+    """
+    config_dir = e2e_env["config_dir"]
+
+    with RunningEngine(config_dir, succeed=True) as engine:
+        base = engine.base_url
+
+        # Read-only surface: unchanged, so the UI is never locked out.
+        assert requests.get(f"{base}/api/onboarding", timeout=10).status_code == 200
+        assert requests.get(f"{base}/api/media", timeout=10).status_code == 200
+
+        refusal = requests.post(f"{base}/api/onboarding", json={}, timeout=10)
+        assert refusal.status_code == 401, refusal.text
+        assert refusal.json()["detail"]
+
+        assert requests.post(f"{base}/api/connect/youtube", json={}, timeout=10).status_code == 401
+        assert requests.post(
+            f"{base}/api/onboarding/complete", json={}, timeout=10
+        ).status_code == 401
+        assert requests.post(
+            f"{base}/api/post",
+            json={"media_paths": [], "caption": "unauthenticated", "platforms": ["youtube"]},
+            timeout=10,
+        ).status_code == 401
+
+        # A wrong token is refused too — the check is not "any header".
+        assert requests.post(
+            f"{base}/api/onboarding",
+            json={},
+            headers={"X-API-Token": "not-the-token"},
+            timeout=10,
+        ).status_code == 401
+
+        # With the credential the very same request is accepted.
+        accepted = requests.post(f"{base}/api/onboarding", json={}, headers=E2E_HEADERS, timeout=10)
+        assert accepted.status_code == 200, accepted.text
