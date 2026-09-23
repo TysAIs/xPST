@@ -1,6 +1,6 @@
 # xPST — Cross-Posting Suite
 
-**Enterprise-grade Python CLI/desktop app for automated video cross-posting to YouTube, X, Instagram, TikTok.**
+**Enterprise-grade Python CLI/desktop app for automated video cross-posting to YouTube, X, and Instagram, with TikTok as a video source (TikTok publishing is not available yet — see docs/INSTALL.md capability truth table).**
 
 ## Quick Start
 
@@ -26,7 +26,7 @@ python -m pytest tests/        # full suite (1555 passed, 2 skipped)
 | **Config** | `src/xpst/config.py` | Pydantic settings, bcrypt dashboard auth, auto-migration v1→v4 |
 | **Desktop** | `src/xpst/desktop_app/` | PySide6/QML (8 core pages + onboarding/detail panel), splash, i18n, plugins |
 | **Dashboard** | `src/xpst/dashboard/server.py` | FastAPI + WebSocket, bcrypt auth |
-| **MCP** | `src/xpst/mcp/server.py` | 38 tools (post, health, config, state, platforms, scheduling, analytics, KB, captions, ideas, bio, transcripts, search, Messenger DM + comment auto-reply) |
+| **MCP** | `src/xpst/mcp/server.py` | 40 tools (post, health, config, state, platforms, scheduling incl. cancel, targeted failure retry, analytics, KB, captions, ideas, bio, transcripts, search, Messenger DM + comment auto-reply) |
 
 ## Key Principles
 

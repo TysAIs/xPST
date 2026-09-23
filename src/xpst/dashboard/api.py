@@ -6,13 +6,53 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 logger = logging.getLogger(__name__)
+
+
+def require_api_token(request: Request) -> None:
+    """Route-level guard: mutating ``/api`` routes fail closed.
+
+    The app-wide middleware in :mod:`xpst.dashboard.server` is the primary
+    enforcement point (it also covers non-``/api`` mutations such as
+    ``/bio/edit``). This dependency is defence in depth: it keeps the
+    protection attached to the routes themselves, so a future app assembly that
+    includes this router without the middleware still cannot execute a post,
+    a connect flow or an onboarding write anonymously.
+
+    Credentials come from the app state populated by ``_create_app`` (dashboard
+    Basic auth + API tokens). On a bare router the only accepted token is the
+    one supplied through ``XPST_API_TOKEN`` / ``XPST_UI_TOKEN`` — never a
+    default.
+    """
+    from xpst.dashboard.auth import env_tokens, mutation_authorized
+
+    accepted = getattr(request.app.state, "xpst_api_tokens", None)
+    if accepted is None:
+        accepted = env_tokens()
+    username, password_hash = getattr(request.app.state, "xpst_dashboard_auth", ("", ""))
+    if mutation_authorized(
+        request,
+        accepted=set(accepted),
+        username=username or "",
+        password_hash=password_hash or "",
+    ):
+        return
+    raise HTTPException(
+        status_code=401,
+        detail=(
+            "Mutating endpoints require the xPST API token. Run "
+            "`xpst auth api-token --show` (or set XPST_API_TOKEN) and send it as "
+            "`Authorization: Bearer <token>` or `X-API-Token: <token>`."
+        ),
+    )
+
 
 # Live auth probes hit the network (measured ~5.6s on a real machine), so the
 # Home screen must not pay that cost on every load. Entries are keyed by config
@@ -35,16 +75,92 @@ def _auth_status_ttl() -> float:
         return DEFAULT_AUTH_STATUS_TTL_S
 
 
-def _probe_and_store(config_dir: str, config: Any) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Run the live probe and store the result."""
+def _refresh_due_tokens_quietly(config: Any) -> None:
+    """Renew expiring access tokens before a live probe (bounded, secret-free).
+
+    Runs only when a token is actually due; failures are recorded (and keep the
+    badge red) rather than raised — a refresh problem must not break a status
+    read.
+    """
+    try:
+        from xpst.token_refresh import (
+            FAST_BASE_DELAY_SECONDS,
+            FAST_DEADLINE_SECONDS,
+            FAST_MAX_ATTEMPTS,
+            refresh_due_tokens,
+            save_refresh_report,
+        )
+
+        report = refresh_due_tokens(
+            config,
+            max_attempts=FAST_MAX_ATTEMPTS,
+            base_delay=FAST_BASE_DELAY_SECONDS,
+            deadline=FAST_DEADLINE_SECONDS,
+        )
+        if report:
+            save_refresh_report(config, report)
+    except Exception as exc:  # noqa: BLE001 - refresh is best-effort
+        logger.debug("Background token refresh skipped: %s", exc)
+
+
+def _probe_and_store(
+    config_dir: str, config: Any, *, refresh_tokens: bool = False
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Run the live probe and store the result.
+
+    ``refresh_tokens`` is only set on the background path: a cold request must
+    not wait on a token refresh (bounded, but still seconds of retry budget)
+    before the UI can paint.
+    """
     from xpst.auth_status import collect_live_auth_status
     from xpst.provider_truth import canonical_status_report
 
+    if refresh_tokens:
+        # Renew expiring tokens first so the badge derived below reflects a
+        # refreshed token instead of the one that was about to die.
+        _refresh_due_tokens_quietly(config)
     auth = collect_live_auth_status(config)
     canonical = canonical_status_report(config, auth)
     with _AUTH_STATUS_LOCK:
         _AUTH_STATUS_CACHE[str(config_dir)] = (time.monotonic(), auth, canonical)
     return auth, canonical
+
+
+# The outcome report verifies post ownership, which for YouTube is a real API
+# round trip (channel uploads playlist). The Analytics page must not pay that
+# on every load, so recorded-mode reports are memoized per config dir for
+# XPST_ANALYTICS_OUTCOME_TTL seconds (default 60; 0 disables caching).
+_OUTCOME_REPORT_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_OUTCOME_REPORT_LOCK = threading.Lock()
+DEFAULT_OUTCOME_TTL_S = 60.0
+
+
+def _outcome_ttl() -> float:
+    raw = os.environ.get("XPST_ANALYTICS_OUTCOME_TTL")
+    if raw is None:
+        return DEFAULT_OUTCOME_TTL_S
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_OUTCOME_TTL_S
+
+
+def _cached_outcome_report(config_dir: str) -> dict[str, Any]:
+    """Recorded-mode outcome report, memoized for a short TTL."""
+    from xpst.analytics import AnalyticsCollector
+
+    ttl = _outcome_ttl()
+    key = str(config_dir)
+    now = time.monotonic()
+    if ttl > 0:
+        with _OUTCOME_REPORT_LOCK:
+            hit = _OUTCOME_REPORT_CACHE.get(key)
+            if hit is not None and (now - hit[0]) < ttl:
+                return hit[1]
+    report = AnalyticsCollector(config_dir).outcome_report()
+    with _OUTCOME_REPORT_LOCK:
+        _OUTCOME_REPORT_CACHE[key] = (time.monotonic(), report)
+    return report
 
 
 def _refresh_in_background(config_dir: str, config: Any) -> bool:
@@ -57,7 +173,7 @@ def _refresh_in_background(config_dir: str, config: Any) -> bool:
 
     def work() -> None:
         try:
-            _probe_and_store(config_dir, config)
+            _probe_and_store(config_dir, config, refresh_tokens=True)
         except Exception as exc:  # noqa: BLE001 - a failed refresh keeps the stale value
             logger.debug("Background auth refresh failed: %s", exc)
         finally:
@@ -78,6 +194,33 @@ def warm_auth_status_cache(config_dir: str, config: Any) -> None:
 def _has_cached_auth(config_dir: str) -> bool:
     with _AUTH_STATUS_LOCK:
         return str(config_dir) in _AUTH_STATUS_CACHE
+
+
+def _badge_summary(auth: Mapping[str, Any] | None) -> dict[str, str]:
+    """``{platform: badge}`` from a live-auth mapping (never invents a badge)."""
+    summary: dict[str, str] = {}
+    if not isinstance(auth, Mapping):
+        return summary
+    for name, entry in auth.items():
+        if isinstance(entry, Mapping) and entry.get("badge"):
+            summary[str(name)] = str(entry["badge"])
+    return summary
+
+
+def _auth_checked_at(auth: Mapping[str, Any] | None) -> float | None:
+    """Newest live-check timestamp in a live-auth mapping (the badge's age)."""
+    stamps: list[float] = []
+    if isinstance(auth, Mapping):
+        for entry in auth.values():
+            if isinstance(entry, Mapping) and isinstance(entry.get("checked_at"), (int, float)):
+                stamps.append(float(entry["checked_at"]))
+    return max(stamps) if stamps else None
+
+
+def _auth_checked_at_iso(auth: Mapping[str, Any] | None) -> str | None:
+    from xpst.token_state import iso_timestamp
+
+    return iso_timestamp(_auth_checked_at(auth))
 
 
 def _auth_probe_in_flight(config_dir: str) -> bool:
@@ -255,7 +398,7 @@ def create_api_router(
         """First-run onboarding state (read-only; never creates a config file)."""
         return _onboarding_payload(_load_ui_config())
 
-    @router.post("/onboarding")
+    @router.post("/onboarding", dependencies=[Depends(require_api_token)])
     def api_onboarding_save(payload: dict[str, Any]) -> dict[str, Any]:
         """Persist the first-run choices (content folder + enabled destinations).
 
@@ -299,7 +442,7 @@ def create_api_router(
         payload_out["actions"] = actions
         return payload_out
 
-    @router.post("/onboarding/complete")
+    @router.post("/onboarding/complete", dependencies=[Depends(require_api_token)])
     def api_onboarding_complete() -> dict[str, Any]:
         """Persist ``first_run_complete`` so the wizard is offered once."""
         config = _load_ui_config()
@@ -320,8 +463,19 @@ def create_api_router(
         The folder comes from the caller or from the configured content folder.
         No folder is guessed from the user's home directory, and nothing is
         scanned recursively.
+
+        Only files that at least one destination can actually publish are
+        returned in ``items``. A file whose modality no destination accepts
+        (an image, today) is moved to ``skipped`` with the plain-language reason
+        from the canonical media spec, so the UI never offers something the
+        preflight would hard-reject and nothing is dropped without a trace.
         """
-        from xpst.sources.local import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+        from xpst.media.modality import (
+            IMAGE_EXTENSIONS,
+            VIDEO_EXTENSIONS,
+            detect_modality,
+        )
+        from xpst.media.specs import destinations_for_modality, modality_unsupported_message
 
         config = _load_ui_config()
         configured = str(getattr(getattr(config, "local", None), "path", "") or "")
@@ -335,6 +489,8 @@ def create_api_router(
                 "exists": False,
                 "items": [],
                 "count": 0,
+                "skipped": [],
+                "skipped_count": 0,
                 "hint": "No content folder is configured yet. Choose one during setup.",
             }
 
@@ -346,6 +502,8 @@ def create_api_router(
                 "exists": False,
                 "items": [],
                 "count": 0,
+                "skipped": [],
+                "skipped_count": 0,
                 "error": f"Folder not found: {path}",
             }
 
@@ -357,24 +515,142 @@ def create_api_router(
         unique = sorted(set(files), key=lambda item: item.name.lower())[:cap]
 
         items: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
         for item in unique:
             try:
                 stat = item.stat()
             except OSError:
                 continue
             suffix = item.suffix.lower()
-            items.append(
-                {
-                    "path": str(item),
-                    "name": item.name,
-                    "size_bytes": stat.st_size,
-                    "type": "video" if suffix in VIDEO_EXTENSIONS else "image",
-                    "modified": stat.st_mtime,
-                }
-            )
-        return {"ok": True, "folder": str(path), "exists": True, "items": items, "count": len(items)}
+            modality = detect_modality(item)
+            # The same capability answer the preflight uses: a modality no
+            # destination accepts is not offered, and it is never offered "with
+            # a warning" that the post path would then turn into a hard refusal.
+            # No destination list is emitted on purpose — "where can I post
+            # this" is a readiness question the canonical preflight answers
+            # (auth, quota, destination-specific limits), and guessing it here
+            # would recreate the same offer-then-refuse defect.
+            postable = bool(destinations_for_modality(modality)) if modality else False
+            entry = {
+                "path": str(item),
+                "name": item.name,
+                "size_bytes": stat.st_size,
+                "type": modality or suffix.lstrip(".") or "unknown",
+                "modified": stat.st_mtime,
+                "postable": postable,
+            }
+            if postable:
+                items.append(entry)
+            else:
+                entry["reason"] = modality_unsupported_message(
+                    modality or "unknown",
+                    suffix=suffix,
+                )
+                skipped.append(entry)
 
-    @router.post("/connect/{platform}")
+        payload: dict[str, Any] = {
+            "ok": True,
+            "folder": str(path),
+            "exists": True,
+            "items": items,
+            "count": len(items),
+            "skipped": skipped,
+            "skipped_count": len(skipped),
+        }
+        if skipped:
+            payload["hint"] = skipped[0]["reason"]
+        return payload
+
+    @router.get("/media/stream")
+    def api_media_stream(request: Request, path: str = "") -> Response:
+        """Stream one local media file to the composer's preview player.
+
+        Contract the UI depends on:
+
+        * ``Accept-Ranges: bytes`` and a real ``206 Partial Content`` answer,
+          so a video is *playable and seekable* in the webview and the client
+          pulls only the ranges it needs.
+        * The body is produced by a bounded chunk iterator (see
+          :mod:`xpst.dashboard.media_preview`), so selecting or scrubbing a 2 GB
+          video never costs the engine a full-file read.
+
+        Only real, previewable local files are served; a directory, a missing
+        path, or a non-media extension is refused before any bytes are read.
+        """
+        from xpst.dashboard.media_preview import (
+            iter_file_chunks,
+            media_content_type,
+            parse_byte_range,
+            resolve_media_path,
+        )
+
+        try:
+            resolved = resolve_media_path(path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+        try:
+            size = resolved.stat().st_size
+        except OSError as exc:
+            raise HTTPException(status_code=404, detail=f"Media file unreadable: {exc}") from None
+
+        try:
+            span = parse_byte_range(request.headers.get("range"), size)
+        except ValueError:
+            # 416 with the true size: a player asking past EOF must not be
+            # handed the whole file as a consolation prize.
+            return JSONResponse(
+                status_code=416,
+                content={"ok": False, "error": "Range not satisfiable", "size_bytes": size},
+                headers={"Accept-Ranges": "bytes", "Content-Range": f"bytes */{size}"},
+            )
+
+        start, end = span if span else (0, max(size - 1, 0))
+        length = end - start + 1 if size else 0
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(length),
+            "Cache-Control": "private, max-age=0",
+        }
+        status_code = 200
+        if span is not None:
+            status_code = 206
+            headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        return StreamingResponse(
+            iter_file_chunks(resolved, start=start, length=length),
+            status_code=status_code,
+            media_type=media_content_type(resolved),
+            headers=headers,
+        )
+
+    @router.get("/media/thumb")
+    def api_media_thumb(path: str = "", width: int = 640) -> FileResponse:
+        """Serve a generated, cached thumbnail (JPEG) for one media file.
+
+        ``ffmpeg`` extracts a single scaled frame; the result is cached under
+        ``~/.xpst/cache/previews`` keyed by path+size+mtime, so re-selecting
+        the same asset is a file read of a small JPEG, not another decode.
+
+        404 means *no thumbnail could be generated* (ffmpeg missing or the
+        decode failed) — the UI answers that by streaming the original file
+        through ``/api/media/stream``, so a preview still appears.
+        """
+        from xpst.dashboard.media_preview import resolve_media_path, thumbnail_for
+
+        try:
+            resolved = resolve_media_path(path)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+
+        thumb = thumbnail_for(resolved, width=max(64, min(int(width or 640), 1280)))
+        if thumb is None:
+            raise HTTPException(
+                status_code=404,
+                detail="No thumbnail could be generated for this file; stream the original instead.",
+            )
+        return FileResponse(thumb, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+    @router.post("/connect/{platform}", dependencies=[Depends(require_api_token)])
     def api_connect(platform: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Inspect, enable, and verify one destination platform.
 
@@ -416,7 +692,9 @@ def create_api_router(
                     config_changed = True
 
         entry: dict[str, Any] = {}
-        live_checked = False
+        # ``None`` = not probed (a disabled destination is never probed, and
+        # "not probed" must not read as "checked and failed").
+        live_checked: bool | None = None
         probe_error: str | None = None
         if verify and getattr(getattr(config, key, None), "enabled", False):
             try:
@@ -429,6 +707,7 @@ def create_api_router(
                 live_checked = bool(entry)
             except Exception as exc:  # noqa: BLE001 - an unverifiable account is not a 500
                 probe_error = str(exc)[:200]
+                live_checked = False
                 logger.debug("Connect probe failed for %s: %s", key, exc)
 
         provider = destinations[key]
@@ -436,6 +715,8 @@ def create_api_router(
         state = str(role.get("state") or provider.get("destination_state") or "unconfigured")
         authenticated = bool(entry.get("authenticated")) if entry else False
         verified_ready = state == "ready"
+        # ``live_checked`` is None for a skipped probe; None is falsy, so the
+        # connected verdict stays conservative without claiming a check ran.
         # An account can be authenticated (e.g. TikTok source cookies) while the
         # *destination* credential is still unconfigured — that is not connected
         # for posting, and claiming otherwise hides the sign-in / setup step the
@@ -461,7 +742,7 @@ def create_api_router(
             "connected": connected,
             "authenticated": authenticated,
             "state": state,
-            "verified": live_checked,
+            "verified": live_checked is True,
             "live_checked": live_checked,
             "error": probe_error or role.get("error") or provider.get("destination_error"),
             "auth_mode": entry.get("auth_mode") or provider.get("auth_mode"),
@@ -472,7 +753,7 @@ def create_api_router(
             "sign_in": _sign_in_support(key, config),
         }
 
-    @router.post("/post")
+    @router.post("/post", dependencies=[Depends(require_api_token)])
     def api_post(payload: dict[str, Any]) -> JSONResponse:
         """Run (or plan) a manual post through the canonical engine path.
 
@@ -503,6 +784,29 @@ def create_api_router(
         from xpst.dashboard.analytics import cached_summary_stats
 
         return cached_summary_stats(config_dir)
+
+    @router.get("/analytics/outcomes")
+    def api_analytics_outcomes(live: int = 0) -> dict[str, Any]:
+        """Per-post/per-platform outcomes, labelled recorded vs live.
+
+        ``live=0`` (default) reads the persisted snapshot store plus the
+        verified ownership set — no metric network calls. ``live=1`` runs a
+        real collection first (platform APIs, seconds, API quota) and labels
+        the rows it fetched as ``live``; posts whose collection failed keep
+        their recorded snapshot and stay labelled ``recorded``.
+
+        Every number traces to a post in the verified ownership set. A
+        platform with no metric-bearing owned post returns ``totals: null``
+        so the UI renders "no data" instead of a zero.
+        """
+        from xpst.analytics import AnalyticsCollector
+
+        if live:
+            import asyncio
+
+            collector = AnalyticsCollector(config_dir)
+            return asyncio.run(collector.collect_outcome_report())
+        return _cached_outcome_report(config_dir)
 
     @router.get("/videos")
     def api_videos() -> dict[str, Any]:
@@ -663,6 +967,12 @@ def create_api_router(
             "auth_cached": auth_cached,
             "auth_age_seconds": auth_age_seconds,
             "auth_stale": auth_stale,
+            # Badge truth, straight from the probe above (xpst.token_state):
+            # the UI must render `badges[platform]` and `auth_checked_at`,
+            # never a green pill derived from credential presence.
+            "badges": _badge_summary(auth),
+            "auth_checked_at": _auth_checked_at(auth),
+            "auth_checked_at_iso": _auth_checked_at_iso(auth),
             "canonical": canonical,
             "providers": canonical["providers"],
             "readiness_pending": False,
@@ -677,6 +987,42 @@ def create_api_router(
         from xpst.provider_truth import canonical_provider_catalog
 
         return canonical_provider_catalog(_load_ui_config())
+
+    @router.post("/refresh-tokens")
+    def api_refresh_tokens(force: bool = False) -> dict[str, Any]:
+        """Renew due/expiring tokens on demand (bounded retry, no secrets).
+
+        Mirrors ``xpst refresh-tokens``: a no-op when nothing is due, so the
+        UI's "Refresh accounts" action is cheap and safe to press. ``force=true``
+        renews every platform that has a refresh path, whatever its expiry.
+        Failures are reported honestly and the cached probe is invalidated so
+        the next read re-checks liveness instead of serving the old answer.
+        """
+        from xpst.token_refresh import (
+            FAST_BASE_DELAY_SECONDS,
+            FAST_DEADLINE_SECONDS,
+            FAST_MAX_ATTEMPTS,
+            refresh_due_tokens,
+            save_refresh_report,
+        )
+
+        config = _load_ui_config()
+        report = refresh_due_tokens(
+            config,
+            force=force,
+            max_attempts=FAST_MAX_ATTEMPTS,
+            base_delay=FAST_BASE_DELAY_SECONDS,
+            deadline=FAST_DEADLINE_SECONDS,
+        )
+        save_refresh_report(config, report)
+        with _AUTH_STATUS_LOCK:
+            _AUTH_STATUS_CACHE.pop(str(config_dir), None)
+        return {
+            "refreshed": report,
+            "attempted": sorted(report),
+            "count": len(report),
+            "failed": [name for name, item in report.items() if not item.get("ok")],
+        }
 
     @router.get("/schedules")
     def api_schedules() -> dict[str, Any]:
@@ -743,7 +1089,7 @@ def create_api_router(
         items.sort(key=lambda item: item.get("last_attempt") or "", reverse=True)
         return {"items": items, "count": len(items)}
 
-    @router.post("/preflight")
+    @router.post("/preflight", dependencies=[Depends(require_api_token)])
     def api_preflight(payload: dict[str, Any]) -> dict[str, Any]:
         """Run the canonical, side-effect-free post preflight.
 
@@ -840,7 +1186,7 @@ def create_api_router(
         """Live (non-terminal) sign-in sessions, newest first."""
         return {"ok": True, "sessions": _auth_flow().active(platform)}
 
-    @router.post("/auth/signin/{platform}")
+    @router.post("/auth/signin/{platform}", dependencies=[Depends(require_api_token)])
     def api_signin_start(platform: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Start the xPST-owned OAuth flow for one platform.
 
@@ -894,7 +1240,7 @@ def create_api_router(
         except SignInError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
 
-    @router.post("/auth/signin/{session_id}/cancel")
+    @router.post("/auth/signin/{session_id}/cancel", dependencies=[Depends(require_api_token)])
     def api_signin_cancel(session_id: str) -> dict[str, Any]:
         """Abandon a sign-in session — no credential is written."""
         from xpst.auth_flow import SignInError
