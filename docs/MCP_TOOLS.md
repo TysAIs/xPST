@@ -4,7 +4,7 @@ The xPST MCP server exposes local xPST workflows over stdio so AI assistants and
 
 This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). The current registry contains **40 tools: 34 `xpst_*` + 2 `messenger_*` + 4 `kb_*`**, including the canonical capability, readiness, browser-free auth plan, resumable setup tools, the failure/activity recovery tools (list + targeted retry), scheduling incl. cancel, and the canonical post preflight.
 
-xPST posts to six destinations — YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger (messaging/auto-reply) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
+xPST posts to the destinations enabled by your configuration — YouTube, Instagram, and X/Twitter are the live-verified destinations (TikTok publishing is not available yet and awaits external TikTok developer review; Threads and Messenger are opt-in integrations, currently disabled/unauthenticated — see the [INSTALL.md capability truth table](INSTALL.md#capability-truth-table)) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
 
 ## Setup
 
