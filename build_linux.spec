@@ -99,9 +99,9 @@ a = Analysis(
 )
 
 # Keep only the static discovery docs the app builds services for
-# (youtube v3, youtubeAnalytics v2); the discovery_cache package itself stays
+# (youtube v3); the discovery_cache package itself stays
 # importable — see the matching comment in build_macos.spec.
-_KEEP_DOCS = ("discovery_cache/documents/youtube.v3.json", "discovery_cache/documents/youtubeAnalytics.v2.json")
+_KEEP_DOCS = ("discovery_cache/documents/youtube.v3.json",)
 a.datas = [
     entry
     for entry in a.datas

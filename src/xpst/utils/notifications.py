@@ -311,6 +311,20 @@ class WebhookNotifier:
         if not url:
             return
 
+        # The webhook URL is user-supplied (config). Validate it as an SSRF
+        # guard before any request: a loopback or link-local target would let a
+        # crafted config reach the dashboard itself or cloud instance metadata.
+        from xpst.utils.net_guard import BlockedURLError, validate_webhook_url
+
+        try:
+            url = validate_webhook_url(url)
+        except BlockedURLError as e:
+            logger.warning(f"Discord webhook URL refused: {e}")
+            return
+        except Exception as e:  # noqa: BLE001 - never let validation break notifications
+            logger.warning(f"Discord webhook URL could not be validated: {e}")
+            return
+
         try:
             payload = notification.to_discord_embed()
             data = json.dumps(payload).encode("utf-8")

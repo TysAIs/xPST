@@ -1018,6 +1018,106 @@ def _guardrail_block(name: str, arguments: dict[str, Any]) -> CallToolResult | N
     return None
 
 
+# Argument names across every MCP tool that carry a filesystem path. A tool
+# argument is attacker-influenced: an MCP client (or an LLM reading untrusted
+# content) chooses it, so a path must be confined the same way a CLI path is.
+_PATH_ARG_NAMES = frozenset(
+    {
+        "video_path",
+        "carousel_paths",
+        "media_path",
+        "media_paths",
+        "file_path",
+        "path",
+        "output_path",
+    }
+)
+
+# Argument names that carry a URL xPST will fetch.
+# "source" is deliberately included: it is a URL for ``kb_add`` (knowledge-base
+# ingest) and a bare platform name for ``xpst_run`` — the ``://`` check in
+# ``_argument_shape_block`` skips the latter, so only real URLs are validated.
+_URL_ARG_NAMES = frozenset(
+    {
+        "url",
+        "webhook_url",
+        "callback_url",
+        "source_url",
+        "media_url",
+        "source",
+    }
+)
+
+
+def _iter_arg_values(arguments: dict[str, Any], names: frozenset[str]):
+    """Yield ``(argument_name, value)`` for string / list-of-string args."""
+    for key, value in arguments.items():
+        if key not in names:
+            continue
+        if isinstance(value, str):
+            yield key, value
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                if isinstance(item, str):
+                    yield key, item
+
+
+def _argument_shape_block(name: str, arguments: dict[str, Any]) -> CallToolResult | None:
+    """Validate path and URL arguments for EVERY tool, before dispatch.
+
+    Applied to all tools (not just mutating ones): ``xpst_post``,
+    ``xpst_run``, ``xpst_schedule_add`` and the knowledge base all take a path
+    or a URL from the caller. A rejected argument returns an ``isError`` result
+    describing which argument failed — never a traceback and never a secret.
+    """
+    import os
+
+    from xpst.utils.net_guard import BlockedURLError, validate_public_url
+    from xpst.utils.path_guard import PathConfinementError, confine_media_path
+
+    # Explicit, documented opt-out for users whose media genuinely lives outside
+    # the default roots (or who already pass XPST_MEDIA_ROOTS).
+    if os.environ.get("XPST_MCP_ALLOW_ANY_PATH", "").lower() in {"1", "true", "yes"}:
+        return None
+
+    def _reject(argument: str, reason: str) -> CallToolResult:
+        logger.warning("MCP argument refused: tool=%s argument=%s reason=%s", name, argument, reason)
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(
+                type="text",
+                text=f"Blocked: {name} argument '{argument}' was refused — {reason}. "
+                     "Media paths must live inside the xPST config dir or a user media "
+                     "folder (override with XPST_MEDIA_ROOTS); URLs must be public http(s).",
+            )],
+        )
+
+    try:
+        for argument, value in _iter_arg_values(arguments, _PATH_ARG_NAMES):
+            try:
+                confine_media_path(value, must_exist=False)
+            except PathConfinementError as exc:
+                return _reject(argument, str(exc))
+            except Exception as exc:  # noqa: BLE001 - never crash the tool call
+                return _reject(argument, f"unusable path ({type(exc).__name__})")
+
+        for argument, value in _iter_arg_values(arguments, _URL_ARG_NAMES):
+            # Only look at URL-shaped values: some tools pass a bare platform
+            # name or a knowledge-base label in a 'source'-like field.
+            if "://" not in value:
+                continue
+            try:
+                validate_public_url(value)
+            except BlockedURLError as exc:
+                return _reject(argument, str(exc))
+            except Exception as exc:  # noqa: BLE001 - never crash the tool call
+                return _reject(argument, f"unusable URL ({type(exc).__name__})")
+    except Exception as exc:  # noqa: BLE001 - validation must never break the server
+        logger.warning("MCP argument validation errored (allowing through): %s", exc)
+
+    return None
+
+
 _SETUP_TOOL_NAMES = {
     "xpst_setup_start",
     "xpst_setup_status",
@@ -1076,6 +1176,14 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         log_tool_invocation(name, arguments, "blocked_by_guardrail",
                             (_time.monotonic() - _start) * 1000, False, "guardrail_block")
         return blocked
+
+    # Validate path/URL arguments for EVERY tool (not just mutating ones) before
+    # anything touches the filesystem or the network.
+    malformed = _argument_shape_block(name, arguments)
+    if malformed is not None:
+        log_tool_invocation(name, arguments, "blocked_by_argument_validation",
+                            (_time.monotonic() - _start) * 1000, False, "argument_block")
+        return malformed
 
     engine_tools = {
         "xpst_run", "xpst_post", "xpst_health", "xpst_status", "xpst_backfill", "xpst_delete",
@@ -1181,12 +1289,62 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         )
 
 
+def _engine_uploaders(engine: Any) -> dict[str, Any] | None:
+    """The uploaders the engine actually initialised, or ``None`` for a double.
+
+    ``None`` means "not an engine with an uploader map" (a test stand-in), which
+    is deliberately distinct from ``{}`` — an empty dict is the production state
+    this guard exists for: nothing enabled, so nothing can be published.
+    """
+    platforms = getattr(engine, "_platforms", None)
+    return platforms if isinstance(platforms, dict) else None
+
+
+def _engine_can_publish(engine: Any, targets: list[str]) -> bool:
+    """True when at least one resolved destination has a live uploader."""
+    uploaders = _engine_uploaders(engine)
+    if uploaders is None:
+        return True
+    return any(name in uploaders for name in targets)
+
+
+def _no_destinations_result() -> CallToolResult:
+    """The canonical zero-destination refusal shared by every surface.
+
+    Same code and message as the CLI (``NO_DESTINATIONS`` / "Choose at least
+    one destination platform.") so an agent, a script and the desktop UI all
+    branch on one value instead of parsing three different sentences.
+    """
+    from xpst.services.post_preflight import NO_DESTINATIONS_CODE, NO_DESTINATIONS_MESSAGE
+
+    return CallToolResult(
+        isError=True,
+        content=[TextContent(
+            type="text",
+            text=json.dumps({
+                "ok": False,
+                "status": "refused",
+                "error": {"code": NO_DESTINATIONS_CODE, "message": NO_DESTINATIONS_MESSAGE},
+                "blockers": [NO_DESTINATIONS_MESSAGE],
+            }, indent=2),
+        )],
+    )
+
+
 async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallToolResult:
     """Handle xpst_run tool."""
     dry_run = args.get("dry_run", False)
     max_posts = args.get("max_posts", 5)
     source = args.get("source", "tiktok")
     catch_up = args.get("catch_up", False)
+
+    # No destination means no run: refuse before fetching anything, with the
+    # canonical error, instead of returning a payload for a cycle that could
+    # not have published to anything. An engine double with no uploader map is
+    # left alone (the caller owns that stand-in).
+    uploaders = _engine_uploaders(engine)
+    if uploaders is not None and not uploaders:
+        return _no_destinations_result()
 
     if dry_run:
         actual_max = 20 if catch_up else max_posts
@@ -1303,6 +1461,14 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
         )
 
     from pathlib import Path
+
+    from xpst.services.post_preflight import resolve_destinations
+
+    # Same canonical guard as the CLI: a manual post with no destination that
+    # has a live uploader is refused instead of reporting an empty success.
+    targets = resolve_destinations(engine.config, args.get("platforms"))
+    if not _engine_can_publish(engine, targets):
+        return _no_destinations_result()
 
     if carousel_paths:
         media_paths = [Path(args["video_path"]), *(Path(p) for p in carousel_paths)]
@@ -1938,20 +2104,6 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
     platforms = [str(item).lower() for item in (arguments.get("platforms") or []) if str(item).strip()]
     caption = str(arguments.get("caption") or "")
 
-    missing = []
-    if not platforms:
-        # An empty target list would produce an empty plan that reports "ready".
-        missing.append("platforms is required")
-    if missing:
-        payload = {
-            "ok": False,
-            "ready": False,
-            "blockers": missing,
-            "warnings": [],
-            "network_calls": False,
-        }
-        return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
-
     plan = PostPreflightService(config).plan(
         PostPlanRequest(
             media_paths=[media_path] if media_path else [],
@@ -1959,11 +2111,15 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
             base_caption=caption,
         )
     ).to_dict()
+    # The zero-destination wording and code are the canonical ones (the plan
+    # carries them), so the MCP answer, the dashboard answer and the CLI
+    # refusal are the same error.
     payload = {
         "ok": plan["ok"],
         "ready": plan["ready"],
         "blockers": [issue["message"] for issue in plan["hard_blockers"]],
         "warnings": [issue["message"] for issue in plan["warnings"]],
+        "error": plan["error"],
         "plan": plan,
         "network_calls": False,
     }

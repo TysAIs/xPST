@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -179,8 +180,132 @@ def test_tauri_workflow_gates_the_app_and_installer_size_budget() -> None:
     assert "Verify app/installer size budget" in workflow
     assert "du -sm \"$APP_PATH\"" in workflow
     assert 'INSTALLER=$(find src-tauri/target -path "$PATTERN" -print -quit)' in workflow
+
     assert "APP_BUDGET_MB=130" in workflow
     assert "over the ${APP_BUDGET_MB}MB budget" in workflow
     assert "must be resolved at runtime" in workflow
     assert "engine sidecar missing from the app bundle" in workflow
     assert "::error::installer ${SIZE_MB}MB exceeds the ${INSTALLER_BUDGET_MB}MB budget" in workflow
+
+
+def _workflow_jobs() -> dict:
+    import yaml
+
+    return yaml.safe_load((ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8"))["jobs"]
+
+
+def test_tauri_workflow_publishes_one_asserted_release_asset_set() -> None:
+    """One job owns the release, and the published asset set is asserted first.
+
+    Three lanes racing to create the same GitHub release killed a tag build with
+    `Creating new GitHub release ... 500 / Too many retries` (dryrun-tauri-1), so
+    the lanes upload artifacts and a single publish job collects, asserts,
+    checksums and publishes them.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
+    jobs = _workflow_jobs()
+
+    assert "publish-release" in jobs
+    publish = jobs["publish-release"]
+    assert publish["needs"] == ["build-tauri"]
+    assert publish.get("if") == "startsWith(github.ref, 'refs/tags/')"
+
+    build_lane = workflow.split("publish-release:", 1)[0]
+    assert "action-gh-release" not in build_lane, "a build lane still creates the release itself"
+    assert "fail_on_unmatched_files: true" in workflow
+    assert "would publish no" in workflow, "no platform-coverage assertion before publishing"
+    assert "upload-artifact@v4" in build_lane and "download-artifact@v4" in workflow
+    assert "SHA256SUMS" in workflow
+
+
+def test_tauri_workflow_marks_a_documented_dry_run_tag_as_a_draft() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
+    assert "dryrun-tauri-*" in workflow
+    assert "draft: ${{ !startsWith(github.ref_name, 'v') }}" in workflow
+    # A path filter on the tag trigger would be dead config: GitHub does not
+    # evaluate path filters for tag pushes, so the lane must not carry one.
+    import yaml
+
+    triggers = yaml.safe_load((ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8"))[True]
+    assert "paths" not in triggers["push"]
+    assert triggers["push"]["tags"] == ["v*.*.*", "dryrun-tauri-*"]
+
+
+def test_release_asset_assertion_runs_and_gates(tmp_path: Path) -> None:
+    """The publish job's assertion step is executed, not just grepped for.
+
+    A tag that resolves no installer for a claimed platform must fail before
+    anything is published.
+    """
+    if sys.platform == "win32":
+        import pytest
+
+        pytest.skip("the publish job runs on Linux; the step is a bash script")
+
+    step = None
+    for candidate in _workflow_jobs()["publish-release"]["steps"]:
+        if candidate.get("id") == "assets":
+            step = candidate["run"]
+    assert step, "publish-release has no asset-resolution step"
+
+    def run(artifacts: dict[str, str]) -> subprocess.CompletedProcess:
+        (tmp_path / "release-artifacts").mkdir(exist_ok=True)
+        for name, body in artifacts.items():
+            path = tmp_path / "release-artifacts" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+        out = tmp_path / "github_output"
+        out.write_text("", encoding="utf-8")
+        script = tmp_path / "step.sh"
+        script.write_text(step, encoding="utf-8")
+        return subprocess.run(
+            ["bash", str(script)],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin:/usr/local/bin", "GITHUB_REF_NAME": "dryrun-tauri-1", "GITHUB_OUTPUT": str(out)},
+            timeout=120,
+        )
+
+    complete = {
+        "mac/dmg/xPST_1.1.0_aarch64.dmg": "dmg",
+        "mac/dmg/media-binaries-PROVENANCE-aarch64-apple-darwin.txt": "prov",
+        "win/nsis/xPST_1.1.0_x64-setup.exe": "exe",
+        "linux/appimage/xPST_1.1.0_amd64.AppImage": "appimage",
+    }
+    proc = run(complete)
+    assert proc.returncode == 0, proc.stderr
+    assert "SHA256SUMS" in (tmp_path / "github_output").read_text(encoding="utf-8")
+    assert (tmp_path / "release-artifacts" / "SHA256SUMS").is_file()
+
+    shutil.rmtree(tmp_path / "release-artifacts")
+    proc = run({k: v for k, v in complete.items() if not k.startswith("linux")})
+    assert proc.returncode == 1
+    assert "would publish no Linux installer" in proc.stdout
+
+
+def test_release_asset_assertion_requires_the_provenance_record(tmp_path: Path) -> None:
+    if sys.platform == "win32":
+        import pytest
+
+        pytest.skip("the publish job runs on Linux; the step is a bash script")
+
+    jobs = _workflow_jobs()
+    step = [s for s in jobs["publish-release"]["steps"] if s.get("id") == "assets"][0]["run"]
+    (tmp_path / "release-artifacts").mkdir()
+    for name in ("xPST_1.1.0_aarch64.dmg", "xPST_1.1.0_x64-setup.exe", "xPST_1.1.0_amd64.AppImage"):
+        (tmp_path / "release-artifacts" / name).write_text("x", encoding="utf-8")
+    script = tmp_path / "step.sh"
+    script.write_text(step, encoding="utf-8")
+    out = tmp_path / "github_output"
+    out.write_text("", encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", str(script)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin:/usr/local/bin", "GITHUB_REF_NAME": "v1.1.1", "GITHUB_OUTPUT": str(out)},
+        timeout=120,
+    )
+    assert proc.returncode == 1
+    assert "would publish no media binary provenance record" in proc.stdout

@@ -505,7 +505,7 @@ def http_get(url: str, timeout: float = 2.0) -> tuple[int | None, bytes, str | N
     """GET a loopback URL and retain HTTP status even for error responses."""
     request = urllib.request.Request(url, headers={"User-Agent": "xPST-stranger-install-e2e"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 - URL is a loopback probe built by this script
             return response.status, response.read(2 * 1024 * 1024), None
     except urllib.error.HTTPError as exc:
         try:
@@ -892,7 +892,7 @@ def github_api_json(url: str) -> Any:
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - loopback probe built by this script
             return json.loads(response.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as exc:
         raise E2EError(f"GitHub API returned HTTP {exc.code} for {url}") from exc

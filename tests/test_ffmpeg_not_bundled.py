@@ -54,7 +54,13 @@ def test_fetch_script_only_fetches_ytdlp() -> None:
 
     assert "binaries/ffmpeg" not in script
     assert "evermeet" not in script and "osxexperts" not in script
-    assert "yt-dlp/releases" in script
+    # The script's download urls now live in the pinned lock it reads, and every
+    # locked row must be a yt-dlp release asset (no artifact the lane dropped).
+    assert "media-binaries.lock" in script, "the script no longer reads the pinned lock"
+    lock = (REPO_ROOT / "scripts" / "media-binaries.lock").read_text(encoding="utf-8")
+    rows = [line for line in lock.splitlines() if line.strip() and not line.strip().startswith("#")]
+    assert rows, "the lock file has no pinned rows"
+    assert all("yt-dlp/releases/download/" in row for row in rows), "a non-yt-dlp artifact is pinned again"
 
 
 def test_release_lane_asserts_the_app_size_budget() -> None:
