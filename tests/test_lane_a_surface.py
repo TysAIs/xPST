@@ -120,8 +120,20 @@ class TestMcpSurface:
 
         result = await _handle_analytics(config, {})
         payload = json.loads(result.content[0].text)
-        assert set(payload) == {"live", "snapshot_count", "platforms", "posts"}
+        assert set(payload) == {"live", "snapshot_count", "platforms", "posts", "outcome_report"}
         assert payload["live"] is False
+        # D5: the labelled report is the authoritative view for agents — every
+        # platform says where its numbers came from, and an empty platform
+        # reports totals=None rather than a zero.
+        report = payload["outcome_report"]
+        assert report["live"] is False
+        assert set(report["platforms"]) >= {"youtube", "x", "instagram", "tiktok", "threads"}
+        for entry in report["platforms"].values():
+            assert entry["data_source_label"] in (
+                "No data", "Recorded", "Recorded (stale)", "Live (fetched now)",
+            )
+            if not entry["has_data"]:
+                assert entry["totals"] is None
 
     @pytest.mark.asyncio
     async def test_config_show_masks_monitoring_secrets(self, monkeypatch):

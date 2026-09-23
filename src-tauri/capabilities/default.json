@@ -1,12 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability: core window/webview + updater + deep-link permissions",
+  "description": "Default capability: core window/webview + updater + deep-link permissions, plus the composer's native file picker (dialog:default) for the main window.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:default",
     "updater:default",
-    "deep-link:default"
-  ]
+    "deep-link:default",
+    "dialog:default"
+  ],
+  "remote": {
+    "urls": ["http://127.0.0.1:*"]
+  }
 }

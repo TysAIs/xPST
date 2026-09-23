@@ -110,6 +110,12 @@ Page {
         if (!status.connected) {
             if (status.circuitBreakerOpen) return "Connection issue — click to retry"
             if (!status.enabled) return "Disabled"
+            // Say WHY it is not connected, from the badge derivation.
+            var badge = status.badge || "unknown"
+            if (badge === "source_only") return "Source only — no posting access"
+            if (badge === "expiring") return "Expiring soon — will refresh automatically"
+            if (badge === "unknown") return "Not verified — no live check yet"
+            if (badge === "needs_reauth") return status.badgeReason ? ("Needs re-auth — " + status.badgeReason) : "Needs re-auth"
             return "Not connected"
         }
         if (status.lastSuccess) {
@@ -199,16 +205,40 @@ Page {
         var key = platformName.toLowerCase()
         if (key === "x") key = "x"
         var info = healthData[key]
-        if (!info) return { status: "unknown", connected: false, enabled: true }
+        if (!info) return { status: "unknown", connected: false, enabled: true, badge: "unknown", badgeReason: "" }
         return {
             status: info.status || "unknown",
             connected: info.status === "ok" || info.status === "healthy" || info.status === "connected",
+            // Truthful badge from the backend (xpst.token_state): "connected"
+            // needs a passing live check; everything else is labelled honestly.
+            badge: info.badge || "unknown",
+            badgeReason: info.badge_reason || "",
+            badgeAction: info.badge_action || "",
             enabled: info.enabled !== false,
             failures: info.failures || 0,
             canUpload: info.can_upload !== false,
             circuitBreakerOpen: info.circuit_breaker_open || false,
             lastSuccess: info.last_success || null
         }
+    }
+
+    function badgeLabel(status) {
+        var b = status.badge || "unknown"
+        if (b === "connected") return "Connected — verified by a live check"
+        if (b === "expiring") return "Expiring soon — refreshes automatically"
+        if (b === "needs_reauth") return "Needs re-auth"
+        if (b === "source_only") return "Source only — no posting access"
+        if (b === "disabled") return "Disabled"
+        if (b === "unknown") return "Not verified yet"
+        return "Unknown"
+    }
+
+    function badgeColor(status) {
+        var b = status.badge || "unknown"
+        if (b === "connected") return theme.success
+        if (b === "expiring") return theme.warning
+        if (b === "needs_reauth") return theme.error
+        return theme.textMuted
     }
 
     function getHealthColor(status) {
@@ -804,10 +834,10 @@ Page {
                                         spacing: theme.spacingXs
                                         Rectangle {
                                             width: 8; height: 8; radius: 4
-                                            color: platformStatus.connected ? theme.success : theme.textMuted
+                                            color: platformStatus.enabled ? connectPage.badgeColor(platformStatus) : theme.textMuted
                                         }
                                         Text {
-                                            text: platformStatus.enabled ? (platformStatus.connected ? "Connected" : "Not connected") : "Disabled"
+                                            text: platformStatus.enabled ? connectPage.badgeLabel(platformStatus) : "Disabled"
                                             font.pixelSize: 12
                                             color: theme.textSecondary
                                         }

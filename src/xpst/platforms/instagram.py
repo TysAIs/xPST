@@ -36,6 +36,7 @@ from xpst.platforms.base import (
 )
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.utils.logger import get_logger
+from xpst.utils.probe_errors import classify_probe_failure, probe_details_from_error
 
 logger = get_logger(__name__)
 
@@ -762,12 +763,14 @@ class InstagramUploader(PlatformUploader):
                         "full_name": account.full_name,
                     },
                 )
-            except Exception:
+            except Exception as exc:
+                failure = classify_probe_failure("instagram", exc, probe="sessionid")
                 return PlatformHealth(
                     platform="instagram",
                     authenticated=False,
                     session_valid=False,
-                    error="Session expired - run 'xpst auth instagram'",
+                    error=failure.error,
+                    details=failure.as_details(),
                 )
 
         except FileNotFoundError as e:
@@ -778,18 +781,23 @@ class InstagramUploader(PlatformUploader):
                 error=str(e),
             )
         except ValueError as e:
+            # SessionManager already classified the failure; keep the raw error
+            # and the verdict instead of flattening them back into a string.
             return PlatformHealth(
                 platform="instagram",
                 authenticated=False,
                 session_valid=False,
                 error=str(e),
+                details=probe_details_from_error(e),
             )
         except Exception as e:
+            failure = classify_probe_failure("instagram", e, probe="sessionid")
             return PlatformHealth(
                 platform="instagram",
                 authenticated=False,
                 session_valid=False,
-                error=f"Health check failed: {str(e)[:200]}",
+                error=failure.error,
+                details=failure.as_details(),
             )
 
     async def delete(

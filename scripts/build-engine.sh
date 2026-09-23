@@ -125,10 +125,10 @@ probe_health() {
 
 ENV_PORT="$(pick_port)"
 probe_health "XPST_DASHBOARD_PORT env" "$ENV_PORT" \
-    env "XPST_CONFIG_DIR=$CHECK_CONFIG_DIR" "XPST_DASHBOARD_PORT=$ENV_PORT" "$ENGINE_EXECUTABLE"
+    env "XPST_CONFIG_DIR=$CHECK_CONFIG_DIR" "XPST_MEDIA_AUTO_FETCH=0" "XPST_DASHBOARD_PORT=$ENV_PORT" "$ENGINE_EXECUTABLE"
 
 ARGV_PORT="$(pick_port)"
 probe_health "--port argv flag" "$ARGV_PORT" \
-    env "XPST_CONFIG_DIR=$CHECK_CONFIG_DIR" "$ENGINE_EXECUTABLE" --port "$ARGV_PORT"
+    env "XPST_CONFIG_DIR=$CHECK_CONFIG_DIR" "XPST_MEDIA_AUTO_FETCH=0" "$ENGINE_EXECUTABLE" --port "$ARGV_PORT"
 
 echo "PASS: sidecar honors both the env var and --port"
