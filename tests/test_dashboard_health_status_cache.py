@@ -102,7 +102,11 @@ def test_expired_entry_is_served_stale_and_refreshed_behind_the_request(tmp_path
 
     assert aged["auth_cached"] is True, "the stale value should still be served"
     assert aged["auth_stale"] is True, "the response must admit the value is stale"
-    assert elapsed < 1.0, f"a stale serve must not wait on the probe (took {elapsed:.2f}s)"
+    # A wall-clock bound only has to rule out *waiting on the probe*: the
+    # blocking probe in the cold-probe test waits 5s, while this one returns
+    # instantly, so 2.5s leaves a loaded CI runner room while still failing a
+    # request that actually blocks.
+    assert elapsed < 2.5, f"a stale serve must not wait on the probe (took {elapsed:.2f}s)"
 
     # The refresh happens in the background; wait briefly for it to land.
     for _ in range(50):
@@ -186,7 +190,7 @@ def test_cold_probe_answers_immediately_with_a_pending_state(tmp_path, monkeypat
     payload = client.get("/api/health-status").json()
     elapsed = time.monotonic() - started
 
-    assert elapsed < 1.0, f"cold request blocked for {elapsed:.2f}s"
+    assert elapsed < 2.5, f"cold request blocked for {elapsed:.2f}s"
     assert payload["readiness_pending"] is True
     assert payload["readiness"]["pending"] is True
     assert payload["auth_cached"] is False
