@@ -6,9 +6,7 @@ Supports incremental migrations from any version to latest.
 
 from __future__ import annotations
 
-import os
 import shutil
-import sys
 import time
 from pathlib import Path
 
@@ -92,11 +90,11 @@ class ConfigMigration:
             config_dir: Path to config directory. Defaults to platform default.
         """
         if config_dir is None:
-            if sys.platform == "win32":
-                appdata = os.environ.get("APPDATA")
-                config_dir = Path(appdata) / "xPST" if appdata else Path.home() / ".xpst"
-            else:
-                config_dir = Path.home() / ".xpst"
+            # Honor the XPST_CONFIG_DIR isolation override (a clean install
+            # profile must never be migrated using the real HOME/.xpst).
+            from xpst.utils.platform import get_config_dir
+
+            config_dir = get_config_dir()
 
         self.config_dir = Path(config_dir)
         self.config_file = self.config_dir / "config.yaml"
@@ -187,21 +185,19 @@ class ConfigMigration:
         return backup_path
 
     def _write_config(self, data: dict) -> None:
-        """Write config to file atomically (tmp file + rename + fsync)."""
+        """Write config to file atomically (tmp file + rename + fsync).
+
+        Uses the shared atomic writer so the migrated file keeps the same
+        owner-only ``0600`` mode as every other credentials-bearing xPST file:
+        the previous ``open(tmp, "w")`` produced a 0644 ``config.yaml`` (world
+        readable) on every migration, exposing stored API tokens to any local
+        user for the rest of the install's life.
+        """
+        from xpst.utils.atomic import write_text_atomic
+
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.config_file.parent / f".config.yaml.tmp.{os.getpid()}"
-        try:
-            with open(tmp_path, "w") as f:
-                yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, self.config_file)
-        except Exception:
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
-            raise
+        payload = yaml.dump(data, default_flow_style=False, sort_keys=False)
+        write_text_atomic(self.config_file, payload, mode=0o600)
 
     # ── Migration Methods ──
 

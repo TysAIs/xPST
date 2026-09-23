@@ -25,6 +25,11 @@ from pathlib import Path
 
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger
+from xpst.utils.probe_errors import (
+    ProbeFailure,
+    ProbeFailureError,
+    classify_probe_failure,
+)
 from xpst.utils.secure_io import write_text_0600
 
 logger = get_logger(__name__)
@@ -179,7 +184,22 @@ class SessionManager:
                 cookies = stored_session.get("cookies", {})
                 sessionid = cookies.get("sessionid") or stored_session.get("sessionid")
 
-        # Try sessionid-based auth first (no username/password needed)
+        # Try sessionid-based auth first (no username/password needed).
+        # Every failure is classified: a transport error, a challenge or an
+        # anti-bot redirect is NOT proof that the credential is dead, and the
+        # old code turned all of them into "session expired or invalid.
+        # Re-run: xpst connect instagram" — a diagnosis nothing had verified.
+        def _sessionid_failure(exc: BaseException) -> ProbeFailure:
+            """Classify a failed sessionid probe and log what really happened."""
+            failure = classify_probe_failure("instagram", exc, probe="sessionid")
+            logger.info(
+                "Instagram sessionid probe failed (%s): %s",
+                failure.kind,
+                failure.raw_error,
+            )
+            return failure
+
+        sid_failure: ProbeFailure | None = None
         if sessionid:
             try:
                 client.login_by_sessionid(sessionid)
@@ -197,12 +217,12 @@ class SessionManager:
                     write_text_0600(session_path, json.dumps(refreshed, default=str))
 
                     return client
-                except LoginRequired:
-                    logger.info("Instagram sessionid expired, trying re-login")
-            except LoginRequired:
-                logger.info("Instagram sessionid expired, trying re-login")
+                except LoginRequired as exc:
+                    sid_failure = _sessionid_failure(exc)
+            except LoginRequired as exc:
+                sid_failure = _sessionid_failure(exc)
             except Exception as sid_err:
-                logger.debug("Sessionid auth failed: %s, falling back to login", sid_err)
+                sid_failure = _sessionid_failure(sid_err)
 
         # Fall back to username/password login if provided
         if username and password:
@@ -243,9 +263,15 @@ class SessionManager:
                     "Run: xpst auth instagram"
                 ) from e
 
-        # No valid session and no credentials provided
+        # No valid session and no credentials provided. Report the failure we
+        # actually observed (raw error + classification) instead of asserting
+        # an expiry: an unverified probe must not be presented as a dead
+        # credential, because the fix for the two is different.
+        if sid_failure is not None:
+            raise ProbeFailureError(sid_failure, platform="instagram")
+
         raise ValueError(
-            "Instagram session expired or invalid. "
+            "Instagram session has no usable sessionid. "
             "Re-run: xpst connect instagram (username/password required for re-login)"
         )
 

@@ -773,8 +773,18 @@ class AnalyticsReadModel:
     def get_engagement_data(self) -> dict[str, dict]:
         """Get engagement metrics aggregated by platform.
 
-        Attempts to collect real metrics from platform APIs. Falls back to
-        state.json counts if API calls fail or credentials are unavailable.
+        Resolves each destination's post id from the real state schema
+        (``posted_to[platform]["id"]``, written by StateManager;
+        ``"post_id"`` is only a legacy fallback) and, when any id exists,
+        fetches live metrics through the one AnalyticsCollector.
+
+        Fail-closed (t_620480fc): collection errors propagate to the caller
+        instead of being swallowed into fabricated zero metrics. The desktop
+        live refresh already runs this on a worker thread and surfaces the
+        error; callers inside a running asyncio loop must not use this path
+        (it calls ``asyncio.run``) — await ``AnalyticsCollector.collect_all``
+        directly instead. With no ids at all there is nothing to fetch, so
+        state-derived post counts are returned with zero metrics.
 
         Returns dict keyed by platform name with aggregated metrics:
             {platform: {posts, views, likes, comments, shares}}
@@ -807,30 +817,35 @@ class AnalyticsReadModel:
             for platform, info in video_data.get("posted_to", {}).items():
                 if platform in engagement:
                     engagement[platform]["posts"] += 1
-                    if info.get("post_id"):
-                        post_ids[platform].append(info["post_id"])
+                    # StateManager writes the destination entry as
+                    # {"id": ...} — "post_id" is only a fallback for older
+                    # hand-edited state files, so a missing id is the
+                    # expected shape, not an error.
+                    resolved_id = info.get("id") or info.get("post_id") or ""
+                    if resolved_id:
+                        post_ids[platform].append(resolved_id)
 
         # Try to collect real metrics from APIs (one cached collector — a
-        # fresh instance per call defeated its 15-minute TTL, G20)
-        try:
-            from xpst.analytics import AnalyticsCollector
+        # fresh instance per call defeated its 15-minute TTL, G20).
+        # Fail-closed: an error here propagates to the caller. Swallowing
+        # it turned every live refresh into silent zero metrics while
+        # looking successful — the exact defect this method had.
+        from xpst.analytics import AnalyticsCollector
 
-            if getattr(self, "_live_collector", None) is None:
-                self._live_collector: Any = AnalyticsCollector(self.config_dir)
-            collector = self._live_collector
-            # Only attempt if we have IDs to query
-            has_ids = any(ids for ids in post_ids.values())
-            if has_ids:
-                data = asyncio.run(collector.collect_all(post_ids))
-                for platform, posts_data in data.items():
-                    if platform in engagement:
-                        for metrics in posts_data.values():
-                            engagement[platform]["views"] += metrics.get("views", 0)
-                            engagement[platform]["likes"] += metrics.get("likes", 0)
-                            engagement[platform]["comments"] += metrics.get("comments", 0)
-                            engagement[platform]["shares"] += metrics.get("shares", 0)
-        except Exception as exc:
-            logger.debug("Live analytics collection failed, using state data: %s", exc)
+        if getattr(self, "_live_collector", None) is None:
+            self._live_collector: Any = AnalyticsCollector(self.config_dir)
+        collector = self._live_collector
+        # Only attempt if we have IDs to query
+        has_ids = any(ids for ids in post_ids.values())
+        if has_ids:
+            data = asyncio.run(collector.collect_all(post_ids))
+            for platform, posts_data in data.items():
+                if platform in engagement:
+                    for metrics in posts_data.values():
+                        engagement[platform]["views"] += metrics.get("views", 0)
+                        engagement[platform]["likes"] += metrics.get("likes", 0)
+                        engagement[platform]["comments"] += metrics.get("comments", 0)
+                        engagement[platform]["shares"] += metrics.get("shares", 0)
 
         return engagement
 
