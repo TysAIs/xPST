@@ -390,10 +390,16 @@ xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help
 |------|---------|
 | `0` | Success |
 | `1` | General error |
-| `2` | Authentication failure |
-| `3` | Rate limit exceeded |
-| `4` | Configuration error |
+| `2` | Configuration error (also Click usage errors) |
+| `3` | Authentication failure |
+| `4` | Rate limit exceeded |
 | `10` | Platform unavailable |
+
+`xpst post` reports the post outcome in the exit status (see
+[docs/TUTORIAL_CLI.md](docs/TUTORIAL_CLI.md#exit-codes-reference)): `0` when at
+least one destination published — a partial success is a success — and
+otherwise the shared reason every attempted destination failed for, which is
+`1` for a mix of reasons.
 
 ### Dry-Run Mode
 

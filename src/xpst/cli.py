@@ -611,6 +611,121 @@ def watch(ctx: click.Context, interval: int | None, source: str, bidirectional: 
         engine.release_pidfile()
 
 
+# ── Post exit status: a failed post must not read as success ────────────────
+# ``xpst post`` reports the outcome twice: the JSON payload is the detailed
+# report, the exit status is the verdict. Shell scripts and agents branch on
+# the verdict (`xpst post … && echo ok`), so a post where nothing was published
+# must not exit 0. One rule, documented in docs/TUTORIAL_CLI.md:
+#
+#   0   at least one attempted destination published — a partial success is a
+#       success — or every destination was already posted (idempotent no-op)
+#   4   every attempted destination failed for quota / rate-limit reasons
+#   3   every attempted destination failed to authenticate
+#   10  no destination was attempted at all, or every attempted destination is
+#       unavailable or refused the media (e.g. THREADS_NEEDS_URL)
+#   1   every attempted destination failed for any other reason, including a
+#       mix of reasons
+#
+# The families below match the provider error codes the uploaders emit as
+# "CODE: message" plus their plain-language variants. Order matters: quota is
+# checked before auth, because "quota exceeded" never means re-authenticate.
+_POST_RATE_MARKERS = (
+    "QUOTA_EXHAUSTED",
+    "RATE_LIMITED",
+    "RATE_LIMIT",
+    "TOO MANY REQUESTS",
+    "429",
+)
+_POST_AUTH_MARKERS = (
+    "AUTH_EXPIRED",
+    "AUTH_FAILURE",
+    "AUTHENTICATION",
+    "SESSION_EXPIRED",
+    "INVALID_GRANT",
+    "NOT_CONFIGURED",
+    "UNAUTHORIZED",
+    "TOKEN EXPIRED",
+    "LOGIN REQUIRED",
+    "CREDENTIALS",
+    "401",
+)
+_POST_UNAVAILABLE_MARKERS = (
+    "NEEDS_URL",
+    "UNSUPPORTED",
+    "NOT SUPPORTED",
+    "UNAVAILABLE",
+    "NOT AVAILABLE",
+    "DISABLED",
+)
+
+_POST_EXIT_CODE_LABELS = {
+    EXIT_GENERAL: "post failed",
+    EXIT_AUTH_FAILURE: "authentication failed",
+    EXIT_RATE_LIMIT: "quota or rate limit reached",
+    EXIT_PLATFORM_UNAVAILABLE: "destination unavailable",
+}
+
+
+def _post_failure_exit_code(error: str | None) -> int:
+    """Map one destination's failure text to the exit-code family it belongs to."""
+
+    text = (error or "").upper()
+    for markers, code in (
+        (_POST_RATE_MARKERS, EXIT_RATE_LIMIT),
+        (_POST_AUTH_MARKERS, EXIT_AUTH_FAILURE),
+        (_POST_UNAVAILABLE_MARKERS, EXIT_PLATFORM_UNAVAILABLE),
+    ):
+        if any(marker in text for marker in markers):
+            return code
+    return EXIT_GENERAL
+
+
+def _post_failure_message(exit_code: int) -> str:
+    """One-line human summary of why a post published nothing."""
+
+    return (
+        f"nothing was published — {_POST_EXIT_CODE_LABELS.get(exit_code, 'post failed')} "
+        f"(exit code {exit_code})."
+    )
+
+
+def _post_exit_code(result: CrossPostResult, requested: list[str] | None) -> int:
+    """Exit code for one ``xpst post`` run — the single rule above.
+
+    Args:
+        result: the CrossPostResult the engine returned.
+        requested: the platform names the caller asked for, or None for
+            "all enabled platforms" (the engine then decides).
+
+    Returns:
+        The exit code the CLI should terminate with.
+    """
+
+    rows = result.results
+    if not rows:
+        # Nothing was attempted (no destination was available/enabled), so
+        # nothing was posted: a failure, not a silent success.
+        return EXIT_PLATFORM_UNAVAILABLE
+
+    attempted = [p for p, ur in rows.items() if "already_posted" not in (ur.metadata or {})]
+    if not attempted:
+        # Every destination was already posted — nothing to do, nothing failed.
+        return EXIT_SUCCESS
+    if any(rows[p].success for p in attempted):
+        # A partial success is a success; the per-platform detail is in the report.
+        return EXIT_SUCCESS
+
+    codes = {_post_failure_exit_code(rows[p].error) for p in attempted}
+
+    # A requested destination with no result row was never attempted at all
+    # (its uploader is not available) — that failed the caller too.
+    requested_norm = {name.strip().lower() for name in (requested or []) if name.strip()}
+    if requested_norm - {name.strip().lower() for name in rows}:
+        codes.add(EXIT_PLATFORM_UNAVAILABLE)
+
+    return codes.pop() if len(codes) == 1 else EXIT_GENERAL
+
+
 @main.command()
 @click.option("--video", "-v", required=True, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
 @click.option("--caption", "-c", required=True, help="Video caption")
@@ -694,6 +809,9 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
         if not ur.success and "QUOTA_EXHAUSTED" in (ur.error or "")
     ]
 
+    # The verdict: one rule for every post path (see _post_exit_code above).
+    exit_code = _post_exit_code(result, platform_list)
+
     if as_json:
         out = _result_to_dict(result)
         if quota_blocked:
@@ -702,7 +820,8 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
                 "message": "Daily upload quota exhausted; no upload was attempted",
                 "platforms": quota_blocked,
             }
-            out["exit_code"] = EXIT_RATE_LIMIT
+        if exit_code != EXIT_SUCCESS:
+            out["exit_code"] = exit_code
         json_output(out, True)
     else:
         _display_result(result)
@@ -712,15 +831,15 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
                 f"{', '.join(quota_blocked)}. No upload was attempted. "
                 f"Quota resets at midnight.[/red]"
             )
+        elif exit_code != EXIT_SUCCESS and not quiet:
+            console.print(f"[red]Error:[/red] {_post_failure_message(exit_code)}")
 
-    # Exit non-zero when every target platform was quota-blocked so scripts,
-    # schedulers, and MCP callers can detect the failure instead of missing it.
-    attempted = [p for p, ur in result.results.items() if "already_posted" not in (ur.metadata or {})]
-    if attempted and all(
-        not result.results[p].success and "QUOTA_EXHAUSTED" in (result.results[p].error or "")
-        for p in attempted
-    ):
-        sys.exit(EXIT_RATE_LIMIT)
+    # Exit non-zero when nothing was published, so scripts, schedulers, and
+    # MCP/agent wrappers detect the failure instead of reading a failed post as
+    # success. A partial success still exits 0; the per-platform detail lives in
+    # the JSON payload (unchanged).
+    if exit_code != EXIT_SUCCESS:
+        sys.exit(exit_code)
 
 
 @main.command("verify-media")
