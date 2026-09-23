@@ -39,6 +39,17 @@ class ReadinessCheck:
         }
 
 
+#: Human labels for the canonical provider roles. The role is part of a row's
+#: identity: without it, "instagram" renders three identical-looking rows (one
+#: per role) and a user cannot tell a ready source from a dead destination.
+ROLE_LABELS: dict[str, str] = {
+    "source": "Source",
+    "video_destination": "Destination",
+    "analytics": "Analytics",
+    "messaging": "Messaging",
+}
+
+
 @dataclass
 class ReadinessReport:
     """Aggregated readiness report for onboarding and support."""
@@ -46,6 +57,10 @@ class ReadinessReport:
     ready: bool
     summary: str
     checks: list[ReadinessCheck]
+    #: One entry per ENABLED provider role (see :func:`role_readiness`). The
+    #: report carries the role-level truth so the CLI, the web UI and the
+    #: onboarding payload cannot each render a private opinion about a role.
+    roles: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable report."""
@@ -55,7 +70,54 @@ class ReadinessReport:
             "checks": [check.to_dict() for check in self.checks],
             "blocking": [check.to_dict() for check in self.checks if not check.ok and check.severity == "error"],
             "warnings": [check.to_dict() for check in self.checks if not check.ok and check.severity == "warning"],
+            "roles": [dict(role) for role in self.roles],
         }
+
+
+def role_readiness(
+    config: XPSTConfig | None = None,
+    live_status: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """One row per enabled provider role — the single role-level verdict.
+
+    Every surface that lists readiness rows (the Home panel, the onboarding
+    payload) renders this list, so a row can never become a second, private
+    opinion about a role. ``role``/``role_label`` are always present because
+    three roles of one platform are three different facts, not duplicates.
+
+    Args:
+        config: Config to read the enabled flags from.
+        live_status: Canonical live probe output (the same mapping
+            ``xpst auth status`` renders). Omitted means "not probed", in which
+            case the states are the offline/config-only ones (``live_checked``
+            is then ``False`` on every row so a caller can tell them apart).
+    """
+    from xpst.provider_truth import SUPPORTED_PROVIDERS, build_canonical_status
+
+    config = config or XPSTConfig.load()
+    canonical = build_canonical_status(config, live_status)
+    rows: list[dict[str, Any]] = []
+    for definition in SUPPORTED_PROVIDERS:
+        info = canonical.get(definition.name) or {}
+        role_status = info.get("role_status") or {}
+        for role in definition.roles:
+            item = role_status.get(role.value) or {}
+            if not item.get("enabled"):
+                continue
+            rows.append(
+                {
+                    "platform": definition.name,
+                    "platform_label": definition.display_name,
+                    "role": role.value,
+                    "role_label": ROLE_LABELS.get(role.value, role.value.replace("_", " ").title()),
+                    "state": item.get("state", "unknown"),
+                    "ready": bool(item.get("ready")),
+                    "session_valid": item.get("session_valid"),
+                    "live_checked": item.get("live_checked"),
+                    "error": item.get("error"),
+                }
+            )
+    return rows
 
 
 def repair_local_setup(config: XPSTConfig, config_path: str | None = None) -> dict[str, Any]:
@@ -135,7 +197,12 @@ def build_readiness_report(
     else:
         summary = "Ready to post."
 
-    return ReadinessReport(ready=not blocking, summary=summary, checks=checks)
+    return ReadinessReport(
+        ready=not blocking,
+        summary=summary,
+        checks=checks,
+        roles=role_readiness(config, live_status),
+    )
 
 
 def _python_check() -> ReadinessCheck:
