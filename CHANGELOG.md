@@ -50,6 +50,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the composer says the picker is unavailable instead of inventing a path.
 
 ### Fixed
+- **A platform's download source was reported as a posting destination.**
+  `xpst doctor --json` derived its per-platform `connected` boolean from the
+  platform-level `authenticated` flag, which for TikTok (auth mode
+  `source_only`) is the verdict of its *download* probe. A healthy source
+  therefore read as `"connected": true, "problem": null` — a promise that the
+  posting destination exists when the engine has none until TikTok approves a
+  Content Posting API app. TikTok is now reported as `source_only` /
+  `can_post: false` with the reason attached, on every surface: `xpst doctor`
+  (as an informational `notes` entry, never an `issue`, so a healthy machine
+  still exits 0), `xpst health`, `xpst readiness`, `xpst connect --test
+  --json`, `xpst onboard`, `POST /api/connect/<platform>`, `/api/providers`,
+  `/api/health-status`, the MCP status tools and the desktop app's
+  Connect/Compose/Accounts screens. Posting truth is computed once, in
+  `xpst.provider_truth.posting_truth`, and every surface consumes that result
+  instead of inferring "connected" from whichever flag was at hand.
+- **`xpst doctor` paraphrased a real failure into a vague one.** A platform
+  with stored credentials whose live check failed was reported as
+  "Credentials found but the health check failed - token may be expired or
+  revoked." even though the engine already knew the answer. Instagram's actual
+  message — `Instagram session expired or invalid. Re-run: xpst connect
+  instagram (username/password required for re-login)` — is now carried
+  verbatim, so the reader gets the command to run and the one input it needs.
+- **`xpst readiness` treated Threads as a source.** A hard-coded
+  `{"tiktok", "threads"}` name list downgraded an unconfigured destination
+  check to `info` severity, so an enabled Threads destination nobody had
+  connected read as "nothing to do". Severity now follows the role verdict:
+  source-only is `info`, an unconfigured destination is a `warning`.
+- **`xpst doctor` on a fresh machine depended on the developer's quota
+  ledger.** The doctor tests invoked the CLI without `--config`, so the report
+  was built from the real `~/.xpst`; `test_all_clear_json` failed on any box
+  whose X quota was already used up. They now pass their fixture config (with
+  the JSON payload still parsed by skipping the CLI's log preamble).
 - **Undefined design token** — `--xpst-color-primary-soft` was referenced by
   the selected/hover states but never defined in `tokens.css`, so those states
   silently rendered transparent in both themes. Defined for light, dark-theme
@@ -77,6 +109,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `needs_reauth`) on every surface — `health`, `doctor`, `auth status`, MCP and
   the web UI. The raw error is no longer discarded at `logger.debug`.
 ### Added
+- `xpst doctor --json` gained a `notes` array (facts that are not failures), plus
+  `posting_destination`, `posting_role`, `posting_state`, `posting_error`,
+  `can_post`, `source_only` and `source_ready` per platform. `xpst connect
+  --test --json` gained the same `source_only` / `posting_truth` /
+  `ready_sources` keys, and `xpst onboard --dry-run --json` reports source-only
+  platforms under `source_only` / `ready_sources` instead of listing them as
+  things to connect.
 - **Honest token state + truthful badges** — `xpst auth status --json` now
   reports, per platform, a `token_state` / `badge` (`connected`, `expiring`,
   `needs_reauth`, `source_only`, `disabled`, `unknown`), a `badge_reason`

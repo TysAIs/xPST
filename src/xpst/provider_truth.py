@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from xpst.providers import ProviderManifest, ProviderRole, ProviderState
+from xpst.providers import AuthMode, ProviderManifest, ProviderRole, ProviderState
 
 # Public aliases make the contract easy to discover for callers that use the
 # shorter names from the product architecture document.
@@ -329,6 +329,194 @@ def _aggregate_state(statuses: Mapping[str, RoleStatus], primary: ProviderRole) 
     return primary_state
 
 
+# ── posting truth ───────────────────────────────────────────────────────────
+#
+# A platform can be perfectly healthy as a SOURCE and still be unable to
+# receive a post (TikTok before its Content Posting API app is approved).  The
+# platform-level ``authenticated`` flag on a canonical entry describes the
+# provider's *primary* role, and for a source-only provider that role is the
+# source — it proves xPST can download from the platform and says nothing at
+# all about its uploader.  Reading that flag as "this account is connected" is
+# how a surface ends up promising a post it cannot deliver, so every posting
+# decision on every surface goes through :func:`posting_truth` instead.
+
+#: Roles a post can be delivered to.  Every other role is not a posting
+#: capability, however healthy it is.
+POSTING_ROLES: tuple[ProviderRole, ...] = (
+    ProviderRole.VIDEO_DESTINATION,
+    ProviderRole.MESSAGING,
+)
+
+#: The flat keys every canonical provider entry carries about posting.
+POSTING_FIELDS: tuple[str, ...] = (
+    "posting_destination",
+    "posting_role",
+    "posting_state",
+    "posting_error",
+    "can_post",
+    "source_only",
+    "posting_note",
+)
+
+
+def _posting_note(
+    display_name: str,
+    source_only: bool,
+    state: str | None,
+    error: str | None,
+) -> str | None:
+    """One truthful sentence explaining why a platform cannot be posted to."""
+    if not source_only:
+        return None
+    note = (
+        f"{display_name} is a source only: xPST downloads from it, and it cannot be "
+        "used as a posting destination."
+    )
+    if error:
+        note = f"{note} The uploader reported: {error}"
+    elif state is None:
+        note = f"{note} No destination role is configured for it."
+    return note
+
+
+def posting_truth(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the posting verdict for ONE canonical provider entry.
+
+    ``can_post`` is True only when the provider's posting role is ``ready``
+    according to a canonical live probe.  ``source_only`` is True when the
+    provider *has* a posting role that is not usable while its effective auth
+    mode is ``source_only`` — i.e. it is wired up as a download source, not as
+    an upload destination.
+    """
+    statuses = entry.get("role_status") or entry.get("roles") or {}
+    if not isinstance(statuses, Mapping):
+        statuses = {}
+
+    role_name: str | None = None
+    role: Mapping[str, Any] = {}
+    for candidate in POSTING_ROLES:
+        status = statuses.get(candidate.value)
+        if isinstance(status, Mapping) and status:
+            role_name = candidate.value
+            role = status
+            break
+
+    state = role.get("state")
+    auth_modes = {
+        str(entry.get("auth_mode") or ""),
+        str(role.get("auth_mode") or ""),
+    }
+    can_post = state == ProviderState.READY.value
+    source_only = (
+        role_name is not None
+        and not can_post
+        and AuthMode.SOURCE_ONLY.value in auth_modes
+    )
+    error = role.get("error")
+    return {
+        "posting_destination": role_name is not None,
+        "posting_role": role_name,
+        "posting_state": state,
+        "posting_error": error,
+        "can_post": can_post,
+        "source_only": source_only,
+        "posting_note": _posting_note(
+            str(entry.get("display_name") or entry.get("name") or "This platform"),
+            source_only,
+            state if isinstance(state, str) else None,
+            str(error) if error else None,
+        ),
+    }
+
+
+def with_posting_truth(entry: Mapping[str, Any]) -> dict[str, Any]:
+    """Return ``entry`` plus the flat posting fields every surface can read.
+
+    Idempotent: re-applying it to an entry that already carries a posting
+    verdict (a cached payload from an older build, or the early-return path in
+    :func:`build_canonical_status`) recomputes the same values rather than
+    trusting the ones it finds.
+    """
+    enriched = dict(entry)
+    truth = posting_truth(enriched)
+    for field, value in truth.items():
+        enriched[field] = value
+    return enriched
+
+
+def posting_capability(
+    config: Any,
+    name: str,
+    live_facts: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Posting verdict for one provider from config + optional live facts.
+
+    ``live_facts`` are the platform's *posting-role* probe results (the shape
+    the uploader ``check_health()`` returns).  Omitting them keeps the verdict
+    offline: "not probed" yields ``can_post: False`` rather than an invented
+    success.
+    """
+    raw = dict(live_facts or {})
+    if raw and "live_checked" not in raw:
+        raw["live_checked"] = True
+    live = {name: raw} if raw else None
+    canonical = build_canonical_status(config, live)
+    return posting_truth(canonical.get(name) or {"name": name})
+
+
+def live_status_from_booleans(
+    config: Any,
+    values: Mapping[str, bool],
+) -> dict[str, dict[str, Any]]:
+    """Rebuild role-aware live facts from a legacy ``{platform: bool}`` map.
+
+    A single boolean cannot describe a provider with two independent
+    capabilities.  For TikTok in ``source_only`` mode the boolean is the
+    SOURCE verdict, so promoting it to every role would claim the uploader was
+    verified by a probe that never ran against it.  The destination role gets
+    the same not-configured verdict the live collector produces instead.
+    """
+    statuses = build_canonical_status(config, None)
+    live: dict[str, dict[str, Any]] = {}
+    for name, ok in values.items():
+        if name == "local":
+            continue
+        entry = statuses.get(name) or {}
+        if name == "tiktok" and entry.get("auth_mode") == AuthMode.SOURCE_ONLY.value:
+            live[name] = {
+                "authenticated": bool(ok),
+                "session_valid": bool(ok),
+                "live_checked": True,
+                "error": None if ok else "Live check failed",
+                "details": {},
+                "source_check": {
+                    "authenticated": bool(ok),
+                    "session_valid": bool(ok),
+                    "auth_mode": AuthMode.SOURCE_ONLY.value,
+                    "live_checked": True,
+                    "error": None if ok else "Live check failed",
+                    "details": {},
+                },
+                "destination_check": {
+                    "authenticated": False,
+                    "session_valid": False,
+                    "auth_mode": AuthMode.SOURCE_ONLY.value,
+                    "live_checked": True,
+                    "error": "TikTok Content Posting API is not configured",
+                    "details": {"auth_mode": AuthMode.SOURCE_ONLY.value},
+                },
+            }
+        else:
+            live[name] = {
+                "authenticated": bool(ok),
+                "session_valid": bool(ok),
+                "live_checked": True,
+                "error": None if ok else "Live check failed",
+                "details": {},
+            }
+    return live
+
+
 def build_canonical_status(
     config: Any,
     live_status: Mapping[str, Any] | None = None,
@@ -349,7 +537,7 @@ def build_canonical_status(
         for value in live.values()
     ):
         return {
-            name: dict(live[name])
+            name: with_posting_truth(live[name])
             for name in supported_provider_names()
             if name in live
         }
@@ -390,7 +578,7 @@ def build_canonical_status(
         # a verdict.  Promoted to the platform level so every consumer can tell
         # "re-authenticate" apart from "retry" without re-parsing the message.
         compat_details = compat.details if isinstance(compat.details, Mapping) else {}
-        result[definition.name] = {
+        result[definition.name] = with_posting_truth({
             "name": definition.name,
             "display_name": definition.display_name,
             "state": aggregate.value,
@@ -416,7 +604,7 @@ def build_canonical_status(
             "probe_retryable": compat_details.get("probe_retryable"),
             "enabled": _enabled(config, definition.name),
             "legacy_authenticated": bool(raw.get("credentials_stored")),
-        }
+        })
     return result
 
 
@@ -432,7 +620,7 @@ def canonical_status_report(
         isinstance(value, Mapping) and "role_status" in value
         for value in candidate.values()
     ):
-        providers = dict(candidate)
+        providers = {name: with_posting_truth(entry) for name, entry in candidate.items()}
     else:
         providers = build_canonical_status(config, live_status)
     return {
@@ -529,7 +717,7 @@ async def collect_canonical_status_async(config: Any) -> dict[str, dict[str, Any
     # The auth collector returns canonical entries in current builds.  Accept
     # legacy mappings too so third-party callers can upgrade incrementally.
     if live and all(isinstance(value, Mapping) and "roles" in value for value in live.values()):
-        return dict(live)
+        return {name: with_posting_truth(entry) for name, entry in live.items()}
     return build_canonical_status(config, live)
 
 
@@ -547,11 +735,17 @@ __all__ = [
     "RoleStatus",
     "ProviderStatus",
     "SUPPORTED_PROVIDERS",
+    "POSTING_ROLES",
+    "POSTING_FIELDS",
     "supported_provider_names",
     "provider_definition",
     "build_canonical_status",
     "canonical_status_report",
     "canonical_provider_catalog",
+    "posting_truth",
+    "with_posting_truth",
+    "posting_capability",
+    "live_status_from_booleans",
     "status_snapshot",
     "status_snapshot_async",
     "collect_canonical_status_async",

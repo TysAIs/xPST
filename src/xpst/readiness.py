@@ -237,7 +237,12 @@ def _destination_checks(
     live_status: dict[str, Any] | None = None,
 ) -> list[ReadinessCheck]:
     """Build destination checks from canonical video-destination states."""
-    from xpst.provider_truth import SUPPORTED_PROVIDERS, ProviderState, build_canonical_status
+    from xpst.provider_truth import (
+        SUPPORTED_PROVIDERS,
+        ProviderState,
+        build_canonical_status,
+        posting_truth,
+    )
 
     canonical = build_canonical_status(config, live_status)
     destination_names = [
@@ -299,6 +304,20 @@ def _destination_checks(
             message = f"{name.title()} health is degraded."
             action = str(role.get("error") or f"Reconnect {name}.")
 
+        # A source-only platform (TikTok) is not an unconfigured destination
+        # waiting to be connected: xPST reads from it and cannot post to it
+        # until the provider approves an upload app. Reporting it as "not
+        # configured — connect TikTok" is a promise the engine cannot keep, and
+        # a platform being a SOURCE is never a warning (nothing is broken).
+        posting = posting_truth(info)
+        source_only = posting["source_only"]
+        if source_only:
+            message = posting["posting_note"] or f"{name.title()} is a source only."
+            action = (
+                f"Posting to {name.title()} requires an approved provider upload app. "
+                "Keep using it as a source, or connect another destination."
+            )
+
         # `readiness` is deliberately offline and deterministic, so it never runs
         # a live credential probe. When no probe has run, the session fields are
         # unknown (None) for every state. Emitting False contradicts
@@ -319,9 +338,12 @@ def _destination_checks(
                 label=f"{name.title()} connection",
                 ok=state == ProviderState.READY.value,
                 severity=(
-                    "info"
-                    if state == ProviderState.UNCONFIGURED.value and name in {"tiktok", "threads"}
-                    else "warning"
+                    # Only "this platform is a download source, not a posting
+                    # destination" is informational. An enabled destination the
+                    # user has not connected yet (Threads) is a real warning —
+                    # the old name-based exception downgraded it too, which is
+                    # how a genuinely postable platform read as "nothing to do".
+                    "info" if source_only else "warning"
                 ),
                 message=message,
                 action=action,
@@ -335,6 +357,11 @@ def _destination_checks(
                     "session_valid": session_valid,
                     "live_checked": live_checked,
                     "error": role["error"],
+                    # Role-qualified: a source-only platform can be healthy as
+                    # a source and never accept a post.
+                    "source_only": source_only,
+                    "can_post": posting["can_post"],
+                    "posting_state": posting["posting_state"],
                 },
             )
         )

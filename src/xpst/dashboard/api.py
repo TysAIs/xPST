@@ -666,7 +666,7 @@ def create_api_router(
             verify: bool (default True) — run the canonical live probe.
         """
         from xpst.auth_status import collect_live_auth_status
-        from xpst.provider_truth import canonical_status_report
+        from xpst.provider_truth import canonical_status_report, posting_truth
 
         config = _load_ui_config()
         key = str(platform).strip().lower()
@@ -714,13 +714,27 @@ def create_api_router(
         role = (entry.get("role_status") or {}).get("video_destination") or {}
         state = str(role.get("state") or provider.get("destination_state") or "unconfigured")
         authenticated = bool(entry.get("authenticated")) if entry else False
-        verified_ready = state == "ready"
+        # Posting truth, not the platform-level ``authenticated`` flag: for a
+        # source-only platform that flag is the SOURCE verdict, and treating it
+        # as an upload verdict is how the app showed a green "Connected" badge
+        # for a platform it can never post to.
+        truth = posting_truth(entry or provider)
+        source_only = bool(truth["source_only"])
         # ``live_checked`` is None for a skipped probe; None is falsy, so the
         # connected verdict stays conservative without claiming a check ran.
-        connected = bool((authenticated or verified_ready) and live_checked)
+        connected = bool(truth["can_post"] and live_checked)
 
         enabled_now = bool(getattr(getattr(config, key, None), "enabled", False))
-        if connected:
+        if source_only:
+            next_action = {
+                "kind": "review",
+                "label": (
+                    f"{provider.get('display_name', key)} is a source only — posting needs "
+                    "an approved provider upload app"
+                ),
+                "role": "video_destination",
+            }
+        elif connected:
             next_action = {"kind": "compose", "label": "Compose a post", "route": "#/compose"}
         elif not enabled_now:
             next_action = {"kind": "enable", "label": f"Enable {provider['display_name']}", "route": "#/connect"}
@@ -742,6 +756,12 @@ def create_api_router(
             "live_checked": live_checked,
             "error": probe_error or role.get("error") or provider.get("destination_error"),
             "auth_mode": entry.get("auth_mode") or provider.get("auth_mode"),
+            # Role-qualified truth: a platform can be readable and not postable.
+            "can_post": bool(truth["can_post"]),
+            "source_only": source_only,
+            "posting_role": truth["posting_role"],
+            "posting_state": truth["posting_state"],
+            "posting_note": truth["posting_note"],
             "official_api": bool(provider.get("is_official_api")),
             "docs_url": provider.get("docs_url") or "",
             "guide": _guide_payload(key),
