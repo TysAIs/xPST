@@ -58,7 +58,7 @@ from xpst.utils.probe_errors import (
 
 YTDLP_VERSION = "2099.01.02"
 
-PROVIDERS = ("youtube", "x", "instagram", "tiktok", "threads", "messenger", "local")
+PROVIDERS = ("youtube", "x", "instagram", "tiktok", "threads", "facebook", "messenger", "local")
 
 # The facts the surfaces must agree on.  role_states is intentionally excluded:
 # it is the per-role detail, and the reconciled contract is that the
@@ -66,7 +66,7 @@ PROVIDERS = ("youtube", "x", "instagram", "tiktok", "threads", "messenger", "loc
 # (``xpst.provider_truth.build_canonical_status``).
 FACTS = ("authenticated", "session_valid", "live_checked", "state", "auth_mode")
 
-DESTINATIONS = ("youtube", "x", "instagram", "tiktok", "threads")
+DESTINATIONS = ("youtube", "x", "instagram", "tiktok", "threads", "facebook")
 
 # Destinations enabled in the synthetic config; POST /api/connect only probes
 # enabled destinations, so the disabled ones are compared separately (their
@@ -106,6 +106,15 @@ EXPECTED: dict[str, dict[str, Any]] = {
         "auth_mode": "source_only",
     },
     "threads": {
+        "authenticated": False,
+        "session_valid": False,
+        "live_checked": True,
+        "state": "disabled",
+        "auth_mode": "oauth",
+    },
+    "facebook": {
+        # Disabled in the synthetic config: the Page connector is opt-in and
+        # reports "disabled" (a probed negative), never a fabricated pass.
         "authenticated": False,
         "session_valid": False,
         "live_checked": True,
@@ -153,6 +162,7 @@ def _stub_uploaders() -> dict[str, _FakeUploader]:
         "instagram": _FakeUploader("instagram", live("instagram")),
         "tiktok": _FakeUploader("tiktok", dead("tiktok", "Content Posting API is not configured")),
         "threads": _FakeUploader("threads", dead("threads")),
+        "facebook": _FakeUploader("facebook", dead("facebook")),
         "messenger": _FakeUploader("messenger", dead("messenger")),
     }
 
@@ -191,6 +201,7 @@ def _write_config(root: Path) -> tuple[XPSTConfig, Path]:
     config.tiktok.username = "creator"
     config.tiktok.cookies_file = str(creds / "tiktok_cookies.txt")
     config.threads.enabled = False
+    config.facebook.enabled = False
     config.messenger.enabled = False
     config_file = root / "config.yaml"
     config.save(str(config_file))
@@ -548,7 +559,7 @@ def test_nested_provider_rejection_outranks_the_transport_error() -> None:
     assert surfaces["health"]["platforms"]["instagram"]["probe_class"] == PROBE_INVALID_CREDENTIALS
 
 
-@pytest.mark.parametrize("provider", ("threads",))
+@pytest.mark.parametrize("provider", ("threads", "facebook"))
 def test_connect_endpoint_never_claims_a_probe_it_did_not_run(provider: str) -> None:
     """A disabled destination is not probed, so its live facts are unknown.
 
@@ -591,7 +602,9 @@ def test_every_fact_is_cross_checked_by_several_surfaces(fact: str) -> None:
         )
 
 
-@pytest.mark.parametrize("provider", ("youtube", "x", "instagram", "tiktok", "threads"))
+@pytest.mark.parametrize(
+    "provider", ("youtube", "x", "instagram", "tiktok", "threads", "facebook")
+)
 def test_offline_surfaces_report_unknown_not_invalid(provider: str) -> None:
     """No probe ran, so a live fact is None — never the negation of the truth.
 

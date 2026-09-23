@@ -63,7 +63,7 @@ from xpst.utils.video import VideoProcessor
 logger = get_logger(__name__)
 
 # Platform-encoded temp-file suffixes (single source, ISC-92)
-_ENCODED_SUFFIXES = ("_youtube", "_instagram", "_x", "_tiktok", "_threads")
+_ENCODED_SUFFIXES = ("_youtube", "_instagram", "_x", "_tiktok", "_threads", "_facebook")
 
 
 @dataclass
@@ -200,6 +200,7 @@ class CrossPostEngine:
             "x": config.rate_limits.x,
             "tiktok": config.rate_limits.tiktok,
             "threads": config.rate_limits.threads,
+            "facebook": config.rate_limits.facebook,
         })
         self.upload_service = UploadService(
             video_processor=self.video_processor,
@@ -346,6 +347,15 @@ class CrossPostEngine:
                 logger.info("Threads uploader initialized")
             except Exception as e:
                 logger.error(f"Failed to initialize Threads uploader: {e}")
+
+        # Facebook Page (Page-scoped publishing via Facebook Login for Business)
+        if self.config.facebook.enabled:
+            try:
+                from xpst.platforms.facebook import FacebookPageUploader
+                self._platforms["facebook"] = FacebookPageUploader(self.config)
+                logger.info("Facebook Page uploader initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Facebook Page uploader: {e}")
 
         # NOTE: Messenger is intentionally NOT registered here. It is a
         # webhook-driven auto-reply adapter (ManyChat-lite), not a video-posting
@@ -1451,7 +1461,7 @@ class CrossPostEngine:
                 }
 
         # Check platforms (connectivity test, no uploads)
-        all_known_platforms = {"youtube", "instagram", "x", "tiktok", "threads"}
+        all_known_platforms = {"youtube", "instagram", "x", "tiktok", "threads", "facebook"}
         if include_platforms:
             for name, uploader in self._platforms.items():
                 try:

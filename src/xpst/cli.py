@@ -1418,7 +1418,7 @@ def health(ctx: click.Context, as_json: bool):
 # ──────────────────────────────────────────────
 
 @main.command()
-@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
+@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "facebook", "messenger"]))
 @click.option("--guide", is_flag=True, help="Print the step-by-step setup guide for the platform (YouTube: Google Cloud OAuth) and exit")
 @click.option("--open-browser/--no-browser", default=None,
               help="Allow/deny browser launches during account setup (default: TTY only)")
@@ -1446,7 +1446,7 @@ def connect(ctx: click.Context, platform: str | None, guide: bool, open_browser:
     if dry_run:
         from xpst.wizard import PLATFORM_GUIDES
 
-        targets = [platform] if platform else ["tiktok", "youtube", "instagram", "x", "threads", "messenger"]
+        targets = [platform] if platform else ["tiktok", "youtube", "instagram", "x", "threads", "facebook", "messenger"]
         plan: dict[str, Any] = {
             "dry_run": True,
             "platforms": targets,
@@ -1518,36 +1518,40 @@ def _connect_guide(platform: str | None, as_json: bool) -> None:
     """Print the platform setup guide and exit (no config, no prompts).
 
     Renders the same auto-generated guide the wizard uses
-    (:data:`xpst.wizard.PLATFORM_GUIDES`) so the two never drift. JSON
-    output is also enabled automatically on non-TTY stdout (group-level
-    auto-JSON), matching every other xPST command.
+    (:data:`xpst.wizard.PLATFORM_GUIDES`) so the two never drift — for every
+    platform, not just YouTube, because the non-TTY refusal message tells an
+    agent to run ``xpst connect <platform> --guide``. JSON output is also
+    enabled automatically on non-TTY stdout (group-level auto-JSON), matching
+    every other xPST command.
     """
-    if platform not in (None, "youtube"):
-        console.print(
-            f"[red]--guide is only available for youtube (got '{platform}').[/red]"
-        )
+    from xpst.wizard import PLATFORM_GUIDES, platform_guide_payload, youtube_guide_payload
+
+    key = str(platform or "youtube")
+    if key not in PLATFORM_GUIDES:
+        console.print(f"[red]--guide is not available for '{key}'.[/red]")
+        console.print(f"[dim]Known platforms: {', '.join(PLATFORM_GUIDES)}[/dim]")
         sys.exit(EXIT_CONFIG_ERROR)
 
-    from xpst.wizard import PLATFORM_GUIDES, youtube_guide_payload
-
-    payload = youtube_guide_payload()
+    # YouTube keeps its richer payload (client-secrets path, app status).
+    payload = youtube_guide_payload() if key == "youtube" else platform_guide_payload(key)
     if as_json:
         json_output(payload, True)
         return
 
-    guide = PLATFORM_GUIDES["youtube"]
-    console.print(f"[bold]{guide.title} — Google Cloud setup guide[/bold]")
+    guide = PLATFORM_GUIDES[key]
+    console.print(f"[bold]{guide.title} — setup guide[/bold]")
     console.print(guide.why)
     console.print()
     for i, step in enumerate(guide.steps, 1):
         console.print(f"  {i}. {step.text}")
     console.print()
-    console.print(f"[dim]More details: {guide.docs_url}[/dim]")
-    console.print("[dim]When done, run [cyan]xpst connect youtube[/cyan] to link the account.[/dim]")
+    if guide.docs_url:
+        console.print(f"[dim]More details: {guide.docs_url}[/dim]")
+    console.print(f"[dim]When done, run [cyan]xpst connect {key}[/cyan] to link the account.[/dim]")
 
 
 @main.command()
-@click.argument("platform", required=True, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
+@click.argument("platform", required=True, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "facebook", "messenger"]))
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt (required in non-interactive/JSON mode)")
 @json_option
 @click.pass_context
@@ -1640,7 +1644,7 @@ def _legacy_wizard_checklist(service: SetupTransactionService) -> list[dict[str,
 
 
 @main.command()
-@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
+@click.argument("platform", required=False, type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "facebook", "messenger"]))
 @click.option("--export-md", "export_md", type=click.Path(), default=None, help="Export the step-by-step guide as markdown and exit")
 @click.option("--status", "show_status", is_flag=True, help="Show the active setup transaction")
 @click.option("--resume", "resume_transaction", is_flag=True, help="Resume the active setup transaction")
@@ -1732,7 +1736,7 @@ def wizard(
 # Onboarding & Doctor Commands
 # ──────────────────────────────────────────────
 
-_ONBOARD_PLATFORMS = ["youtube", "tiktok", "x", "instagram", "threads", "messenger"]
+_ONBOARD_PLATFORMS = ["youtube", "tiktok", "x", "instagram", "threads", "facebook", "messenger"]
 
 
 @main.command()
@@ -1927,7 +1931,7 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
 
 @main.command()
 @click.argument("platform", required=False,
-                type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "messenger"]))
+                type=click.Choice(["tiktok", "youtube", "x", "instagram", "threads", "facebook", "messenger"]))
 @json_option
 @click.pass_context
 def doctor(ctx: click.Context, platform: str | None, as_json: bool):
@@ -2198,6 +2202,7 @@ def auth(ctx: click.Context, platform: str | None, refresh: bool, rotate: bool, 
         xpst auth x           # Authenticate with X/Twitter
         xpst auth instagram   # Authenticate with Instagram
         xpst auth tiktok      # Authenticate with TikTok
+        xpst auth facebook    # Authenticate a Facebook Page (BYO Meta app)
         xpst auth status      # Show auth status for all platforms
         xpst auth status --refresh   # Refresh expiring tokens, then report
     """
@@ -2209,7 +2214,7 @@ def auth(ctx: click.Context, platform: str | None, refresh: bool, rotate: bool, 
         _show_api_token(ctx, as_json, rotate=rotate)
         return
 
-    valid_platforms = {"tiktok", "youtube", "x", "instagram", "threads", "messenger"}
+    valid_platforms = {"tiktok", "youtube", "x", "instagram", "threads", "facebook", "messenger"}
     if platform not in valid_platforms:
         click.echo(f"Unknown platform: {platform}")
         click.echo(f"Valid platforms: {', '.join(sorted(valid_platforms))}")
@@ -2218,7 +2223,10 @@ def auth(ctx: click.Context, platform: str | None, refresh: bool, rotate: bool, 
 
     config = load_config(ctx.obj.get("config_path"))
 
-    console.print(f"[bold blue]Authenticating with {platform.title()}...[/bold blue]")
+    if not as_json:
+        # JSON mode must emit one parseable document on stdout: an agent piping
+        # `xpst auth <platform> --json` into a parser gets JSON, not a banner.
+        console.print(f"[bold blue]Authenticating with {platform.title()}...[/bold blue]")
 
     if platform == "youtube":
         _auth_youtube(config)
@@ -2230,6 +2238,11 @@ def auth(ctx: click.Context, platform: str | None, refresh: bool, rotate: bool, 
         _auth_tiktok(config)
     elif platform == "threads":
         _auth_threads(config)
+    elif platform == "facebook":
+        # Facebook is Page-scoped and BYO-app only; a failed discovery/exchange
+        # is a real auth failure, so the command exits non-zero.
+        if not _auth_facebook(config, as_json=as_json):
+            ctx.exit(EXIT_AUTH_FAILURE)
     elif platform == "messenger":
         _auth_messenger(config)
 
@@ -2326,6 +2339,7 @@ def _show_auth_status(ctx: click.Context, as_json: bool, refresh: bool = False):
         ig_creds = cred_store.retrieve_json("instagram_session")
         tiktok_creds = cred_store.retrieve_json("tiktok_cookies")
         threads_creds = cred_store.retrieve("threads_access_token")
+        facebook_creds = cred_store.retrieve("facebook_page_token")
         messenger_creds = cred_store.retrieve("messenger_page_token")
         for plat, creds in [
             ("youtube", yt_creds),
@@ -2333,6 +2347,7 @@ def _show_auth_status(ctx: click.Context, as_json: bool, refresh: bool = False):
             ("instagram", ig_creds),
             ("tiktok", tiktok_creds),
             ("threads", threads_creds),
+            ("facebook", facebook_creds),
             ("messenger", messenger_creds),
             ("local", config.local.path),
         ]:
@@ -2491,6 +2506,18 @@ def _show_auth_status(ctx: click.Context, as_json: bool, refresh: bool = False):
         str(quota_mgr.quotas.get("threads", {}).daily_limit if hasattr(quota_mgr.quotas.get("threads", {}), "daily_limit") else "N/A"),
         str(threads_quota.get("daily", "N/A")),
         _live_detail("threads", "Keyring" if threads_creds else ("Config" if config.threads.graph_access_token else "Not configured")),
+    )
+
+    # Facebook Page (Page-scoped publishing)
+    facebook_page_id = str(getattr(config.facebook, "page_id", "") or "")
+    facebook_quota = quota_mgr.get_remaining("facebook")
+    facebook_detail = f"Page {facebook_page_id}" if facebook_page_id else "Not configured"
+    table.add_row(
+        "Facebook Page",
+        _badge_cell("facebook"),
+        str(quota_mgr.quotas.get("facebook", {}).daily_limit if hasattr(quota_mgr.quotas.get("facebook", {}), "daily_limit") else "N/A"),
+        str(facebook_quota.get("daily", "N/A")),
+        _live_detail("facebook", facebook_detail),
     )
 
     # Messenger
@@ -3512,6 +3539,28 @@ def _auth_messenger(config: XPSTConfig) -> None:
     from xpst.connect import connect_messenger
 
     connect_messenger(config)
+
+
+def _auth_facebook(config: XPSTConfig, *, as_json: bool = False) -> bool:
+    """Authenticate a Facebook Page through Facebook Login for Business.
+
+    The flow is Page-scoped: it discovers the Pages the user administers and
+    stores one Page access token, encrypted. There is no personal-profile
+    fallback (the Graph API cannot publish as a personal profile).
+
+    Args:
+        config: Loaded xPST configuration.
+        as_json: Emit the structured report (agent mode) instead of a panel.
+
+    Returns:
+        True when a Page was verified and stored.
+    """
+    from xpst.connect import facebook_auth
+
+    report = facebook_auth(config, as_json=as_json)
+    if as_json:
+        json_output(report, True)
+    return bool(report.get("success"))
 
 
 # ──────────────────────────────────────────────

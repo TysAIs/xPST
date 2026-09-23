@@ -132,6 +132,14 @@ SUPPORTED_PROVIDERS: tuple[ProviderDefinition, ...] = (
         official_api=True,
         docs_url="https://developers.facebook.com/docs/messenger-platform",
     ),
+    ProviderDefinition(
+        "facebook",
+        "Facebook Page",
+        (ProviderRole.VIDEO_DESTINATION,),
+        "oauth",
+        official_api=True,
+        docs_url="https://developers.facebook.com/docs/pages-api",
+    ),
     ProviderDefinition("local", "Local files", (ProviderRole.SOURCE,), "local"),
 )
 
@@ -239,6 +247,14 @@ def _configured(config: Any, name: str, role: ProviderRole, raw: Mapping[str, An
         )
     if name == "messenger":
         return bool(getattr(account, "page_access_token", ""))
+    if name == "facebook":
+        # Page-scoped: a Page id AND its Page access token are both required
+        # before anything can be published, so a half-configured account is not
+        # "configured". Credentials normally live encrypted in the
+        # CredentialStore (``credentials_stored``, checked above).
+        return bool(
+            getattr(account, "page_id", "") and getattr(account, "page_access_token", "")
+        )
     return False
 
 

@@ -178,6 +178,24 @@ def render_youtube_guide_markdown() -> str:
     return render_platform_markdown(youtube_gcp_guide())
 
 
+def platform_guide_payload(key: str) -> dict:
+    """Machine-readable setup guide for one platform (``--json`` / agent mode).
+
+    Every platform in :data:`PLATFORM_GUIDES` answers this shape, so an agent
+    can fetch the click-by-click steps for any provider without a TTY and
+    without scraping the rendered human view.
+    """
+    guide = PLATFORM_GUIDES[str(key)]
+    return {
+        "platform": guide.key,
+        "title": guide.title,
+        "why": guide.why,
+        "steps": [step.text for step in guide.steps],
+        "docs_url": guide.docs_url,
+        "next_action": f"xpst connect {guide.key}",
+    }
+
+
 # ──────────────────────────────────────────────
 # Per-platform click-by-click guides
 # ──────────────────────────────────────────────
@@ -267,6 +285,36 @@ PLATFORM_GUIDES: dict[str, PlatformGuide] = {
             WizardStep("Paste the token and your numeric Threads user ID into the wizard."),
         ],
     ),
+    "facebook": PlatformGuide(
+        key="facebook",
+        title="Facebook Page",
+        why="Publishes as a Facebook Page (Pages only — personal profiles have no publishing API).",
+        steps=[
+            WizardStep(
+                "Facebook publishing is Page-scoped and needs your own Meta app: "
+                "open https://developers.facebook.com/apps"
+            ),
+            WizardStep("'Create App' → type 'Business', then add the 'Facebook Login for Business' product."),
+            WizardStep(
+                "Grant the app pages_show_list, pages_read_engagement and "
+                "pages_manage_posts (Standard Access is enough for your own Pages)."
+            ),
+            WizardStep(
+                "In the Graph API Explorer pick that app, select the permissions "
+                "above and generate a User Access Token."
+            ),
+            WizardStep(
+                "Run `xpst auth facebook` and paste the token (plus the App ID/Secret "
+                "so the token is exchanged for a long-lived one)."
+            ),
+            WizardStep(
+                "xPST lists your Pages via GET /me/accounts, verifies the chosen "
+                "Page token and stores it encrypted. No Page → a clear error, never "
+                "a personal-profile post."
+            ),
+        ],
+        docs_url="https://github.com/TysAIs/xPST/blob/main/docs/setup-facebook.md",
+    ),
     "messenger": PlatformGuide(
         key="messenger",
         title="Messenger (optional)",
@@ -279,7 +327,7 @@ PLATFORM_GUIDES: dict[str, PlatformGuide] = {
     ),
 }
 
-PLATFORM_ORDER = ["youtube", "instagram", "x", "tiktok", "threads", "messenger"]
+PLATFORM_ORDER = ["youtube", "instagram", "x", "tiktok", "threads", "facebook", "messenger"]
 
 
 # ──────────────────────────────────────────────
@@ -562,6 +610,7 @@ def run_wizard(
     results: dict[str, bool] = {}
 
     from xpst.connect import (
+        connect_facebook,
         connect_instagram,
         connect_messenger,
         connect_threads,
@@ -577,6 +626,7 @@ def run_wizard(
         "x": connect_x,
         "tiktok": connect_tiktok,
         "threads": connect_threads,
+        "facebook": connect_facebook,
         "messenger": connect_messenger,
     }
 

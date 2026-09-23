@@ -4,6 +4,7 @@ const PLATFORM_LABELS = {
   x: "X",
   tiktok: "TikTok",
   threads: "Threads",
+  facebook: "Facebook Page",
   messenger: "Messenger",
   local: "Local",
   other: "Other",
