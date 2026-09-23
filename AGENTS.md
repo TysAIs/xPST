@@ -36,7 +36,7 @@ is the whole application; the shell is a wrapper.
 | Layer | Location | Responsibility |
 |-------|----------|----------------|
 | **Engine** | `src/xpst/engine.py` | `CrossPostEngine` — the single orchestrator that every surface calls (check-and-post, backfill, delete, health). |
-| **Platforms** | `src/xpst/platforms/` | Destination uploaders (YouTube, X, Instagram, TikTok, Threads) + Messenger for messaging; auth through `SessionManager`. |
+| **Platforms** | `src/xpst/platforms/` | Destination uploaders (YouTube, X, Instagram) + TikTok/Threads destination code pending external review; Messenger for messaging; auth through `SessionManager`. |
 | **Sources** | `src/xpst/sources/` | TikTok, Instagram Reels, YouTube, local files. |
 | **State** | `src/xpst/state_store.py`, `state_manager.py` | Atomic write-then-rename persistence, thread-safe business logic, crash recovery. |
 | **Config** | `src/xpst/config.py`, `config_migration.py` | Pydantic settings, schema auto-migration on load. |
