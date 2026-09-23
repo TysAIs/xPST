@@ -62,6 +62,9 @@ class InstagramUploader(PlatformUploader):
     # Instagram limits
     MAX_CAPTION_LENGTH = 2200
     MAX_HASHTAGS = 30
+    # One carousel holds at most this many items. It is a refusal boundary, not
+    # a truncation boundary: xPST never silently drops items from a carousel.
+    MAX_CAROUSEL_ITEMS = 10
 
     def __init__(self, config: XPSTConfig) -> None:
         """Initialize Instagram uploader with lazy client caching."""
@@ -104,7 +107,7 @@ class InstagramUploader(PlatformUploader):
             extra={
                 "content": ("video", "image", "carousel"),
                 "max_caption_length": self.MAX_CAPTION_LENGTH,
-                "max_carousel_items": 10,
+                "max_carousel_items": self.MAX_CAROUSEL_ITEMS,
             },
         )
 
@@ -829,40 +832,349 @@ class InstagramUploader(PlatformUploader):
                 detail=str(e)[:200],
             )
 
-    async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
-        """Upload a carousel/album to Instagram.
+    async def upload_image(self, image_path: Path, caption: str) -> UploadResult:
+        """Publish a single image to the Instagram feed.
 
-        Uses instagrapi's album_upload() for native carousel support.
-        Supports up to 10 images/videos in a single carousel post.
+        Dispatches on auth_mode exactly like :meth:`upload`:
+
+        - ``graph_api``: official Meta Graph API. Feed photos are published from
+          a publicly reachable ``image_url``; a local file cannot be sent, and
+          saying so is the honest answer (Meta's content-publishing contract).
+        - ``session``: instagrapi ``photo_upload`` — local file, JPEG only.
+
+        The image is validated against the shard of the media spec matrix that
+        applies to Instagram (``xpst.media.specs``: JPEG, ≤ 8 MB, aspect within
+        4:5–1.91:1) *before* the client is touched, so an unsupported image
+        never reaches Instagram.
 
         Args:
-            media_paths: List of paths to images/videos (max 10)
-            caption: Caption for the carousel
+            image_path: Path to the image file (or an http(s) URL on graph_api).
+            caption: Caption for the post.
 
         Returns:
-            UploadResult with media code and URL
+            UploadResult with media code and URL.
         """
-        if len(media_paths) > 10:
-            logger.warning("Instagram carousels support max 10 items, truncating")
-            media_paths = media_paths[:10]
+        image_str = str(image_path)
+        if self.config.instagram.auth_mode == "graph_api":
+            return await self._upload_image_graph_api(image_str, caption)
+        return await self._upload_image_instagrapi(Path(image_path), caption)
 
-        if len(media_paths) < 2:
-            logger.warning("Carousel needs 2+ items, falling back to single upload")
-            return await self.upload(media_paths[0], caption) if media_paths else UploadResult(
-                success=False, error="No media files provided", platform="instagram"
+    def image_rejection_reasons(self, image_path: Path) -> tuple[str, ...]:
+        """Destination-named reasons Instagram cannot publish this image."""
+        from xpst.media.specs import image_rejection_reasons
+
+        return image_rejection_reasons(image_path, self.platform_name)
+
+    async def _upload_image_graph_api(self, image_url: str, caption: str) -> UploadResult:
+        """Publish a feed photo through the official Meta Graph API.
+
+        Meta publishes photos from a public URL it fetches itself, so a local
+        file cannot be posted this way — the refusal says so instead of sending
+        a broken request.
+        """
+        import httpx
+
+        token = self.config.instagram.graph_access_token
+        ig_user_id = self.config.instagram.graph_ig_user_id
+
+        if not token or not ig_user_id:
+            return UploadResult(
+                success=False,
+                error="IG_GRAPH_API_NOT_CONFIGURED: Set graph_access_token and graph_ig_user_id in config, "
+                "or switch auth_mode to 'session' for instagrapi-based uploads.",
+                platform="instagram",
+                retryable=False,
             )
 
-        # Truncate caption if needed
+        if not image_url.startswith(("http://", "https://")):
+            return UploadResult(
+                success=False,
+                error=(
+                    "IG_GRAPH_API_IMAGE_NEEDS_URL: the official Instagram API publishes feed photos "
+                    "from a public image URL and cannot accept a local file. Use auth_mode 'session' "
+                    "(xpst auth instagram) to post a local image, or host the image and pass its URL."
+                ),
+                platform="instagram",
+                retryable=False,
+            )
+
         if len(caption) > self.MAX_CAPTION_LENGTH:
+            caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
+
+        base_url = f"https://graph.facebook.com/v19.0/{ig_user_id}"
+        try:
+            async with httpx.AsyncClient(timeout=300) as client:
+                resp = await client.post(
+                    f"{base_url}/media",
+                    data={
+                        "image_url": image_url,
+                        "caption": caption,
+                        "access_token": token,
+                    },
+                )
+                resp.raise_for_status()
+                container_id = resp.json().get("id")
+                if not container_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"IG_GRAPH_API_ERROR: No container ID for image: {resp.text[:200]}",
+                        platform="instagram",
+                    )
+
+                resp = await client.post(
+                    f"{base_url}/media_publish",
+                    data={"creation_id": container_id, "access_token": token},
+                )
+                resp.raise_for_status()
+                media_id = resp.json().get("id")
+                if not media_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"IG_GRAPH_API_ERROR: No media ID in publish response: {resp.text[:200]}",
+                        platform="instagram",
+                    )
+
+                permalink = ""
+                try:
+                    resp = await client.get(
+                        f"https://graph.facebook.com/v19.0/{media_id}",
+                        params={"fields": "permalink", "access_token": token},
+                    )
+                    permalink = resp.json().get("permalink", "")
+                except Exception:
+                    pass
+
+                logger.info(f"Posted image to Instagram via Graph API: {permalink or media_id}")
+                return UploadResult(
+                    success=True,
+                    post_id=str(media_id),
+                    post_url=permalink or f"https://www.instagram.com/p/{media_id}/",
+                    platform="instagram",
+                    metadata={
+                        "caption_length": len(caption),
+                        "auth_mode": "graph_api",
+                        "container_id": container_id,
+                        "content_type": "image",
+                    },
+                )
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:300] if e.response else str(e)
+            logger.error(f"Instagram Graph API image upload HTTP error: {e}")
+            return UploadResult(
+                success=False,
+                error=f"IG_GRAPH_API_HTTP_ERROR: {error_body}",
+                platform="instagram",
+            )
+        except Exception as e:
+            logger.error(f"Instagram Graph API image upload failed: {e}")
+            return UploadResult(
+                success=False,
+                error=f"IG_GRAPH_API_ERROR: {str(e)[:200]}",
+                platform="instagram",
+            )
+
+    async def _upload_image_instagrapi(self, image_path: Path, caption: str) -> UploadResult:
+        """Upload a local image to the Instagram feed via instagrapi.
+
+        Instagram publishes the photo and *then* calls ``qe/expose/`` (see the
+        video path); a failure after publication is reconciled against the
+        account rather than reported as a plain failure, so the post can never
+        exist without a recorded id.
+        """
+        import asyncio
+        import random
+
+        rejections = self.image_rejection_reasons(image_path)
+        if rejections:
+            message = " ".join(rejections)
+            logger.warning("Refusing Instagram image upload: %s", message)
+            return UploadResult(
+                success=False,
+                error=f"IG_IMAGE_REJECTED: {message}",
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "image"},
+            )
+
+        if len(caption) > self.MAX_CAPTION_LENGTH:
+            caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
+
+        # Anti-ban: pre-upload delay with jitter (1-3 seconds), like the video path.
+        await asyncio.sleep(random.uniform(1.0, 3.0))
+
+        try:
+            client = await self._get_client()
+            logger.info(f"Uploading image to Instagram: {image_path.name}")
+            media = client.photo_upload(image_path, caption=caption)
+        except Exception as e:
+            error_msg = str(e).lower()
+            logger.error(f"Instagram image upload failed: {e}")
+
+            if any(marker in error_msg for marker in _POST_PUBLISH_ERROR_MARKERS):
+                reconciled = await self._reconcile_published_media(caption)
+                if reconciled is not None:
+                    post_url = f"https://www.instagram.com/p/{reconciled.code}/"
+                    logger.warning(
+                        "Instagram image upload raised '%s' after publication, but the post is live: "
+                        "reconciled it as %s so it can be deleted",
+                        e,
+                        post_url,
+                    )
+                    return UploadResult(
+                        success=True,
+                        post_id=str(reconciled.pk),
+                        post_url=post_url,
+                        platform="instagram",
+                        metadata={
+                            "code": reconciled.code,
+                            "caption_length": len(caption),
+                            "auth_mode": "session",
+                            "content_type": "image",
+                            "reconciled": True,
+                            "original_error": str(e)[:200],
+                        },
+                    )
+                return UploadResult(
+                    success=False,
+                    error=(
+                        "IG_UNCONFIRMED: the image upload failed after publication and the post was "
+                        "not found on the account — check the Instagram profile before retrying"
+                    ),
+                    platform="instagram",
+                    retryable=False,
+                )
+
+            if "login" in error_msg or "unauthorized" in error_msg or "required" in error_msg:
+                return UploadResult(
+                    success=False,
+                    error="IG_SESSION_EXPIRED: Run 'xpst auth instagram'",
+                    platform="instagram",
+                    retryable=False,
+                )
+
+            if "rate limit" in error_msg or "too many" in error_msg or "429" in error_msg:
+                return UploadResult(
+                    success=False,
+                    error="IG_RATE_LIMITED: Too many requests, try again later",
+                    platform="instagram",
+                )
+
+            return UploadResult(
+                success=False,
+                error=f"IG_IMAGE_ERROR: {str(e)[:200]}",
+                platform="instagram",
+            )
+
+        post_url = f"https://www.instagram.com/p/{media.code}/"
+        logger.info(f"Posted image to Instagram: {post_url}")
+        return UploadResult(
+            success=True,
+            post_id=str(media.pk),
+            post_url=post_url,
+            platform="instagram",
+            metadata={
+                "code": media.code,
+                "caption_length": len(caption),
+                "auth_mode": "session",
+                "content_type": "image",
+            },
+        )
+
+    async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
+        """Publish a native Instagram carousel (album) — one post, N items.
+
+        Uses instagrapi's ``album_upload``: Instagram publishes the items as a
+        single carousel, in the order given. Nothing is stitched, re-encoded or
+        reordered, and every refusal below happens *before* the client is
+        touched:
+
+        * fewer than 2 items is refused (a 1-item "carousel" is an image or a
+          Reel post, and guessing which one the caller meant is how a photo
+          used to end up on the video path);
+        * more than ``MAX_CAROUSEL_ITEMS`` is refused, never silently truncated
+          — the caller learns which items would have been dropped;
+        * ``graph_api`` mode is refused by name: Meta's carousel publishing
+          needs public item URLs and is not implemented on that path;
+        * each image item is checked against Instagram's image contract with
+          ``image_rejection_reasons`` — the preflight's own destination-named
+          wording — so an unsupported still never reaches the album call.
+
+        Args:
+            media_paths: List of paths to images/videos, in post order.
+            caption: Caption for the carousel.
+
+        Returns:
+            UploadResult with the post URL and the published item order.
+        """
+        items = [Path(p) for p in media_paths]
+
+        if len(items) < 2:
+            reason = (
+                "Instagram carousels need at least 2 items "
+                f"(got {len(items)}). Post it as an image or a Reel instead."
+            )
+            logger.warning("Refusing Instagram carousel: %s", reason)
+            return UploadResult(
+                success=False,
+                error=f"IG_CAROUSEL_NEEDS_TWO: {reason}",
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items)},
+            )
+
+        if len(items) > self.MAX_CAROUSEL_ITEMS:
+            reason = (
+                f"Instagram carousels hold at most {self.MAX_CAROUSEL_ITEMS} items "
+                f"(got {len(items)}). Split the post instead — xPST will not drop items silently."
+            )
+            logger.warning("Refusing Instagram carousel: %s", reason)
+            return UploadResult(
+                success=False,
+                error=f"IG_CAROUSEL_TOO_MANY_ITEMS: {reason}",
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items)},
+            )
+
+        if self.config.instagram.auth_mode == "graph_api":
+            reason = (
+                "IG_GRAPH_API_CAROUSEL_UNSUPPORTED: the official Instagram API path publishes a "
+                "carousel from public item URLs and is not implemented in xPST; use auth_mode "
+                "'session' (xpst auth instagram) to publish a carousel from local files."
+            )
+            logger.warning("Refusing Instagram carousel: %s", reason)
+            return UploadResult(
+                success=False,
+                error=reason,
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items), "auth_mode": "graph_api"},
+            )
+
+        rejections = self.carousel_item_rejection_reasons(items)
+        if rejections:
+            message = " ".join(rejections)
+            logger.warning("Refusing Instagram carousel: %s", message)
+            return UploadResult(
+                success=False,
+                error=f"IG_CAROUSEL_ITEM_REJECTED: {message}",
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items)},
+            )
+
+        # Truncate caption if needed (Instagram's own hard limit, reported back)
+        caption_truncated = len(caption) > self.MAX_CAPTION_LENGTH
+        if caption_truncated:
             caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
 
         try:
             client = await self._get_client()
-            logger.info(f"Uploading carousel to Instagram: {len(media_paths)} items")
+            logger.info(f"Uploading carousel to Instagram: {len(items)} items")
 
-            # Upload as album
+            # Upload as album — order is the caller's order, unchanged.
             media = client.album_upload(
-                [Path(p) for p in media_paths],
+                items,
                 caption=caption,
             )
 
@@ -877,7 +1189,9 @@ class InstagramUploader(PlatformUploader):
                 metadata={
                     "code": media.code,
                     "caption_length": len(caption),
-                    "carousel_items": len(media_paths),
+                    "caption_truncated": caption_truncated,
+                    "carousel_items": len(items),
+                    "item_order": [p.name for p in items],
                     "content_type": "carousel",
                 },
             )
@@ -905,6 +1219,25 @@ class InstagramUploader(PlatformUploader):
                 error=f"IG_CAROUSEL_ERROR: {str(e)[:200]}",
                 platform="instagram",
             )
+
+    def carousel_item_rejection_reasons(self, items: list[Path]) -> tuple[str, ...]:
+        """Destination-named reasons Instagram cannot publish these carousel items.
+
+        Only still images are checked here, and with Instagram's image contract
+        (JPEG, size and aspect limits) — the same rules and the same wording the
+        preflight uses, so a refused item reads identically on both surfaces. The
+        check reads the file header in pure Python: no ffmpeg, no ffprobe, so an
+        image-only carousel request never invokes a media binary.
+        """
+        from xpst.content import MEDIA_KIND_IMAGE, media_kind
+        from xpst.media.specs import image_rejection_reasons
+
+        reasons: list[str] = []
+        for item in items:
+            if media_kind(item) != MEDIA_KIND_IMAGE:
+                continue
+            reasons.extend(image_rejection_reasons(item, self.platform_name))
+        return tuple(reasons)
 
     async def get_followers(self) -> int:
         """Return follower count for the authenticated Instagram account.
