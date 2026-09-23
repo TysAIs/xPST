@@ -1181,12 +1181,62 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         )
 
 
+def _engine_uploaders(engine: Any) -> dict[str, Any] | None:
+    """The uploaders the engine actually initialised, or ``None`` for a double.
+
+    ``None`` means "not an engine with an uploader map" (a test stand-in), which
+    is deliberately distinct from ``{}`` — an empty dict is the production state
+    this guard exists for: nothing enabled, so nothing can be published.
+    """
+    platforms = getattr(engine, "_platforms", None)
+    return platforms if isinstance(platforms, dict) else None
+
+
+def _engine_can_publish(engine: Any, targets: list[str]) -> bool:
+    """True when at least one resolved destination has a live uploader."""
+    uploaders = _engine_uploaders(engine)
+    if uploaders is None:
+        return True
+    return any(name in uploaders for name in targets)
+
+
+def _no_destinations_result() -> CallToolResult:
+    """The canonical zero-destination refusal shared by every surface.
+
+    Same code and message as the CLI (``NO_DESTINATIONS`` / "Choose at least
+    one destination platform.") so an agent, a script and the desktop UI all
+    branch on one value instead of parsing three different sentences.
+    """
+    from xpst.services.post_preflight import NO_DESTINATIONS_CODE, NO_DESTINATIONS_MESSAGE
+
+    return CallToolResult(
+        isError=True,
+        content=[TextContent(
+            type="text",
+            text=json.dumps({
+                "ok": False,
+                "status": "refused",
+                "error": {"code": NO_DESTINATIONS_CODE, "message": NO_DESTINATIONS_MESSAGE},
+                "blockers": [NO_DESTINATIONS_MESSAGE],
+            }, indent=2),
+        )],
+    )
+
+
 async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallToolResult:
     """Handle xpst_run tool."""
     dry_run = args.get("dry_run", False)
     max_posts = args.get("max_posts", 5)
     source = args.get("source", "tiktok")
     catch_up = args.get("catch_up", False)
+
+    # No destination means no run: refuse before fetching anything, with the
+    # canonical error, instead of returning a payload for a cycle that could
+    # not have published to anything. An engine double with no uploader map is
+    # left alone (the caller owns that stand-in).
+    uploaders = _engine_uploaders(engine)
+    if uploaders is not None and not uploaders:
+        return _no_destinations_result()
 
     if dry_run:
         actual_max = 20 if catch_up else max_posts
@@ -1303,6 +1353,14 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
         )
 
     from pathlib import Path
+
+    from xpst.services.post_preflight import resolve_destinations
+
+    # Same canonical guard as the CLI: a manual post with no destination that
+    # has a live uploader is refused instead of reporting an empty success.
+    targets = resolve_destinations(engine.config, args.get("platforms"))
+    if not _engine_can_publish(engine, targets):
+        return _no_destinations_result()
 
     if carousel_paths:
         media_paths = [Path(args["video_path"]), *(Path(p) for p in carousel_paths)]
@@ -1938,20 +1996,6 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
     platforms = [str(item).lower() for item in (arguments.get("platforms") or []) if str(item).strip()]
     caption = str(arguments.get("caption") or "")
 
-    missing = []
-    if not platforms:
-        # An empty target list would produce an empty plan that reports "ready".
-        missing.append("platforms is required")
-    if missing:
-        payload = {
-            "ok": False,
-            "ready": False,
-            "blockers": missing,
-            "warnings": [],
-            "network_calls": False,
-        }
-        return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
-
     plan = PostPreflightService(config).plan(
         PostPlanRequest(
             media_paths=[media_path] if media_path else [],
@@ -1959,11 +2003,15 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
             base_caption=caption,
         )
     ).to_dict()
+    # The zero-destination wording and code are the canonical ones (the plan
+    # carries them), so the MCP answer, the dashboard answer and the CLI
+    # refusal are the same error.
     payload = {
         "ok": plan["ok"],
         "ready": plan["ready"],
         "blockers": [issue["message"] for issue in plan["hard_blockers"]],
         "warnings": [issue["message"] for issue in plan["warnings"]],
+        "error": plan["error"],
         "plan": plan,
         "network_calls": False,
     }
