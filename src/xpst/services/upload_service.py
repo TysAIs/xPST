@@ -112,6 +112,7 @@ class UploadService:
         platform_name: str,
         video_id: str,
         source_platform: str = "",
+        visibility: str | None = None,
     ) -> UploadResult:
         """Single method that handles the full upload pipeline.
 
@@ -345,15 +346,23 @@ class UploadService:
                 encoded_path,
             )
 
+            retry_kwargs: dict[str, Any] = {
+                "config": STANDARD_RETRY,
+                "platform": platform_name,
+                # X maps duplicate posts to success server-side; IG/YT do
+                # not, so ambiguous errors there must not blind-retry (G07).
+                "ambiguous_safe": platform_name == "x",
+            }
+            # Only pass visibility to uploaders that accept it (YouTube
+            # honours it; every other platform ignores it harmlessly).
+            if visibility is not None and self._accepts_visibility(uploader):
+                retry_kwargs["visibility"] = visibility
+
             raw_upload_result = await retry_operation(
                 uploader.upload,
                 encoded_path,
                 caption,
-                config=STANDARD_RETRY,
-                platform=platform_name,
-                # X maps duplicate posts to success server-side; IG/YT do
-                # not, so ambiguous errors there must not blind-retry (G07).
-                ambiguous_safe=platform_name == "x",
+                **retry_kwargs,
             )
             # Provider acknowledgments are not publication proof. Normalize at
             # this single chokepoint before any state, quota, or success path.
@@ -464,6 +473,24 @@ class UploadService:
                 error=f"Upload failed: {str(e)[:200]}",
                 platform=platform_name,
             )
+
+    @staticmethod
+    def _accepts_visibility(uploader: PlatformUploader) -> bool:
+        """Whether an uploader's ``upload`` accepts a ``visibility`` keyword.
+
+        YouTube honours it; the other platform uploaders deliberately do not,
+        so this is how the shared service forwards the option without breaking
+        their signatures.
+        """
+        import inspect
+
+        try:
+            params = inspect.signature(uploader.upload).parameters
+        except (TypeError, ValueError):
+            return False
+        if "visibility" in params:
+            return True
+        return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
 
     def _is_auth_expired(self, error: str | None) -> bool:
         """Check if an error indicates authentication expiry.
