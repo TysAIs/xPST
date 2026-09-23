@@ -44,7 +44,7 @@ Unlike YouTube/Instagram/X which are wired into the interactive `xpst connect` w
 | Max video size | 1 GB |
 | Max text/caption length | 500 characters |
 | Token lifetime | 60 days (refreshable) |
-| Media upload | URL-based (media must be reachable via a public URL) or a two-step container upload |
+| Media upload | **None.** Meta retrieves `video_url`/`image_url` from a server *you* host — there is no upload endpoint, so xPST cannot publish a local file to Threads |
 
 > The 250-post daily limit is enforced server-side by Meta. xPST tracks quota locally and will warn as you approach it.
 
@@ -170,7 +170,7 @@ xpst health
 | `THREADS_NOT_CONFIGURED: Set graph_access_token and threads_user_id` | Edit `~/.xpst/config.yaml` (Step 4) and run `xpst config validate`. |
 | `190` / token-expired errors | Re-generate a long-lived token (Step 3) and update config. |
 | `(#10) Application does not have permission` | Threads tester invite not accepted (Step 1, item 4), or `threads_content_publish` scope missing on the token. |
-| Upload fails with "media URL not accessible" | Threads requires media reachable via a **public URL**. For local files, xPST uses the two-step container upload; ensure FFmpeg is installed so the file is re-encoded to spec (H.264, ≤300s, ≤1GB). |
+| `THREADS_NEEDS_URL: … a local file cannot be published to Threads` | Working as designed. Meta's API fetches `video_url` from a server you host and xPST is local, so a local file is refused **before any request** — by `xpst preflight`, by `xpst post`, and by the uploader. xPST cannot deliver a media URL to Threads either yet (its publish pipeline prepares a local file first, and no CLI/MCP surface accepts a URL), so Threads media publishing is not offered today: post this content from the Threads app. |
 | `Rate limit` / 250 posts exceeded | You've hit the 24-hour cap. It resets server-side; wait or reduce post frequency. |
 | `400` invalid container | Caption > 500 chars, or video > 300s / > 1GB. Trim or re-encode. |
 

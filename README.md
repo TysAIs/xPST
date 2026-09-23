@@ -9,10 +9,10 @@
 <p align="center">
   <a href="https://www.python.org"><img alt="Python" src="https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green"></a>
-  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-1534%20passing-brightgreen"></a>
+  <a href="https://github.com/TysAIs/xPST/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/TysAIs/xPST/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-7-blue"></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/os-Linux%20|%20macOS%20|%20Windows-lightgrey"></a>
-  <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-28%20tools-orange"></a>
+  <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-40%20tools-orange"></a>
   <a href="#"><img alt="Desktop" src="https://img.shields.io/badge/desktop-PySide6%2FQML-blueviolet"></a>
 </p>
 
@@ -48,8 +48,8 @@ xPST includes integrations for **six platforms** — YouTube, Instagram, X/Twitt
 
 It runs three ways:
 - **Desktop GUI** — PySide6/QML native app with 8 pages
-- **CLI** — 38 top-level commands covering the entire workflow
-- **MCP server** — 38 tools so AI agents can drive the entire product
+- **CLI** — 46 top-level commands (69 including subcommands) covering the entire workflow
+- **MCP server** — 40 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
 
@@ -94,8 +94,24 @@ platform API calls you configure. See
 
 ### Three Drivable Surfaces
 - **Desktop GUI** — PySide6/QML app with Dashboard, Compose, Content, Analytics, Connect, Schedule, Settings, and About pages + DetailPanel
-- **CLI** — 38 Click-based commands with `--json` output, `--dry-run` mode, and meaningful exit codes
-- **MCP server** — 38 tools (32 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
+- **CLI** — 46 Click-based commands (69 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
+- **MCP server** — 40 tools (34 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
+
+#### Surface counts
+
+These numbers are generated from the shipped code, not maintained by hand. `python scripts/generate_counts.py --check` fails when a claim here drifts, and runs in CI.
+
+<!-- BEGIN GENERATED SURFACE COUNTS -->
+| Surface | Count | Measured from |
+|---------|-------|---------------|
+| MCP tools | **40** | `tools/list` over a real stdio handshake with `xpst mcp start` |
+| CLI top-level commands | **46** | `xpst.cli.main.commands` |
+| CLI commands including subcommands | **69** | recursive walk of the Click command tree |
+| HTTP routes (dashboard app) | **34** | FastAPI route table (30 xPST routes + 4 framework docs routes) |
+| Supported providers | **7** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
+
+Regenerate and verify with `python scripts/generate_counts.py --write` / `--check`; the check runs in CI, so these numbers cannot drift silently.
+<!-- END GENERATED SURFACE COUNTS -->
 
 ### Enterprise Hardening
 - **Encrypted credential-store values** — Fernet/scrypt `.enc` fallback by default, with optional OS keychain storage; platform-specific token/session files remain owner-only and the whole `~/.xpst/` directory is sensitive
@@ -247,7 +263,7 @@ See `Dockerfile` and `docker-compose.yml` for details.
 
 ## CLI Reference
 
-xPST provides 38 top-level commands. Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 
 ### Setup & Accounts
 
@@ -258,7 +274,8 @@ xPST provides 38 top-level commands. Run `xpst --help` for the full list. Most c
 | `xpst doctor` | Diagnose auth health, quotas and environment; prints a prioritized fix-it checklist |
 | `xpst connect [PLATFORM]` | Streamlined account connection wizard; use `--test` to test existing |
 | `xpst auth [PLATFORM]` | Authenticate with a specific platform (youtube/x/instagram/tiktok/threads) |
-| `xpst auth status` | Show authentication and quota status for all platforms |
+| `xpst auth status` | Show authentication and quota status for all platforms, with a truthful per-platform badge derived from a live check |
+| `xpst refresh-tokens` | Refresh expiring/expired access tokens in the background (bounded retry, no prompts, no token material printed) |
 | `xpst config show` | Display current configuration as YAML (sensitive values masked) |
 | `xpst config set KEY VALUE` | Set a config value using dotted keys (e.g. `rate_limits.youtube 10`) |
 | `xpst config validate` | Validate configuration for errors (exit 0 if valid, 4 if invalid) |
@@ -267,6 +284,8 @@ xPST provides 38 top-level commands. Run `xpst --help` for the full list. Most c
 | `xpst config import FILE` | Import configuration (merge or replace, with diff preview) |
 | `xpst readiness` | Show first-run readiness and next actions; use `--fix` to create missing dirs |
 | `xpst providers` | Show supported source and destination providers with capabilities |
+| `xpst media status` | Show which ffmpeg/ffprobe xPST will use and where it came from (env / system / fetched) |
+| `xpst media fetch` | Download a checksum-verified static ffmpeg/ffprobe into `~/.xpst/bin` (only needed when the machine has none) |
 
 ### Core Posting
 
@@ -278,7 +297,7 @@ xPST provides 38 top-level commands. Run `xpst --help` for the full list. Most c
 | `xpst watch` | Continuous monitoring loop (runs until Ctrl+C) |
 | `xpst watch --interval 300` | Check every 300 seconds (default: from config) |
 | `xpst post -v VIDEO -c CAPTION` | Manually post a video file; use multiple `-v` for carousel |
-| `xpst post -v v.mp4 -c 'text' -p youtube,x,threads` | Post to specific platforms only |
+| `xpst post -v v.mp4 -c 'text' -p youtube,x,instagram` | Post to specific platforms only |
 | `xpst backfill` | Retry failed or incomplete posts from history |
 | `xpst backfill --dry-run` | Show what would be backfilled without uploading |
 | `xpst delete VIDEO_ID` | Delete a posted video from platforms; use `--platform` to target one |
@@ -367,10 +386,16 @@ xPST provides 38 top-level commands. Run `xpst --help` for the full list. Most c
 |------|---------|
 | `0` | Success |
 | `1` | General error |
-| `2` | Authentication failure |
-| `3` | Rate limit exceeded |
-| `4` | Configuration error |
+| `2` | Configuration error (also Click usage errors) |
+| `3` | Authentication failure |
+| `4` | Rate limit exceeded |
 | `10` | Platform unavailable |
+
+`xpst post` reports the post outcome in the exit status (see
+[docs/TUTORIAL_CLI.md](docs/TUTORIAL_CLI.md#exit-codes-reference)): `0` when at
+least one destination published — a partial success is a success — and
+otherwise the shared reason every attempted destination failed for, which is
+`1` for a mix of reasons.
 
 ### Dry-Run Mode
 
@@ -424,8 +449,12 @@ On first launch, a welcome dialog guides you to the Connect page to set up your 
 ## Dashboard Guide
 
 xPST ships a lightweight web API dashboard (FastAPI + uvicorn, no extra UI
-framework needed). It is loopback-only by default (`127.0.0.1`) and protects
-all endpoints with HTTP Basic auth when dashboard credentials are configured.
+framework needed). It is loopback-only by default (`127.0.0.1`). Read-only
+endpoints are protected with HTTP Basic auth when dashboard credentials are
+configured; every mutating endpoint (`POST /api/post`, `/api/connect/{platform}`,
+`/api/onboarding*`, `/bio/edit`) always requires the xPST API token, because
+loopback is not an authorisation boundary. Print it with
+`xpst auth api-token`.
 
 ```bash
 xpst dashboard                # http://127.0.0.1:8080
@@ -437,10 +466,12 @@ xpst dashboard --port 9000    # custom port
 | `GET /health` | none | Aggregated per-platform health (`healthy` / `degraded`) |
 | `GET /metrics` | none | Prometheus text-format metrics |
 | `GET /state` | Basic | Posting summary: totals, per-platform counts, health, best platform |
+| `POST /api/post` | API token | Plan (`dry_run`) or publish through the real engine |
+| `POST /api/connect/{platform}` | API token | Inspect / enable / verify one destination |
 | `GET /webhook/messenger` | none | Meta webhook handshake (only when Messenger is enabled) |
 | `POST /webhook/messenger` | none | Messenger events, verified with `X-Hub-Signature-256` |
 
-Set the dashboard password (stored as a bcrypt hash):
+Set the dashboard password (stored as a bcrypt hash) to also protect reads:
 
 ```bash
 xpst config set monitoring.dashboard_password mypassword
@@ -477,62 +508,64 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 }
 ```
 
-### 23 Tools
+<!-- BEGIN GENERATED README TOOL INDEX -->
 
-**Posting & operations (10 tools):**
+### 38 Tools
 
-| Tool | Description |
-|------|-------------|
-| `xpst_run` | Check for new videos and cross-post them (supports `dry_run`, `source`, `max_posts`) |
-| `xpst_post` | Post a specific local video file or carousel to platforms |
-| `xpst_backfill` | Retry failed or incomplete posts from history |
-| `xpst_delete` | Delete a post from a platform |
-| `xpst_health` | Test connectivity to all platforms and sources (no uploads) |
-| `xpst_status` | Show cross-posting statistics and system status |
-| `xpst_config_show` | Display current configuration (sensitive values masked) |
-| `xpst_auth_status` | Show authentication status for all platforms |
-| `xpst_providers` | List supported content sources and posting destinations with capabilities |
-| `xpst_security_audit` | Run an automated security audit of the installation |
+Generated from the live registry — full schemas, consent gates, and per-tool notes live in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
 
-**Analytics & insights (4 tools):**
+| Tool | Purpose | Mutates real accounts |
+|------|---------|-----------------------|
+| `xpst_run` | Check for new videos and cross-post them to configured platforms | **Yes** |
+| `xpst_post` | Manually post a local video file or carousel to platforms | **Yes** |
+| `xpst_analytics` | Per-post and per-platform engagement metrics (views, likes, comments, shares) with persisted sn… | No |
+| `xpst_cross_post_analytics` | Cross-post correlation analytics (B1): one video posted to multiple platforms shown as a single… | No |
+| `xpst_followers` | Follower counts per platform with growth history. Returns total followers across all platforms,… | No |
+| `xpst_best_time` | Best time to post per platform, based on engagement history. Analyzes when your posts get the h… | No |
+| `xpst_security_audit` | Run an automated security check on the xPST installation. Verifies credential file permissions,… | No |
+| `xpst_suggest_caption` | Generate AI caption suggestions for a video file. Uses the video's transcript to generate 3 cap… | No |
+| `xpst_generate_ideas` | Generate post ideas for a content topic (AI content studio). Uses the KB LLM when configured (X… | No |
+| `xpst_transcript` | Get the transcript for a video by its content_hash or video_id. Returns the full transcript tex… | No |
+| `xpst_search` | Search the knowledge base for nuggets, clips, and topics. Returns matching knowledge nuggets wi… | No |
+| `xpst_activity` | List recorded platform failures with targeted retry or review actions (read-only) | No |
+| `xpst_schedule_list` | List scheduled posts (pending, completed, failed) with times and targets | No |
+| `xpst_schedule_add` | Schedule a post for later: local video file + caption + ISO-8601 time, optional platform list a… | **Yes** |
+| `xpst_health` | Test connectivity to all platforms and sources (no uploads) | No |
+| `xpst_status` | Show cross-posting statistics and health status | No |
+| `xpst_backfill` | Retry failed or incomplete posts from history | **Yes** |
+| `xpst_config_show` | Display current configuration (with sensitive values masked) | No |
+| `xpst_auth_status` | Show live authentication status for every provider — the same verdict as `xpst auth status` (ro… | No |
+| `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the public /bio URL, the pa… | No |
+| `xpst_capabilities` | Return the canonical role-aware provider and capability contract without network calls | No |
+| `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets (media, caption,… | No |
+| `xpst_readiness` | Return local setup readiness and actionable blockers without starting the posting engine | No |
+| `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or accepts secrets | No |
+| `xpst_providers` | List supported content sources and posting destinations with capabilities | No |
+| `xpst_disconnect` | Disconnect a platform: remove its stored account credentials (tokens, cookies, session files) a… | **Yes** |
+| `xpst_delete` | Delete a post record from state | **Yes** |
+| `messenger_send` | Send a text message to a Messenger recipient (page-scoped PSID) via the Meta Graph API. Require… | **Yes** |
+| `messenger_set_rules` | Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->reply map (the '*' k… | **Yes** |
+| `xpst_messenger_check_comments` | Fetch recent comments on an Instagram or Facebook post and auto-reply per the configured reply_… | **Yes** |
+| `kb_add` | Ingest a local file or URL into the knowledge base | **Yes** |
+| `kb_query` | Return stored knowledge nuggets whose text matches the query | No |
+| `kb_organize` | Discover areas, tag difficulty, and assign nuggets | **Yes** |
+| `kb_areas` | List discovered knowledge areas in course order (beginner -> advanced) | No |
+| `xpst_setup_start` | Start or return the shared resumable setup transaction | No |
+| `xpst_setup_status` | Read the shared setup transaction and pending human actions | No |
+| `xpst_setup_resume` | Resume setup with safe step state or caller-verified readiness | No |
+| `xpst_setup_reset` | Reset the shared setup transaction and its recovery copies | No |
 
-| Tool | Description |
-|------|-------------|
-| `xpst_analytics` | Per-post and per-platform engagement metrics with persistent history (`live=false` for offline, `live=true` to refresh from APIs) |
-| `xpst_cross_post_analytics` | Cross-post correlation analytics — how one video performed across every platform |
-| `xpst_followers` | Follower counts per platform with growth history |
-| `xpst_best_time` | Recommended posting times derived from engagement history |
-
-**Content & creative (3 tools):**
-
-| Tool | Description |
-|------|-------------|
-| `xpst_suggest_caption` | Generate AI caption suggestions from a video file |
-| `xpst_transcript` | Get the transcript for a video by ID or content hash |
-| `xpst_search` | Search transcripts and content across the knowledge base |
-
-**Scheduling (2 tools):**
-
-| Tool | Description |
-|------|-------------|
-| `xpst_schedule_list` | List scheduled posts (pending, completed, failed) with times and targets |
-| `xpst_schedule_add` | Schedule a post: local video + caption + ISO-8601 time + optional platform list and repeat rule |
-
-**Knowledge base (4 tools, deprecated in favor of the `xpst_*` content tools):**
-
-| Tool | Description |
-|------|-------------|
-| `kb_add` | Ingest a local file or URL into the knowledge base (transcribe, extract nuggets, embed, store) |
-| `kb_query` | Return stored knowledge nuggets whose text matches the query (semantic search with cited provenance) |
-| `kb_organize` | Discover areas, tag difficulty, and assign nuggets |
-| `kb_areas` | List discovered knowledge areas in course order (beginner → advanced) |
+<!-- END GENERATED README TOOL INDEX -->
 
 ### Security Guardrails
 
-Mutating tools (`xpst_run`, `xpst_post`, `xpst_backfill`, `xpst_delete`, `xpst_schedule_add`, `kb_add`, `kb_organize`) post to or mutate **real accounts**. Two environment-variable tiers control them:
+Mutating tools — every row marked **Yes** in the table above — post to or mutate **real accounts**. With no environment variables set they are **refused** (fail-closed). Three tiers control them:
 
-- **`XPST_MCP_READONLY=1`** — Blocks all mutating tools entirely (read-only mode)
-- **`XPST_MCP_REQUIRE_CONFIRM=1`** — Requires `confirm: true` in the arguments (consent tier)
+- **`XPST_MCP_ALLOW_MUTATIONS=1`** — Explicit opt-in: mutating tools run without a per-call confirmation
+- **`XPST_MCP_REQUIRE_CONFIRM=1`** — Consent tier: mutating tools require `confirm: true` in the arguments
+- **`XPST_MCP_READONLY=1`** — Blocks all mutating tools entirely, even when `ALLOW_MUTATIONS` is set (read-only mode)
+
+Local setup-state tools (`xpst_setup_start`, `xpst_setup_resume`, `xpst_setup_reset`) are not in the mutating set: they change local setup/config state rather than platform accounts, and are not gated.
 
 ### Recommended Agent Cold-Start Flow
 
@@ -659,6 +692,16 @@ The configured Threads path has platform limits (including post frequency,
 video duration/size, and caption length) and may refresh a still-valid token.
 See [docs/setup-threads.md](docs/setup-threads.md) for the opt-in requirements.
 
+**Threads takes no uploaded media.** Meta's API retrieves `video_url` from a
+public server and offers no upload endpoint, and xPST has no server to host a
+file, so a local file is refused before any request — by `xpst preflight`, by
+`xpst post`, and by the uploader — with the code `THREADS_NEEDS_URL` and the
+requirement spelled out. xPST cannot deliver a media URL to Threads either yet:
+its publish pipeline prepares a local file before an uploader runs and no
+CLI/MCP surface accepts a URL, so **Threads media publishing is not offered at
+all today** — post that content from the Threads app. Text posts need no URL,
+but xPST has no Threads text sender yet, so they are not offered either.
+
 ### Messenger (opt-in — currently disabled)
 
 Messenger is an **opt-in messaging/auto-reply** integration, not a video-posting
@@ -697,9 +740,13 @@ MCP tools: `messenger_send`, `messenger_set_rules`. See
 Use local folders as a source for manual posting and carousels:
 
 ```bash
-xpst post -v ./my-video.mp4 -c "My caption" -p youtube,instagram,x,threads
+xpst post -v ./my-video.mp4 -c "My caption" -p youtube,instagram,x
 xpst run --source local
 ```
+
+Threads is absent from that list on purpose: Meta's Threads API fetches `video_url`
+from a server *you* host and has no upload endpoint, so xPST cannot publish a local
+file there and refuses it before any request (`THREADS_NEEDS_URL`).
 
 ---
 
@@ -850,7 +897,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and [docs/a
 # Install with dev tooling
 uv pip install -e ".[full,dev]"
 
-# Run the test suite (1524 passed / 12 skipped on Python 3.11)
+# Run the test suite (current pass/skip counts: see the CI badge at the top)
 pytest
 
 # Lint and format
@@ -879,7 +926,7 @@ Contributions are welcome. The codebase enforces import boundaries (surfaces mus
   documented. TikTok destination publishing is not currently available;
   Threads and Messenger are disabled/unauthenticated.
 - **Secrets are masked** in `xpst config show`, redacted in `xpst diagnostics` bundles, and never written to logs.
-- **MCP guardrails** (`XPST_MCP_READONLY`, `XPST_MCP_REQUIRE_CONFIRM`) gate every mutating tool so agents cannot post without explicit authorization.
+- **MCP guardrails** (`XPST_MCP_ALLOW_MUTATIONS`, `XPST_MCP_REQUIRE_CONFIRM`, `XPST_MCP_READONLY`) gate the mutating tools so agents cannot post without explicit authorization — with none set, they are refused.
 - **Self-audit** your installation with `xpst security-audit`, which checks credential file permissions and configuration hygiene.
 
 See [docs/PRIVACY.md](docs/PRIVACY.md) for the full privacy model.
