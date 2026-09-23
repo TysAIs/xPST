@@ -17,6 +17,25 @@ Sources:
 `verify_media` classifies every violation as ERROR (blocks the upload — the
 platform will reject or irrecoverably mangle the file) or WARNING (the
 platform will re-encode — quality will drop, but the upload goes through).
+
+Modality awareness
+------------------
+`verify_media` is MODALITY-AWARE: a file's modality (video/image, see
+:mod:`xpst.content` media kinds) is decided first, and only the checks that apply to
+that modality run. A JPEG is no longer measured against the video container and
+video-stream rules; when its destination cannot publish images it produces ONE
+error that names the destination instead of a pair of raw spec violations.
+
+The `modalities` field below is the DECLARED publish capability and must stay
+honest in both directions:
+
+- Only add a modality once an adapter can really publish it (a spec that says
+  "images welcome" while every uploader validates a video recreates the exact
+  defect this module now prevents).
+- Only keep video-only once that is true. ``destinations_for_modality`` and
+  ``modality_unsupported_message`` are the single source every surface reads
+  (``/api/media``, the preflight, the CLI), so flipping a platform here flips it
+  everywhere at once.
 """
 
 from __future__ import annotations
@@ -25,6 +44,12 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from xpst.media.modality import (
+    MODALITY_IMAGE,
+    MODALITY_VIDEO,
+    detect_modality,
+    normalize_suffix,
+)
 from xpst.utils.video import (
     _parse_frame_rate,
     _pick_video_stream,
@@ -35,6 +60,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Name of the check that reports "this destination cannot take this modality".
+MODALITY_CHECK = "modality"
 
 
 @dataclass(frozen=True)
@@ -53,9 +81,35 @@ class PlatformSpec:
     max_video_bitrate_bps: int  # profile ceiling (warn above)
     file_size_cap_mb: int | None
     duration_cap_s: int | None  # standard (non-premium) tier
+    # Modalities xPST can actually publish to this destination today. Video is
+    # universal; an image entry is only legitimate once the adapter has a real
+    # image publish path.
+    modalities: tuple[str, ...] = (MODALITY_VIDEO,)
+    # Image suffixes this destination accepts — only meaningful, and only
+    # allowed to be non-empty, when MODALITY_IMAGE is declared above.
+    image_containers: tuple[str, ...] = ()
+
+    def supports(self, modality: str) -> bool:
+        """Whether this destination can publish ``modality`` today."""
+        return modality in self.modalities
+
+    def containers_for(self, modality: str) -> tuple[str, ...]:
+        """Acceptable file suffixes for ``modality`` at this destination."""
+        if modality == MODALITY_IMAGE:
+            return self.image_containers
+        return self.containers
 
 
 PLATFORM_SPECS: dict[str, PlatformSpec] = {
+    # Image publishing is NOT declared anywhere below on purpose: no adapter has
+    # an image publish path yet (every ``upload()`` validates a video — the
+    # Instagram Graph path is REELS-only, X uploads chunked video, YouTube and
+    # TikTok are video ingests, Threads takes a video URL). Declaring it here
+    # without that path is exactly the "app offers what it hard-rejects" defect
+    # this matrix now protects against. Adding ``MODALITY_IMAGE`` plus
+    # ``image_containers`` here is the single switch that makes a destination
+    # offerable for images everywhere at once (/api/media, preflight, CLI) —
+    # do it in the same PR that adds the adapter's image upload.
     "youtube": PlatformSpec(
         display_name="YouTube",
         containers=(".mp4", ".mov"),
@@ -209,27 +263,111 @@ def _measure_lufs(path: Path, ffmpeg_path: str | None) -> float | None:
     return measured["input_i"] if measured else None
 
 
+def _check_file_size(path: Path, spec: PlatformSpec, checks: list[Check]) -> None:
+    """File size — hard rejection above the cap → ERROR."""
+    try:
+        size_mb = path.stat().st_size / (1024 * 1024)
+    except OSError:
+        return
+    _add(
+        checks,
+        "file_size",
+        spec.file_size_cap_mb is None or size_mb <= spec.file_size_cap_mb,
+        f"{size_mb:.0f} MB vs cap {spec.file_size_cap_mb} MB" if spec.file_size_cap_mb else f"{size_mb:.0f} MB",
+        error_level="error",
+    )
+
+
+def _verify_image(path: Path, platform: str, spec: PlatformSpec, checks: list[Check]) -> MediaReport:
+    """Checks that apply to a still image at a destination that publishes them.
+
+    No video-stream, codec, fps, faststart, or loudness rule is meaningful for a
+    still image, so none of them run here — that is the whole point of the
+    modality split.
+    """
+    report = MediaReport(path=str(path), platform=platform, checks=checks)
+    suffix = normalize_suffix(path)
+    accepted = spec.containers_for(MODALITY_IMAGE)
+    _add(
+        checks,
+        "container",
+        suffix in accepted,
+        f"{suffix or '(none)'} vs accepted {', '.join(accepted) or '(none)'}",
+        error_level="error",
+    )
+
+    try:
+        info = get_video_info_standalone(path)
+        report.probe = info
+    except Exception as e:  # noqa: BLE001 - pre-flight must never block on a probe hiccup
+        checks.append(Check(name="probe", status="warn", detail=f"ffprobe failed ({e}); spec not verified"))
+        return report
+
+    stream = next(
+        (item for item in info.get("streams", []) if item.get("codec_type") == "video"),
+        None,
+    )
+    if stream is not None:
+        width = int(stream.get("width") or 0)
+        height = int(stream.get("height") or 0)
+        long_edge = max(width, height)
+        _add(
+            checks,
+            "dimensions",
+            0 < long_edge <= spec.long_edge,
+            f"{width}x{height} (long edge {long_edge}) vs max {spec.long_edge}",
+        )
+    _check_file_size(path, spec, checks)
+    return report
+
+
 def verify_media(
     video_path: Path,
     platform: str,
     *,
     ffmpeg_path: str | None = None,
     check_loudness: bool = True,
+    modality: str | None = None,
 ) -> MediaReport:
     """Check a media file against ``platform``'s ingest spec before upload.
 
+    The file's modality is decided first (from its extension, or from the
+    explicit ``modality`` argument). A destination that cannot publish that
+    modality produces exactly one error, named for the destination — never a
+    pile of video rules applied to a still image.
+
     Never raises: a probe failure degrades to a warning so a pre-flight
-    hiccup can never block a legitimate upload. Hard errors (wrong container,
-    no video stream, oversized file) mean the platform would reject or
-    irrecoverably mangle the file — callers should block the upload on
-    ``report.errors``.
+    hiccup can never block a legitimate upload. Hard errors (unsupported
+    modality, wrong container, no video stream, oversized file) mean the
+    platform would reject or irrecoverably mangle the file — callers should
+    block the upload on ``report.errors``.
     """
     spec = PLATFORM_SPECS.get(platform, PLATFORM_SPECS["instagram"])
     checks: list[Check] = []
     report = MediaReport(path=str(video_path), platform=platform, checks=checks)
 
+    detected = modality or detect_modality(video_path)
+    suffix = normalize_suffix(video_path)
+
+    # Unsupported modality — one clear error naming the destination → ERROR
+    if detected is not None and not spec.supports(detected):
+        checks.append(
+            Check(
+                name=MODALITY_CHECK,
+                status="error",
+                detail=modality_unsupported_message(
+                    detected,
+                    suffix=suffix,
+                    destination=destination_display_name(platform),
+                ),
+            )
+        )
+        return report
+
+    if detected == MODALITY_IMAGE:
+        return _verify_image(video_path, platform, spec, checks)
+
     # Container — platform rejection risk → ERROR
-    suffix = video_path.suffix.lower()
     _add(
         checks,
         "container",
@@ -333,17 +471,7 @@ def verify_media(
     )
 
     # File size — hard rejection above the cap → ERROR
-    try:
-        size_mb = video_path.stat().st_size / (1024 * 1024)
-        _add(
-            checks,
-            "file_size",
-            spec.file_size_cap_mb is None or size_mb <= spec.file_size_cap_mb,
-            f"{size_mb:.0f} MB vs cap {spec.file_size_cap_mb} MB" if spec.file_size_cap_mb else f"{size_mb:.0f} MB",
-            error_level="error",
-        )
-    except OSError:
-        pass
+    _check_file_size(video_path, spec, checks)
 
     # faststart — playback/ingest optimization → WARNING only (zero-loss to fix)
     if suffix == ".mp4":
@@ -372,9 +500,93 @@ def verify_media(
     return report
 
 
+def destinations_for_modality(modality: str) -> tuple[str, ...]:
+    """Platform names (canonical keys) that can publish ``modality`` today.
+
+    This is the ONE answer to "is this file offerable?" — ``/api/media`` uses it
+    to decide what the UI may list, and ``verify_media`` uses the same
+    ``PlatformSpec.supports`` flag, so an offered file and an accepted file can
+    never disagree.
+    """
+    return tuple(name for name, spec in PLATFORM_SPECS.items() if spec.supports(modality))
+
+
+# Platform keys that share another platform's ingest spec but are NOT that
+# platform. A message must name the destination the user actually chose.
+_DISPLAY_NAME_OVERRIDES = {"threads": "Threads"}
+
+
+def destination_display_name(platform: str) -> str:
+    """Human name for a platform key (Threads ships Instagram's ingest spec)."""
+    override = _DISPLAY_NAME_OVERRIDES.get(platform)
+    if override:
+        return override
+    spec = PLATFORM_SPECS.get(platform)
+    return spec.display_name if spec else platform
+
+
+def destination_display_names(modality: str) -> tuple[str, ...]:
+    """Human-facing names of the destinations that can publish ``modality``.
+
+    Deduplicated because several platform keys can share one spec (Threads
+    ingests through Instagram's pipeline), and a message must not name the same
+    destination twice.
+    """
+    return tuple(
+        dict.fromkeys(
+            destination_display_name(name)
+            for name, spec in PLATFORM_SPECS.items()
+            if spec.supports(modality)
+        )
+    )
+
+
+def modality_unsupported_message(
+    modality: str,
+    *,
+    suffix: str = "",
+    destination: str | None = None,
+) -> str:
+    """One plain-language sentence for a modality no destination can publish.
+
+    Args:
+        modality: the file's modality (``video``/``image``).
+        suffix: dotted file suffix, included so the message names the format.
+        destination: destination display name when the message is per-platform.
+
+    The message always says who cannot take the file, whether anyone can, and
+    what to do instead — it never leaks a bare spec comparison like
+    ``".jpg vs accepted .mp4, .mov"``.
+    """
+    file_label = f"{'an' if modality[:1].lower() in 'aeiou' else 'a'} {modality} file"
+    if suffix:
+        file_label += f" ({suffix})"
+    head = (
+        f"{destination} cannot accept {file_label}"
+        if destination
+        else f"No destination can accept {file_label}"
+    )
+
+    accepting = destination_display_names(modality)
+    if accepting:
+        # Somebody can take it — say who, and stay out of the way.
+        tail = f" It can be posted to {', '.join(accepting)}."
+    elif modality == MODALITY_IMAGE:
+        tail = " xPST has no image publish path yet."
+    else:
+        tail = " xPST cannot publish this file type yet."
+
+    advice = (
+        " Choose a video file, or convert the image to a video first."
+        if modality == MODALITY_IMAGE
+        else " Choose a different file."
+    )
+    return f"{head}.{tail}{advice}"
+
+
 def format_report(report: MediaReport) -> str:
     """Human-readable multi-line report for CLI output."""
-    display = PLATFORM_SPECS[report.platform].display_name if report.platform in PLATFORM_SPECS else report.platform
+    display = destination_display_name(report.platform)
     lines = [f"{report.path} — {display}"]
     for c in report.checks:
         mark = {"ok": "[ok]  ", "warn": "[WARN]", "error": "[FAIL]"}[c.status]

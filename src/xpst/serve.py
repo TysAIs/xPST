@@ -33,6 +33,7 @@ from xpst.engine import CrossPostEngine
 from xpst.schedule_manager import ScheduleManager
 from xpst.scheduler import Scheduler
 from xpst.utils.logger import get_logger
+from xpst.utils.net import port_in_use, port_remedy
 from xpst.utils.pidfile import PidfileLock, PidfileLockError
 
 if TYPE_CHECKING:
@@ -42,6 +43,11 @@ logger = get_logger(__name__)
 
 # Default source fed to the watch loop (matches `xpst run/watch`).
 DEFAULT_WATCH_SOURCE = "tiktok"
+
+# Exit code returned when the requested dashboard port is already taken.
+# Stable and machine-readable so supervisors (launchd/systemd) and smoke
+# scripts can tell "port conflict" apart from a generic crash.
+EXIT_PORT_IN_USE = 3
 
 
 class ServeSupervisor:
@@ -271,8 +277,20 @@ class ServeSupervisor:
 
         Returns:
             0 on clean shutdown, 1 if the pidfile could not be interpreted /
-            a fatal setup error occurred.
+            a fatal setup error occurred, and :data:`EXIT_PORT_IN_USE` when the
+            requested dashboard port is already bound.
+
+        Port pre-flight (regression guard): ``xpst serve --port N`` used to
+        start the scheduler even when ``N`` was taken — the dashboard thread
+        swallowed the bind error ("never kill the daemon") so the process
+        looked healthy while its HTTP UI was dead, and the requested ``--port``
+        had no effect. A taken port is now a loud failure *before* the
+        scheduler starts, naming the port and the remedy.
         """
+        if not self.no_dashboard and port_in_use(self.host, self.port):
+            logger.error("xpst serve: %s", port_remedy(self.host, self.port))
+            return EXIT_PORT_IN_USE
+
         if not self.acquire():
             # Another live instance already supervises the engine — an
             # idempotent no-op for cron/launchctl keep-alive invocations.

@@ -45,11 +45,24 @@ def _authed_app(tmp_path: Path) -> tuple[TestClient, str]:
     return TestClient(_create_app(config_dir)), config_dir
 
 
+# Mutating /api routes require the dashboard API token even on a bare router
+# (defence in depth in `require_api_token`). These flow tests are about route
+# behaviour, so they authenticate the way a real client does.
+API_TOKEN = "first-run-api-token"
+API_HEADERS = {"X-API-Token": API_TOKEN}
+
+
+@pytest.fixture(autouse=True)
+def _api_token_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bare-router app has no credential store, so it reads the env override."""
+    monkeypatch.setenv("XPST_API_TOKEN", API_TOKEN)
+
+
 def _open_app(tmp_path: Path, config_dir: str | None = None, **router_kwargs: Any) -> TestClient:
-    """App without auth, for flows that do not exercise the auth matrix."""
+    """App without Basic auth, for flows that do not exercise the auth matrix."""
     app = FastAPI()
     app.include_router(create_api_router(config_dir or str(tmp_path / "cfg"), **router_kwargs))
-    return TestClient(app)
+    return TestClient(app, headers=API_HEADERS)
 
 
 def _media_dir(tmp_path: Path, count: int = 2) -> Path:
@@ -121,6 +134,10 @@ def _engine_factory(engine: FakeEngine):
 NEW_ROUTES = [
     ("GET", "/api/onboarding"),
     ("GET", "/api/media"),
+    # Preview routes serve the user's own media bytes, so they belong behind
+    # exactly the same gate as the rest of the API.
+    ("GET", "/api/media/stream"),
+    ("GET", "/api/media/thumb"),
 ]
 
 
@@ -325,7 +342,11 @@ def test_connect_never_reports_connected_for_a_disabled_destination(tmp_path: Pa
     assert data["connected"] is False
     assert data["authenticated"] is False
     assert data["enabled"] is False
-    assert data["live_checked"] is False, "a disabled destination must not be probed"
+    # A disabled destination is never probed: the answer is "unknown", not a
+    # failed check. `false` would contradict `xpst auth status`, which probes
+    # it and reports live_checked=true with error="disabled".
+    assert data["live_checked"] is None, "a disabled destination must not be probed"
+    assert data["verified"] is False
     assert data["guide"]["steps"], "the setup guide must be available"
     assert data["next_action"]["kind"] == "enable"
     assert token.exists() is False

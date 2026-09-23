@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.config import XPSTConfig
+from xpst.content import ALL_MEDIA_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.sources.base import (
     ContentType,
@@ -24,10 +25,10 @@ from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Supported file extensions
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff"}
-ALL_MEDIA_EXTENSIONS = VIDEO_EXTENSIONS | IMAGE_EXTENSIONS
+# Supported file extensions live in xpst.content (the content-type contract) so
+# the local-file source and the publish pipeline cannot disagree about what a
+# .webp is. Re-exported here for existing importers.
+__all__ = ["ALL_MEDIA_EXTENSIONS", "IMAGE_EXTENSIONS", "VIDEO_EXTENSIONS", "LocalSource"]
 
 
 class LocalSource(VideoSource):

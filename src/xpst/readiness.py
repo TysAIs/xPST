@@ -175,7 +175,12 @@ def _ffmpeg_check() -> ReadinessCheck:
         ok=ok,
         severity="error",
         message="FFmpeg is available." if ok else "FFmpeg is required for video processing.",
-        action="" if ok else "Install FFmpeg and make sure it is on PATH.",
+        action=(
+            ""
+            if ok
+            else "Run `xpst media fetch` to download a verified static build, or install "
+            "FFmpeg and make sure it is on PATH."
+        ),
         details={"binary": get_ffmpeg_name(), "path": resolve_ffmpeg_path()},
     )
 
@@ -268,7 +273,16 @@ def _destination_checks(
                     label=f"{name.title()} connection",
                     ok=True,
                     message=f"{name.title()} is disabled.",
-                    details={"enabled": False, "state": state},
+                    details={
+                        "role": "video_destination",
+                        "enabled": False,
+                        "state": state,
+                        # Disabled is not a probe result: the live facts are
+                        # unknown, not False.
+                        "session_valid": None,
+                        "live_checked": None,
+                        "error": role["error"],
+                    },
                 )
             )
             continue
@@ -312,6 +326,10 @@ def _destination_checks(
                 message=message,
                 action=action,
                 details={
+                    # This check is the video-destination role's verdict; the
+                    # platform-level entry in `xpst auth status` aggregates
+                    # roles, so name the role here to keep the two comparable.
+                    "role": "video_destination",
                     "enabled": role["enabled"],
                     "state": state,
                     "session_valid": session_valid,

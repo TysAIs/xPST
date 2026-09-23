@@ -38,7 +38,7 @@ live availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-t
 │  └──────────────────────────────────────────────────────┘   │
 │                                                              │
 │  Surfaces: CLI (38 cmds) │ Desktop (10 QML pages)          │
-│            Dashboard (FastAPI) │ MCP Server (38 tools)      │
+│            Dashboard (FastAPI) │ MCP Server (40 tools)      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -47,7 +47,7 @@ live availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-t
 ### 1. Separation of Concerns
 Each component has a single responsibility:
 - **Sources**: Fetch/download videos (TikTok, Instagram Reels, YouTube, local files)
-- **Platforms**: Upload videos (YouTube, Instagram, X/Twitter, TikTok, Threads)
+- **Platforms**: Upload videos (YouTube, Instagram, X/Twitter; TikTok code exists but publishing is blocked pending external TikTok review — see INSTALL.md capability truth table)
 - **Engine**: Orchestrate workflow via single CrossPostEngine orchestrator
 - **State**: Persist data atomically (write-then-rename, thread-safe)
 - **Config**: Pydantic settings with auto-migration (v1→v4)
@@ -106,7 +106,7 @@ class VideoSource(ABC):
 
 Responsible for uploading videos to target platforms.
 
-**Current**: YouTube, X/Twitter, Instagram, TikTok, Threads, Messenger (messaging/auto-reply)
+**Current**: YouTube, X/Twitter, Instagram as live-verified upload destinations; TikTok/Threads destination code exists but publishing is blocked (TikTok awaits external app review, Threads is unauthenticated); Messenger (messaging/auto-reply, opt-in)
 
 **Interface**:
 ```python
