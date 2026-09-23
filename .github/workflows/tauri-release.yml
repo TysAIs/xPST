@@ -103,6 +103,10 @@ jobs:
           npm ci
           npm run build
 
+      - name: UI contracts (node --test)
+        working-directory: ui
+        run: npm test
+
       - name: Install Linux system dependencies (Tauri v2 + AppImage)
         if: runner.os == 'Linux'
         run: |
@@ -158,13 +162,15 @@ jobs:
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
 
-      - name: Fetch media binaries (ffmpeg/ffprobe/yt-dlp)
+      - name: Fetch bundled media binaries (yt-dlp only)
         run: |
           set -euo pipefail
           chmod +x scripts/fetch-media-binaries.sh
-          # The script auto-detects the host platform (Darwin/Linux/MINGW) and
-          # fetches the matching ffmpeg/ffprobe/yt-dlp. Pass the OS explicitly so
-          # a mis-detecting shell cannot silently fetch the wrong architecture.
+          # ffmpeg/ffprobe are NOT bundled any more (~87MB of a 192MB app): the
+          # engine prefers a system ffmpeg and otherwise fetches a pinned,
+          # checksum-verified static build on first use. Only yt-dlp still ships,
+          # and the engine's bundled yt_dlp module is the primary path, so a
+          # failed yt-dlp fetch is a warning rather than a lane failure.
           case "${RUNNER_OS}" in
             macOS)   PLATFORM=macos-arm64 ;;
             Linux)   PLATFORM=linux-x64 ;;
@@ -172,18 +178,20 @@ jobs:
             *) echo "::error::unsupported runner OS ${RUNNER_OS}"; exit 1 ;;
           esac
           scripts/fetch-media-binaries.sh "$PLATFORM"
-          # Guard: the resources are consumed by bundle.resources, so an empty
-          # directory means the packaged app would ship without media tools.
           if [ "${RUNNER_OS}" = "Windows" ]; then
-            test -f src-tauri/binaries/ffmpeg/ffmpeg.exe
-            test -f src-tauri/binaries/ffmpeg/ffprobe.exe
-            test -f src-tauri/binaries/ytdlp/yt-dlp.exe
+            YTDLP=src-tauri/binaries/ytdlp/yt-dlp.exe
           else
-            test -x src-tauri/binaries/ffmpeg/ffmpeg
-            test -x src-tauri/binaries/ffmpeg/ffprobe
-            test -x src-tauri/binaries/ytdlp/yt-dlp
+            YTDLP=src-tauri/binaries/ytdlp/yt-dlp
           fi
-          echo "media binaries present"
+          if [ -e "$YTDLP" ]; then
+            echo "yt-dlp bundled: $YTDLP ($(du -sh "$YTDLP" | cut -f1))"
+          else
+            echo "::warning::$YTDLP was not fetched; the engine's bundled yt_dlp module still works"
+          fi
+          test ! -e src-tauri/binaries/ffmpeg/ffmpeg || {
+            echo "::error::an ffmpeg binary reappeared in the bundle inputs — it must not be bundled"
+            exit 1
+          }
 
       - name: Import Apple signing cert (if secrets present)
         if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != null && env.APPLE_CERTIFICATE != ''
@@ -194,6 +202,15 @@ jobs:
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+
+      - name: Shell unit tests (cargo test)
+        # Runs the shell's own tests, including the capability/ACL contract that
+        # proves the engine origin is granted the dialog command on whatever
+        # loopback port the app picks at launch. Deliberately placed after the
+        # UI build and the resource fetch: the test harness compiles the same
+        # generate_context!() the app does, and that needs both present.
+        working-directory: src-tauri
+        run: cargo test
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
@@ -221,12 +238,20 @@ jobs:
           # installer at all; createUpdaterArtifacts is false in
           # tauri.conf.json, so an absent key simply means ad-hoc signing.
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            # Signed release build. The committed config keeps
+            # bundle.createUpdaterArtifacts=false so a plain local
+            # `cargo tauri build` never demands a key; this lane flips it on for
+            # exactly this build through a config overlay, which is what emits
+            # the updater packages the manifest points at (macOS .app.tar.gz,
+            # Windows *.nsis.zip, Linux *.AppImage.tar.gz) plus their .sig
+            # sidecars.
             echo "updater signing key present: building ${{ matrix.bundles }} with signed updater artifacts"
+            cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} \
+              --config '{"bundle":{"createUpdaterArtifacts":true}}'
           else
             echo "no TAURI_SIGNING_PRIVATE_KEY: building ${{ matrix.bundles }} with Tauri's default ad-hoc signing"
+            cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           fi
-          echo "cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}"
-          cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -271,14 +296,17 @@ jobs:
           esac
           echo "expected installer present: $INSTALLER"
 
-      - name: Verify installer size gate (<=200MB)
+      - name: Verify app/installer size budget
         run: |
           set -euo pipefail
-          # Gate the artifact a stranger actually downloads, not the unpacked
-          # bundle: the .dmg/.AppImage/.exe compresses far below the .app it was
-          # built from, so measuring the app failed a perfectly shippable
-          # installer. The unpacked size is still reported as a warning so bloat
-          # stays visible.
+          # Budgets after unbundling ffmpeg (it was 87MB of a 192MB app):
+          # the unpacked macOS .app must stay <= 130MB, the installer a stranger
+          # downloads <= 150MB. Both are hard failures now — the unpacked app
+          # size is the number this budget exists to protect, and the previous
+          # version only warned about it (so 87MB of ffmpeg could ride along
+          # unnoticed).
+          APP_BUDGET_MB=130
+          INSTALLER_BUDGET_MB=150
           case "${RUNNER_OS}" in
             macOS)   PATTERN='*bundle/dmg/*.dmg' ;;
             Windows) PATTERN='*bundle/nsis/*.exe' ;;
@@ -300,21 +328,42 @@ jobs:
           BYTES=$(wc -c < "$INSTALLER" | tr -d ' ')
           SIZE_MB=$((BYTES / 1048576))
           echo "installer (what a stranger downloads): ${INSTALLER} -> ${SIZE_MB}MB (${BYTES} bytes)"
+
+          FAILED=0
           if [ "${RUNNER_OS}" = "macOS" ]; then
             APP_PATH=$(find src-tauri/target -type d -name "xPST.app" -path "*release*" -print -quit || true)
             if [ -n "${APP_PATH}" ]; then
               APP_MB=$(du -sm "$APP_PATH" | cut -f1)
-              echo "unpacked app bundle: ${APP_MB}MB"
-              if [ "$APP_MB" -gt 200 ]; then
-                echo "::warning::unpacked xPST.app is ${APP_MB}MB, over the 200MB app target; the published installer is ${SIZE_MB}MB"
+              echo "unpacked app bundle: ${APP_PATH} -> ${APP_MB}MB (budget ${APP_BUDGET_MB}MB)"
+              # The bundle must not carry an ffmpeg/ffprobe binary at all.
+              BUNDLED_MEDIA=$(find "$APP_PATH" -type f \( -name 'ffmpeg' -o -name 'ffprobe' -o -name 'ffmpeg.exe' -o -name 'ffprobe.exe' \) -print || true)
+              if [ -n "$BUNDLED_MEDIA" ]; then
+                echo "::error::ffmpeg/ffprobe is bundled again (must be resolved at runtime):"
+                echo "$BUNDLED_MEDIA"
+                FAILED=1
               fi
+              if [ "$APP_MB" -gt "$APP_BUDGET_MB" ]; then
+                echo "::error::unpacked xPST.app is ${APP_MB}MB, over the ${APP_BUDGET_MB}MB budget"
+                FAILED=1
+              fi
+              # A build that lost its engine would also be small: assert the
+              # engine is really there before crediting the size win.
+              ENGINE_BIN="$APP_PATH/Contents/Resources/binaries/engine/xpst-engine"
+              if [ ! -f "$ENGINE_BIN" ]; then
+                echo "::error::engine sidecar missing from the app bundle ($ENGINE_BIN)"
+                FAILED=1
+              fi
+            else
+              echo "::error::no xPST.app found to measure"
+              FAILED=1
             fi
           fi
-          if [ "$SIZE_MB" -gt 200 ]; then
-            echo "::error::installer ${SIZE_MB}MB exceeds the 200MB gate"
-            exit 1
+          if [ "$SIZE_MB" -gt "$INSTALLER_BUDGET_MB" ]; then
+            echo "::error::installer ${SIZE_MB}MB exceeds the ${INSTALLER_BUDGET_MB}MB budget"
+            FAILED=1
           fi
-          echo "installer size gate: PASS (${SIZE_MB}MB <= 200MB)"
+          [ "$FAILED" -eq 0 ] || exit 1
+          echo "size budget: PASS (installer ${SIZE_MB}MB <= ${INSTALLER_BUDGET_MB}MB)"
 
       - name: Upload installers (per target)
         uses: actions/upload-artifact@v4
@@ -329,33 +378,41 @@ jobs:
             src-tauri/target/**/bundle/macos/*.app.tar.gz.sig
             src-tauri/target/**/bundle/dmg/*.dmg
             src-tauri/target/**/bundle/nsis/*.exe
+            src-tauri/target/**/bundle/nsis/*.nsis.zip
+            src-tauri/target/**/bundle/nsis/*.nsis.zip.sig
             src-tauri/target/**/bundle/msi/*.msi
-            src-tauri/target/**/bundle/deb/*.deb
             src-tauri/target/**/bundle/appimage/*.AppImage
+            src-tauri/target/**/bundle/appimage/*.AppImage.tar.gz
+            src-tauri/target/**/bundle/appimage/*.AppImage.tar.gz.sig
+            src-tauri/target/**/bundle/deb/*.deb
           if-no-files-found: error
 
-      - name: "Smoke boot (macOS) — app launches and stays up"
+      - name: "Cold-boot measurement + budget gate (macOS)"
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
           APP_PATH=$(find src-tauri/target -type d -path "*release*" -name "xPST.app" -print -quit)
-          test -n "$APP_PATH" || { echo "::error::xPST.app not found — smoke would have silently no-op'd"; exit 1; }
-          # macOS ships no GNU `timeout`, so bound the wait with a watchdog
-          # instead of `timeout 60 ...`.
-          BIN=$(ls "$APP_PATH/Contents/MacOS/"*)
-          LOG="$RUNNER_TEMP/xpst-smoke-boot.log"
-          "$BIN" > "$LOG" 2>&1 &
-          APP_PID=$!
-          sleep 15
-          if ! kill -0 $APP_PID 2>/dev/null; then
-            echo "::error::App exited during smoke boot"
-            cat "$LOG" || true
-            exit 1
-          fi
-          kill $APP_PID 2>/dev/null || true
-          echo "--- smoke boot log (first 40 lines) ---"
-          head -40 "$LOG" || true
-          echo "PASS: macOS app stayed up for 15s"
+          test -n "$APP_PATH" || { echo "::error::xPST.app not found — the boot gate would have silently no-op'd"; exit 1; }
+          # This replaces the old "launch it and sleep 15s" smoke: reaching
+          # BOOT_TO_READY_SECS already proves the app came up AND that the engine
+          # sidecar answered /health, and the harness additionally asserts the
+          # sidecar is reaped on exit (no leftover xpst-engine). The numbers are
+          # then enforced against perf/boot-budget.json, so a startup regression
+          # fails the lane that publishes bundles instead of shipping quietly.
+          python scripts/measure_boot.py \
+            --app "$APP_PATH" \
+            --runs 3 \
+            --json-out "$RUNNER_TEMP/boot-samples.json" | tee "$RUNNER_TEMP/boot-report.txt"
+
+      - name: "Upload cold-boot samples (macOS)"
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-samples-${{ github.run_id }}-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/boot-samples.json
+            ${{ runner.temp }}/boot-report.txt
+          if-no-files-found: warn
 
       - name: "Smoke boot (Linux) — the real .AppImage runs under xvfb with the engine sidecar"
         if: runner.os == 'Linux'
@@ -451,9 +508,137 @@ jobs:
             src-tauri/target/**/bundle/macos/*.app.tar.gz.sig
             src-tauri/target/**/bundle/dmg/*.dmg
             src-tauri/target/**/bundle/nsis/*.exe
+            src-tauri/target/**/bundle/nsis/*.nsis.zip
+            src-tauri/target/**/bundle/nsis/*.nsis.zip.sig
             src-tauri/target/**/bundle/msi/*.msi
             src-tauri/target/**/bundle/deb/*.deb
             src-tauri/target/**/bundle/appimage/*.AppImage
+            src-tauri/target/**/bundle/appimage/*.AppImage.tar.gz
+            src-tauri/target/**/bundle/appimage/*.AppImage.tar.gz.sig
           fail_on_unmatched_files: false
           generate_release_notes: true
           draft: false
+
+  publish-updater-manifest:
+    # Wires the ONE updater manifest generator into the release lane.
+    #
+    # scripts/gen-updater-manifest.py is the single authority for latest.json in
+    # this repository (the same script `.github/workflows/publish-updater.yml`
+    # runs). There is deliberately no second generator: two scripts writing the
+    # same manifest is how a release ends up advertising a platform it never
+    # built, or a signature that does not match the configured pubkey.
+    #
+    # This job only ASSEMBLES and VALIDATES the manifest for the platforms this
+    # run actually produced a signed artifact for, and attaches it to the
+    # tagged release as `latest.json` (which is what makes the Release-asset
+    # fallback endpoint work). Committing `updates/latest.json` to the Pages
+    # root stays the single responsibility of publish-updater.yml.
+    #
+    # A run with no signing key produces no `.sig`, so the job reports the
+    # channel as blocked and succeeds — it never invents a signature.
+    needs: build-tauri
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      # The three lanes upload under `xPST-<target>`; merge them into one flat
+      # directory because the selector resolves one signed artifact per target
+      # from a directory listing.
+      - uses: actions/download-artifact@v4
+        with:
+          path: updater-assets
+          merge-multiple: true
+
+      - name: Flatten the updater-relevant files
+        run: |
+          set -euo pipefail
+          mkdir -p updater-flat
+          # download-artifact keeps the path the lane uploaded under, so a
+          # recursive copy of just the updater-shaped files gives the selector
+          # the flat directory it expects. The unpacked *.app tree is skipped on
+          # purpose: only the .tar.gz/.zip packages carry a signature.
+          find updater-assets -type f \
+            \( -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \
+               -o -name '*.nsis.zip' -o -name '*.nsis.zip.sig' \
+               -o -name '*.AppImage' -o -name '*.AppImage.tar.gz' \
+               -o -name '*.AppImage.tar.gz.sig' -o -name '*setup.exe' \
+               -o -name '*.msi' -o -name '*.msi.sig' \) \
+            -exec cp {} updater-flat/ \;
+          find updater-flat -type f -print | sort
+
+      - name: Select one signed artifact per target
+        id: select
+        run: |
+          set -euo pipefail
+          python3 scripts/select-updater-artifacts.py \
+            --dir updater-flat \
+            --report "$RUNNER_TEMP/updater-artifacts.json" \
+            --args-file "$RUNNER_TEMP/updater-artifact-args.txt" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Generate and validate updates/latest.json (the one generator)
+        id: manifest
+        if: steps.select.outputs.found != '' && steps.select.outputs.found != '0'
+        run: |
+          set -euo pipefail
+          manifest="$RUNNER_TEMP/latest.json"
+          args=()
+          while IFS= read -r entry; do
+            [[ -n "$entry" ]] || continue
+            args+=(--platform "${entry%%=*}" --artifact "$entry")
+          done < "$RUNNER_TEMP/updater-artifact-args.txt"
+          python3 scripts/gen-updater-manifest.py \
+            --version "${GITHUB_REF_NAME#v}" \
+            --notes "xPST ${GITHUB_REF_NAME} desktop release - see the GitHub release notes." \
+            --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME" \
+            --output "$manifest" \
+            --config src-tauri/tauri.conf.json \
+            --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "${args[@]}"
+          # Same staging/validation script the publish workflow uses, so the
+          # bytes that reach a release asset are the bytes that reach Pages.
+          scripts/publish-updater.sh --manifest "$manifest" --site-dir "$GITHUB_WORKSPACE"
+          test -s "$GITHUB_WORKSPACE/updates/latest.json"
+          printf 'manifest=%s\n' "$manifest" >> "$GITHUB_OUTPUT"
+
+      - name: Attach latest.json to the release
+        if: steps.manifest.outputs.manifest != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          MANIFEST: ${{ steps.manifest.outputs.manifest }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "$MANIFEST#latest.json" \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Report the updater channel state
+        if: always()
+        env:
+          FOUND: ${{ steps.select.outputs.found }}
+          PLATFORMS: ${{ steps.select.outputs.platforms }}
+          MISSING: ${{ steps.select.outputs.missing }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Updater manifest"
+            echo
+            echo "- release tag: ${GITHUB_REF_NAME}"
+            echo "- publishable platforms: ${PLATFORMS:-<none>}"
+            echo "- platforms without a signed artifact: ${MISSING:-<none>}"
+            if [[ "${FOUND:-0}" == "0" ]]; then
+              echo
+              echo "No signed updater artifact was produced, so no manifest was written. That is"
+              echo "expected while the repository has no \`TAURI_SIGNING_PRIVATE_KEY\` secret: a"
+              echo "Tauri build without the key emits no \`.sig\`, and the manifest must never invent one."
+            else
+              echo
+              echo "\`latest.json\` was attached to ${GITHUB_REF_NAME}; \`publish-updater.yml\`"
+              echo "commits the same manifest to the Pages root on \`main\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

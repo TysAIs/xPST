@@ -1,14 +1,19 @@
 """
-Analytics Collector for xPST Dashboard
+Analytics read model for the xPST dashboard.
 
-Collects engagement metrics from all platforms:
-- YouTube: via Google Analytics/Data API
-- Instagram: via instagrapi insights
-- X/Twitter: via twikit metrics
-- TikTok: via yt-dlp metadata
+Aggregates what xPST already recorded — ``AnalyticsStore`` metric snapshots
+and ``state.json`` post history — into the shapes the dashboard API, MCP tool,
+CLI and desktop app render: summary stats, video lineup, cross-post groups,
+platform health, engagement totals.
 
-Each collector method returns a list of dicts with standardized metrics.
-Failures for individual posts are logged and skipped (graceful degradation).
+It does NOT implement per-platform collection. The one and only
+``AnalyticsCollector`` lives in ``xpst.analytics``; the read model's single
+live path (``get_engagement_data``) delegates to it. The old per-platform
+``collect_youtube``/``collect_instagram``/``collect_x``/``collect_tiktok``
+copies that lived here were dead code (no callers) and were deleted.
+
+Each accessor degrades gracefully: a failed snapshot read is logged and the
+recorded data is returned rather than an error.
 """
 
 import json
@@ -19,15 +24,6 @@ from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
-
-# Try to import CredentialStore
-try:
-    from xpst.utils.credentials import CredentialStore
-
-    HAS_CREDENTIAL_STORE = True
-except ImportError:
-    CredentialStore = None
-    HAS_CREDENTIAL_STORE = False
 
 # AnalyticsStore backs the persisted metric_snapshots read model (used by
 # get_video_lineup). Core xpst module — always present, no optional guard.
@@ -219,11 +215,14 @@ def _freshness_fields(ts_str: str | None) -> dict[str, Any]:
     }
 
 
-class AnalyticsCollector:
-    """Collects analytics from all xPST platforms.
+class AnalyticsReadModel:
+    """Read model over recorded analytics: state.json + metric snapshots.
 
-    Uses real platform APIs where credentials are available.
-    Falls back to state.json data for basic post tracking.
+    This is NOT a collector. It aggregates what xPST already recorded
+    (:class:`xpst.analytics_store.AnalyticsStore` snapshots and state.json
+    post history) for the dashboard/MCP/desktop surfaces, and its single
+    live path delegates to :class:`xpst.analytics.AnalyticsCollector` — the
+    one and only implementation of per-platform metric collection.
     """
 
     def __init__(self, config_dir: str = "~/.xpst") -> None:
@@ -233,16 +232,7 @@ class AnalyticsCollector:
             config_dir: Path to xPST config directory.
         """
         self.config_dir = config_dir
-        self._yt_service = None  # Cached YouTube Analytics service
-        self._ig_client = None  # Cached instagrapi Client
-        self._x_client = None  # Cached twikit Client
-        self._cred_store = None
         self._store_cache: dict[Path, Any] = {}  # db path -> AnalyticsStore
-        if HAS_CREDENTIAL_STORE:
-            try:
-                self._cred_store = CredentialStore(config_dir)
-            except Exception as e:
-                logger.debug(f"Could not create CredentialStore: {e}")
         self._load_config()
 
     def _load_config(self) -> None:
@@ -261,317 +251,6 @@ class AnalyticsCollector:
                 self.config = yaml.safe_load(f) or {}
         else:
             self.config = {}
-
-    def _get_youtube_service(self):
-        """Get authenticated YouTube Analytics API service.
-
-        Returns:
-            YouTube Analytics API service or None if unavailable.
-        """
-
-        if self._yt_service is not None:
-            return self._yt_service
-        try:
-            from google.oauth2.credentials import Credentials
-            from googleapiclient.discovery import build
-
-            token_path = Path(self.config_dir).expanduser() / "credentials" / "youtube_token.json"
-            if not token_path.exists():
-                return None
-
-            creds = Credentials.from_authorized_user_file(str(token_path))
-            self._yt_service = build("youtubeAnalytics", "v2", credentials=creds)
-            return self._yt_service
-        except Exception as exc:
-            logger.debug("YouTube analytics service unavailable: %s", exc)
-            return None
-
-    def _get_youtube_data_service(self):
-        """Get authenticated YouTube Data API v3 service.
-
-        Returns:
-            YouTube Data API service or None if unavailable.
-        """
-
-        try:
-            from google.oauth2.credentials import Credentials
-            from googleapiclient.discovery import build
-
-            token_path = Path(self.config_dir).expanduser() / "credentials" / "youtube_token.json"
-            if not token_path.exists():
-                return None
-
-            creds = Credentials.from_authorized_user_file(str(token_path))
-            return build("youtube", "v3", credentials=creds)
-        except Exception as exc:
-            logger.debug("YouTube Data API unavailable: %s", exc)
-            return None
-
-    def _get_instagram_client(self):
-        """Get authenticated instagrapi Client.
-
-        Returns:
-            Authenticated Client or None if unavailable.
-        """
-
-        if self._ig_client is not None:
-            return self._ig_client
-        try:
-            from instagrapi import Client
-
-            session_data = None
-            # Try CredentialStore first
-            if self._cred_store is not None:
-                try:
-                    session_data = self._cred_store.retrieve_json("instagram_session")
-                except Exception:
-                    pass
-
-            # Fall back to file
-            if session_data is None:
-                session_path = Path(self.config_dir).expanduser() / "credentials" / "instagram_session.json"
-                if not session_path.exists():
-                    return None
-                with open(session_path) as f:
-                    session_data = json.load(f)
-
-            cl = Client()
-            auth_data = session_data.get("authorization_data", session_data)
-            if "sessionid" in auth_data:
-                cl.load_session(auth_data)
-            elif "cookies" in session_data:
-                cl.load_cookies(str(session_path))
-            else:
-                cl.load_session(session_data)
-
-            self._ig_client = cl
-            return self._ig_client
-        except Exception as exc:
-            logger.debug("Instagram client unavailable: %s", exc)
-            return None
-
-    def _get_x_client(self):
-        """Get authenticated twikit Client.
-
-        Returns:
-            Authenticated Client or None if unavailable.
-        """
-
-        if self._x_client is not None:
-            return self._x_client
-        try:
-            from twikit import Client as TwikitClient
-
-            cookies_data = None
-            # Try CredentialStore first
-            if self._cred_store is not None:
-                try:
-                    cookies_data = self._cred_store.retrieve_json("x_cookies")
-                except Exception:
-                    pass
-
-            # Fall back to file
-            if cookies_data is not None:
-                # Write to temp file for twikit
-                import tempfile
-
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-                    json.dump(cookies_data, f)
-                    cookies_path = f.name
-            else:
-                cookies_path = Path(self.config_dir).expanduser() / "credentials" / "x_cookies.json"
-                if not cookies_path.exists():
-                    return None
-
-            client = TwikitClient("en-US")
-            client.load_cookies(str(cookies_path))
-            self._x_client = client
-            return self._x_client
-        except Exception as exc:
-            logger.debug("X/Twitter client unavailable: %s", exc)
-            return None
-
-    # ── YouTube ──────────────────────────────────────────────────────────
-
-    async def collect_youtube(self, video_ids: list[str]) -> list[dict]:
-        """Get YouTube video statistics via Data API v3.
-
-        Args:
-            video_ids: List of YouTube video IDs.
-
-        Returns:
-            List of dicts with keys: platform, post_id, views, likes,
-            comments, duration.
-        """
-
-        results = []
-        service = self._get_youtube_data_service()
-        if not service:
-            return results
-
-        try:
-            for i in range(0, len(video_ids), 50):
-                batch = video_ids[i : i + 50]
-                resp = service.videos().list(part="statistics,contentDetails", id=",".join(batch)).execute()
-                for item in resp.get("items", []):
-                    stats = item.get("statistics", {})
-                    results.append(
-                        {
-                            "platform": "youtube",
-                            "post_id": item["id"],
-                            "views": int(stats.get("viewCount", 0)),
-                            "likes": int(stats.get("likeCount", 0)),
-                            "comments": int(stats.get("commentCount", 0)),
-                            "duration": item.get("contentDetails", {}).get("duration", ""),
-                        }
-                    )
-        except Exception as exc:
-            logger.warning("YouTube analytics collection failed: %s", exc)
-
-        return results
-
-    # ── Instagram ────────────────────────────────────────────────────────
-
-    async def collect_instagram(self, media_ids: list[str]) -> list[dict]:
-        """Get Instagram media insights via instagrapi.
-
-        Falls back to basic media_info if insights API fails.
-
-        Args:
-            media_ids: List of Instagram media PKs.
-
-        Returns:
-            List of dicts with keys: platform, post_id, likes, comments,
-            reach, impressions, saves, shares.
-        """
-
-        results = []
-        client = self._get_instagram_client()
-        if not client:
-            return results
-
-        for media_id in media_ids:
-            try:
-                media_pk = int(media_id) if media_id.isdigit() else media_id
-                insights = client.insights.get_media_insights(media_pk)
-                info = client.media_info(media_pk)
-
-                metric_map = {}
-                for metric in insights.get("data", []):
-                    name = metric.get("name", "")
-                    values = metric.get("values", [])
-                    if values:
-                        metric_map[name] = values[0].get("value", 0)
-
-                results.append(
-                    {
-                        "platform": "instagram",
-                        "post_id": media_id,
-                        "likes": getattr(info, "like_count", 0) or 0,
-                        "comments": getattr(info, "comment_count", 0) or 0,
-                        "reach": metric_map.get("reach", 0),
-                        "impressions": metric_map.get("impressions", 0),
-                        "saves": metric_map.get("saved", 0),
-                        "shares": metric_map.get("shares", 0),
-                    }
-                )
-            except Exception as exc:
-                logger.warning("Instagram insights failed for %s: %s", media_id, exc)
-                try:
-                    info = client.media_info(int(media_id) if media_id.isdigit() else media_id)
-                    results.append(
-                        {
-                            "platform": "instagram",
-                            "post_id": media_id,
-                            "likes": getattr(info, "like_count", 0) or 0,
-                            "comments": getattr(info, "comment_count", 0) or 0,
-                            "reach": 0,
-                            "impressions": 0,
-                            "saves": 0,
-                            "shares": 0,
-                        }
-                    )
-                except Exception as e:
-                    logger.debug("Failed to collect platform analytics: %s", e)
-
-        return results
-
-    # ── X / Twitter ─────────────────────────────────────────────────────
-
-    async def collect_x(self, tweet_ids: list[str]) -> list[dict]:
-        """Get X/Twitter tweet metrics via twikit.
-
-        Args:
-            tweet_ids: List of tweet IDs.
-
-        Returns:
-            List of dicts with keys: platform, post_id, likes, retweets,
-            replies, views, bookmarks.
-        """
-
-        results = []
-        client = self._get_x_client()
-        if not client:
-            return results
-
-        for tweet_id in tweet_ids:
-            try:
-                tweet = await client.get_tweet_by_id(tweet_id)
-                results.append(
-                    {
-                        "platform": "x",
-                        "post_id": tweet_id,
-                        "likes": getattr(tweet, "favorite_count", 0) or 0,
-                        "retweets": getattr(tweet, "retweet_count", 0) or 0,
-                        "replies": getattr(tweet, "reply_count", 0) or 0,
-                        "views": int(getattr(tweet, "view_count", 0) or 0),
-                        "bookmarks": getattr(tweet, "bookmark_count", 0) or 0,
-                    }
-                )
-            except Exception as exc:
-                logger.warning("X metrics failed for %s: %s", tweet_id, exc)
-
-        return results
-
-    # ── TikTok ──────────────────────────────────────────────────────────
-
-    async def collect_tiktok(self, video_ids: list[str]) -> list[dict]:
-        """Get TikTok metrics via yt-dlp metadata extraction (best effort).
-
-        Args:
-            video_ids: List of TikTok video IDs.
-
-        Returns:
-            List of dicts with keys: platform, post_id, views, likes,
-            comments, shares.
-        """
-
-        results = []
-        try:
-            import yt_dlp
-
-            for video_id in video_ids:
-                url = f"https://www.tiktok.com/@_/video/{video_id}"
-                try:
-                    ydl_opts = {"quiet": True, "skip_download": True, "extract_flat": False}
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(url, download=False)
-                    results.append(
-                        {
-                            "platform": "tiktok",
-                            "post_id": video_id,
-                            "views": info.get("view_count", 0) or 0,
-                            "likes": info.get("like_count", 0) or 0,
-                            "comments": info.get("comment_count", 0) or 0,
-                            "shares": info.get("repost_count", 0) or 0,
-                        }
-                    )
-                except Exception as exc:
-                    logger.debug("TikTok metadata failed for %s: %s", video_id, exc)
-        except ImportError:
-            logger.debug("yt-dlp not available for TikTok metrics")
-
-        return results
 
     # ── Aggregated Helpers ──────────────────────────────────────────────
 
@@ -1094,8 +773,18 @@ class AnalyticsCollector:
     def get_engagement_data(self) -> dict[str, dict]:
         """Get engagement metrics aggregated by platform.
 
-        Attempts to collect real metrics from platform APIs. Falls back to
-        state.json counts if API calls fail or credentials are unavailable.
+        Resolves each destination's post id from the real state schema
+        (``posted_to[platform]["id"]``, written by StateManager;
+        ``"post_id"`` is only a legacy fallback) and, when any id exists,
+        fetches live metrics through the one AnalyticsCollector.
+
+        Fail-closed (t_620480fc): collection errors propagate to the caller
+        instead of being swallowed into fabricated zero metrics. The desktop
+        live refresh already runs this on a worker thread and surfaces the
+        error; callers inside a running asyncio loop must not use this path
+        (it calls ``asyncio.run``) — await ``AnalyticsCollector.collect_all``
+        directly instead. With no ids at all there is nothing to fetch, so
+        state-derived post counts are returned with zero metrics.
 
         Returns dict keyed by platform name with aggregated metrics:
             {platform: {posts, views, likes, comments, shares}}
@@ -1128,30 +817,35 @@ class AnalyticsCollector:
             for platform, info in video_data.get("posted_to", {}).items():
                 if platform in engagement:
                     engagement[platform]["posts"] += 1
-                    if info.get("post_id"):
-                        post_ids[platform].append(info["post_id"])
+                    # StateManager writes the destination entry as
+                    # {"id": ...} — "post_id" is only a fallback for older
+                    # hand-edited state files, so a missing id is the
+                    # expected shape, not an error.
+                    resolved_id = info.get("id") or info.get("post_id") or ""
+                    if resolved_id:
+                        post_ids[platform].append(resolved_id)
 
         # Try to collect real metrics from APIs (one cached collector — a
-        # fresh instance per call defeated its 15-minute TTL, G20)
-        try:
-            from xpst.analytics import AnalyticsCollector
+        # fresh instance per call defeated its 15-minute TTL, G20).
+        # Fail-closed: an error here propagates to the caller. Swallowing
+        # it turned every live refresh into silent zero metrics while
+        # looking successful — the exact defect this method had.
+        from xpst.analytics import AnalyticsCollector
 
-            if getattr(self, "_live_collector", None) is None:
-                self._live_collector: Any = AnalyticsCollector(self.config_dir)
-            collector = self._live_collector
-            # Only attempt if we have IDs to query
-            has_ids = any(ids for ids in post_ids.values())
-            if has_ids:
-                data = asyncio.run(collector.collect_all(post_ids))
-                for platform, posts_data in data.items():
-                    if platform in engagement:
-                        for metrics in posts_data.values():
-                            engagement[platform]["views"] += metrics.get("views", 0)
-                            engagement[platform]["likes"] += metrics.get("likes", 0)
-                            engagement[platform]["comments"] += metrics.get("comments", 0)
-                            engagement[platform]["shares"] += metrics.get("shares", 0)
-        except Exception as exc:
-            logger.debug("Live analytics collection failed, using state data: %s", exc)
+        if getattr(self, "_live_collector", None) is None:
+            self._live_collector: Any = AnalyticsCollector(self.config_dir)
+        collector = self._live_collector
+        # Only attempt if we have IDs to query
+        has_ids = any(ids for ids in post_ids.values())
+        if has_ids:
+            data = asyncio.run(collector.collect_all(post_ids))
+            for platform, posts_data in data.items():
+                if platform in engagement:
+                    for metrics in posts_data.values():
+                        engagement[platform]["views"] += metrics.get("views", 0)
+                        engagement[platform]["likes"] += metrics.get("likes", 0)
+                        engagement[platform]["comments"] += metrics.get("comments", 0)
+                        engagement[platform]["shares"] += metrics.get("shares", 0)
 
         return engagement
 
@@ -1168,3 +862,10 @@ class AnalyticsCollector:
         posts = self.get_all_posts()
         ranked = sorted(posts, key=lambda p: len(p.get("platforms", {})), reverse=True)
         return ranked[:limit]
+
+
+# Deprecated alias: the dashboard read model used to be a second class named
+# ``AnalyticsCollector``. Importers (dashboard API/server, MCP, desktop app,
+# CLI) keep working unchanged, but there is now exactly one AnalyticsCollector
+# implementation in xPST: ``xpst.analytics.AnalyticsCollector``.
+AnalyticsCollector = AnalyticsReadModel

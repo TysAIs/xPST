@@ -24,6 +24,7 @@ from xpst.drafts import DRAFT_FILE_NAME
 
 from .test_dashboard import _auth_headers
 from .test_dashboard_first_run_api import (
+    API_TOKEN,
     FakeEngine,
     _authed_app,
     _engine_factory,
@@ -34,6 +35,17 @@ from .test_dashboard_first_run_api import (
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _api_token_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Authenticate like a real client.
+
+    ``_open_app`` builds a bare-router app, whose ``require_api_token`` falls
+    back to the env override (the mutating draft routes require a token even on
+    a bare router). Without this the draft POST/DELETE calls answer 401.
+    """
+    monkeypatch.setenv("XPST_API_TOKEN", API_TOKEN)
 
 
 def _save_draft(client: TestClient, media: str, *, caption: str = "hello", platforms: list[str] | None = None, draft_id: str = "") -> dict:

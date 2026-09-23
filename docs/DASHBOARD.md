@@ -1,9 +1,11 @@
 # xPST Dashboard (Web API)
 
 > The dashboard is a lightweight FastAPI/uvicorn server that exposes health,
-> metrics, and state over HTTP. It is loopback-only by default and protected
-> by Basic auth when dashboard credentials are configured. No external
-> dependencies are required beyond the core install.
+> metrics, and state over HTTP. It is loopback-only by default. Read-only
+> routes are protected by Basic auth when dashboard credentials are
+> configured; mutating routes always require the xPST API token (see
+> [Authentication](#authentication)). No external dependencies are required
+> beyond the core install.
 
 ## Starting the Dashboard
 
@@ -19,10 +21,14 @@ The server runs in the foreground; press `Ctrl+C` to stop it.
 
 ## Authentication
 
-If `monitoring.dashboard_username` and `monitoring.dashboard_password_hash`
-(bcrypt) are set in `~/.xpst/config.yaml`, all endpoints other than `/health`
-and `/metrics` require HTTP Basic auth. `/health` and `/metrics` are open so
-load balancers and uptime monitors can probe them.
+There are two layers, and they behave differently on purpose.
+
+**Read-only routes** (`GET /health`, `/metrics`, `/state`, `/api/summary`,
+`/api/videos`, `/api/onboarding`, …) keep the historical behaviour: if
+`monitoring.dashboard_username` and `monitoring.dashboard_password_hash`
+(bcrypt) are set in `~/.xpst/config.yaml`, everything except `/health`,
+`/metrics`, `/bio` and `/oauth/callback` requires HTTP Basic auth; otherwise
+they are open on loopback so the web UI is never locked out.
 
 Set a dashboard password:
 
@@ -32,6 +38,66 @@ xpst config set monitoring.dashboard_password mypassword
 
 (The value is hashed with bcrypt and stored as `dashboard_password_hash`.)
 
+**Mutating routes** (`POST /api/post`, `POST /api/connect/{platform}`,
+`POST /api/onboarding`, `POST /api/onboarding/complete`, `POST /api/preflight`,
+`POST /bio/edit`) always require a credential, whether or not a dashboard
+password is configured. Loopback is not an authorisation boundary: any process
+on the machine — and any page open in a browser — can reach
+`127.0.0.1:<port>`, so an unauthenticated write is refused with `401`.
+
+### The API token
+
+The token is generated on first run and stored in the encrypted credential
+store under `~/.xpst/credentials/` (the same place as the platform OAuth
+tokens; never in `config.yaml`, and no default value ships with the project).
+Print it with:
+
+```bash
+xpst auth api-token          # print the token
+xpst auth api-token --json   # {"config_dir": ..., "api_token": ...}
+xpst auth api-token --rotate # replace it (the old token stops working)
+```
+
+Send it as either header:
+
+```bash
+TOKEN=$(xpst auth api-token --json | python -c 'import json,sys;print(json.load(sys.stdin)["api_token"])')
+
+curl -sS -X POST http://127.0.0.1:8080/api/post \
+  -H "X-API-Token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"media_paths": ["/path/clip.mp4"], "caption": "hi", "platforms": ["youtube"]}'
+
+curl -sS -X POST http://127.0.0.1:8080/api/onboarding \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}'
+```
+
+Two further tokens are accepted but never written to disk:
+
+| Variable | Who sets it | Purpose |
+|----------|-------------|---------|
+| `XPST_API_TOKEN` | you / your scripts / CI | operator override for CLI, MCP bridges and agents; no need to read the store |
+| `XPST_UI_TOKEN` | the desktop shell (`xPST.app`) | per-launch token it hands its own webview; regenerated on every boot |
+
+### How each client authenticates
+
+| Client | Mechanism |
+|--------|-----------|
+| Desktop app (Tauri/Svelte shell) | The shell mints a per-launch token, passes it to the engine as `XPST_UI_TOKEN`, and opens the webview at `http://127.0.0.1:<port>/#xpst_token=<token>`. The UI reads the fragment, sends `X-API-Token` on writes, and strips the fragment from the URL immediately. |
+| `xpst ui` (local browser UI) | Same fragment hand-off, with a token minted for that run and opened in your default browser. Nothing is ever embedded in the served HTML. |
+| CLI / scripts / agents | `xpst auth api-token` (or `XPST_API_TOKEN`), sent as `Authorization: Bearer` or `X-API-Token`. |
+| MCP server | Not affected: MCP tools call the engine in-process and never traverse HTTP. |
+| Link-in-bio editor | Basic auth when configured; otherwise `?token=<api-token>` on `/bio/edit` (a plain HTML form cannot send a header). `xpst bio` prints that editor URL for you. |
+
+Read-only calls need no token in any of these clients.
+
+### Public-by-design routes
+
+`POST /oauth/callback` (OAuth deep-link redirect from the browser) and the
+optional Messenger webhook (`/webhook/*`) stay reachable without a token: a
+browser redirect cannot attach a header, and Meta calls the webhook directly.
+Both validate their own payloads (body cap + scheme allow-list; hub verify
+token + HMAC signature).
+
 ## Endpoints
 
 | Method & Path | Auth | Description |
@@ -39,6 +105,13 @@ xpst config set monitoring.dashboard_password mypassword
 | `GET /health` | — | Aggregated platform health check: one entry per configured platform with `ok`, `detail`, and latency. |
 | `GET /metrics` | — | Prometheus text-format metrics (posting counters, upload durations, queue depths, health status). |
 | `GET /state` | Basic | Current xPST state summary: version, per-platform status, queued and completed post counts, dead-letter queue size. |
+| `GET /api/*` | Basic when configured | Web-UI JSON API (summary, videos, onboarding state, media, library, activity, schedules, providers, settings). Read-only. |
+| `POST /api/post` | API token | Plan (`dry_run: true`) or run a post through the real engine path. |
+| `POST /api/connect/{platform}` | API token | Inspect / enable / verify one destination platform. |
+| `POST /api/onboarding`, `POST /api/onboarding/complete` | API token | Persist the first-run choices and the "wizard finished" flag. |
+| `POST /api/preflight` | API token | Local, no-network post preflight. |
+| `GET /bio` | — | Public link-in-bio page (meant to be shared). |
+| `GET/POST /bio/edit` | Basic or `?token=` | Admin editor for the link-in-bio page. |
 
 ### `/health` example
 
@@ -91,10 +164,10 @@ destination names, and the preflight plan. No credential material is ever copied
 
 | Method & Path | Auth | Description |
 |---------------|------|-------------|
-| `GET /api/drafts` | Basic | Stored drafts, newest first, each revalidated against this machine right now. |
-| `POST /api/drafts` | Basic | Create or update a draft (`draft_id`, `media_paths`, `caption`, `platforms`). Returns the stored draft and its verdict. An unknown `draft_id` creates a fresh draft and reports `recreated: true` rather than losing what was typed. |
-| `GET /api/drafts/{draft_id}` | Basic | One draft plus a fresh verdict — the revalidation performed when a screen resumes. |
-| `DELETE /api/drafts/{draft_id}` | Basic | Discard a draft. |
+| `GET /api/drafts` | Basic when configured | Stored drafts, newest first, each revalidated against this machine right now. |
+| `POST /api/drafts` | API token | Create or update a draft (`draft_id`, `media_paths`, `caption`, `platforms`). Returns the stored draft and its verdict. An unknown `draft_id` creates a fresh draft and reports `recreated: true` rather than losing what was typed. |
+| `GET /api/drafts/{draft_id}` | Basic when configured | One draft plus a fresh verdict — the revalidation performed when a screen resumes. |
+| `DELETE /api/drafts/{draft_id}` | API token | Discard a draft. |
 
 A draft records **what it was validated against**: the local facts the verdict depended on
 (media existence/size/mtime, per-destination enabled flag and local auth readiness) plus a
@@ -126,7 +199,7 @@ Point your Facebook Page's webhook URL at
 ## Analytics Payload
 
 The dashboard's analytics layer (`src/xpst/dashboard/analytics.py`) collects
-per-post engagement from YouTube, Instagram, X, and TikTok APIs and caches
+per-post engagement from YouTube, Instagram, X, and TikTok (TikTok via the source-side downloader metadata path; TikTok publishing itself is not available yet) and caches
 snapshots in `~/.xpst/analytics.db`. The desktop app (`xpst app`) and the MCP
 server (`xpst_analytics`, `xpst_cross_post_analytics`) share this data.
 

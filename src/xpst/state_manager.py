@@ -7,6 +7,7 @@ dead letter queue, circuit breaker state, and health metrics.
 from __future__ import annotations
 
 import hashlib
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,28 +33,50 @@ def _utc_now_iso() -> str:
 
 
 class StateManager:
-    """High-level state management with business logic.
+    """The single owner of xPST's persisted state.
 
-    Uses StateStore for persistence. Provides:
+    Uses ``StateStore`` (the single persistence owner) for all disk I/O.
+    Provides:
     - Video tracking (posted, pending, failed)
     - Content hash deduplication
     - Cross-posting statistics
     - Dead letter queue
     - Platform health tracking
     - Circuit breaker state
+
+    The legacy ``xpst.state`` import path re-exports THIS class, so callers
+    (engine, CLI, monitor, dashboard, MCP) all share one implementation and
+    one persistence owner — there is no second state class anywhere.
     """
 
-    def __init__(self, config: XPSTConfig | str | Path):
+    def __init__(
+        self,
+        config: XPSTConfig | str | Path | None = None,
+        *,
+        state_dir: str | Path | None = None,
+    ):
         """Initialize state manager.
 
         Args:
-            config: XPSTConfig instance or config directory path
+            config: XPSTConfig instance or config directory path. ``None``
+                resolves to ``~/.xpst``.
+            state_dir: Legacy keyword alias for ``config`` (older callers and
+                the desktop models pass the directory this way).
         """
-        config_dir = config.config_dir if isinstance(config, XPSTConfig) else config
+        if state_dir is not None:
+            config = state_dir
+        if config is None:
+            config = Path.home() / ".xpst"
+        config_dir: Any = config.config_dir if isinstance(config, XPSTConfig) else config
 
+        # Legacy attribute — callers (and diagnostics) read ``config_dir``.
+        self.config_dir = config_dir
         self._state_dir = Path(config_dir).expanduser().resolve()
         self._store = StateStore(self._state_dir)
-        self._save_lock = self._store._thread_lock  # Use store's lock
+        # Legacy callers expect a plain (non-reentrant) lock attribute; all
+        # persistence itself is serialized by the store's own RLock.
+        self._save_lock = threading.Lock()
+        self._last_save_ts: float = 0.0
 
     @property
     def state_dir(self) -> Path:
@@ -69,6 +92,31 @@ class StateManager:
     def _state(self) -> dict[str, Any]:
         """Get raw state from store."""
         return self._store.get_raw()
+
+    @property
+    def state(self) -> dict[str, Any]:
+        """Raw state dict (legacy public attribute).
+
+        Always the store's live dict, so a ``reload()`` (or another process's
+        write picked up by the store) is visible without re-reading here.
+        """
+        return self._store.get_raw()
+
+    @state.setter
+    def state(self, value: dict[str, Any]) -> None:
+        """Replace the persisted state (legacy ``sm.state = {...}``)."""
+        self._store.set(value)
+
+    # ── File-lock passthrough (legacy attributes/tests) ──
+
+    @property
+    def _lock_fd(self):
+        """Cross-process lock fd, owned by the store."""
+        return self._store._lock_fd
+
+    @_lock_fd.setter
+    def _lock_fd(self, value) -> None:
+        self._store._lock_fd = value
 
     # ── Video Tracking ──
 
@@ -117,7 +165,7 @@ class StateManager:
         source_url: str,
         source_platform: str,
         posted_to: dict[str, dict[str, str]] | None,
-        caption: str,
+        caption: str | None,
         content_hash: str | None,
     ) -> dict[str, Any]:
         now = _utc_now_iso()
@@ -384,8 +432,25 @@ class StateManager:
                     )
         return dlq
 
-    def clear_dead_letter_queue(self) -> int:
-        """Clear all dead letter queue entries."""
+    def clear_dead_letter_queue(self, video_id: str | None = None) -> int:
+        """Clear dead letter queue entries.
+
+        Args:
+            video_id: When given, clear only that video's errors (legacy
+                per-video API used by ``xpst dlq clear <video>``). Otherwise
+                clear every entry.
+        """
+        if video_id is not None:
+            video = self._state.get("posted_videos", {}).get(video_id)
+            if not video or not video.get("errors"):
+                return 0
+            # G02: clearing the DLQ must only clear the ERRORS — deleting the
+            # whole record erased posted-history and re-posted the video.
+            cleared = len(video["errors"])
+            video["errors"] = {}
+            self.save()
+            return cleared
+
         cleared = 0
 
         def clear_dlq(state: dict[str, Any]) -> dict[str, Any]:
@@ -578,3 +643,206 @@ class StateManager:
     def list_video_ids(self) -> list[str]:
         """Get all tracked video IDs."""
         return list(self._state["posted_videos"].keys())
+
+    # ── Legacy compatibility API ─────────────────────────────────────────
+    # These methods used to live on a second StateManager class inside
+    # ``xpst/state.py`` that wrapped this one. They now live here: one state
+    # class, one persistence owner. ``xpst.state`` still re-exports this
+    # class, so every existing import path and signature keeps working.
+
+    def mark_video_posted(
+        self,
+        video_id: str,
+        platform: str,
+        post_id: str | None = None,
+        post_url: str | None = None,
+        content_hash: str | None = None,
+        caption: str | None = "",
+        tiktok_url: str | None = None,
+        source_platform: str = "",
+    ) -> None:
+        """Legacy method for marking a video as posted."""
+        now = _utc_now_iso()
+        posted_to = {}
+        if platform:
+            posted_to[platform] = {
+                "id": post_id or "",
+                "url": post_url or "",
+                "timestamp": now,
+            }
+        with self._save_lock:
+            self._add_posted_video_inner(
+                self._state,
+                video_id=video_id,
+                source_url=tiktok_url or "",
+                source_platform=source_platform,
+                posted_to=posted_to,
+                caption=caption,
+                content_hash=content_hash,
+            )
+            # Persist to disk — throttled to avoid I/O bottleneck in bulk operations
+            import time as _time
+
+            now_ts = _time.monotonic()
+            if not hasattr(self, "_last_save_ts") or (now_ts - self._last_save_ts) > 2.0:
+                self._last_save_ts = now_ts
+                try:
+                    self._store.save()
+                except Exception:
+                    pass  # Non-fatal — state will be saved on next cycle
+
+    def mark_video_failed(self, video_id: str, platform: str, error: str) -> None:
+        """Legacy method - mark a video as failed on a platform."""
+        self.record_failure(video_id, platform, error)
+        # Also update platform health with error
+        self.update_platform_health(platform, "error", last_success=None)
+
+    def is_fully_posted(self, video_id: str, platforms: list[str]) -> bool:
+        """Legacy method - check if video fully posted."""
+        return self.is_fully_cross_posted(video_id, platforms)
+
+    def is_video_posted(self, video_id: str, platform: str) -> bool:
+        """Legacy method - check if video posted to platform."""
+        return self.is_posted(video_id, platform)
+
+    # ── Cross-posting tracking (legacy API) ──
+
+    def mark_cross_posted(
+        self,
+        video_id: str,
+        platform: str,
+        post_id: str | None = None,
+        post_url: str | None = None,
+        caption: str = "",
+        content_hash: str | None = None,
+    ) -> None:
+        """Legacy method - mark video as cross-posted to platform with optional content_hash."""
+        now = _utc_now_iso()
+        posted_to = {platform: {"id": post_id or "", "url": post_url or "", "timestamp": now}}
+        self.add_posted_video(
+            video_id=video_id,
+            source_url="",
+            # Composite keys carry their origin ("youtube:123") — record it
+            # so backfill's source filter has something to match (G03).
+            source_platform=video_id.split(":", 1)[0] if ":" in video_id else "",
+            posted_to=posted_to,
+            caption=caption,
+            content_hash=content_hash,
+        )
+
+        # Also maintain legacy cross_posted key for test compatibility.
+        # G05: video_id may already be a composite key ("instagram:123") —
+        # blindly prefixing produced junk keys like "tiktok:instagram:123".
+        composite_key = video_id if ":" in video_id else f"tiktok:{video_id}"
+        if composite_key not in self._state.get("cross_posted", {}):
+            self._state.setdefault("cross_posted", {})[composite_key] = {}
+        self._state["cross_posted"][composite_key][platform] = {
+            "post_id": post_id or "",
+            "url": post_url or "",
+            "timestamp": now,
+        }
+
+    def mark_cross_post_failed(self, video_id: str, platform: str, error: str) -> None:
+        """Legacy method - mark cross-post as failed."""
+        self.record_failure(video_id, platform, error)
+
+    def is_cross_posted(self, video_id: str, platform: str) -> bool:
+        """Legacy method - check if cross-posted to platform."""
+        return self.is_posted(video_id, platform)
+
+    def get_cross_post_data(self, video_id: str, platform: str) -> dict[str, Any] | None:
+        """Legacy method - get cross-post data."""
+        video = self.get_video(video_id)
+        if not video:
+            return None
+        return video.get("posted_to", {}).get(platform)
+
+    def get_post_data(self, video_id: str, platform: str) -> dict[str, Any] | None:
+        """Legacy method - get post data for a video on a platform."""
+        return self.get_cross_post_data(video_id, platform)
+
+    def find_duplicate_by_hash(
+        self, content_hash: str, exclude_platform: str | None = None
+    ) -> dict[str, Any] | None:
+        """Legacy method - find video with matching content hash."""
+        # Check if hash exists
+        existing_video_id = self.get_by_hash(content_hash)
+        if not existing_video_id:
+            return None
+
+        video = self.get_video(existing_video_id)
+        if not video:
+            return None
+
+        # Get platforms this video was posted to
+        posted_to = video.get("posted_to", {})
+        if exclude_platform and exclude_platform in posted_to:
+            posted_to = {k: v for k, v in posted_to.items() if k != exclude_platform}
+
+        if not posted_to:
+            return None
+
+        return {
+            "video_id": existing_video_id,
+            "posted_platforms": list(posted_to.keys()),
+            "posted_to": posted_to,
+        }
+
+    def is_content_hash_posted(self, content_hash: str, platform: str | None = None) -> bool:
+        """Legacy method - check if content hash exists.
+
+        If platform is specified, checks if the content hash was posted to that platform.
+        Otherwise checks if the hash exists anywhere.
+
+        Args:
+            content_hash: The content hash to check
+            platform: Optional platform to check (for backward compatibility with tests)
+        """
+        if platform:
+            # Check if hash is posted to specific platform
+            existing_video_id = self.get_by_hash(content_hash)
+            if not existing_video_id:
+                return False
+            video = self.get_video(existing_video_id)
+            if not video:
+                return False
+            posted_to = video.get("posted_to", {})
+            return platform in posted_to
+        return self.has_hash(content_hash)
+
+    def get_video_id_by_hash(self, content_hash: str) -> str | None:
+        """Legacy method - get video_id by content hash."""
+        return self.get_by_hash(content_hash)
+
+    def get_platform_health(self, platform: str) -> dict[str, Any]:
+        """Legacy method - get platform health details."""
+        state = self._state
+        platform_state = state["health"]["platforms"].get(platform, {})
+        return {
+            "status": platform_state.get("status", "unknown"),
+            "last_success": platform_state.get("last_success"),
+            "failures": platform_state.get("failures", 0),
+            "last_error": platform_state.get("last_error"),
+            "circuit_breaker_open": self.is_circuit_breaker_open(platform),
+        }
+
+    def _load_state(self) -> None:
+        """Legacy method - reload state from disk."""
+        self.reload()
+
+    # File lock compatibility (tests expect these)
+    def _acquire_file_lock(self, blocking=True):
+        """Legacy method - acquire file lock for state operations."""
+        return self._store._acquire_file_lock(blocking)
+
+    def _release_file_lock(self):
+        """Legacy method - release file lock."""
+        self._store._release_file_lock()
+
+    def _close(self):
+        """Legacy method - close state manager (release lock)."""
+        self._store._release_file_lock()
+
+    def close(self):
+        """Close state manager and release file lock."""
+        self._store._release_file_lock()
