@@ -114,10 +114,17 @@ class _RecordingUploadService:
 
     def __init__(self) -> None:
         self.captions: dict[str, str] = {}
+        #: The visibility each upload received (YouTube honours it; the rest
+        #: get None) — proof the option reached the upload layer.
+        self.visibility_by_platform: dict[str, str | None] = {}
 
     async def upload_to_platform(
-        self, *, uploader: Any, video_path: Any, caption: str, platform_name: str, video_id: str, source_platform: str = ""
+        self, *, uploader: Any, video_path: Any, caption: str, platform_name: str, video_id: str,
+        source_platform: str = "", visibility: str | None = None,
     ) -> UploadResult:
+        # `visibility` arrives from post_manual (YouTube-only option); the
+        # double records it so a test can prove it reached the upload layer.
+        self.visibility_by_platform[platform_name] = visibility
         self.captions[platform_name] = caption
         return UploadResult(
             success=True,
