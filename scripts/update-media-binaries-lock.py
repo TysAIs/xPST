@@ -92,7 +92,7 @@ def _fetch(url: str, token: str | None = None, as_json: bool = False):
     request.add_header("User-Agent", "xpst-media-binaries-lock")
     if token:
         request.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310 - fixed https urls
+    with urllib.request.urlopen(request, timeout=60) as response:  # nosec B310 - fixed https urls
         body = response.read()
     return json.loads(body) if as_json else body.decode("utf-8", "replace")
 
