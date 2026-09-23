@@ -33,6 +33,63 @@ if TYPE_CHECKING:
 _SUPPORTED_PLATFORMS = tuple(PLATFORM_SPECS)
 _CAPTION_LIMITS = {"threads": 500}
 
+# ── Canonical zero-destination guard ───────────────────────────────────────
+# A post with no destination uploads nothing, yet every surface used to report
+# it as a completed run: ``xpst run`` printed "No new videos to post" and exited
+# 0, ``xpst post`` exited 0, and ``xpst_run`` returned a hard-coded ok. The
+# refusal is therefore stated ONCE, here, and consumed by the CLI, the MCP
+# server, the HTTP API and the desktop UI so no two surfaces can word it
+# (or classify it) differently.
+NO_DESTINATIONS_CODE = "NO_DESTINATIONS"
+NO_DESTINATIONS_MESSAGE = "Choose at least one destination platform."
+
+# Canonical destination order for "all configured platforms". Matches the
+# engine's registration order so a UI list and a CLI resolution never differ.
+DESTINATION_ORDER = ("youtube", "x", "instagram", "tiktok", "threads")
+
+
+def destinations_blocker(target_platforms: Sequence[str] | None) -> PreflightIssue | None:
+    """Return the canonical no-destination blocker, or ``None`` when one exists.
+
+    Blank entries are not destinations. ``--platforms ","`` parses to two empty
+    names and the engine silently skips any name it has no uploader for, which
+    is exactly the empty run this refuses.
+    """
+    for platform in target_platforms or ():
+        if str(platform).strip():
+            return None
+    return PreflightIssue(NO_DESTINATIONS_CODE, NO_DESTINATIONS_MESSAGE, "blocker")
+
+
+def enabled_destinations(config: XPSTConfig) -> list[str]:
+    """Every platform enabled as a posting destination in local configuration."""
+    return [
+        name
+        for name in DESTINATION_ORDER
+        if bool(getattr(getattr(config, name, None), "enabled", False))
+    ]
+
+
+def resolve_destinations(
+    config: XPSTConfig, requested: Sequence[str] | None = None
+) -> list[str]:
+    """Resolve the destination list a post will run against.
+
+    An explicit request wins (normalized, deduped, request order preserved);
+    ``None`` means "every destination enabled in configuration", the same
+    contract the engine's ``platforms=None`` carries — but resolved here so the
+    CLI, MCP and HTTP surfaces cannot disagree about what "all" is, and so an
+    empty result is detectable *before* an engine run is started.
+    """
+    if requested is None:
+        return enabled_destinations(config)
+    seen: dict[str, None] = {}
+    for platform in requested:
+        name = str(platform).strip().lower()
+        if name:
+            seen.setdefault(name, None)
+    return list(seen)
+
 
 @dataclass(frozen=True)
 class PreflightIssue:
@@ -253,9 +310,17 @@ class PlatformPlan:
 
 @dataclass
 class PostPlanResult:
-    """Complete normalized post plan, preserving requested platform order."""
+    """Complete normalized post plan, preserving requested platform order.
+
+    ``request_blockers`` holds refusals about the *request shape* itself — the
+    zero-destination case today. They cannot live on a per-platform plan because
+    an empty target list produces no platforms at all, and an empty plan used to
+    report ``ready: true`` (``all()`` over nothing), which is how a
+    zero-destination run looked successful.
+    """
 
     platforms: dict[str, PlatformPlan]
+    request_blockers: tuple[PreflightIssue, ...] = ()
 
     @property
     def plans(self) -> dict[str, PlatformPlan]:
@@ -264,7 +329,7 @@ class PostPlanResult:
 
     @property
     def ready(self) -> bool:
-        return all(plan.ready for plan in self.platforms.values())
+        return not self.request_blockers and all(plan.ready for plan in self.platforms.values())
 
     @property
     def ok(self) -> bool:
@@ -272,11 +337,25 @@ class PostPlanResult:
 
     @property
     def hard_blockers(self) -> tuple[PreflightIssue, ...]:
-        return tuple(issue for plan in self.platforms.values() for issue in plan.hard_blockers)
+        return tuple(self.request_blockers) + tuple(
+            issue for plan in self.platforms.values() for issue in plan.hard_blockers
+        )
 
     @property
     def warnings(self) -> tuple[PreflightIssue, ...]:
         return tuple(issue for plan in self.platforms.values() for issue in plan.warnings)
+
+    @property
+    def error(self) -> dict[str, Any] | None:
+        """The first hard blocker as a stable ``{code, message}`` error object.
+
+        Every surface returns this same object for the same refusal, so a
+        script, an agent and the desktop UI all branch on one code.
+        """
+        blockers = self.hard_blockers
+        if not blockers:
+            return None
+        return {"code": blockers[0].code, "message": blockers[0].message}
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -285,6 +364,8 @@ class PostPlanResult:
             "platforms": {name: plan.to_dict() for name, plan in self.platforms.items()},
             "hard_blockers": [issue.to_dict() for issue in self.hard_blockers],
             "warnings": [issue.to_dict() for issue in self.warnings],
+            "request_blockers": [issue.to_dict() for issue in self.request_blockers],
+            "error": self.error,
         }
 
     def to_json(self) -> str:
@@ -322,6 +403,11 @@ class PostPreflightService:
 
         Unknown platforms are represented by a hard-blocked plan rather than
         being dropped.  This is important for deterministic machine clients.
+
+        A request with no destination at all is refused here, once, so every
+        caller of this service — CLI, MCP, HTTP and the desktop UI — inherits
+        the same ``NO_DESTINATIONS`` refusal instead of each deciding for itself
+        (the empty plan used to report ``ready: true``).
         """
         config = request.config or self.config
         quota_manager = self.quota_manager
@@ -330,7 +416,11 @@ class PostPreflightService:
         platforms: dict[str, PlatformPlan] = {}
         for platform in request.target_platforms:
             platforms[platform] = self._plan_platform(platform, request, config, quota_manager)
-        return PostPlanResult(platforms=platforms)
+        blocker = destinations_blocker(request.target_platforms)
+        return PostPlanResult(
+            platforms=platforms,
+            request_blockers=(blocker,) if blocker is not None else (),
+        )
 
     def _readonly_quota_manager(self, config: XPSTConfig) -> QuotaManager:
         return QuotaManager(config.config_dir, config=config, persist=False)

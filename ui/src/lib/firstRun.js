@@ -233,6 +233,35 @@ export function targetSummary(rows) {
   };
 }
 
+/**
+ * Whether the compose screen may start a post, and why not when it may not.
+ *
+ * The shipped defect this guards: the post button was enabled with a video and
+ * zero destinations selected, so it started a run that could not publish
+ * anything (and, before the engine reported results honestly, could read as a
+ * success). The reason string is the same wording the CLI, the MCP server and
+ * the HTTP API refuse with, so the UI explains the rule instead of restating it
+ * differently.
+ */
+export const NO_DESTINATIONS_REASON = "Choose at least one destination platform.";
+
+export function composePostState({ mediaPath = "", chosen = [], busy = false } = {}) {
+  const destinations = chosen ?? [];
+  if (busy) return { canPost: false, reason: "", count: destinations.length };
+  if (!mediaPath) return { canPost: false, reason: "Choose a video before posting.", count: destinations.length };
+  if (!destinations.length) {
+    return { canPost: false, reason: NO_DESTINATIONS_REASON, count: 0 };
+  }
+  return { canPost: true, reason: "", count: destinations.length };
+}
+
+/** Label for the post button; never claims a destination count it does not have. */
+export function composePostLabel({ dryRun = false, count = 0 } = {}) {
+  if (count === 0) return dryRun ? "Run dry run" : "Post";
+  const noun = `destination${count === 1 ? "" : "s"}`;
+  return dryRun ? `Run dry run for ${count} ${noun}` : `Post to ${count} ${noun}`;
+}
+
 /** Human file size for the media picker. */
 export function formatBytes(bytes) {
   const value = Number(bytes ?? 0);
