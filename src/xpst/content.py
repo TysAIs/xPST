@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from xpst.providers import ProviderRole
 
@@ -71,6 +72,17 @@ def media_kind(path: str | Path) -> str:
     if suffix in IMAGE_EXTENSIONS:
         return MEDIA_KIND_IMAGE
     return MEDIA_KIND_UNKNOWN
+
+
+def is_remote_media(value: str | Path) -> bool:
+    """Whether a media reference is an http(s) URL rather than a local path.
+
+    A destination that fetches media itself can only be given a URL; every
+    destination that uploads bytes itself needs a local path. One predicate for
+    both directions, so no surface invents its own ``startswith("http")``.
+    """
+    parsed = urlparse(str(value).strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 # ── Vocabulary ──────────────────────────────────────────────────────────────
@@ -249,6 +261,35 @@ def content_type_from_source(value: Any) -> ContentType:
 # ── Capability: declared vs implemented ─────────────────────────────────────
 
 
+class MediaTransport(str, Enum):
+    """How a destination can receive the bytes of a media file.
+
+    This is the second half of a capability question that used to be answered by
+    a hard-coded ``platform == "threads"`` check in three places: a destination
+    can *support* a content type and still be unable to take the file xPST has,
+    because it fetches the media itself instead of accepting an upload.
+
+    ``LOCAL_UPLOAD``
+        xPST sends the bytes (multipart, resumable, chunked — whatever the API
+        takes). A local file is exactly what is needed.
+    ``PUBLIC_URL``
+        The destination retrieves the media from a URL over the public
+        internet. xPST is a local tool with no server and no CDN, so it cannot
+        produce that URL: a local file can never be published to such a
+        destination, and saying so *before* any network call is the only honest
+        behaviour.
+    """
+
+    LOCAL_UPLOAD = "local_upload"
+    PUBLIC_URL = "public_url"
+
+
+#: Stable code for "this destination cannot take the local file you gave it".
+#: Reported identically by the engine's content validation, the preflight plan,
+#: and the uploader, because all three read it from the profile below.
+MEDIA_TRANSPORT_ERROR_CODE = "content_type.media_transport"
+
+
 @dataclass(frozen=True)
 class ContentSupport:
     """One destination's support state for one content type."""
@@ -287,6 +328,16 @@ class DestinationContentProfile:
     #: Raw labels exactly as the provider manifest declares them (drift-checked).
     declared_labels: tuple[str, ...] = ()
     note: str = ""
+    #: How this destination receives media bytes (see :class:`MediaTransport`).
+    media_transport: MediaTransport = MediaTransport.LOCAL_UPLOAD
+    #: The exact, user-facing requirement for a destination that fetches media
+    #: itself. Empty when xPST uploads the bytes and there is nothing to state.
+    media_transport_requirement: str = ""
+    #: Stable, machine-readable code every surface reports when a local file is
+    #: offered to a destination that cannot fetch one (preflight, engine
+    #: validation, uploader). Kept stable so a client can branch on it without
+    #: parsing prose.
+    media_transport_error_code: str = MEDIA_TRANSPORT_ERROR_CODE
 
     def _types(self, *, implemented: bool) -> frozenset[ContentType]:
         return frozenset(item.content_type for item in self.support if (item.implemented if implemented else item.declared))
@@ -316,6 +367,16 @@ class DestinationContentProfile:
         """Whether this destination publishes content (vs messaging only)."""
         return self.role is not ProviderRole.MESSAGING
 
+    @property
+    def accepts_local_media(self) -> bool:
+        """Whether a local file can reach this destination at all.
+
+        False means the destination fetches media from a URL that xPST cannot
+        host, so no local file — of any content type — can ever be published
+        there. Callers must refuse before any network call, not after.
+        """
+        return self.media_transport is MediaTransport.LOCAL_UPLOAD
+
     def supports(self, content_type: ContentType) -> bool:
         """Whether the engine has a real implementation for this content type."""
         return content_type in self.implemented
@@ -337,6 +398,10 @@ class DestinationContentProfile:
             "implemented": sorted(item.value for item in self.implemented),
             "declared_but_unimplemented": sorted(item.value for item in self.declared_but_unimplemented),
             "implemented_but_undeclared": sorted(item.value for item in self.implemented_but_undeclared),
+            "media_transport": self.media_transport.value,
+            "accepts_local_media": self.accepts_local_media,
+            "media_transport_requirement": self.media_transport_requirement,
+            "media_transport_error_code": None if self.accepts_local_media else self.media_transport_error_code,
             "content": [item.to_dict() for item in self.support],
             "note": self.note,
         }
@@ -400,6 +465,9 @@ def _publish_profile(
     implemented: Iterable[ContentType],
     notes: Mapping[ContentType, str] | None = None,
     note: str = "",
+    media_transport: MediaTransport = MediaTransport.LOCAL_UPLOAD,
+    media_transport_requirement: str = "",
+    media_transport_error_code: str = MEDIA_TRANSPORT_ERROR_CODE,
 ) -> DestinationContentProfile:
     return DestinationContentProfile(
         platform=platform,
@@ -408,8 +476,27 @@ def _publish_profile(
         support=_build_support(declared_labels, implemented, notes),
         declared_labels=tuple(declared_labels),
         note=note,
+        media_transport=media_transport,
+        media_transport_requirement=media_transport_requirement,
+        media_transport_error_code=media_transport_error_code,
     )
 
+
+#: The exact requirement for Threads media, stated once and reported verbatim by
+#: the preflight plan, the engine's content validation and the uploader, so no
+#: surface can soften it into "will be added separately" or hide it until after
+#: a network call has already failed.
+#:
+#: Grounded in Meta's Threads API docs (2026): creating a container takes
+#: ``video_url``/``image_url`` and "Threads retrieves your video from the URL
+#: provided, so it must be on a public server". The publishing reference lists
+#: only ``POST /{threads-user-id}/threads``, ``threads_publish``, the container
+#: status field, repost and delete — there is no binary/resumable upload.
+THREADS_PUBLIC_URL_REQUIREMENT = (
+    "Threads has no upload endpoint: its API fetches your media from a public server, and xPST is a local "
+    "tool with no server to host a file for it. A local file cannot be published to Threads, and xPST "
+    "cannot deliver a media URL either yet — post this content from the Threads app instead."
+)
 
 #: THE capability table. ``declared_labels`` mirror each provider manifest's
 #: ``extra["content"]`` exactly (tests/test_content_contract.py fails if a
@@ -457,7 +544,26 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
         "Threads",
         declared_labels=("video", "text"),
         implemented=(ContentType.VIDEO,),
-        notes={ContentType.TEXT: "declared as `text`; only media_type VIDEO exists, so there is no text path"},
+        notes={
+            ContentType.VIDEO: (
+                "published only from media that is already hosted at a public URL: the Threads API "
+                "retrieves the URL itself and has no binary upload, so a local file is refused before "
+                "any network call (see media_transport). xPST cannot deliver a media URL to any "
+                "uploader yet either, so no media publishing path reaches Threads today"
+            ),
+            ContentType.TEXT: "declared as `text`; only media_type VIDEO exists, so there is no text path",
+        },
+        # The Threads API is URL-fetch only (graph.threads.net/{user-id}/threads takes
+        # `video_url`/`image_url`; there is no multipart or resumable upload endpoint).
+        # xPST is a local tool with no server, so it cannot produce that URL.
+        media_transport=MediaTransport.PUBLIC_URL,
+        media_transport_requirement=THREADS_PUBLIC_URL_REQUIREMENT,
+        media_transport_error_code="THREADS_NEEDS_URL",
+        note=(
+            "Threads is a URL-fetch destination: it publishes media it can download from a public URL, "
+            "never a local file — and xPST cannot hand it a URL yet, so media publishing is refused "
+            "today. Text posts would need no URL but have no implementation yet."
+        ),
     ),
     "facebook": _publish_profile(
         "facebook",
@@ -547,6 +653,48 @@ def validate_destination_content(platform: str, content_type: ContentType) -> No
         supported=sorted(profile.implemented, key=lambda item: item.value),
         declared=content_type in profile.declared,
     )
+
+
+def media_transport_blocker(platform: str, media: Sequence[str | Path]) -> ContentIssue | None:
+    """The one refusal for a local file a destination cannot fetch itself.
+
+    Pure and side-effect free: it decides without touching the network, so it is
+    safe to call in a preflight, in request validation, and inside an uploader.
+
+    Returns ``None`` when the destination uploads the bytes itself, when there is
+    no media, or when every media item is already a public URL. Otherwise it
+    returns the destination profile's *stable code* and its *exact requirement*
+    — the same pair the preflight plan and the uploader report, because both call
+    this function instead of restating the rule.
+    """
+    profile = content_profile(platform)
+    if profile is None or profile.accepts_local_media:
+        return None
+    local = [str(item).strip() for item in (media or ()) if str(item).strip() and not is_remote_media(item)]
+    if not local:
+        return None
+    message = profile.media_transport_requirement or (
+        f"{profile.display_name} cannot take a local file: it fetches media from a URL you host, "
+        f"and xPST has no server to provide one."
+    )
+    return ContentIssue(
+        code=profile.media_transport_error_code,
+        message=message,
+        severity="error",
+        platform=profile.platform,
+    )
+
+
+def media_transport_requirement(platform: str) -> str:
+    """The exact requirement for a destination that fetches media itself.
+
+    Empty string for every destination xPST can upload a local file to. Surfaces
+    use it to explain the constraint *before* a request is attempted.
+    """
+    profile = content_profile(platform)
+    if profile is None or profile.accepts_local_media:
+        return ""
+    return profile.media_transport_requirement
 
 
 def capability_matrix() -> dict[str, Any]:
@@ -946,6 +1094,17 @@ def validate_content_request(request: ContentRequest) -> tuple[ContentIssue, ...
                     platform=platform_key,
                 )
             )
+            # A destination that cannot publish this content type at all is
+            # already fully explained by that one error; do not stack a media
+            # transport complaint on top of it.
+            continue
+
+        # Supported content type — but can this destination receive these bytes?
+        # Answered from its profile, so it cannot drift from the preflight plan
+        # or the uploader, and answered *before* any network call is made.
+        transport_issue = media_transport_blocker(platform_key, request.media)
+        if transport_issue is not None:
+            issues.append(transport_issue)
 
     return tuple(issues)
 

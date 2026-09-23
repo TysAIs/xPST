@@ -13,10 +13,14 @@ asked:
 * One readiness payload reported yt-dlp twice with two different versions
   (``2026.08.19`` from the resolved binary, ``2026.8.19`` from
   ``importlib.metadata``).
+* ``xpst health`` probed platforms through the engine while ``xpst doctor``
+  rendered the canonical collector, so the same box could answer both
+  ``instagram: session expired`` and ``instagram: ready`` (t_10a26bfd).
 
 These tests pin the reconciled contract:
 
-1. live facts agree across CLI, MCP and HTTP (probes stubbed, no network);
+1. live facts agree across CLI (auth status, health, doctor), MCP and HTTP
+   (probes stubbed, no network);
 2. a surface that did not probe reports ``None`` (unknown), never ``False``;
 3. a fact has exactly one implementation (the yt-dlp version comes from the
    resolved binary, not from Python package metadata).
@@ -46,6 +50,11 @@ from xpst.engine import CrossPostResult
 from xpst.mcp import server as mcp_server
 from xpst.platforms.base import PlatformHealth, UploadResult
 from xpst.readiness import build_readiness_report
+from xpst.utils.probe_errors import (
+    PROBE_INVALID_CREDENTIALS,
+    PROBE_UNVERIFIED,
+    classify_probe_failure,
+)
 
 YTDLP_VERSION = "2099.01.02"
 
@@ -231,6 +240,13 @@ def surface_data() -> dict[str, Any]:
         ytdlp.write_text("#!/bin/sh\necho " + YTDLP_VERSION + "\n", encoding="utf-8")
         ytdlp.chmod(0o755)
         patch.setenv("XPST_YTDLP_PATH", str(ytdlp))
+        # `xpst health` builds the engine and `xpst doctor` checks the
+        # environment; neither may depend on the machine running the tests.
+        fake_ffmpeg = root / "ffmpeg-fake"
+        fake_ffmpeg.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_ffmpeg.chmod(0o755)
+        patch.setenv("XPST_FFMPEG_PATH", str(fake_ffmpeg))
+        patch.setenv("XPST_FFPROBE_PATH", str(fake_ffmpeg))
         uploaders = _stub_uploaders()
         patch.setattr(auth_status_module, "_build_uploaders", lambda cfg: uploaders)
         patch.setattr(xpst_setup_module, "check_yt_dlp", lambda: YTDLP_VERSION)
@@ -243,9 +259,16 @@ def surface_data() -> dict[str, Any]:
             assert result.exit_code == 0, result.output
             return _json_from_cli(result.output)
 
+        def cli_report(*args: str) -> dict[str, Any]:
+            """Like ``cli``, but for commands that exit non-zero on findings."""
+            result = runner.invoke(cli_main, ["--config", str(config_file), *args])
+            return _json_from_cli(result.output)
+
         data: dict[str, Any] = {
             "cli_auth_status": cli("auth", "status", "--json"),
             "cli_readiness": cli("readiness", "--json"),
+            "cli_health": cli("health", "--json"),
+            "cli_doctor": cli_report("doctor", "--json"),
         }
 
         mcp_server._server = mcp_server.XPSTMCPServer(config)
@@ -289,6 +312,27 @@ def surface_data() -> dict[str, Any]:
     return data
 
 
+#: Which facts each surface exposes, and the key it exposes them under. A
+#: surface with no key for a fact is omitted for that fact rather than recorded
+#: as ``None``: "does not report it" is not a disagreement.
+SURFACE_FACTS: dict[str, tuple[tuple[str, ...], dict[str, str]]] = {
+    "cli auth status": (FACTS, {}),
+    "mcp xpst_auth_status": (FACTS, {}),
+    "http /api/health-status": (FACTS, {}),
+    "cli health": (FACTS, {}),
+    # `xpst doctor` reports the same live facts, but names the authentication
+    # bit ``connected`` and does not restate session_valid/live_checked.
+    "cli doctor": (
+        ("authenticated", "state", "auth_mode"),
+        {"authenticated": "connected"},
+    ),
+}
+
+#: Surfaces that must report every provider (health/doctor omit the local
+#: source on purpose — it is not a platform).
+FULL_COVERAGE_SURFACES = ("cli auth status", "mcp xpst_auth_status", "http /api/health-status")
+
+
 def _facts(surfaces: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
     """{provider: {fact: {surface: value}}} for every surface exposing the fact."""
     observed: dict[str, dict[str, dict[str, Any]]] = {
@@ -299,13 +343,20 @@ def _facts(surfaces: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
         "cli auth status": surfaces["cli_auth_status"]["platforms"],
         "mcp xpst_auth_status": surfaces["mcp_auth_status"]["platforms"],
         "http /api/health-status": surfaces["http_health"]["auth"],
+        "cli health": surfaces["cli_health"]["platforms"],
+        "cli doctor": surfaces["cli_doctor"]["platforms"],
     }
     for surface, entries in surface_entries.items():
+        facts, aliases = SURFACE_FACTS[surface]
         for provider in PROVIDERS:
             entry = entries.get(provider)
-            assert entry is not None, f"{surface} omits provider {provider}"
-            for fact in FACTS:
-                observed[provider][fact][surface] = entry.get(fact)
+            if entry is None:
+                assert surface not in FULL_COVERAGE_SURFACES and provider == "local", (
+                    f"{surface} omits provider {provider}"
+                )
+                continue
+            for fact in facts:
+                observed[provider][fact][surface] = entry.get(aliases.get(fact, fact))
 
     for provider in ENABLED_DESTINATIONS:
         entry = surfaces["http_connect"][provider]
@@ -313,6 +364,199 @@ def _facts(surfaces: dict[str, Any]) -> dict[str, dict[str, dict[str, Any]]]:
             observed[provider][fact]["http POST /api/connect"] = entry.get(fact)
 
     return observed
+
+
+@pytest.mark.parametrize("provider", ("instagram", "youtube", "x", "tiktok"))
+def test_health_and_doctor_never_disagree_about_connected(provider: str) -> None:
+    """``health`` and ``doctor`` are the two commands a stuck user runs.
+
+    They disagreed about Instagram on one machine, minutes apart (t_10a26bfd):
+    ``doctor`` answered "ready" from a credential file that merely existed while
+    ``health`` ran the live probe, and one of the two then told the user to
+    re-enter a password. Both now render the canonical probe's verdict.
+    """
+    surfaces = surface_data()
+    health = surfaces["cli_health"]["platforms"][provider]
+    doctor = surfaces["cli_doctor"]["platforms"][provider]
+
+    assert health["authenticated"] is doctor["connected"], (
+        f"{provider}: health says authenticated={health['authenticated']!r} while "
+        f"doctor says connected={doctor['connected']!r}"
+    )
+    assert health["state"] == doctor["state"], (
+        f"{provider}: health state={health['state']!r} vs doctor state={doctor['state']!r}"
+    )
+
+
+class _FakeResponse:
+    """Minimal requests/httpx-style response for classification tests."""
+
+    def __init__(self, status_code: int, text: str = "") -> None:
+        self.status_code = status_code
+        self.text = text
+
+
+def _named_exception(name: str, message: str, *, response: _FakeResponse | None = None) -> Exception:
+    """An exception whose *class name* matches what a provider library raises.
+
+    The classifier matches names on purpose (``instagrapi``/``requests`` are
+    optional dependencies), so the tests exercise that path rather than
+    importing them.
+    """
+    cls = type(name, (Exception,), {})
+    exc = cls(message)
+    if response is not None:
+        exc.response = response  # type: ignore[attr-defined]
+    return exc
+
+
+#: Instagram's real 403 body when it has invalidated the session — captured from
+#: the wire on the machine that filed t_10a26bfd.
+LOGGED_OUT_BODY = json.dumps(
+    {
+        "error_title": "You've been logged out",
+        "error_body": "Please log back in.",
+        "message": "login_required",
+        "status": "fail",
+        "logout_reason": 8,
+    }
+)
+
+
+def _instagram_probe_surfaces(exc: Exception) -> tuple[dict[str, Any], Any]:
+    """Run health/doctor/auth status against one config dir with a failing probe.
+
+    Returns the three JSON payloads plus the classification the probe produced.
+    """
+    root = Path(tempfile.mkdtemp(prefix="xpst-instagram-probe-"))
+    config, config_file = _write_config(root)
+
+    failure = classify_probe_failure("instagram", exc, probe="sessionid")
+    uploaders = _stub_uploaders()
+    uploaders["instagram"] = _FakeUploader(
+        "instagram",
+        PlatformHealth(
+            platform="instagram",
+            authenticated=False,
+            session_valid=False,
+            error=failure.error,
+            details=failure.as_details(),
+        ),
+    )
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("XPST_AUTH_STATUS_TTL", "0")
+        patch.setattr(auth_status_module, "_build_uploaders", lambda cfg: uploaders)
+        patch.setattr(xpst_setup_module, "check_yt_dlp", lambda: YTDLP_VERSION)
+        patch.setattr("xpst.readiness.check_yt_dlp", lambda: YTDLP_VERSION)
+        fake_ffmpeg = root / "ffmpeg-fake"
+        fake_ffmpeg.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        fake_ffmpeg.chmod(0o755)
+        patch.setenv("XPST_FFMPEG_PATH", str(fake_ffmpeg))
+        patch.setenv("XPST_FFPROBE_PATH", str(fake_ffmpeg))
+
+        runner = CliRunner()
+
+        def run(*args: str) -> dict[str, Any]:
+            result = runner.invoke(cli_main, ["--config", str(config_file), *args])
+            return _json_from_cli(result.output)
+
+        surfaces = {
+            "health": run("health", "--json"),
+            "doctor": run("doctor", "--json"),
+            "auth_status": run("auth", "status", "--json"),
+        }
+    return surfaces, failure
+
+
+def test_transient_instagram_probe_is_unverified_not_expired() -> None:
+    """A probe that never got an answer must not be reported as an expiry.
+
+    Instagram's anti-bot 302 loop (``TooManyRedirects``) says nothing about the
+    stored credential. The old message — "Instagram session expired or invalid.
+    Re-run: xpst connect instagram (username/password required for re-login)" —
+    asserted a cause nobody had observed, and pushed the user into a
+    password re-login that xPST's own docs call a ban signal.
+    """
+    raw = "Exceeded 30 redirects."
+    surfaces, failure = _instagram_probe_surfaces(_named_exception("TooManyRedirects", raw))
+
+    assert failure.kind == PROBE_UNVERIFIED
+    assert failure.retryable is True
+
+    health = surfaces["health"]["platforms"]["instagram"]
+    doctor = surfaces["doctor"]["platforms"]["instagram"]
+    status = surfaces["auth_status"]["platforms"]["instagram"]
+
+    for name, entry in (("health", health), ("doctor", doctor), ("auth_status", status)):
+        assert entry["probe_class"] == PROBE_UNVERIFIED, (name, entry)
+        assert entry["probe_retryable"] is True, (name, entry)
+        assert raw in (entry.get("error") or entry.get("problem") or entry.get("probe_error")), (
+            name,
+            entry,
+        )
+
+    # The claim that must not be made, and the advice that must not be given.
+    assert "session expired" not in (health["error"] or "").lower(), health["error"]
+    assert health["token_state"] == "unknown", health
+    assert health["badge"] == "unknown", health
+    assert status["badge"] == "unknown", status
+    assert "needs_reauth" not in (status["badge"], status["token_state"]), status
+    assert doctor["fix"].startswith("Retry"), doctor["fix"]
+
+    # Still not green: nothing was verified, so nothing may be claimed.
+    assert health["authenticated"] is False
+    assert doctor["connected"] is False
+    assert status["authenticated"] is False
+
+
+def test_rejected_instagram_session_keeps_the_relogin_instruction() -> None:
+    """The opposite case must stay actionable, with the provider's own words.
+
+    Instagram answering 403 ``login_required`` with "You've been logged out" is
+    a real rejection (instagrapi's error guide: the session was invalidated
+    server-side, re-login is the only fix), so the verdict and the remediation
+    stay — but the raw body is now attached instead of being replaced by a
+    paraphrase.
+    """
+    exc = _named_exception(
+        "LoginRequired", "login_required", response=_FakeResponse(403, LOGGED_OUT_BODY)
+    )
+    surfaces, failure = _instagram_probe_surfaces(exc)
+
+    assert failure.kind == PROBE_INVALID_CREDENTIALS
+    assert failure.retryable is False
+
+    health = surfaces["health"]["platforms"]["instagram"]
+    status = surfaces["auth_status"]["platforms"]["instagram"]
+    doctor = surfaces["doctor"]["platforms"]["instagram"]
+
+    assert health["probe_class"] == PROBE_INVALID_CREDENTIALS, health
+    assert "Re-run: xpst connect instagram" in health["error"], health["error"]
+    assert "You've been logged out" in health["error"], health["error"]
+    assert status["badge"] == "needs_reauth", status
+    assert doctor["connected"] is False
+    assert "You've been logged out" in doctor["problem"], doctor["problem"]
+
+
+def test_nested_provider_rejection_outranks_the_transport_error() -> None:
+    """The provider's answer is often nested under a transport failure.
+
+    On the machine that filed t_10a26bfd, instagrapi raised ``LoginRequired``
+    (Instagram: "You've been logged out") and then its session bootstrap died
+    with ``TooManyRedirects`` on top of it. Classifying only the outermost
+    exception would downgrade a proven rejection to "unverified".
+    """
+    outer = _named_exception("TooManyRedirects", "Exceeded 30 redirects.")
+    outer.__cause__ = _named_exception(
+        "LoginRequired", "login_required", response=_FakeResponse(403, LOGGED_OUT_BODY)
+    )
+
+    surfaces, failure = _instagram_probe_surfaces(outer)
+
+    assert failure.kind == PROBE_INVALID_CREDENTIALS, failure
+    assert "You've been logged out" in failure.raw_error, failure.raw_error
+    assert surfaces["health"]["platforms"]["instagram"]["probe_class"] == PROBE_INVALID_CREDENTIALS
 
 
 @pytest.mark.parametrize("provider", ("threads", "facebook"))
