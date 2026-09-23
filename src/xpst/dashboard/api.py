@@ -298,26 +298,120 @@ def create_api_router(
         config.config_dir = str(target)
         config.save(str(target / "config.yaml"))
 
-    def _destination_providers(config: Any) -> list[dict[str, Any]]:
+    def _destination_providers(
+        config: Any, live_status: Any = None
+    ) -> list[dict[str, Any]]:
         """Canonical video-destination providers, in catalog order.
 
-        Config-only truth (no live probe): an entry is ``ready`` only when the
-        destination is enabled AND its local credentials exist.
+        Role truth comes from the live canonical probe when one answered, so a
+        destination whose stored session was rejected is never rendered as a
+        green/ready destination. With no live answer the entry says so: the
+        states are the config-only ones and ``live_checked`` is False, which
+        stops "a credential file exists" from reading as "verified".
         """
-        from xpst.provider_truth import canonical_provider_catalog
+        from xpst.provider_truth import build_canonical_status, canonical_provider_catalog
 
         catalog = canonical_provider_catalog(config)
+        live = build_canonical_status(config, live_status)
         providers = [
             provider
             for provider in catalog.get("providers", [])
             if "video_destination" in (provider.get("roles") or [])
         ]
         for provider in providers:
-            role = (provider.get("role_status") or {}).get("video_destination") or {}
+            role = (live.get(provider["name"]) or {}).get("role_status", {}).get("video_destination") or {}
+            probed = bool(role.get("live_checked"))
             provider["destination_state"] = role.get("state", "unconfigured")
-            provider["destination_ready"] = role.get("state") == "ready"
+            provider["destination_ready"] = bool(role.get("ready"))
             provider["destination_error"] = role.get("error")
+            provider["live_checked"] = probed
         return providers
+
+    def _readiness_live_status(config: Any) -> dict[str, Any] | None:
+        """The canonical live probe output for readiness, or None (unknown).
+
+        Readiness must render the ONE probe verdict the other surfaces render
+        (:mod:`xpst.provider_truth`), never a config-only green. The answer is
+        deliberately non-blocking: when a probe is already running and nothing
+        is cached yet, the caller gets None (= "checking"), and with live
+        checking disabled (the offline test harness) only a probe some other
+        request already performed is returned.
+        """
+        key = str(config_dir)
+        if os.environ.get("XPST_DISABLE_AUTH_WARM"):
+            with _AUTH_STATUS_LOCK:
+                entry = _AUTH_STATUS_CACHE.get(key)
+            return entry[2] if entry is not None else None
+        if _auth_probe_in_flight(key) and not _has_cached_auth(key):
+            return None
+        try:
+            _, canonical, _, _, _ = _live_auth_and_canonical(key, config)
+            return canonical
+        except Exception as exc:  # noqa: BLE001 - never 500 a readiness read
+            logger.debug("Live readiness status unavailable: %s", exc)
+            return None
+
+    def _readiness_block(config: Any, live_status: Any) -> dict[str, Any]:
+        """The ONE readiness verdict block every surface serves.
+
+        Same builder for ``/api/health-status`` and ``/api/onboarding``, so the
+        Home panel, the onboarding wizard and the payload behind them cannot
+        disagree. Per-role rows come from
+        :func:`xpst.readiness.role_readiness`; ``verdict`` is the rendered
+        pill/copy pair.
+        """
+        from xpst.readiness import build_readiness_report
+
+        try:
+            report = build_readiness_report(config, live_status=live_status).to_dict()
+        except Exception as exc:  # noqa: BLE001 - report truthfully instead of 500
+            logger.warning("Readiness report failed: %s", exc)
+            report = {
+                "ready": False,
+                "summary": f"Readiness could not be computed: {str(exc)[:200]}",
+                "checks": [],
+                "blocking": [],
+                "warnings": [],
+                "roles": [],
+            }
+
+        roles = list(report.get("roles") or [])
+        # No live probe answered: keep the local checks (they are offline and
+        # deterministic) but claim nothing about roles or readiness.
+        if live_status is None:
+            report["ready"] = False
+            report["summary"] = "Live account checks are still running. Nothing is claimed until they answer."
+            roles = []
+
+        needs_attention = [row for row in roles if not row.get("ready")]
+        ready = bool(report["ready"]) and not needs_attention
+        warnings = list(report.get("warnings") or [])
+        if live_status is None:
+            verdict = {"status": "unknown", "label": "Checking…", "detail": report["summary"]}
+        elif not ready:
+            verdict = {"status": "degraded", "label": "Needs attention", "detail": report["summary"]}
+            if report["ready"] and needs_attention:
+                # Posting works (a destination is ready); the rows still need
+                # attention. Say both, so the copy never claims posting is
+                # blocked while a Create-post action is offered.
+                verdict["detail"] = "A destination is ready, so posting works. The roles below still need attention."
+        elif warnings:
+            verdict = {"status": "warning", "label": "Ready with warnings", "detail": report["summary"]}
+        else:
+            verdict = {"status": "healthy", "label": "Ready", "detail": report["summary"]}
+
+        return {
+            "ready": ready,
+            "summary": report["summary"],
+            "checks": report.get("checks", []),
+            "blocking": report.get("blocking", []),
+            "warnings": warnings,
+            "roles": roles,
+            # Rows the UI must render, each one distinct: (platform, role).
+            "blockers": needs_attention,
+            "verdict": verdict,
+            "pending": live_status is None,
+        }
 
     def _guide_payload(platform: str) -> dict[str, Any]:
         """Click-by-click setup steps for one platform (never a secret)."""
@@ -340,18 +434,15 @@ def create_api_router(
 
     def _onboarding_payload(config: Any) -> dict[str, Any]:
         """First-run state: source folder, destinations, readiness, next step."""
-        from xpst.readiness import build_readiness_report
-
-        destinations = _destination_providers(config)
+        # Readiness and the destination list render the live probe's verdict,
+        # the same canonical truth the Home endpoint and `xpst doctor` render.
+        live_status = _readiness_live_status(config)
+        destinations = _destination_providers(config, live_status)
         source_path = str(getattr(getattr(config, "local", None), "path", "") or "")
         source_exists = bool(source_path) and Path(source_path).expanduser().is_dir()
         ready_destinations = [item["name"] for item in destinations if item.get("destination_ready")]
 
-        try:
-            readiness = build_readiness_report(config).to_dict()
-        except Exception as exc:  # noqa: BLE001 - report truthfully instead of 500
-            logger.warning("Readiness report failed: %s", exc)
-            readiness = {"ready": False, "summary": f"Readiness could not be computed: {str(exc)[:200]}", "checks": [], "blocking": [], "warnings": []}
+        readiness = _readiness_block(config, live_status)
 
         first_run_complete = bool(getattr(config, "first_run_complete", False))
         if ready_destinations:
@@ -858,13 +949,24 @@ def create_api_router(
         state = load_state(config_dir)
         health = state.get("health", {})
         platforms = health.get("platforms", {})
-        status = "healthy" if all(p.get("status") == "ok" for p in platforms.values()) else "degraded"
+        # This pill belongs to the RECORDED block below it, so it reports the
+        # recorded status only. It used to be flipped to "degraded" by the live
+        # role states, which put a Degraded pill next to its own "YouTube OK"
+        # row; the live verdict is reported by `readiness` (the Readiness card).
+        status = (
+            "healthy"
+            if platforms and all(p.get("status") == "ok" for p in platforms.values())
+            else "degraded"
+            if platforms
+            else "unknown"
+        )
 
         auth: dict[str, Any] = {}
         auth_error: str | None = None
         auth_cached = False
         auth_age_seconds: float | None = None
         auth_stale = False
+        canonical: dict[str, Any] = {"providers": {}, "platforms": {}, "roles": []}
         try:
             from xpst.config import XPSTConfig
 
@@ -873,6 +975,7 @@ def create_api_router(
                 # A probe is already running (startup warm-up) and nothing is
                 # cached yet: answer immediately and say it is still being
                 # checked, instead of blocking the first paint on the network.
+                readiness = _readiness_block(config, None)
                 return {
                     "status": "pending",
                     "platforms": platforms,
@@ -885,7 +988,7 @@ def create_api_router(
                     "readiness_pending": True,
                     "canonical": {"providers": {}, "platforms": {}, "roles": []},
                     "providers": {},
-                    "readiness": {"ready": False, "blockers": [], "pending": True},
+                    "readiness": readiness,
                     "next_action": {
                         "kind": "checking",
                         "label": "Checking live accounts",
@@ -901,35 +1004,22 @@ def create_api_router(
                 auth_age_seconds,
                 auth_stale,
             ) = _live_auth_and_canonical(config_dir, config)
-            role_states = [
-                role.get("state")
-                for provider in canonical["providers"].values()
-                for role in provider.get("role_status", {}).values()
-                if role.get("enabled")
-            ]
-            if any(state in {"unconfigured", "degraded", "blocked_external_review"} for state in role_states):
-                status = "degraded"
         except Exception as exc:
             auth_error = str(exc)[:200]
             logger.debug("Live auth status unavailable: %s", exc)
             canonical = {"providers": {}, "platforms": {}, "roles": []}
 
+        # The readiness verdict is the shared block: the same document
+        # /api/onboarding serves, so the two screens cannot disagree. When the
+        # live probe failed there is no live answer to render, so readiness
+        # reports "checking" instead of falling back to a config-only green.
+        readiness = _readiness_block(_load_ui_config(), None if auth_error else canonical)
         provider_values = list(canonical.get("providers", {}).values())
         role_values = [
             role
             for provider in provider_values
             for role in provider.get("role_status", {}).values()
             if role.get("enabled")
-        ]
-        blockers = [
-            {
-                "platform": role.get("platform"),
-                "role": role.get("role"),
-                "state": role.get("state"),
-                "error": role.get("error"),
-            }
-            for role in role_values
-            if role.get("state") != "ready"
         ]
         destinations = [
             role for role in role_values if role.get("role") == "video_destination"
@@ -952,7 +1042,6 @@ def create_api_router(
                 "role": destination.get("role") if destination else "video_destination",
             }
         )
-        ready = not blockers
         return {
             "status": status,
             "platforms": platforms,
@@ -971,7 +1060,7 @@ def create_api_router(
             "canonical": canonical,
             "providers": canonical["providers"],
             "readiness_pending": False,
-            "readiness": {"ready": ready, "blockers": blockers},
+            "readiness": readiness,
             "next_action": next_action,
             "can_create_post": destination_ready,
         }

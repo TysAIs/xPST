@@ -8,6 +8,7 @@
   import LoadingSkeleton from "../lib/components/LoadingSkeleton.svelte";
   import StatusBadge from "../lib/components/StatusBadge.svelte";
   import PlatformBadge from "../lib/components/PlatformBadge.svelte";
+  import { readinessVerdict } from "../lib/labels.js";
 
   let state = $state("loading");
   let error = $state("");
@@ -41,6 +42,9 @@
   const steps = $derived(stepRows(onboarding));
   const destinations = $derived(destinationRows(onboarding));
   const readiness = $derived(onboarding?.readiness ?? null);
+  // Same engine verdict the Home panel renders (/api/onboarding and
+  // /api/health-status serve one readiness document), never a local opinion.
+  const verdict = $derived(readinessVerdict(readiness));
   const blockingChecks = $derived(readiness?.blocking ?? []);
   const sourceExists = $derived(Boolean(onboarding?.source?.exists));
 
@@ -160,9 +164,9 @@
   <section class="xpst-section" aria-labelledby="readiness-heading">
     <div class="xpst-section__heading">
       <h2 id="readiness-heading">Readiness</h2>
-      <StatusBadge status={readiness?.ready ? "success" : "warning"} label={readiness?.ready ? "Ready" : "Needs attention"} />
+      <StatusBadge status={verdict.status} label={verdict.label} />
     </div>
-    <Card description={readiness?.summary ?? "The engine has not reported readiness."}>
+    <Card description={verdict.detail || (readiness?.summary ?? "The engine has not reported readiness.")}>
       {#if blockingChecks.length}
         <ul aria-label="Setup blockers">
           {#each blockingChecks as check (check.id)}
