@@ -103,13 +103,27 @@ jobs:
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
 
-      - name: Fetch media binaries (ffmpeg/ffprobe/yt-dlp)
+      - name: Fetch bundled media binaries (yt-dlp only)
         run: |
           set -euo pipefail
           chmod +x scripts/fetch-media-binaries.sh
+          # ffmpeg/ffprobe are NOT bundled any more (~87MB of a 192MB app): the
+          # engine prefers a system ffmpeg and otherwise fetches a pinned,
+          # checksum-verified static build on first use. Only yt-dlp still ships,
+          # and the engine's bundled yt_dlp module is the primary path, so a
+          # failed yt-dlp fetch is a warning rather than a lane failure.
+          # This step used to assert src-tauri/binaries/ffmpeg/ffmpeg, which the
+          # design removed, so every run of this lane died right here.
           scripts/fetch-media-binaries.sh macos-arm64
-          test -x src-tauri/binaries/ffmpeg/ffmpeg
-          test -x src-tauri/binaries/ytdlp/yt-dlp
+          if [ -e src-tauri/binaries/ytdlp/yt-dlp ]; then
+            echo "yt-dlp bundled: src-tauri/binaries/ytdlp/yt-dlp ($(du -sh src-tauri/binaries/ytdlp/yt-dlp | cut -f1))"
+          else
+            echo "::warning::src-tauri/binaries/ytdlp/yt-dlp was not fetched; the engine's bundled yt_dlp module still works"
+          fi
+          test ! -e src-tauri/binaries/ffmpeg/ffmpeg || {
+            echo "::error::an ffmpeg binary reappeared in the bundle inputs — it must not be bundled"
+            exit 1
+          }
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
