@@ -2,7 +2,7 @@
 
 **Free, local-first, provider-agnostic cross-posting for short-form video**
 
-Automatically distribute short-form video from configured sources to connected destinations. xPST includes integrations for six platforms — YouTube, Instagram, X/Twitter, TikTok, Threads, and Messenger (messaging/auto-reply) — but current availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-table) for the live-verified, source-only, and disabled states.
+Automatically distribute short-form video from configured sources to connected destinations. xPST includes integrations for seven platforms — YouTube, Instagram, X/Twitter, TikTok, Threads, Facebook Pages, and Messenger (messaging/auto-reply) — but current availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-table) for the live-verified, source-only, and disabled states.
 
 ---
 

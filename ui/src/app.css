@@ -729,6 +729,14 @@ input,
   font-size: 0.875rem;
 }
 
+/* The role is part of a readiness row's identity (a platform has several
+   roles), so it is set apart from the platform label rather than reading as a
+   repeat of it. */
+.xpst-inline-meta__role {
+  font-weight: 600;
+  color: var(--xpst-color-text-primary);
+}
+
 .xpst-inline-actions {
   display: flex;
   flex-wrap: wrap;

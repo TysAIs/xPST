@@ -27,7 +27,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 from rich.console import Console
@@ -37,6 +37,7 @@ from rich.table import Table
 from xpst.config import XPSTConfig
 from xpst.utils.credentials import CredentialStore
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import stdin_is_interactive
 from xpst.utils.secure_io import write_text_0600
 
 console = Console()
@@ -1375,6 +1376,351 @@ def connect_messenger(config: XPSTConfig) -> bool:
 
 
 # ──────────────────────────────────────────────
+# Facebook Page (Page-scoped publishing, Facebook Login for Business)
+# ──────────────────────────────────────────────
+
+#: Redirect URI used for the Facebook Login for Business dialog. Facebook
+#: requires it to match a URI registered on the app *exactly*; override it with
+#: XPST_FACEBOOK_REDIRECT_URI when the app registers something else.
+FACEBOOK_DEFAULT_REDIRECT_URI = "https://localhost/"
+
+#: Environment variables that let an agent complete ``xpst auth facebook``
+#: without a TTY. Each one maps to a field in the input mapping below; none of
+#: them is ever echoed back in output.
+FACEBOOK_ENV_VARS: dict[str, str] = {
+    "app_id": "XPST_FACEBOOK_APP_ID",
+    "app_secret": "XPST_FACEBOOK_APP_SECRET",
+    "user_token": "XPST_FACEBOOK_USER_TOKEN",
+    "oauth_code": "XPST_FACEBOOK_OAUTH_CODE",
+    "page_id": "XPST_FACEBOOK_PAGE_ID",
+    "login_config_id": "XPST_FACEBOOK_LOGIN_CONFIG_ID",
+    "redirect_uri": "XPST_FACEBOOK_REDIRECT_URI",
+}
+
+
+def _facebook_prompt(prompt: str, *, secret: bool = False) -> str:
+    """Prompt for one Facebook input, returning ``""`` on closed stdin.
+
+    ``console.input``/``getpass`` raise ``EOFError`` when stdin is a pipe or
+    /dev/null (agent and CI runs). Treating that as an empty answer lets the
+    caller fail with a precise message instead of a traceback.
+    """
+    try:
+        if secret:
+            return _input_secret(prompt).strip()
+        return console.input(f"[cyan]{prompt}[/cyan]").strip()
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
+def _facebook_inputs(interactive: bool) -> dict[str, str]:
+    """Collect Facebook auth inputs from the environment, then the terminal.
+
+    Environment variables win and are the only source in a non-interactive run
+    (an agent cannot answer a prompt), so a headless caller gets a deterministic
+    error naming the missing variable rather than an EOF traceback.
+    """
+    import os
+
+    inputs = {key: os.environ.get(var, "").strip() for key, var in FACEBOOK_ENV_VARS.items()}
+    if not interactive:
+        return inputs
+
+    console.print(Panel("[bold]Facebook Page Connection[/bold]", style="blue"))
+    console.print(
+        "[dim]Facebook publishing is Page-scoped: the Graph API posts as a Page you "
+        "administer, never as a personal profile. This needs your own Meta app "
+        "(Facebook Login for Business, Standard Access).[/dim]\n"
+    )
+    console.print("[bold]Quick setup:[/bold]")
+    console.print("  1. Go to: [link=https://developers.facebook.com/apps]https://developers.facebook.com/apps[/link]")
+    console.print("  2. Create/select an app → add the [bold]Facebook Login for Business[/bold] product")
+    console.print("  3. In the Graph API Explorer pick that app and grant "
+                  "[bold]pages_show_list, pages_read_engagement, pages_manage_posts[/bold]")
+    console.print("  4. Generate a [bold]User Access Token[/bold] and paste it below\n")
+
+    if not inputs["app_id"]:
+        inputs["app_id"] = _facebook_prompt("Meta App ID (optional, needed for the long-lived token): ")
+    if inputs["app_id"] and not inputs["app_secret"]:
+        inputs["app_secret"] = _facebook_prompt("Meta App Secret (optional, hidden): ", secret=True)
+    if not inputs["login_config_id"]:
+        inputs["login_config_id"] = _facebook_prompt(
+            "Facebook Login for Business configuration ID (optional, press Enter to skip): "
+        )
+    if not inputs["user_token"] and not inputs["oauth_code"]:
+        pasted = _facebook_prompt(
+            "User Access Token — or the full redirect URL you landed on after approving: ",
+            secret=True,
+        )
+        if pasted:
+            # A pasted redirect URL carries the authorization code; a bare value
+            # is the token itself.
+            if "code=" in pasted or pasted.startswith("http"):
+                inputs["oauth_code"] = pasted
+            else:
+                inputs["user_token"] = pasted
+    if not inputs["redirect_uri"]:
+        inputs["redirect_uri"] = FACEBOOK_DEFAULT_REDIRECT_URI
+    return inputs
+
+
+def _facebook_code_from_pasted(pasted: str) -> str:
+    """Extract the ``code`` query parameter from a pasted redirect URL."""
+    if pasted.startswith("http"):
+        with contextlib.suppress(ValueError):
+            values = parse_qs(urlsplit(pasted).query).get("code") or []
+            if values:
+                return values[0]
+    for pair in pasted.replace("?", "&").split("&"):
+        if pair.startswith("code="):
+            return pair[len("code=") :]
+    return pasted.strip()
+
+
+def _facebook_emit(report: dict[str, Any], as_json: bool) -> None:
+    """Print the auth report for humans.
+
+    JSON callers get the report as a return value (the CLI owns stdout for
+    ``--json``), so this is a no-op in JSON mode — a flow must never print two
+    representations of the same result.
+    """
+    if as_json:
+        return
+
+    if report.get("success"):
+        page = report.get("page") or {}
+        console.print(f"[green]✅ Connected to Facebook Page {page.get('name')} ({page.get('id')})[/green]")
+        if len(report.get("pages") or []) > 1:
+            console.print(
+                f"[dim]Selected Page {page.get('id')} out of {len(report['pages'])} "
+                "administered Pages. Re-run with the Page id to switch.[/dim]"
+            )
+        console.print("[dim]Publishing is Page-scoped; the Page access token is stored encrypted.[/dim]")
+    else:
+        console.print(f"[red]❌ Facebook connection failed: {report.get('error')}[/red]")
+        if report.get("hint"):
+            console.print(f"[dim]{report['hint']}[/dim]")
+
+
+def facebook_auth(
+    config: XPSTConfig,
+    *,
+    as_json: bool = False,
+    interactive: bool | None = None,
+) -> dict[str, Any]:
+    """Run the Page-scoped Facebook auth flow and return a structured report.
+
+    Flow (both paths end in a verified Page access token):
+
+    * **token** — a user access token from the Graph API Explorer (the BYO-app
+      Standard Access path); it is extended to a long-lived token when app
+      credentials are available, then ``GET /me/accounts`` discovers the Pages.
+    * **code** — the Facebook Login for Business dialog is opened (or its URL
+      printed) and the resulting authorization code is exchanged.
+
+    Then: pick the Page (explicit id, or the only Page), verify the Page token
+    against ``GET /{page_id}``, and store everything encrypted.
+
+    Args:
+        config: Loaded xPST configuration.
+        as_json: Emit the report as JSON instead of human output.
+        interactive: Force prompt/no-prompt behaviour (defaults to a real TTY).
+
+    Returns:
+        ``{"platform", "success", "page", "pages", "user", "auth_mode",
+        "redirect_uri", "error", "hint", "steps"}`` — never any token.
+    """
+    from xpst.platforms.facebook import (
+        FACEBOOK_CRED_KEYS,
+        FacebookError,
+        FacebookGraphClient,
+        FacebookPageRequiredError,
+        public_page_listing,
+        select_page,
+    )
+
+    if interactive is None:
+        interactive = stdin_is_interactive()
+
+    inputs = _facebook_inputs(interactive)
+    report: dict[str, Any] = {
+        "platform": "facebook",
+        "success": False,
+        "page": None,
+        "pages": [],
+        "user": None,
+        "auth_mode": None,
+        "redirect_uri": inputs.get("redirect_uri") or FACEBOOK_DEFAULT_REDIRECT_URI,
+        "error": None,
+        "hint": None,
+        "steps": [],
+    }
+
+    def record(step: str, ok: bool, detail: str = "") -> None:
+        report["steps"].append({"step": step, "ok": ok, "detail": detail})
+
+    def fail(message: str, *, hint: str | None = None) -> dict[str, Any]:
+        report["error"] = message
+        report["hint"] = hint
+        record("done", False, message)
+        _facebook_emit(report, as_json)
+        return report
+
+    pasted = inputs.get("oauth_code") or ""
+    user_token = inputs.get("user_token") or ""
+    app_id = inputs.get("app_id") or ""
+    app_secret = inputs.get("app_secret") or ""
+    login_config_id = inputs.get("login_config_id") or ""
+    redirect_uri = report["redirect_uri"]
+    code_mode = bool(pasted)
+    report["auth_mode"] = "oauth_code" if code_mode else "user_token"
+
+    if code_mode and not (app_id and app_secret):
+        return fail(
+            "FACEBOOK_APP_REQUIRED: exchanging an authorization code needs the Meta App ID "
+            "and App Secret.",
+            hint="Set XPST_FACEBOOK_APP_ID and XPST_FACEBOOK_APP_SECRET, or paste a user "
+            "access token from the Graph API Explorer instead.",
+        )
+    if not code_mode and not user_token:
+        return fail(
+            "FACEBOOK_CREDENTIALS_REQUIRED: a user access token (or an authorization code) "
+            "is required to discover your Pages.",
+            hint="Set XPST_FACEBOOK_USER_TOKEN for a non-interactive run, or paste the token "
+            "from the Graph API Explorer when prompted.",
+        )
+
+    client = FacebookGraphClient(proxy=getattr(config.facebook, "proxy", None))
+    try:
+        if code_mode:
+            code = _facebook_code_from_pasted(pasted)
+            try:
+                payload = client.exchange_code_for_user_token(app_id, app_secret, redirect_uri, code)
+            except FacebookError as exc:
+                return fail(f"FACEBOOK_CODE_EXCHANGE_FAILED: {exc}")
+            user_token = str(payload.get("access_token", "") or "")
+            if not user_token:
+                return fail("FACEBOOK_CODE_EXCHANGE_FAILED: Facebook returned no access token.")
+            record("code_exchange", True)
+
+        # Extend to a long-lived user token when we hold the app credentials —
+        # Page tokens inherit the user token's lifetime.
+        if app_id and app_secret:
+            try:
+                extended = client.extend_user_token(app_id, app_secret, user_token)
+            except FacebookError as exc:
+                record("token_extension", False, str(exc))
+                logger.warning("Facebook long-lived token exchange failed: %s", exc)
+            else:
+                extended_token = str(extended.get("access_token", "") or "")
+                if extended_token:
+                    user_token = extended_token
+                    record("token_extension", True)
+        else:
+            record(
+                "token_extension",
+                False,
+                "no app id/secret supplied — the token keeps its current lifetime",
+            )
+
+        try:
+            user = client.whoami(user_token)
+        except FacebookError as exc:
+            return fail(
+                f"FACEBOOK_USER_TOKEN_INVALID: {exc}",
+                hint="Regenerate the user access token in the Graph API Explorer with "
+                "pages_show_list granted.",
+            )
+        report["user"] = {"id": str(user.get("id", "")), "name": str(user.get("name", ""))}
+        record("user_token_verified", True, f"user {report['user']['id']}")
+
+        try:
+            pages = client.list_pages(user_token)
+        except FacebookPageRequiredError as exc:
+            return fail(str(exc))
+        except FacebookError as exc:
+            return fail(f"FACEBOOK_PAGE_LIST_FAILED: {exc}")
+        report["pages"] = public_page_listing(pages)
+        record("pages_listed", True, f"{len(pages)} Page(s) via GET /me/accounts")
+
+        wanted_page_id = inputs.get("page_id") or str(getattr(config.facebook, "page_id", "") or "")
+        if interactive and len(pages) > 1 and not wanted_page_id:
+            console.print("[bold]Pages you administer:[/bold]")
+            for page in pages:
+                console.print(f"  • {page.id} — {page.name} ({page.category or 'uncategorized'})")
+            wanted_page_id = _facebook_prompt("Page ID to publish as: ")
+        try:
+            page = select_page(pages, wanted_page_id or None)
+        except FacebookPageRequiredError as exc:
+            return fail(str(exc))
+
+        page_token = page.access_token
+        if not page_token:
+            try:
+                page_token = client.page_token_for(page.id, user_token)
+            except FacebookError as exc:
+                return fail(f"FACEBOOK_PAGE_TOKEN_MISSING: {exc}")
+
+        # Prove the Page token works against the Page it claims to be, before
+        # anything is stored.
+        try:
+            verified = client.fetch_page(page.id, page_token)
+        except FacebookError as exc:
+            return fail(
+                f"FACEBOOK_PAGE_TOKEN_INVALID: {exc}",
+                hint="The user token must carry pages_show_list and an admin/editor role "
+                "on this Page.",
+            )
+        if str(verified.get("id", "")) != str(page.id):
+            return fail(
+                "FACEBOOK_PAGE_MISMATCH: the Page token belongs to Page "
+                f"{verified.get('id')}, not {page.id}."
+            )
+        page_name = str(verified.get("name", "") or page.name)
+        record("page_token_verified", True, f"Page {page.id} ({page_name})")
+    finally:
+        client.close()
+
+    # Persist: encrypted store first (the real credential), config fields as a
+    # write-through convenience so a fresh process sees the selection.
+    cred_store = CredentialStore(config.config_dir)
+    try:
+        cred_store.store(FACEBOOK_CRED_KEYS["page_id"], page.id)
+        cred_store.store(FACEBOOK_CRED_KEYS["page_access_token"], page_token)
+        cred_store.store(FACEBOOK_CRED_KEYS["user_token"], user_token)
+        if app_id:
+            cred_store.store(FACEBOOK_CRED_KEYS["app_id"], app_id)
+        if app_secret:
+            cred_store.store(FACEBOOK_CRED_KEYS["app_secret"], app_secret)
+    except Exception as exc:  # noqa: BLE001 — surface, never half-succeed silently
+        return fail(f"FACEBOOK_STORE_FAILED: could not store credentials encrypted: {exc}")
+
+    config.facebook.enabled = True
+    config.facebook.page_id = page.id
+    config.facebook.page_name = page_name
+    config.facebook.page_access_token = page_token
+    config.facebook.graph_user_token = user_token
+    if app_id:
+        config.facebook.app_id = app_id
+    if app_secret:
+        config.facebook.app_secret = app_secret
+    if login_config_id:
+        config.facebook.login_config_id = login_config_id
+    config.save()
+
+    report["success"] = True
+    report["page"] = {**page.to_public_dict(), "name": page_name}
+    record("stored", True, "encrypted CredentialStore + config (enabled=True)")
+    _facebook_emit(report, as_json)
+    return report
+
+
+def connect_facebook(config: XPSTConfig) -> bool:
+    """Connect the Page-scoped Facebook destination (wizard entry point)."""
+    return bool(facebook_auth(config).get("success"))
+
+
+# ──────────────────────────────────────────────
 # Test connections
 # ──────────────────────────────────────────────
 
@@ -1449,7 +1795,11 @@ def run_connect(
             console.print(f"[yellow]⚠️  Issues with: {', '.join(failed)}[/yellow]")
         return all(results.values())
 
-    # Determine which platforms to connect
+    # Determine which platforms to connect. Facebook is deliberately NOT in the
+    # default "connect everything" sweep: it needs a BYO Meta app, so a
+    # credential-less run would fail noisily for anyone who has not set one up.
+    # It stays reachable explicitly (`xpst auth facebook`, `xpst connect
+    # facebook`, or by picking it in `xpst wizard`).
     all_platforms = ["tiktok", "youtube", "instagram", "x", "threads", "messenger"]
     target_platforms = platforms or all_platforms
 
@@ -1465,6 +1815,7 @@ def run_connect(
         "instagram": connect_instagram,
         "x": connect_x,
         "threads": connect_threads,
+        "facebook": connect_facebook,
         "messenger": connect_messenger,
     }
 
@@ -1537,6 +1888,13 @@ _PLATFORM_CRED_KEYS: dict[str, tuple[str, ...]] = {
     "tiktok": ("tiktok_client_secret", "tiktok_access_token", "tiktok_refresh_token"),
     "threads": ("threads_access_token", "threads_user_id"),
     "messenger": ("messenger_page_token", "messenger_app_secret"),
+    "facebook": (
+        "facebook_page_id",
+        "facebook_page_token",
+        "facebook_user_token",
+        "facebook_app_id",
+        "facebook_app_secret",
+    ),
 }
 
 # Raw credential FILES per platform (written alongside the CredentialStore).
