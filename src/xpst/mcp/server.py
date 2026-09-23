@@ -1326,8 +1326,17 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
 
 
 async def _handle_health(engine: CrossPostEngine) -> CallToolResult:
-    """Handle xpst_health tool."""
-    health = await engine.check_health()
+    """Handle xpst_health tool.
+
+    Platform auth facts come from the canonical live probe, so this tool cannot
+    answer a different verdict than ``xpst_auth_status`` for the same account
+    (one fact, one answer — see ``tests/test_status_surface_agreement.py``).
+    """
+    from xpst.auth_status import collect_live_auth_status_async, platform_health_entries
+
+    health = await engine.check_health(include_platforms=False)
+    canonical = await collect_live_auth_status_async(engine.config)
+    health["platforms"] = platform_health_entries(canonical)
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(health, indent=2, default=str))],
     )

@@ -182,6 +182,10 @@ class TestDoctor:
         """
         monkeypatch.delenv("XPST_FFMPEG_PATH", raising=False)
         monkeypatch.setattr(shutil, "which", lambda name: None)
+        # doctor resolves ffmpeg through the same chain the runtime uses
+        # (env override -> PATH -> bundled/well-known locations), so the
+        # "nothing anywhere" case must blank out the whole chain.
+        monkeypatch.setattr("xpst.utils.platform.resolve_ffmpeg_path", lambda: None)
         monkeypatch.setattr("xpst.utils.platform.system_media_dirs", lambda: [])
         monkeypatch.setenv("XPST_MEDIA_BIN_DIR", str(tmp_path / "empty-bin"))
         result = runner.invoke(main, ["doctor", "--json"])
@@ -190,6 +194,7 @@ class TestDoctor:
         ffmpeg = next(e for e in data["environment"] if e["name"] == "ffmpeg")
         assert ffmpeg["ok"] is False
         assert "ffmpeg" in ffmpeg["fix"].lower()
+        assert "XPST_FFMPEG_PATH" in ffmpeg["fix"]
         assert "xpst media fetch" in ffmpeg["fix"]
 
     def test_platform_filter_limits_report(self, runner, config_file, stub_broken):

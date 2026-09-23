@@ -441,14 +441,33 @@ def run(ctx: click.Context, source: str, bidirectional: bool, dry_run: bool, as_
         ctx.exit(1)
         return
 
+    # Connectivity is reported (never assumed): on a host with no network the
+    # source fetch cannot work and no upload can succeed, and a bare
+    # "username not configured" is a misleading explanation.
+    from xpst.utils.net import check_network
+
+    network = check_network()
+    if not network.online and not quiet:
+        console.print(
+            f"[bold red]xPST is offline:[/bold red] {network.detail}"
+        )
+        if not dry_run:
+            console.print(
+                "[dim]Nothing will be posted during this run. Local state is "
+                "readable; retry once connectivity returns.[/dim]"
+            )
+
     try:
-        _run_check_and_post(engine, source, bidirectional, dry_run, as_json, quiet)
+        _run_check_and_post(
+            engine, source, bidirectional, dry_run, as_json, quiet, network=network
+        )
     finally:
         # Always release so a one-shot `run` never leaves a stale pidfile.
         engine.release_pidfile()
 
 
-def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool, as_json: bool, quiet: bool) -> None:
+def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool, as_json: bool, quiet: bool,
+                        network: Any = None) -> None:
     """Execute a single check-and-post cycle.
 
     Extracted from the ``run`` command so the pidfile guard in ``run`` can
@@ -459,12 +478,14 @@ def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool,
     if source == "all":
         bidirectional = True
 
+    network_payload = network.to_dict() if network is not None else None
+
     if dry_run:
         if bidirectional:
             monitor = engine._get_monitor()
             new_posts = asyncio.run(monitor.check_all_sources(5))
             if as_json:
-                json_output({"dry_run": True, "posts": [{"source": p.source_platform, "video_id": p.video_id, "caption": p.caption[:50], "targets": list(p.target_platforms)} for p in new_posts]}, True)
+                json_output({"dry_run": True, "network": network_payload, "posts": [{"source": p.source_platform, "video_id": p.video_id, "caption": p.caption[:50], "targets": list(p.target_platforms)} for p in new_posts]}, True)
             elif new_posts:
                 if not quiet:
                     console.print("[bold blue]Dry run — would cross-post:[/bold blue]")
@@ -477,7 +498,7 @@ def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool,
             videos = asyncio.run(engine.source_service.fetch_new_videos(source, 5))
             new_videos = engine.source_service.filter_new(videos, engine.state, engine._platforms) if videos else []
             if as_json:
-                json_output({"dry_run": True, "videos": [{"video_id": v.video_id, "caption": v.caption[:50], "targets": list(engine._platforms.keys())} for v in new_videos]}, True)
+                json_output({"dry_run": True, "network": network_payload, "videos": [{"video_id": v.video_id, "caption": v.caption[:50], "targets": list(engine._platforms.keys())} for v in new_videos]}, True)
             elif new_videos:
                 if not quiet:
                     console.print("[bold blue]Dry run — would post:[/bold blue]")
@@ -498,15 +519,16 @@ def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool,
         results = asyncio.run(engine.check_and_post(source=source))
 
     if not results:
+        status = "offline_no_network" if (network_payload and not network_payload["online"]) else "no_new_videos"
         if as_json:
-            json_output({"status": "no_new_videos", "results": []}, True)
+            json_output({"status": status, "network": network_payload, "results": []}, True)
         elif not quiet:
             console.print("[green]No new videos to post[/green]")
         return
 
     if as_json:
         out = [_result_to_dict(r) for r in results]
-        json_output({"status": "ok", "results": out}, True)
+        json_output({"status": "ok", "network": network_payload, "results": out}, True)
     else:
         for result in results:
             _display_result(result)
@@ -587,6 +609,121 @@ def watch(ctx: click.Context, interval: int | None, source: str, bidirectional: 
                 _time.sleep(60)
     finally:
         engine.release_pidfile()
+
+
+# ── Post exit status: a failed post must not read as success ────────────────
+# ``xpst post`` reports the outcome twice: the JSON payload is the detailed
+# report, the exit status is the verdict. Shell scripts and agents branch on
+# the verdict (`xpst post … && echo ok`), so a post where nothing was published
+# must not exit 0. One rule, documented in docs/TUTORIAL_CLI.md:
+#
+#   0   at least one attempted destination published — a partial success is a
+#       success — or every destination was already posted (idempotent no-op)
+#   4   every attempted destination failed for quota / rate-limit reasons
+#   3   every attempted destination failed to authenticate
+#   10  no destination was attempted at all, or every attempted destination is
+#       unavailable or refused the media (e.g. THREADS_NEEDS_URL)
+#   1   every attempted destination failed for any other reason, including a
+#       mix of reasons
+#
+# The families below match the provider error codes the uploaders emit as
+# "CODE: message" plus their plain-language variants. Order matters: quota is
+# checked before auth, because "quota exceeded" never means re-authenticate.
+_POST_RATE_MARKERS = (
+    "QUOTA_EXHAUSTED",
+    "RATE_LIMITED",
+    "RATE_LIMIT",
+    "TOO MANY REQUESTS",
+    "429",
+)
+_POST_AUTH_MARKERS = (
+    "AUTH_EXPIRED",
+    "AUTH_FAILURE",
+    "AUTHENTICATION",
+    "SESSION_EXPIRED",
+    "INVALID_GRANT",
+    "NOT_CONFIGURED",
+    "UNAUTHORIZED",
+    "TOKEN EXPIRED",
+    "LOGIN REQUIRED",
+    "CREDENTIALS",
+    "401",
+)
+_POST_UNAVAILABLE_MARKERS = (
+    "NEEDS_URL",
+    "UNSUPPORTED",
+    "NOT SUPPORTED",
+    "UNAVAILABLE",
+    "NOT AVAILABLE",
+    "DISABLED",
+)
+
+_POST_EXIT_CODE_LABELS = {
+    EXIT_GENERAL: "post failed",
+    EXIT_AUTH_FAILURE: "authentication failed",
+    EXIT_RATE_LIMIT: "quota or rate limit reached",
+    EXIT_PLATFORM_UNAVAILABLE: "destination unavailable",
+}
+
+
+def _post_failure_exit_code(error: str | None) -> int:
+    """Map one destination's failure text to the exit-code family it belongs to."""
+
+    text = (error or "").upper()
+    for markers, code in (
+        (_POST_RATE_MARKERS, EXIT_RATE_LIMIT),
+        (_POST_AUTH_MARKERS, EXIT_AUTH_FAILURE),
+        (_POST_UNAVAILABLE_MARKERS, EXIT_PLATFORM_UNAVAILABLE),
+    ):
+        if any(marker in text for marker in markers):
+            return code
+    return EXIT_GENERAL
+
+
+def _post_failure_message(exit_code: int) -> str:
+    """One-line human summary of why a post published nothing."""
+
+    return (
+        f"nothing was published — {_POST_EXIT_CODE_LABELS.get(exit_code, 'post failed')} "
+        f"(exit code {exit_code})."
+    )
+
+
+def _post_exit_code(result: CrossPostResult, requested: list[str] | None) -> int:
+    """Exit code for one ``xpst post`` run — the single rule above.
+
+    Args:
+        result: the CrossPostResult the engine returned.
+        requested: the platform names the caller asked for, or None for
+            "all enabled platforms" (the engine then decides).
+
+    Returns:
+        The exit code the CLI should terminate with.
+    """
+
+    rows = result.results
+    if not rows:
+        # Nothing was attempted (no destination was available/enabled), so
+        # nothing was posted: a failure, not a silent success.
+        return EXIT_PLATFORM_UNAVAILABLE
+
+    attempted = [p for p, ur in rows.items() if "already_posted" not in (ur.metadata or {})]
+    if not attempted:
+        # Every destination was already posted — nothing to do, nothing failed.
+        return EXIT_SUCCESS
+    if any(rows[p].success for p in attempted):
+        # A partial success is a success; the per-platform detail is in the report.
+        return EXIT_SUCCESS
+
+    codes = {_post_failure_exit_code(rows[p].error) for p in attempted}
+
+    # A requested destination with no result row was never attempted at all
+    # (its uploader is not available) — that failed the caller too.
+    requested_norm = {name.strip().lower() for name in (requested or []) if name.strip()}
+    if requested_norm - {name.strip().lower() for name in rows}:
+        codes.add(EXIT_PLATFORM_UNAVAILABLE)
+
+    return codes.pop() if len(codes) == 1 else EXIT_GENERAL
 
 
 @main.command()
@@ -672,6 +809,9 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
         if not ur.success and "QUOTA_EXHAUSTED" in (ur.error or "")
     ]
 
+    # The verdict: one rule for every post path (see _post_exit_code above).
+    exit_code = _post_exit_code(result, platform_list)
+
     if as_json:
         out = _result_to_dict(result)
         if quota_blocked:
@@ -680,7 +820,8 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
                 "message": "Daily upload quota exhausted; no upload was attempted",
                 "platforms": quota_blocked,
             }
-            out["exit_code"] = EXIT_RATE_LIMIT
+        if exit_code != EXIT_SUCCESS:
+            out["exit_code"] = exit_code
         json_output(out, True)
     else:
         _display_result(result)
@@ -690,15 +831,15 @@ def post(ctx: click.Context, video: tuple[str, ...], caption: str, platforms: st
                 f"{', '.join(quota_blocked)}. No upload was attempted. "
                 f"Quota resets at midnight.[/red]"
             )
+        elif exit_code != EXIT_SUCCESS and not quiet:
+            console.print(f"[red]Error:[/red] {_post_failure_message(exit_code)}")
 
-    # Exit non-zero when every target platform was quota-blocked so scripts,
-    # schedulers, and MCP callers can detect the failure instead of missing it.
-    attempted = [p for p, ur in result.results.items() if "already_posted" not in (ur.metadata or {})]
-    if attempted and all(
-        not result.results[p].success and "QUOTA_EXHAUSTED" in (result.results[p].error or "")
-        for p in attempted
-    ):
-        sys.exit(EXIT_RATE_LIMIT)
+    # Exit non-zero when nothing was published, so scripts, schedulers, and
+    # MCP/agent wrappers detect the failure instead of reading a failed post as
+    # success. A partial success still exits 0; the per-platform detail lives in
+    # the JSON payload (unchanged).
+    if exit_code != EXIT_SUCCESS:
+        sys.exit(exit_code)
 
 
 @main.command("verify-media")
@@ -1120,12 +1261,33 @@ def health(ctx: click.Context, as_json: bool):
         console.print("[dim]Testing connectivity to all platforms (no uploads)...[/dim]\n")
 
     engine = CrossPostEngine(config)
-    health_data = asyncio.run(engine.check_health())
+    # Platform auth facts come from the canonical live probe that every other
+    # surface renders from (``auth status``, ``doctor``, MCP, HTTP). ``health``
+    # used to probe platforms on its own path, which let it report a different
+    # verdict than ``doctor`` for the same account on the same box; the engine
+    # is still asked for sources/quotas/state/circuit breakers.
+    from xpst.auth_status import collect_live_auth_status, platform_health_entries
+
+    health_data = asyncio.run(engine.check_health(include_platforms=False))
+    health_data["platforms"] = platform_health_entries(collect_live_auth_status(config))
     health_data["sessions"] = _session_health(config)
+    # Connectivity: without it every "not authenticated"/timeout below is
+    # ambiguous, so state the network answer explicitly and first.
+    from xpst.utils.net import check_network
+
+    network = check_network()
+    health_data["network"] = network.to_dict()
 
     if as_json:
         json_output(health_data, True)
         return
+
+    if not network.online:
+        console.print(
+            f"[bold red]⚠️  OFFLINE:[/bold red] {network.detail}\n"
+            "[dim]xPST is running from local state; every platform check "
+            "below is limited until connectivity returns.[/dim]\n"
+        )
 
     # ── Stored sessions (G53: expired sessions fail silently otherwise) ──
     console.print("[bold]Stored Sessions:[/bold]")
@@ -1774,6 +1936,7 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     """
     from xpst.connect import test_connections
     from xpst.utils.errors import describe_remediation
+    from xpst.utils.probe_errors import PROBE_INVALID_CREDENTIALS, PROBE_UNVERIFIED
 
     config = load_config(ctx.obj.get("config_path"))
 
@@ -1818,11 +1981,29 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
         canonical_info = canonical.get(p, {})
         connected = bool(canonical_info.get("authenticated", ok))
         disabled = canonical_info.get("state") == "disabled" and canonical_results is not None
+        probe_class = canonical_info.get("probe_class")
+        probe_error = canonical_info.get("probe_error")
         if connected or disabled:
             problem = None
             fix = None
+        elif creds_present and probe_class == PROBE_UNVERIFIED:
+            # The probe failed without proving the credential is dead (network
+            # error, challenge, anti-bot redirect). Report that honestly and ask
+            # for a retry — "token expired, re-run connect" would send the user
+            # into a credential re-entry for a failure that may clear on its own.
+            problem = (
+                "Live check could not verify this account — the probe failed "
+                "without proving the credential is dead: "
+                f"{probe_error or 'unclassified probe failure'}"
+            )
+            fix = f"Retry: xpst health (only run `xpst connect {p}` if it keeps failing)"
         elif creds_present:
-            problem = "Credentials found but the health check failed — token may be expired or revoked."
+            problem = (
+                "Credentials found but the health check failed — the provider "
+                f"rejected them: {probe_error}"
+                if probe_class == PROBE_INVALID_CREDENTIALS and probe_error
+                else "Credentials found but the health check failed — token may be expired or revoked."
+            )
             fix = describe_remediation(p, "token expired") or f"xpst connect {p}"
         else:
             problem = "Not connected."
@@ -1837,6 +2018,9 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
                 "auth_mode", getattr(getattr(config, p, None), "auth_mode", None)
             ),
             "session_age_days": session.get("age_days"),
+            "probe_class": probe_class,
+            "probe_error": probe_error,
+            "probe_retryable": canonical_info.get("probe_retryable"),
             "problem": problem,
             "fix": fix,
             "quota": {
@@ -1866,11 +2050,17 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     # fetched on first use (~/.xpst/bin). A bare `shutil.which` reported
     # "not found" for GUI-launched apps whose minimal PATH misses
     # /opt/homebrew/bin and for the fetched build.
-    from xpst.utils.platform import resolve_ffmpeg_path, resolve_ffprobe_path
+    from xpst.utils.net import check_network
+    from xpst.utils.platform import (
+        resolve_ffmpeg_path,
+        resolve_ffprobe_path,
+        resolve_ytdlp_path,
+    )
 
     ffmpeg_path = resolve_ffmpeg_path()
     ffprobe_path = resolve_ffprobe_path()
-    yt_dlp_path = shutil.which("yt-dlp")
+    ytdlp_path = resolve_ytdlp_path()
+    network = check_network()
     environment: list[dict[str, Any]] = [
         {
             "name": "ffmpeg",
@@ -1886,9 +2076,27 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
         },
         {
             "name": "yt-dlp",
-            "ok": bool(yt_dlp_path),
-            "detail": yt_dlp_path or "not found on PATH",
-            "fix": None if yt_dlp_path else "Install yt-dlp (e.g. `brew install yt-dlp` or `pipx install yt-dlp`).",
+            "ok": bool(ytdlp_path),
+            "detail": str(ytdlp_path) if ytdlp_path else (
+                "yt-dlp not found on PATH, in XPST_YTDLP_PATH or in the bundled "
+                "media directory"
+            ),
+            "fix": None if ytdlp_path else (
+                "Install yt-dlp (e.g. `brew install yt-dlp` or "
+                "`pipx install yt-dlp`) or set XPST_YTDLP_PATH to the "
+                "yt-dlp binary."
+            ),
+        },
+        {
+            "name": "network",
+            "ok": network.online,
+            "detail": network.detail,
+            "fix": None if network.online else (
+                "Connect this machine to the internet (check Wi-Fi/VPN/"
+                "firewall/DNS). xPST can start and read local state offline, "
+                "but nothing can be downloaded or posted until connectivity "
+                "returns."
+            ),
         },
     ]
     try:
@@ -1901,7 +2109,10 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
         "name": "config dir",
         "ok": env_ok,
         "detail": str(config.config_dir),
-        "fix": None if env_ok else f"Ensure {config.config_dir} is writable.",
+        "fix": None if env_ok else (
+            f"Ensure {config.config_dir} is writable (chmod u+rwx), or set "
+            f"XPST_CONFIG_DIR to a writable directory."
+        ),
     })
     for entry in environment:
         if not entry["ok"]:

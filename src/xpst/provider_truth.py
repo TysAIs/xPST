@@ -401,6 +401,11 @@ def build_canonical_status(
         error = compat.error
         if error is None and aggregate not in (ProviderState.READY, ProviderState.DISABLED):
             error = next((item.error for item in statuses.values() if item.error), None)
+        # Probe classification (see xpst.utils.probe_errors): whether the
+        # provider rejected the credential or the probe simply could not reach
+        # a verdict.  Promoted to the platform level so every consumer can tell
+        # "re-authenticate" apart from "retry" without re-parsing the message.
+        compat_details = compat.details if isinstance(compat.details, Mapping) else {}
         result[definition.name] = {
             "name": definition.name,
             "display_name": definition.display_name,
@@ -421,7 +426,10 @@ def build_canonical_status(
                 else False
             ),
             "error": error,
-            "details": dict(compat.details or {}),
+            "details": dict(compat_details),
+            "probe_class": compat_details.get("probe_class"),
+            "probe_error": compat_details.get("probe_error"),
+            "probe_retryable": compat_details.get("probe_retryable"),
             "enabled": _enabled(config, definition.name),
             "legacy_authenticated": bool(raw.get("credentials_stored")),
         }

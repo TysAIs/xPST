@@ -52,6 +52,82 @@ def _backup_corrupt_config_file(cfg_path: Path) -> Path | None:
         logger.exception("Failed to back up corrupted config file %s", cfg_path)
         return None
 
+
+def _config_dir_override() -> bool:
+    """True when ``XPST_CONFIG_DIR`` selects the config directory."""
+    return bool((os.environ.get("XPST_CONFIG_DIR") or "").strip())
+
+
+def _default_config_path() -> Path:
+    """Return the default config file path (``XPST_CONFIG_DIR`` aware)."""
+    from xpst.utils.platform import get_config_dir
+
+    return get_config_dir() / "config.yaml"
+
+
+def ensure_config_dir_usable(config_dir: Path) -> None:
+    """Fail early, actionably and without a traceback when the config dir is unusable.
+
+    A *missing* directory is fine — it is created on first run.  A path that
+    exists but is not a directory, or that the current user cannot write to
+    (read-only volume, root-owned install, sandboxed profile), is a
+    user-facing configuration error: the caller is told exactly which path is
+    wrong, why, and what to change (``XPST_CONFIG_DIR`` / ``chmod``).
+
+    Raises:
+        ValueError: With an actionable message, never a bare OSError.
+    """
+    try:
+        if config_dir.exists():
+            if not config_dir.is_dir():
+                raise ValueError(
+                    f"XPST config directory {config_dir} exists but is not a directory. "
+                    f"Fix: remove or rename {config_dir}, or set XPST_CONFIG_DIR to a real directory."
+                )
+            if not os.access(config_dir, os.W_OK | os.X_OK):
+                raise ValueError(
+                    f"XPST config directory {config_dir} is not writable by uid {os.getuid()}. "
+                    f"Fix: chmod u+rwx {config_dir} (or chown it to your user), or set "
+                    f"XPST_CONFIG_DIR to a writable directory."
+                )
+            return
+
+        # Directory is missing: the nearest existing ancestor must be writable
+        # for us to create it.
+        parent = config_dir.parent
+        while not parent.exists() and parent != parent.parent:
+            parent = parent.parent
+        if not os.access(parent, os.W_OK | os.X_OK):
+            raise ValueError(
+                f"XPST cannot create its config directory {config_dir}: {parent} is not "
+                f"writable by uid {os.getuid()}. Fix: mkdir -p {config_dir} yourself, or set "
+                f"XPST_CONFIG_DIR to a writable directory."
+            )
+    except OSError as e:  # pragma: no cover - exotic stat/permission failures
+        raise ValueError(
+            f"XPST could not check its config directory {config_dir}: {e}. "
+            f"Fix: verify the path exists, is a directory and is readable, or set "
+            f"XPST_CONFIG_DIR to a writable directory."
+        ) from e
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` atomically and owner-only (0600).
+
+    Two properties the old ``open(path, "w")`` did not have:
+
+    * config.yaml carries credentials (TikTok client_secret / access_token,
+      Messenger page_access_token, Graph API tokens), so the file is created
+      ``0600`` — a world-readable ``~/.xpst/config.yaml`` leaked every stored
+      token to any local user.
+    * a crash or a full disk part-way through the write must leave the
+      *previous* config intact.  ``open(..., "w")`` truncated it first, so a
+      failed write destroyed the user's accounts.
+    """
+    from xpst.utils.atomic import write_text_atomic
+
+    write_text_atomic(path, text, mode=0o600)
+
 # Default configuration values
 DEFAULT_CONFIG = {
     "accounts": {
@@ -584,13 +660,21 @@ class XPSTConfig:
 
         # Load from file - backward compatibility: use old ~/.crosspstr/ if it exists
         if config_path is None:
-            new_dir = Path(os.path.expanduser("~/.xpst"))
+            new_dir = _default_config_path().parent
             old_dir = Path(os.path.expanduser("~/.crosspstr"))
-            if old_dir.exists() and not new_dir.exists():
+            # Legacy rename only applies to the real default location: an
+            # explicit XPST_CONFIG_DIR profile must never adopt (or mutate)
+            # the user's ~/.crosspstr home directory.
+            if (
+                old_dir.exists()
+                and not new_dir.exists()
+                and not _config_dir_override()
+                and old_dir != new_dir
+            ):
                 # Migrate: rename old directory to new
                 import shutil
                 shutil.move(str(old_dir), str(new_dir))
-            config_path = os.path.expanduser("~/.xpst/config.yaml")
+            config_path = str(new_dir / "config.yaml")
 
         cfg_path: Path = Path(config_path)
         if not cfg_path.exists():
@@ -598,19 +682,53 @@ class XPSTConfig:
             # works without a manual config step (dashboard, desktop, engine
             # all expect the file). An explicit --config path must exist —
             # that is a user error and still raises.
-            default_path = Path(os.path.expanduser("~/.xpst/config.yaml"))
+            default_path = _default_config_path()
             if cfg_path == default_path:
-                cfg_path.parent.mkdir(parents=True, exist_ok=True)
-                cfg_path.write_text(
-                    yaml.safe_dump(DEFAULT_CONFIG, sort_keys=False),
-                    encoding="utf-8",
-                )
+                # Only the config *directory* is checked here: an explicit
+                # path that does not exist is a "file not found" (below), not a
+                # directory problem, and must keep raising FileNotFoundError.
+                ensure_config_dir_usable(cfg_path.parent)
+                try:
+                    created_dir = not cfg_path.parent.exists()
+                    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+                    if created_dir:
+                        # The config directory holds credentials; keep a fresh
+                        # one owner-only (existing directories are left alone).
+                        try:
+                            os.chmod(cfg_path.parent, 0o700)
+                        except OSError:
+                            pass
+                    # Atomic + 0600: DEFAULT_CONFIG contains empty credential
+                    # slots, but the same file is later written by save(), and
+                    # a half-written first-run file must never be observed.
+                    # The schema version is stamped in so a brand-new install
+                    # is not immediately "migrated" (which would rewrite the
+                    # user's file and drop a backup on the very first run).
+                    from xpst.config_migration import ConfigMigration
+
+                    payload = yaml.safe_dump(
+                        {"version": ConfigMigration.CURRENT_VERSION, **DEFAULT_CONFIG},
+                        sort_keys=False,
+                    )
+                    _atomic_write_text(cfg_path, payload)
+                except OSError as e:
+                    raise ValueError(
+                        f"XPST could not create its config file {cfg_path}: {e}. "
+                        f"Fix: make {cfg_path.parent} writable, or set XPST_CONFIG_DIR to a "
+                        f"writable directory."
+                    ) from e
                 logger.info("Created default config at %s", cfg_path)
             else:
                 raise FileNotFoundError(
                     f"XPST config file not found: {cfg_path} "
-                    f"(expected ~/.xpst/config.yaml or a path passed via --config)"
+                    f"(expected {default_path} or a path passed via --config)"
                 )
+        else:
+            # The file exists: the directory still has to be writable, because
+            # state.json, backups and logs live beside it. Checking here turns
+            # a raw "Permission denied: .../backups" from the migrator into an
+            # actionable message naming the directory and the fix.
+            ensure_config_dir_usable(cfg_path.parent)
         try:
             with open(cfg_path, "rb") as f:
                 raw = f.read()
@@ -1184,7 +1302,13 @@ class XPSTConfig:
         config_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Convert to dict
+        from xpst.config_migration import ConfigMigration
+
         config_dict = {
+            # Persist the schema version: without it every load treated the
+            # file as v1 and ran the migration chain again, rewriting the
+            # user's config and dropping a backup on every save/load cycle.
+            "version": ConfigMigration.CURRENT_VERSION,
             "accounts": {
                 "tiktok": {
                     "username": self.tiktok.username,
@@ -1358,8 +1482,21 @@ class XPSTConfig:
             "provider_mode": self.provider_mode,
         }
 
+        # Serialize first, then publish atomically: a dump failure must not
+        # truncate the existing config (data-loss vector on disk-full).
         try:
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(config_dict, f, default_flow_style=False, sort_keys=False)
+            payload = yaml.safe_dump(config_dict, default_flow_style=False, sort_keys=False)
+        except yaml.YAMLError as e:  # pragma: no cover - non-serializable value
+            logger.error("Failed to serialize config for %s: %s", config_path, e)
+            return
+
+        try:
+            _atomic_write_text(config_path, payload)
         except OSError as e:
-            logger.warning("Failed to save config: %s", e)
+            logger.error(
+                "Failed to save config to %s: %s. The previous file was left "
+                "unchanged; check free disk space and write permission on %s.",
+                config_path,
+                e,
+                config_path.parent,
+            )
