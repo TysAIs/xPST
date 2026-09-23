@@ -82,6 +82,48 @@ jobs:
           xpst version --json
           xpst health --json
 
+  shell:
+    name: Shell (Tauri/Rust)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies (Tauri v2)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            build-essential \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # tauri-build refuses to run unless every declared bundle resource path
+      # exists. The real payloads (engine sidecar, yt-dlp, built UI) come from
+      # the release lane; this gate only needs the shell to compile and its
+      # unit tests to run, which is what the release lane is NOT run for.
+      - name: Stub the bundle resource paths
+        run: |
+          mkdir -p ui/dist src-tauri/binaries/engine src-tauri/binaries/ytdlp
+          echo '<!doctype html><title>ci</title>' > ui/dist/index.html
+          echo stub > src-tauri/binaries/engine/xpst-engine-x86_64-unknown-linux-gnu
+          echo stub > src-tauri/binaries/ytdlp/yt-dlp
+
+      - name: Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Shell unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
   docker:
     name: Docker build smoke
     runs-on: ubuntu-latest
