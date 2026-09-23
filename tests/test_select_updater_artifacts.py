@@ -122,3 +122,41 @@ def test_cli_writes_report_args_and_github_output(tmp_path: Path) -> None:
     assert "found=1" in output_file.read_text(encoding="utf-8")
     assert "windows-x86_64" in output_file.read_text(encoding="utf-8")
     assert '"found": 1' in report_file.read_text(encoding="utf-8")
+
+
+def test_windows_and_linux_updater_archives_are_recognized(tmp_path: Path) -> None:
+    """The lanes sign `*.nsis.zip` / `*.AppImage.tar.gz`, not the raw installers."""
+    _artifact(tmp_path, "xPST_1.1.0_x64-setup.nsis.zip")
+    _artifact(tmp_path, "xPST_1.1.0_amd64.AppImage.tar.gz")
+
+    statuses = _statuses(selector.select_all(tmp_path))
+
+    assert statuses["windows-x86_64"] == "ok"
+    assert statuses["linux-x86_64"] == "ok"
+
+
+def test_explicit_nsis_and_appimage_tarball_prefixes_resolve(tmp_path: Path) -> None:
+    _artifact(tmp_path, "windows-x86_64-xPST_1.1.0_x64-setup.nsis.zip")
+    _artifact(tmp_path, "linux-x86_64-xPST_1.1.0_amd64.AppImage.tar.gz")
+
+    results = {result["platform"]: result for result in selector.select_all(tmp_path)}
+
+    assert results["windows-x86_64"]["status"] == "ok"
+    assert results["linux-x86_64"]["status"] == "ok"
+    assert results["windows-x86_64"]["source"] == "explicit-prefix"
+
+
+def test_signed_updater_archive_beats_the_unsigned_raw_installer(tmp_path: Path) -> None:
+    """Both files ship in one release; only the archive carries a signature."""
+    _artifact(tmp_path, "xPST_1.1.0_x64-setup.exe", signature=None)
+    _artifact(tmp_path, "xPST_1.1.0_x64-setup.nsis.zip")
+    _artifact(tmp_path, "xPST_1.1.0_amd64.AppImage", signature=None)
+    _artifact(tmp_path, "xPST_1.1.0_amd64.AppImage.tar.gz")
+
+    windows = selector.select("windows-x86_64", sorted(tmp_path.iterdir()))
+    linux = selector.select("linux-x86_64", sorted(tmp_path.iterdir()))
+
+    assert windows["status"] == "ok"
+    assert windows["artifact"].endswith("xPST_1.1.0_x64-setup.nsis.zip")
+    assert linux["status"] == "ok"
+    assert linux["artifact"].endswith("xPST_1.1.0_amd64.AppImage.tar.gz")

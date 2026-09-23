@@ -386,9 +386,9 @@ xpst config import < backup.yaml
 |------|------|-------------|
 | 0 | EXIT_SUCCESS | Success |
 | 1 | EXIT_GENERAL | General error |
-| 2 | EXIT_AUTH_FAILURE | Authentication failed |
-| 3 | EXIT_RATE_LIMIT | Rate limited by platform |
-| 4 | EXIT_CONFIG_ERROR | Configuration error |
+| 2 | EXIT_CONFIG_ERROR | Configuration error (also Click usage errors) |
+| 3 | EXIT_AUTH_FAILURE | Authentication failed |
+| 4 | EXIT_RATE_LIMIT | Rate limited by platform |
 | 10 | EXIT_PLATFORM_UNAVAILABLE | Platform API unavailable |
 
 ### JSON Output

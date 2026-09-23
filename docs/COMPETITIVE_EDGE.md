@@ -50,6 +50,7 @@ the README and docs can speak to a "beat the incumbents" story with facts, not h
 ## Positioning line for README
 
 > "The open-source, self-hosted, agent-native content engine. Post to YouTube, X,
-> Instagram, TikTok, and Threads with official OAuth; let AI agents drive it
-> over MCP; keep your tokens encrypted on your own machine. Free forever — or
-> self-host it on hardware you already own."
+> and Instagram with official OAuth, source video from TikTok (TikTok publishing
+> awaits external app review — see the INSTALL.md capability truth table); let AI
+> agents drive it over MCP; keep your tokens encrypted on your own machine.
+> Free forever — or self-host it on hardware you already own."
