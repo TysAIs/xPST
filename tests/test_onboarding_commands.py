@@ -28,6 +28,19 @@ def runner():
     return CliRunner()
 
 
+def _json_from_cli(output: str) -> dict:
+    """Parse CLI JSON, ignoring any log preamble on stdout.
+
+    A config directory that has never been opened (which is what the
+    ``config_file`` fixture points at) makes the CLI log its storage
+    initialisation line before the payload, exactly as it does on a real first
+    run. The JSON contract is still the payload, so skip to it.
+    """
+    start = output.find("{")
+    assert start >= 0, f"no JSON in CLI output: {output!r}"
+    return json.loads(output[start:])
+
+
 @pytest.fixture
 def config_file(tmp_path):
     """Create a minimal valid config YAML file (same shape as test_cli_commands)."""
@@ -90,7 +103,7 @@ class TestOnboardDryRun:
     def test_dry_run_json_plan_shape(self, runner, config_file, stub_healthy):
         result = runner.invoke(main, ["onboard", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = _json_from_cli(result.output)
         assert data["dry_run"] is True
         assert data["order"] == PLATFORMS
         for p in PLATFORMS:
@@ -104,7 +117,7 @@ class TestOnboardDryRun:
     def test_dry_run_marks_unconnected(self, runner, config_file, stub_broken):
         result = runner.invoke(main, ["onboard", "--dry-run", "--json"])
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = _json_from_cli(result.output)
         assert data["platforms"]["youtube"]["connected"] is False
         assert data["platforms"]["youtube"]["next"] == "xpst connect youtube"
         assert data["would_connect"] == PLATFORMS
@@ -113,7 +126,7 @@ class TestOnboardDryRun:
         # CLI auto-switches to JSON on non-TTY; either way no side effects.
         result = runner.invoke(main, ["onboard", "--dry-run"])
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = _json_from_cli(result.output)
         assert data["dry_run"] is True
         assert "youtube" in data["platforms"]
 
@@ -123,7 +136,7 @@ class TestOnboardInteractiveGate:
         """Piped stdin must never prompt or open browsers (agent safety)."""
         result = runner.invoke(main, ["onboard", "--json"])
         assert result.exit_code != 0
-        data = json.loads(result.output)
+        data = _json_from_cli(result.output)
         assert data["error"]["code"] == "INTERACTIVE_REQUIRED"
 
     def test_non_tty_human_mode_mentions_alternatives(self, runner, config_file, stub_broken):
@@ -136,7 +149,7 @@ class TestOnboardAllConnected:
     def test_json_when_everything_connected(self, runner, config_file, stub_healthy):
         result = runner.invoke(main, ["onboard", "--json"])
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = _json_from_cli(result.output)
         assert data["mode"] == "onboard"
         assert data["connected_count"] == len(PLATFORMS)
         assert data["actions"] == []
@@ -148,30 +161,68 @@ class TestOnboardAllConnected:
 
 
 class TestDoctor:
+    """Doctor's verdicts, run against the fixture config.
+
+    Every invocation passes ``--config``: without it the CLI falls back to the
+    developer's real ``~/.xpst``, so the report (and therefore the exit code)
+    depends on that machine's live quota counters — ``test_all_clear_json``
+    failed on any box whose X quota was already used up. ``config.config_dir``
+    follows the config file, so passing it keeps the whole verdict
+    deterministic: stubbed platforms, an empty quota ledger, no real account
+    state.
+    """
+
     def test_all_clear_json(self, runner, config_file, stub_healthy, monkeypatch):
         monkeypatch.setenv("XPST_FFMPEG_PATH", "/usr/local/bin/ffmpeg")
         monkeypatch.setattr(shutil, "which", lambda name: "/usr/local/bin/" + name)
-        result = runner.invoke(main, ["doctor", "--json"])
+        result = runner.invoke(main, ["--config", config_file, "doctor", "--json"])
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = _json_from_cli(result.output)
         assert data["doctor"] is True
         assert data["all_clear"] is True
         assert data["issues"] == []
-        for p in PLATFORMS:
+        for p in ("youtube", "x", "instagram"):
             assert data["platforms"][p]["connected"] is True
+            assert data["platforms"][p]["can_post"] is True
+
+        # TikTok is a SOURCE. A healthy download side must never read as a
+        # connected posting destination: this stub config has no Content
+        # Posting API credentials, so it cannot receive a post at all. The old
+        # payload said ``connected: true, problem: null``, which is a promise
+        # the engine cannot keep.
+        tiktok = data["platforms"]["tiktok"]
+        assert tiktok["connected"] is False
+        assert tiktok["can_post"] is False
+        assert tiktok["source_only"] is True
+        assert tiktok["source_ready"] is True
+        assert "source only" in (tiktok["note"] or "")
+        # ...and that fact is a NOTE, never an issue: an environment where the
+        # download path works and the destination role was never configured is
+        # not an auth failure, so it must not change the exit code.
+        assert [n["platform"] for n in data["notes"]] == ["tiktok"]
+        assert [n["severity"] for n in data["notes"]] == ["info"]
+
+        # Disabled platforms are neither connected nor broken.
+        for p in ("threads", "messenger"):
+            assert data["platforms"][p]["connected"] is False
+            assert data["platforms"][p]["problem"] is None
         assert {e["name"] for e in data["environment"]} >= {"ffmpeg", "yt-dlp", "config dir"}
 
     def test_broken_platform_yields_fix_checklist(self, runner, config_file, stub_broken, monkeypatch):
         monkeypatch.setenv("XPST_FFMPEG_PATH", "/usr/local/bin/ffmpeg")
         monkeypatch.setattr(shutil, "which", lambda name: "/usr/local/bin/" + name)
-        result = runner.invoke(main, ["doctor", "--json"])
+        result = runner.invoke(main, ["--config", config_file, "doctor", "--json"])
         assert result.exit_code != 0  # meaningful failure exit
-        data = json.loads(result.output)
+        data = _json_from_cli(result.output)
         assert data["all_clear"] is False
         assert data["platforms"]["youtube"]["connected"] is False
         assert "xpst connect youtube" in data["platforms"]["youtube"]["fix"]
         issue_platforms = {i["platform"] for i in data["issues"] if i["platform"]}
-        assert issue_platforms == set(PLATFORMS)
+        # Every platform that is ENABLED and failing needs a fix — plus TikTok,
+        # whose download source is what failed here. Threads/Messenger are
+        # disabled in this config and are not failures to fix.
+        assert issue_platforms == {"youtube", "x", "instagram", "tiktok"}
+        assert data["notes"] == []
 
     def test_missing_ffmpeg_is_reported(self, runner, config_file, stub_healthy, monkeypatch, tmp_path):
         """Doctor must report a genuinely absent ffmpeg and how to get one.
@@ -188,9 +239,9 @@ class TestDoctor:
         monkeypatch.setattr("xpst.utils.platform.resolve_ffmpeg_path", lambda: None)
         monkeypatch.setattr("xpst.utils.platform.system_media_dirs", lambda: [])
         monkeypatch.setenv("XPST_MEDIA_BIN_DIR", str(tmp_path / "empty-bin"))
-        result = runner.invoke(main, ["doctor", "--json"])
+        result = runner.invoke(main, ["--config", config_file, "doctor", "--json"])
         assert result.exit_code != 0
-        data = json.loads(result.output)
+        data = _json_from_cli(result.output)
         ffmpeg = next(e for e in data["environment"] if e["name"] == "ffmpeg")
         assert ffmpeg["ok"] is False
         assert "ffmpeg" in ffmpeg["fix"].lower()
@@ -198,14 +249,14 @@ class TestDoctor:
         assert "xpst media fetch" in ffmpeg["fix"]
 
     def test_platform_filter_limits_report(self, runner, config_file, stub_broken):
-        result = runner.invoke(main, ["doctor", "youtube", "--json"])
-        data = json.loads(result.output)
+        result = runner.invoke(main, ["--config", config_file, "doctor", "youtube", "--json"])
+        data = _json_from_cli(result.output)
         assert set(data["platforms"]) == {"youtube"}
 
     def test_human_output_includes_checklist(self, runner, config_file, stub_broken, monkeypatch):
         monkeypatch.setenv("XPST_FFMPEG_PATH", "/usr/local/bin/ffmpeg")
         monkeypatch.setattr(shutil, "which", lambda name: "/usr/local/bin/" + name)
-        result = runner.invoke(main, ["doctor"])
+        result = runner.invoke(main, ["--config", config_file, "doctor"])
         assert result.exit_code != 0
         # Non-TTY auto-JSON still carries the checklist fields.
         assert "Fix-it" in result.output or '"issues"' in result.output

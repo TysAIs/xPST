@@ -1295,4 +1295,28 @@ class CrossPostEngine:
                     "details": {},
                 }
 
+        # Role-qualified truth on every platform entry. ``authenticated`` here
+        # is the UPLOADER's verdict — i.e. the posting role — and a source-only
+        # platform (TikTok before its Content Posting API app is approved) gets
+        # ``can_post: false`` plus the reason, so no reader mistakes a working
+        # download source for a postable destination. One implementation:
+        # ``provider_truth.posting_capability``.
+        from xpst.provider_truth import POSTING_FIELDS, posting_capability
+
+        for name, entry in health["platforms"].items():
+            truth = posting_capability(
+                self.config,
+                name,
+                {
+                    "authenticated": entry.get("authenticated"),
+                    "session_valid": entry.get("session_valid"),
+                    "live_checked": True,
+                    "error": entry.get("error"),
+                    "details": entry.get("details") or {},
+                },
+            )
+            entry["role"] = truth["posting_role"] or "video_destination"
+            for field_name in POSTING_FIELDS:
+                entry[field_name] = truth[field_name]
+
         return health

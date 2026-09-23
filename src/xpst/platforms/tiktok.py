@@ -117,8 +117,11 @@ class TikTokUploader(PlatformUploader):
 
         if not token:
             raise ValueError(
-                "TIKTOK_NOT_CONFIGURED: Set access_token (and client_key/client_secret/"
-                "refresh_token for refresh) in config, or run: xpst auth tiktok"
+                "TIKTOK_NOT_CONFIGURED: no Content Posting API credentials are configured. "
+                "TikTok remains usable as a DOWNLOAD SOURCE without them (see `xpst health` "
+                "— role: source). Posting requires an approved TikTok developer app: set "
+                "client_key/client_secret, then access_token/refresh_token, or run: "
+                "xpst auth tiktok"
             )
         self._access_token = token
         return self._access_token

@@ -1329,8 +1329,14 @@ def health(ctx: click.Context, as_json: bool):
     for platform_name, platform_health in health_data.get("platforms", {}).items():
         authenticated = platform_health.get("authenticated", False)
         session_valid = platform_health.get("session_valid", False)
+        source_only = bool(platform_health.get("source_only"))
 
-        if authenticated and session_valid:
+        if source_only:
+            # The download side is what xPST uses; posting is not available at
+            # all, so this is neither a pass nor a failure to fix.
+            icon = "ℹ️"
+            status_text = "[cyan]Source only — not a posting destination[/cyan]"
+        elif authenticated and session_valid:
             icon = "✅"
             status_text = "[green]Connected[/green]"
         elif authenticated:
@@ -1342,7 +1348,11 @@ def health(ctx: click.Context, as_json: bool):
             status_text = "[red]Not authenticated[/red]"
             all_ok = False
 
-        console.print(f"  {icon} {platform_name.title()}: {status_text}")
+        role = platform_health.get("posting_role")
+        console.print(
+            f"  {icon} {platform_name.title()}: {status_text}"
+            + (f" [dim](role: {role})[/dim]" if role else "")
+        )
 
         details = platform_health.get("details", {})
         if details.get("channel_name"):
@@ -1351,6 +1361,9 @@ def health(ctx: click.Context, as_json: bool):
             console.print(f"     Username: @{details['username']}")
         if details.get("full_name"):
             console.print(f"     Name: {details['full_name']}")
+
+        if source_only and platform_health.get("posting_note") and not platform_health.get("error"):
+            console.print(f"     {platform_health['posting_note']}")
 
         error = platform_health.get("error")
         if error:
@@ -1488,11 +1501,41 @@ def connect(ctx: click.Context, platform: str | None, guide: bool, open_browser:
         config = load_config(ctx.obj.get("config_path"))
         with keep_stdout_json(True):
             results = _asyncio.run(test_connections(config))
+        # A source-only platform is not a posting destination, and this payload
+        # must say so instead of just answering "false" about TikTok.
+        posting_truth = dict(getattr(results, "posting_truth", {}))
+        source_only = sorted(
+            name for name, truth in posting_truth.items() if truth.get("source_only")
+        )
         if platform:
             results = {p: ok for p, ok in results.items() if p == platform}
-        json_output({"mode": "test", "platforms": results,
-                     "all_pass": bool(results) and all(results.values())}, True)
-        if not (results and all(results.values())):
+            posting_truth = {p: t for p, t in posting_truth.items() if p == platform}
+            source_only = [name for name in source_only if name == platform]
+        failed = [
+            name for name, ok in results.items() if not ok and name not in source_only
+        ]
+        # Content sources are a separate capability: TikTok's download side can
+        # be ready while `platforms.tiktok` is false (not a posting destination).
+        providers = dict(getattr(results, "providers", {}))
+        ready_sources = sorted(
+            name
+            for name, entry in providers.items()
+            if (entry.get("role_status") or {}).get("source", {}).get("ready")
+        )
+        if platform:
+            ready_sources = [name for name in ready_sources if name == platform]
+        json_output(
+            {
+                "mode": "test",
+                "platforms": results,
+                "posting_truth": posting_truth,
+                "source_only": source_only,
+                "ready_sources": ready_sources,
+                "all_pass": bool(results) and not failed,
+            },
+            True,
+        )
+        if failed or not results:
             sys.exit(EXIT_AUTH_FAILURE)
         return
 
@@ -1755,7 +1798,20 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
         results = asyncio.run(test_connections(config))
 
     connected = {p: bool(results.get(p)) for p in _ONBOARD_PLATFORMS}
-    targets = [p for p in _ONBOARD_PLATFORMS if force or not connected[p]]
+    # A source-only platform is not a connect target: there is nothing to
+    # connect that would make it postable, and offering `xpst connect tiktok`
+    # as the next step promises an upload the engine cannot deliver. The
+    # download side is reported instead.
+    posting_truth = getattr(results, "posting_truth", {})
+    source_only = [
+        p for p in _ONBOARD_PLATFORMS if (posting_truth.get(p) or {}).get("source_only")
+    ]
+    ready_sources = list(getattr(results, "ready_sources", []))
+    targets = [
+        p
+        for p in _ONBOARD_PLATFORMS
+        if (force or not connected[p]) and p not in source_only
+    ]
 
     if dry_run:
         plan: dict[str, Any] = {
@@ -1764,12 +1820,25 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
             "platforms": {
                 p: {
                     "connected": connected[p],
+                    "posting_destination": (
+                        (posting_truth.get(p) or {}).get("posting_destination", True)
+                    ),
+                    "can_post": (posting_truth.get(p) or {}).get("can_post", connected[p]),
+                    "source_only": p in source_only,
                     "title": PLATFORM_GUIDES[p].title,
                     "steps": [s.text for s in PLATFORM_GUIDES[p].steps],
-                    "next": None if connected[p] else f"xpst connect {p}",
+                    "next": (
+                        "Source only — xPST downloads from it; nothing to connect for posting."
+                        if p in source_only
+                        else None
+                        if connected[p]
+                        else f"xpst connect {p}"
+                    ),
                 }
                 for p in _ONBOARD_PLATFORMS
             },
+            "source_only": source_only,
+            "ready_sources": ready_sources,
             "would_connect": targets,
             "config_impact": "accounts.<platform>.enabled=true + platform credentials (encrypted)",
         }
@@ -1784,7 +1853,10 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
         if not ctx.obj.get("quiet", False):
             console.print("[bold blue]Dry run — onboarding plan (nothing connected):[/bold blue]")
         for p in _ONBOARD_PLATFORMS:
-            state_str = "[green]connected[/green]" if connected[p] else "[yellow]not connected[/yellow]"
+            if p in source_only:
+                state_str = "[cyan]source only — nothing to connect[/cyan]"
+            else:
+                state_str = "[green]connected[/green]" if connected[p] else "[yellow]not connected[/yellow]"
             console.print(f"  [bold]{p}[/bold] ({state_str})")
             for i, step in enumerate(plan["platforms"][p]["steps"], 1):
                 console.print(f"    {i}. {step}")
@@ -1794,7 +1866,7 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
     # prompting would happen anyway, so agent mode must succeed here.
     if not targets:
         service.record_readiness(
-            sources=["tiktok"] if connected.get("tiktok") else [],
+            sources=[p for p in ready_sources if p in _ONBOARD_PLATFORMS],
             video_destinations=[p for p in ("youtube", "x", "instagram", "threads") if connected.get(p)],
         )
         report = {
@@ -1802,6 +1874,8 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
             "connected": connected,
             "connected_count": sum(connected.values()),
             "total": len(_ONBOARD_PLATFORMS),
+            "source_only": source_only,
+            "ready_sources": ready_sources,
             "actions": [],
         }
         report.update({
@@ -1891,6 +1965,8 @@ def onboard(ctx: click.Context, dry_run: bool, force: bool, as_json: bool):
             "outcomes": outcomes,
             "connected_count": sum(1 for v in connected.values() if v),
             "total": len(_ONBOARD_PLATFORMS),
+            "source_only": source_only,
+            "ready_sources": ready_sources,
             "succeeded": succeeded,
             "failed": failed,
         }
@@ -1947,22 +2023,23 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     # test_connections is a backward-compatible bool wrapper around the
     # canonical live probes. Rehydrate its result into the same role-aware
     # model so doctor cannot invent a second definition of "connected".
-    from xpst.provider_truth import build_canonical_status
+    from xpst.provider_truth import (
+        build_canonical_status,
+        live_status_from_booleans,
+        posting_truth,
+    )
 
     if canonical_results:
         canonical = build_canonical_status(config, canonical_results)
     else:
-        canonical_live = {
-            name: {
-                "authenticated": ok,
-                "session_valid": ok,
-                "live_checked": True,
-                "error": None if ok else "Live check failed",
-                "details": {},
-            }
-            for name, ok in results.items()
-        }
-        canonical = build_canonical_status(config, canonical_live)
+        # The canonical live payload is missing (a caller or a test double
+        # replaced test_connections with the legacy bool map). Rebuild
+        # per-role facts rather than promoting one boolean into every role:
+        # TikTok's boolean is the SOURCE verdict, and promoting it would make
+        # doctor certify an uploader no probe ever touched.
+        canonical = build_canonical_status(
+            config, live_status_from_booleans(config, results)
+        )
 
     sessions = _session_health(config)
     quota_mgr = QuotaManager(config.config_dir, config=config)
@@ -1971,17 +2048,52 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     # 2. Per-platform findings.
     platforms_report: dict[str, dict[str, Any]] = {}
     issues: list[dict[str, Any]] = []
+    notes: list[dict[str, Any]] = []
     for p, ok in results.items():
         session = sessions.get(p, {})
         creds_present = bool(session.get("present"))
         canonical_info = canonical.get(p, {})
-        connected = bool(canonical_info.get("authenticated", ok))
-        disabled = canonical_info.get("state") == "disabled" and canonical_results is not None
+        role_status = canonical_info.get("role_status") or {}
+        source_role = role_status.get("source") or {}
+        source_ready = bool(source_role.get("ready"))
+        # ``connected`` answers the question doctor is asked — can xPST use
+        # this provider for what it is listed as? A provider whose promise is
+        # posting is connected only when its POSTING role is ready. Reading the
+        # platform-level ``authenticated`` flag instead reported TikTok as
+        # connected (and postable) on the strength of its download side, and
+        # "connected: true, problem: null" is a promise the engine cannot keep.
+        posting = posting_truth(canonical_info)
+        destination_error = posting["posting_error"]
+        if posting["posting_destination"]:
+            connected = posting["can_post"]
+        else:
+            connected = bool(canonical_info.get("authenticated", ok))
+        # A platform switched off in config is not a failure to fix, whatever
+        # path produced its canonical state.
+        disabled = canonical_info.get("state") == "disabled"
         probe_class = canonical_info.get("probe_class")
         probe_error = canonical_info.get("probe_error")
-        if connected or disabled:
-            problem = None
-            fix = None
+
+        problem: str | None = None
+        fix: str | None = None
+        note: str | None = None
+        if disabled:
+            pass
+        elif posting["source_only"]:
+            # A source-only platform (TikTok) has two independent verdicts and
+            # this entry must not collapse them: the download side can be
+            # healthy while posting is simply not available. Report whichever
+            # one is broken, and say plainly that posting is not on the table.
+            if source_ready:
+                note = posting["posting_note"]
+            else:
+                problem = (
+                    source_role.get("error")
+                    or f"{p.title()} is a source only and its download source is not ready."
+                )
+                fix = describe_remediation(p, str(problem)) or f"xpst connect {p}"
+        elif connected:
+            pass
         elif creds_present and probe_class == PROBE_UNVERIFIED:
             # The probe failed without proving the credential is dead (network
             # error, challenge, anti-bot redirect). Report that honestly and ask
@@ -1994,19 +2106,34 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
             )
             fix = f"Retry: xpst health (only run `xpst connect {p}` if it keeps failing)"
         elif creds_present:
+            # Carry the probe's own message verbatim: it is the actionable one
+            # (Instagram names the exact re-login command and the fact that it
+            # needs a username/password), where the fixed sentences below only
+            # guess "token may be expired or revoked".
             problem = (
-                "Credentials found but the health check failed — the provider "
-                f"rejected them: {probe_error}"
-                if probe_class == PROBE_INVALID_CREDENTIALS and probe_error
-                else "Credentials found but the health check failed — token may be expired or revoked."
+                str(destination_error)
+                or str(canonical_info.get("error") or "")
+                or (
+                    "Credentials found but the health check failed — the provider "
+                    f"rejected them: {probe_error}"
+                    if probe_class == PROBE_INVALID_CREDENTIALS and probe_error
+                    else "Credentials found but the health check failed — token may be expired or revoked."
+                )
             )
-            fix = describe_remediation(p, "token expired") or f"xpst connect {p}"
+            fix = (
+                describe_remediation(p, str(destination_error or probe_error or "token expired"))
+                or f"xpst connect {p}"
+            )
         else:
             problem = "Not connected."
             fix = f"xpst connect {p}"
 
         qinfo = quota_status.get(p, {})
         platforms_report[p] = {
+            # The probe's verdict for the provider's primary role. ``connected``
+            # below is the role-qualified answer and differs from this exactly
+            # when the provider is a source only.
+            "authenticated": bool(canonical_info.get("authenticated", ok)),
             "connected": connected,
             "state": canonical_info.get("state", "degraded"),
             "roles": canonical_info.get("roles", {}),
@@ -2019,18 +2146,40 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
             "probe_retryable": canonical_info.get("probe_retryable"),
             "problem": problem,
             "fix": fix,
+            "note": note,
+            # Role-qualified truth. A platform can be usable as a source and
+            # still never accept a post; these fields let a reader tell the
+            # difference without running anything else.
+            "posting_destination": posting["posting_destination"],
+            "posting_role": posting["posting_role"],
+            "posting_state": posting["posting_state"],
+            "posting_error": destination_error,
+            "can_post": posting["can_post"],
+            "source_only": posting["source_only"],
+            "source_ready": source_ready,
             "quota": {
                 "used_today": qinfo.get("used_today"),
                 "daily_limit": qinfo.get("daily_limit"),
                 "remaining": qinfo.get("remaining"),
             },
         }
-        if not connected and not disabled:
+        if problem is not None:
             issues.append({
                 "severity": "error",
                 "platform": p,
                 "problem": problem,
                 "fix": fix,
+            })
+        elif note is not None:
+            notes.append({
+                "severity": "info",
+                "platform": p,
+                "problem": note,
+                "fix": (
+                    f"Nothing to fix for downloads. Posting to "
+                    f"{canonical_info.get('display_name') or p.title()} needs an approved "
+                    "upload API app from the provider — use another destination until then."
+                ),
             })
         elif (qinfo.get("remaining") is not None and qinfo["remaining"] <= 2):
             issues.append({
@@ -2125,6 +2274,10 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
         "canonical": {"providers": canonical, "roles": ["source", "video_destination", "messaging", "analytics"]},
         "environment": environment,
         "issues": issues,
+        # Not failures: facts a reader needs that no fix-it item can express.
+        # Kept out of ``issues``/``all_clear`` so a source-only platform never
+        # makes doctor exit non-zero, but never dropped either.
+        "notes": notes,
         "all_clear": not issues,
     }
     if as_json:
@@ -2140,7 +2293,13 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     table.add_column("Health")
     table.add_column("Quota left")
     for p, info in platforms_report.items():
-        health = "[green]✅ pass[/green]" if info["connected"] else "[red]❌ fail[/red]"
+        if info["connected"]:
+            health = "[green]✅ pass[/green]"
+        elif info["source_only"]:
+            # Not a failure: the download side works, posting is not available.
+            health = "[cyan]ℹ️ source only[/cyan]"
+        else:
+            health = "[red]❌ fail[/red]"
         remaining = info["quota"]["remaining"]
         rem_str = "[dim]—[/dim]" if remaining is None else str(remaining)
         table.add_row(p, info["auth_mode"] or "—", health, rem_str)
@@ -2150,6 +2309,13 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     for entry in environment:
         mark = "✅" if entry["ok"] else "❌"
         console.print(f"  {mark} {entry['name']}: {entry['detail']}")
+
+    if notes:
+        console.print("\n[bold]Notes:[/bold]")
+        for platform_note in notes:
+            console.print(f"  ℹ️  {platform_note['problem']}")
+            if platform_note["fix"]:
+                console.print(f"     [dim]→[/dim] {platform_note['fix']}")
 
     if issues:
         console.print("\n[bold yellow]Fix-it checklist:[/bold yellow]")
