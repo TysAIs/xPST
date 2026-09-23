@@ -583,6 +583,17 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
             "today. Text posts would need no URL but have no implementation yet."
         ),
     ),
+    "facebook": _publish_profile(
+        "facebook",
+        "Facebook Page",
+        declared_labels=("video",),
+        implemented=(ContentType.VIDEO,),
+        note=(
+            "Page-scoped: publishes as a Facebook Page, never as a personal profile "
+            "(there is no API for that). Feed video today; Reels / photo / text are "
+            "the follow-up that extends this row."
+        ),
+    ),
     "messenger": DestinationContentProfile(
         platform="messenger",
         display_name="Messenger",

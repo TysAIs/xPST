@@ -132,6 +132,28 @@ def _provider_enums() -> tuple[list[str], list[str]]:
 _PLATFORM_ENUM, _SOURCE_ENUM = _provider_enums()
 
 
+def _connectable_enum() -> list[str]:
+    """Platforms a human can authenticate or disconnect, from canonical truth.
+
+    ``_PLATFORM_ENUM`` covers publishing destinations only; Messenger is a
+    messaging provider that still has an auth/disconnect flow, so it is added
+    explicitly rather than by a second hardcoded literal that would drift the
+    next time a provider is added (Facebook was exactly that case).
+    """
+    from xpst.provider_truth import SUPPORTED_PROVIDERS
+
+    names = set(_PLATFORM_ENUM)
+    names.update(
+        definition.name
+        for definition in SUPPORTED_PROVIDERS
+        if ProviderRole.MESSAGING in definition.roles
+    )
+    return sorted(names)
+
+
+_CONNECTABLE_ENUM = _connectable_enum()
+
+
 _MCP_INSTALL_HINT = "The MCP server requires the optional 'mcp' extra. Install it with: pip install 'xpst[mcp]'"
 
 
@@ -697,7 +719,7 @@ TOOLS: list[Tool] = [
         description="Return a human-only authentication action plan; never opens a browser or accepts secrets",
         inputSchema={
             "type": "object",
-            "properties": {"platform": {"type": "string", "enum": ["tiktok", "youtube", "x", "instagram", "threads", "messenger"]}},
+            "properties": {"platform": {"type": "string", "enum": _CONNECTABLE_ENUM}},
             "required": ["platform"],
             "additionalProperties": False,
         },
@@ -726,7 +748,7 @@ TOOLS: list[Tool] = [
                 "platform": {
                     "type": "string",
                     "description": "Platform to disconnect",
-                    "enum": ["tiktok", "youtube", "x", "instagram", "threads", "messenger"],
+                    "enum": _CONNECTABLE_ENUM,
                 },
             },
             "required": ["platform"],
