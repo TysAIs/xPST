@@ -61,6 +61,9 @@ class InstagramUploader(PlatformUploader):
     # Instagram limits
     MAX_CAPTION_LENGTH = 2200
     MAX_HASHTAGS = 30
+    # One carousel holds at most this many items. It is a refusal boundary, not
+    # a truncation boundary: xPST never silently drops items from a carousel.
+    MAX_CAROUSEL_ITEMS = 10
 
     def __init__(self, config: XPSTConfig) -> None:
         """Initialize Instagram uploader with lazy client caching."""
@@ -103,7 +106,7 @@ class InstagramUploader(PlatformUploader):
             extra={
                 "content": ("video", "image", "carousel"),
                 "max_caption_length": self.MAX_CAPTION_LENGTH,
-                "max_carousel_items": 10,
+                "max_carousel_items": self.MAX_CAROUSEL_ITEMS,
             },
         )
 
@@ -1070,39 +1073,100 @@ class InstagramUploader(PlatformUploader):
         )
 
     async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
-        """Upload a carousel/album to Instagram.
+        """Publish a native Instagram carousel (album) — one post, N items.
 
-        Uses instagrapi's album_upload() for native carousel support.
-        Supports up to 10 images/videos in a single carousel post.
+        Uses instagrapi's ``album_upload``: Instagram publishes the items as a
+        single carousel, in the order given. Nothing is stitched, re-encoded or
+        reordered, and every refusal below happens *before* the client is
+        touched:
+
+        * fewer than 2 items is refused (a 1-item "carousel" is an image or a
+          Reel post, and guessing which one the caller meant is how a photo
+          used to end up on the video path);
+        * more than ``MAX_CAROUSEL_ITEMS`` is refused, never silently truncated
+          — the caller learns which items would have been dropped;
+        * ``graph_api`` mode is refused by name: Meta's carousel publishing
+          needs public item URLs and is not implemented on that path;
+        * each image item is checked against Instagram's image contract with
+          ``image_rejection_reasons`` — the preflight's own destination-named
+          wording — so an unsupported still never reaches the album call.
 
         Args:
-            media_paths: List of paths to images/videos (max 10)
-            caption: Caption for the carousel
+            media_paths: List of paths to images/videos, in post order.
+            caption: Caption for the carousel.
 
         Returns:
-            UploadResult with media code and URL
+            UploadResult with the post URL and the published item order.
         """
-        if len(media_paths) > 10:
-            logger.warning("Instagram carousels support max 10 items, truncating")
-            media_paths = media_paths[:10]
+        items = [Path(p) for p in media_paths]
 
-        if len(media_paths) < 2:
-            logger.warning("Carousel needs 2+ items, falling back to single upload")
-            return await self.upload(media_paths[0], caption) if media_paths else UploadResult(
-                success=False, error="No media files provided", platform="instagram"
+        if len(items) < 2:
+            reason = (
+                "Instagram carousels need at least 2 items "
+                f"(got {len(items)}). Post it as an image or a Reel instead."
+            )
+            logger.warning("Refusing Instagram carousel: %s", reason)
+            return UploadResult(
+                success=False,
+                error=f"IG_CAROUSEL_NEEDS_TWO: {reason}",
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items)},
             )
 
-        # Truncate caption if needed
-        if len(caption) > self.MAX_CAPTION_LENGTH:
+        if len(items) > self.MAX_CAROUSEL_ITEMS:
+            reason = (
+                f"Instagram carousels hold at most {self.MAX_CAROUSEL_ITEMS} items "
+                f"(got {len(items)}). Split the post instead — xPST will not drop items silently."
+            )
+            logger.warning("Refusing Instagram carousel: %s", reason)
+            return UploadResult(
+                success=False,
+                error=f"IG_CAROUSEL_TOO_MANY_ITEMS: {reason}",
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items)},
+            )
+
+        if self.config.instagram.auth_mode == "graph_api":
+            reason = (
+                "IG_GRAPH_API_CAROUSEL_UNSUPPORTED: the official Instagram API path publishes a "
+                "carousel from public item URLs and is not implemented in xPST; use auth_mode "
+                "'session' (xpst auth instagram) to publish a carousel from local files."
+            )
+            logger.warning("Refusing Instagram carousel: %s", reason)
+            return UploadResult(
+                success=False,
+                error=reason,
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items), "auth_mode": "graph_api"},
+            )
+
+        rejections = self.carousel_item_rejection_reasons(items)
+        if rejections:
+            message = " ".join(rejections)
+            logger.warning("Refusing Instagram carousel: %s", message)
+            return UploadResult(
+                success=False,
+                error=f"IG_CAROUSEL_ITEM_REJECTED: {message}",
+                platform="instagram",
+                retryable=False,
+                metadata={"content_type": "carousel", "items": len(items)},
+            )
+
+        # Truncate caption if needed (Instagram's own hard limit, reported back)
+        caption_truncated = len(caption) > self.MAX_CAPTION_LENGTH
+        if caption_truncated:
             caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
 
         try:
             client = await self._get_client()
-            logger.info(f"Uploading carousel to Instagram: {len(media_paths)} items")
+            logger.info(f"Uploading carousel to Instagram: {len(items)} items")
 
-            # Upload as album
+            # Upload as album — order is the caller's order, unchanged.
             media = client.album_upload(
-                [Path(p) for p in media_paths],
+                items,
                 caption=caption,
             )
 
@@ -1117,7 +1181,9 @@ class InstagramUploader(PlatformUploader):
                 metadata={
                     "code": media.code,
                     "caption_length": len(caption),
-                    "carousel_items": len(media_paths),
+                    "caption_truncated": caption_truncated,
+                    "carousel_items": len(items),
+                    "item_order": [p.name for p in items],
                     "content_type": "carousel",
                 },
             )
@@ -1145,6 +1211,25 @@ class InstagramUploader(PlatformUploader):
                 error=f"IG_CAROUSEL_ERROR: {str(e)[:200]}",
                 platform="instagram",
             )
+
+    def carousel_item_rejection_reasons(self, items: list[Path]) -> tuple[str, ...]:
+        """Destination-named reasons Instagram cannot publish these carousel items.
+
+        Only still images are checked here, and with Instagram's image contract
+        (JPEG, size and aspect limits) — the same rules and the same wording the
+        preflight uses, so a refused item reads identically on both surfaces. The
+        check reads the file header in pure Python: no ffmpeg, no ffprobe, so an
+        image-only carousel request never invokes a media binary.
+        """
+        from xpst.content import MEDIA_KIND_IMAGE, media_kind
+        from xpst.media.specs import image_rejection_reasons
+
+        reasons: list[str] = []
+        for item in items:
+            if media_kind(item) != MEDIA_KIND_IMAGE:
+                continue
+            reasons.extend(image_rejection_reasons(item, self.platform_name))
+        return tuple(reasons)
 
     async def get_followers(self) -> int:
         """Return follower count for the authenticated Instagram account.
