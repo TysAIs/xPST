@@ -6,7 +6,14 @@ The size win only exists while every one of these stays true:
   * the Tauri shell does not point the engine at a bundled ffmpeg/ffprobe;
   * the bundle-input script does not fetch ffmpeg (``scripts/fetch-media-binaries.sh``);
   * the release lane keeps an explicit app-size budget and fails over it, and
-    the .app is checked for a reappearing ffmpeg binary.
+    the .app is checked for a reappearing ffmpeg binary;
+  * no CI lane asserts the binary is *present* before a build.
+
+The last one is not hypothetical: ``boot-budget.yml`` kept
+``test -x src-tauri/binaries/ffmpeg/ffmpeg`` after the unbundling and died in
+its fetch step on every PR that touched ``ui/**`` (run 35812309731). Assertions
+are therefore scanned across every workflow file here, not just the release
+lane, so a new lane cannot inherit one unnoticed.
 
 A regression in any one of them silently puts the app back over its budget, so
 each is asserted here (cheap, offline) rather than discovered by a user
@@ -24,6 +31,7 @@ TAURI_CONF = REPO_ROOT / "src-tauri" / "tauri.conf.json"
 LIB_RS = REPO_ROOT / "src-tauri" / "src" / "lib.rs"
 FETCH_SCRIPT = REPO_ROOT / "scripts" / "fetch-media-binaries.sh"
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tauri-release.yml"
+WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 
 
 def test_tauri_config_does_not_bundle_ffmpeg() -> None:
@@ -74,6 +82,13 @@ def test_release_lane_asserts_the_app_size_budget() -> None:
     assert "exit 1" in workflow
 
 
+def _workflows() -> dict[str, str]:
+    return {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted(WORKFLOWS_DIR.glob("*.y*ml"))
+    }
+
+
 def test_release_lane_no_longer_asserts_bundled_ffmpeg() -> None:
     workflow = RELEASE_WORKFLOW.read_text(encoding="utf-8")
 
@@ -81,6 +96,41 @@ def test_release_lane_no_longer_asserts_bundled_ffmpeg() -> None:
     assert "test -f src-tauri/binaries/ffmpeg/ffmpeg.exe" not in workflow
     # ...and it refuses to build if one shows up in the bundle inputs.
     assert "src-tauri/binaries/ffmpeg/ffmpeg" in workflow
+
+
+def test_no_workflow_asserts_a_bundled_ffmpeg() -> None:
+    """No lane may require the binary the unbundling removed.
+
+    ``boot-budget.yml`` kept the release lane's old assertion and failed in its
+    fetch step on every PR that touched ``ui/**``. The release lane was guarded
+    by a test that read only tauri-release.yml, so this scans the directory.
+    """
+    present_assertions = (
+        "test -x src-tauri/binaries/ffmpeg/ffmpeg",
+        "test -f src-tauri/binaries/ffmpeg/ffmpeg.exe",
+    )
+    offenders = sorted(
+        name
+        for name, text in _workflows().items()
+        if any(fragment in text for fragment in present_assertions)
+    )
+    assert not offenders, f"workflow(s) still assert a bundled ffmpeg: {offenders}"
+
+
+def test_some_lane_still_refuses_a_bundled_ffmpeg() -> None:
+    """The inverse guard must survive the directory-wide scan above."""
+    combined = "\n".join(_workflows().values())
+
+    assert "src-tauri/binaries/ffmpeg/ffmpeg" in combined
+    assert "test ! -e src-tauri/binaries/ffmpeg/ffmpeg" in combined
+
+
+def test_boot_budget_lane_does_not_gate_on_ffmpeg() -> None:
+    """The lane that broke, named explicitly so its regression is not silent."""
+    workflow = (WORKFLOWS_DIR / "boot-budget.yml").read_text(encoding="utf-8")
+
+    assert "test -x src-tauri/binaries/ffmpeg/ffmpeg" not in workflow
+    assert "test -x src-tauri/binaries/ytdlp/yt-dlp" in workflow
 
 
 def test_engine_entry_auto_fetches_media_binaries() -> None:
