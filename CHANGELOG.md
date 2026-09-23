@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **The legacy PySide6/QML desktop app is gone; there is exactly one desktop
+  app.** `src/xpst/desktop_app/` (23 files), its `build_macos.spec` /
+  `build_windows.spec` / `build_linux.spec` PyInstaller specs, `build.sh`,
+  `scripts/verify_desktop_package.py`, `scripts/verify_qml_pages.py` and
+  `scripts/verify_macos.sh` were deleted, the three PyInstaller lanes were
+  removed from `.github/workflows/release.yml`, and the Qt desktop smoke steps
+  were removed from `ci.yml`. The legacy build emitted a second `xPST.app`
+  whose bundle identifier (`com.tysais.xpst`) collided exactly with the Tauri
+  product, so a published installer could not be attributed to the app it came
+  from. The desktop app is now only the Tauri 2 shell in `src-tauri/` plus the
+  Python engine sidecar built by `scripts/build-engine.sh`, published by
+  `.github/workflows/tauri-release.yml`.
+- **`desktop` extra and the `xpst build` command.** `pip install xpst[desktop]`
+  installed PySide6 and nothing else shipped that used it; `xpst build` existed
+  only to run PyInstaller against the three deleted desktop specs. `full` is now
+  `xpst[mcp,dashboard,windows,knowledge]`. `xpst app` still exists but now
+  launches the installed Tauri app instead of importing a Python GUI module.
+- **Qt/PySide6 license notices** (`NOTICES_QT_LGPL.md`) and the PySide6 rows in
+  `NOTICES.md`, `NOTICE.md` and `LICENSING_REPORT.md`: nothing in the shipped
+  product links Qt any more.
+
 ### Security
 - **Mutating dashboard routes now require authentication by default.**
   `POST /api/post`, `POST /api/connect/{platform}`, `POST /api/onboarding*`,

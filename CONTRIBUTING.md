@@ -49,9 +49,8 @@ Recommended local checks:
 
 ```bash
 pytest
-ruff check src tests scripts/verify_qml_pages.py scripts/release_artifacts.py scripts/clean_install_smoke.py
+ruff check src tests scripts/release_artifacts.py scripts/clean_install_smoke.py
 mypy src/xpst scripts/release_artifacts.py scripts/clean_install_smoke.py
-python scripts/verify_qml_pages.py
 python -m build
 python scripts/clean_install_smoke.py --dist dist --artifact both
 python scripts/release_artifacts.py --dist dist --output-dir release --skip-checks
@@ -64,7 +63,7 @@ Contributors should place new code in the matching layer:
 
 | Layer | Location | Responsibility |
 |-------|----------|----------------|
-| CLI | `src/xpst/cli.py` | 34 commands; `--json`, `--dry-run`, structured exit codes |
+| CLI | `src/xpst/cli.py` | 45 commands; `--json`, `--dry-run`, structured exit codes |
 | Engine v2 | `src/xpst/engine.py` (+ `services/` DI use-cases) | Orchestrates the fetch → encode → upload → track pipeline via dependency-injected `UploadService` and `SourceService`; the single entry point the CLI, desktop app, and MCP server share |
 | Providers (destinations) | `src/xpst/platforms/` | YouTube, Instagram, X uploaders; auth via `SessionManager` (`utils/sessions.py`) |
 | Provider metadata | `src/xpst/providers.py` | `ProviderManifest` / role / capability enums shared by sources and destinations |
@@ -77,7 +76,7 @@ Contributors should place new code in the matching layer:
 | Scheduler | `src/xpst/schedule_manager.py` + `scheduler.py` | Scheduled posts, recurring rules, OS-level install |
 | Analytics | `src/xpst/analytics.py` + `analytics_store.py` | Per-post engagement metrics with persistent SQLite history |
 | Knowledge base | `src/xpst/knowledge/` | Transcription, cited nuggets, embeddings, vector search (Phase 3) |
-| Desktop | `src/xpst/desktop_app/` | PySide6/QML (10 pages), splash, i18n, plugins |
+| Desktop | `src-tauri/` + `ui/` | Tauri 2 shell (Rust) over the Svelte dashboard UI; `scripts/build-engine.sh` builds the Python engine sidecar it spawns |
 | Dashboard | `src/xpst/dashboard/server.py` | FastAPI + WebSocket, bcrypt auth |
 | MCP | `src/xpst/mcp/server.py` | 40 tools (post, health, config, state, platforms, scheduling incl. cancel, targeted failure retry, analytics, KB, captions, transcripts, search) |
 
@@ -86,7 +85,7 @@ Contributors should place new code in the matching layer:
 | Phase | Status | Features |
 |-------|--------|----------|
 | **1 — Core** | ✅ Complete | Full-fidelity cross-posting, orientation-aware encode/passthrough, circuit breakers, crash recovery, atomic state, encrypted credentials |
-| **2 — Surfaces** | ✅ Complete | CLI `--json`/`--dry-run`, PySide6/QML desktop app, FastAPI dashboard, MCP server |
+| **2 — Surfaces** | ✅ Complete | CLI `--json`/`--dry-run`, Tauri desktop shell, FastAPI dashboard, MCP server |
 | **3 — Knowledge** | ✅ Complete | faster-whisper transcription, cited nuggets, fastembed + LanceDB vector search, knowledge areas & course outline |
 | **4 — Hardening** | ✅ Complete | Unified analytics with history, anti-bot pacing, quota management, dead-letter queue, diagnostics bundles, state backup/restore, plugin system, i18n |
 | **5 — Polish & Launch** | 🚧 In progress | Docs polish, security audit, release readiness, onboarding UX, final QA |

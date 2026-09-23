@@ -213,8 +213,8 @@ def generate_sbom(dist_dir: Path, output: Path, version: str) -> None:
 
 def copy_project_documents(output_dir: Path) -> None:
     """Copy open-source release documents into the artifact bundle."""
-    required = [Path("LICENSE"), Path("NOTICES_QT_LGPL.md")]
-    optional = [Path("NOTICES.md"), Path("LICENSING_REPORT.md"), Path("CHANGELOG.md")]
+    required = [Path("LICENSE"), Path("NOTICES.md")]
+    optional = [Path("LICENSING_REPORT.md"), Path("CHANGELOG.md")]
 
     for source in required:
         if not source.exists():
@@ -238,7 +238,6 @@ def generate_release_evidence(dist_dir: Path, output_dir: Path, output: Path, ve
         f"{lane_prefix}RELEASE_NOTES.md",
         "LICENSE",
         "NOTICES.md",
-        "NOTICES_QT_LGPL.md",
         "LICENSING_REPORT.md",
         "CHANGELOG.md",
     ]
@@ -251,7 +250,7 @@ def generate_release_evidence(dist_dir: Path, output_dir: Path, output: Path, ve
             "run_by_release_script": checks_run,
             "required_commands": [
                 "python -m pytest",
-                "ruff check src tests scripts/verify_qml_pages.py scripts/verify_desktop_package.py scripts/verify_windows_exe.py scripts/verify_macos_artifact.py scripts/verify_live_platforms.py scripts/scan_public_safety.py scripts/release_preflight.py scripts/clean_install_smoke.py",
+                "ruff check src tests scripts/verify_windows_exe.py scripts/verify_macos_artifact.py scripts/verify_live_platforms.py scripts/scan_public_safety.py scripts/release_preflight.py scripts/clean_install_smoke.py",
                 "mypy src/xpst",
                 "pip-audit",
                 "python scripts/scan_public_safety.py --json",
@@ -260,11 +259,8 @@ def generate_release_evidence(dist_dir: Path, output_dir: Path, output: Path, ve
                 "python scripts/release_preflight.py --public --live-evidence release/live-platforms.json --json",
                 "python scripts/public_release_check.py --json",
                 "python scripts/clean_install_smoke.py --dist dist --artifact both",
-                "python scripts/verify_desktop_package.py",
-                "python scripts/verify_qml_pages.py",
-                "Windows release job: python scripts/verify_windows_exe.py --path dist/xPST.exe --seconds 12 --json --clean-profile, plus --require-signed for tag/public releases",
-                "macOS release job: bash scripts/verify_macos.sh, plus --public for tag releases requiring Developer ID signing and notarization",
-                "GitHub release jobs: actions/attest@v4 for Python, Windows, and macOS artifact bundles",
+                "Desktop installers are built and smoke-booted by .github/workflows/tauri-release.yml (cargo tauri build; macOS .app/.dmg, Windows NSIS .exe/.msi, Linux .deb/.AppImage), not by this Python lane",
+                "GitHub release job: actions/attest@v4 for the Python artifact bundle",
                 "Release owner: python scripts/public_release_check.py --json",
                 "Release owner: python scripts/verify_live_platforms.py --require --json > release/live-platforms.json",
             ],
@@ -340,8 +336,6 @@ def run_quality_checks() -> bool:
                 "check",
                 "src",
                 "tests",
-                "scripts/verify_qml_pages.py",
-                "scripts/verify_desktop_package.py",
                 "scripts/verify_windows_exe.py",
                 "scripts/verify_macos_artifact.py",
                 "scripts/verify_live_platforms.py",
@@ -353,8 +347,6 @@ def run_quality_checks() -> bool:
         ),
         (["mypy", "src/xpst"], "Type checking"),
         (["python", "scripts/release_preflight.py", "--json"], "Release preflight"),
-        (["python", "scripts/verify_desktop_package.py"], "Desktop package static checks"),
-        (["python", "scripts/verify_qml_pages.py"], "QML smoke test"),
     ]
 
     for cmd, name in checks:
