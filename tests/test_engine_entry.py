@@ -56,6 +56,9 @@ def _child_env(config_dir: Path) -> dict[str, str]:
     # Make sure a stray ambient value cannot mask the argv path under test.
     env.pop("XPST_DASHBOARD_PORT", None)
     env.pop("XPST_DASHBOARD_HOST", None)
+    # Keep the media bootstrap offline: these subprocesses must not download
+    # ffmpeg just because the CI host has none installed.
+    env["XPST_MEDIA_AUTO_FETCH"] = "0"
     return env
 
 
@@ -264,3 +267,104 @@ def test_serve_subcommand_help_does_not_start_server(tmp_path):
     assert "usage" in combined
     assert "--port" in combined
 
+
+
+# ── first-use media bootstrap (ffmpeg/ffprobe, no longer bundled) ────────────
+
+
+class _RecordingThread:
+    """Stands in for threading.Thread so the bootstrap body never runs."""
+
+    instances: list[_RecordingThread] = []
+
+    def __init__(self, *, target, name=None, daemon=None) -> None:
+        self.target = target
+        self.name = name
+        self.daemon = daemon
+        _RecordingThread.instances.append(self)
+
+    def start(self) -> None:
+        self.started = True
+
+
+def test_media_bootstrap_is_skipped_when_disabled(monkeypatch):
+    monkeypatch.setenv("XPST_MEDIA_AUTO_FETCH", "0")
+    _RecordingThread.instances = []
+    monkeypatch.setattr(ee.threading, "Thread", _RecordingThread)
+
+    ee._start_media_bootstrap()
+
+    assert _RecordingThread.instances == []
+
+
+def test_media_bootstrap_starts_a_daemon_thread(monkeypatch):
+    monkeypatch.setenv("XPST_MEDIA_AUTO_FETCH", "1")
+    _RecordingThread.instances = []
+    monkeypatch.setattr(ee.threading, "Thread", _RecordingThread)
+
+    ee._start_media_bootstrap()
+
+    assert len(_RecordingThread.instances) == 1
+    thread = _RecordingThread.instances[0]
+    assert thread.daemon is True
+    assert thread.name == "xpst-media-bootstrap"
+    assert thread.started is True
+
+
+def test_media_bootstrap_warns_when_a_binary_is_unavailable(monkeypatch, capsys):
+    """A machine where nothing resolves must say so — never crash the engine."""
+    monkeypatch.setenv("XPST_MEDIA_AUTO_FETCH", "1")
+
+    import xpst.media.binaries as binaries
+
+    monkeypatch.setattr(
+        binaries,
+        "ensure_media_binaries",
+        lambda **kwargs: {
+            "ffmpeg": {"ok": True, "path": "/tmp/ffmpeg", "source": "system"},
+            "ffprobe": {"ok": False, "path": None, "source": "missing", "error": "boom"},
+        },
+    )
+    captured: list[_RecordingThread] = []
+
+    class _InlineThread:
+        def __init__(self, *, target, name=None, daemon=None) -> None:
+            self.target = target
+
+        def start(self) -> None:
+            captured.append(self)
+            self.target()
+
+    monkeypatch.setattr(ee.threading, "Thread", _InlineThread)
+
+    ee._start_media_bootstrap()
+
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "ffprobe" in err
+    assert "xpst media fetch" in err
+    assert captured
+
+
+def test_media_bootstrap_never_raises_on_failure(monkeypatch, capsys):
+    monkeypatch.setenv("XPST_MEDIA_AUTO_FETCH", "1")
+
+    import xpst.media.binaries as binaries
+
+    def _boom(**kwargs):
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(binaries, "ensure_media_binaries", _boom)
+
+    class _InlineThread:
+        def __init__(self, *, target, name=None, daemon=None) -> None:
+            self.target = target
+
+        def start(self) -> None:
+            self.target()
+
+    monkeypatch.setattr(ee.threading, "Thread", _InlineThread)
+
+    ee._start_media_bootstrap()
+
+    assert "media bootstrap skipped" in capsys.readouterr().err

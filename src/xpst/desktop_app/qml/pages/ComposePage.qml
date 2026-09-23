@@ -18,6 +18,7 @@ Page {
     property var selectedPlatforms: ({"youtube": true, "instagram": false, "x": false, "tiktok": false})
     property var localVideos: []
     property string scannedFolder: ""
+    property string skippedNote: ""
     property bool loadingVideos: false
     property bool posting: false
     property var uploadProgress: ({})
@@ -44,6 +45,7 @@ Page {
             if (parsed.ok) {
                 composePage.localVideos = parsed.videos || []
                 composePage.scannedFolder = parsed.folder || ""
+                composePage.skippedNote = parsed.skipped_count > 0 ? (parsed.hint || "") : ""
             } else {
                 composePage.localVideos = []
                 console.warn("getLocalVideos returned not-ok:", parsed.error || "")
@@ -77,6 +79,9 @@ Page {
             if (parsed.ok) {
                 composePage.localVideos = parsed.videos || []
                 composePage.scannedFolder = parsed.folder || ""
+                composePage.skippedNote = parsed.skipped_count > 0 ? (parsed.hint || "") : ""
+                if (parsed.skipped_count > 0 && typeof showToast !== "undefined")
+                    showToast(parsed.hint || "Some files in that folder cannot be posted", true)
             } else {
                 composePage.localVideos = []
                 if (typeof showToast !== "undefined")
@@ -363,6 +368,18 @@ Page {
                             Layout.fillWidth: true
                             elide: Text.ElideMiddle
                             visible: composePage.scannedFolder.length > 0
+                        }
+
+                        // Files the engine would refuse are never listed above;
+                        // say why instead of leaving a silent gap.
+                        Text {
+                            text: composePage.skippedNote
+                            font.pixelSize: 11
+                            color: theme.textMuted
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                            visible: composePage.skippedNote.length > 0
+                            Accessible.name: "Files skipped: " + composePage.skippedNote
                         }
 
                         // Video grid

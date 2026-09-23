@@ -1,5 +1,67 @@
 # Tauri updater — production wiring (xPST desktop shell)
 
+> **One manifest generator.** `scripts/gen-updater-manifest.py` is the *only*
+> authority for `latest.json` in this repository. It is invoked by both
+> pipelines that can produce a manifest — `.github/workflows/publish-updater.yml`
+> (publishes to the Pages root) and `.github/workflows/tauri-release.yml`
+> (`publish-updater-manifest` job, attaches the manifest to the tagged release).
+> A second, differently named generator (`scripts/generate_update_manifest.py`)
+> was proposed and rejected: two scripts writing the same manifest is how a
+> release advertises a platform it never built, or a signature that does not
+> match `plugins.updater.pubkey`. `tests/test_updater_manifest.py` fails if a
+> second generator ever reappears (`test_there_is_exactly_one_manifest_generator`).
+
+## Update endpoint: hosting decision (verified, not assumed)
+
+Configured endpoint: `plugins.updater.endpoints[0]` =
+`https://tysais.github.io/xPST/updates/latest.json`.
+
+**Decision: keep the GitHub Pages endpoint.** GitHub Pages for this repository
+serves `build_type: legacy` from source `main:/` — a *committed file*, not an
+upload target — and it genuinely serves committed paths:
+
+```console
+$ curl -s -o /dev/null -w '%{http_code}' https://tysais.github.io/xPST/privacy/
+200
+$ curl -s -o /dev/null -w '%{http_code}' https://tysais.github.io/xPST/terms/
+200
+$ curl -s -o /dev/null -w '%{http_code}' https://tysais.github.io/xPST/this-path-does-not-exist-xyz/
+404
+```
+
+So Pages *can* serve `updates/latest.json`; the endpoint is not in the
+repository today because no release has ever produced a signed updater
+artifact, and `publish-updater.yml` refuses to invent one.
+
+**Observed status right now (2026-09-14), stated as measured:**
+
+```console
+$ curl -s -o /dev/null -w '%{http_code}' https://tysais.github.io/xPST/updates/latest.json
+404
+$ curl -s -o /dev/null -w '%{http_code}' https://github.com/TysAIs/xPST/releases/latest/download/latest.json
+404
+```
+
+The `404` is a **signing-key** blocker, not a hosting blocker: this repository
+has **0** GitHub Actions secrets, so `TAURI_SIGNING_PRIVATE_KEY` is absent, so
+`cargo tauri build` emits no `.sig`, so there is nothing a manifest could
+legitimately point at.
+
+The Release-asset URL
+(`https://github.com/TysAIs/xPST/releases/latest/download/latest.json`) is kept
+as a **documented fallback**: both `publish-updater.yml` and the release lane's
+`publish-updater-manifest` job attach `latest.json` to the release, so once a
+signed release exists that URL serves the same bytes without depending on a
+commit to branch-protected `main`. It is *not* the configured endpoint because
+`releases/latest` resolves to whichever release is newest and this repository
+has two independent pipelines publishing to the same tag; the committed Pages
+path is stable regardless.
+
+Direct commits to `main` are gated by branch protection (13 required status
+checks, `allow_force_pushes: false`), so `GITHUB_TOKEN` cannot create the
+manifest commit; `publish-updater.yml` force-updates `updater/latest-json` and
+opens a pull request in that case and stays green.
+
 `src-tauri/tauri.conf.json` keeps the **production-facing** updater settings
 (endpoint `https://tysais.github.io/xPST/updates/latest.json`, release pubkey
 slot). The local E2E (`scripts/updater-e2e.sh`) does **not** mutate that file:
@@ -91,9 +153,34 @@ Invariants worth keeping:
 
 Current gap for a real update round-trip (tracked outside this workflow): a
 release only contains signed updater artifacts if the Tauri build ran with
-`TAURI_SIGNING_PRIVATE_KEY` **and** `bundle.createUpdaterArtifacts` enabled, and
-only macOS builds are attached to releases today. `gh release view v1.1.0`
-contains no updater artifact at all, which is exactly the `absent` path above.
+`TAURI_SIGNING_PRIVATE_KEY` **and** the updater artifacts enabled — the release
+lane now passes `--config '{"bundle":{"createUpdaterArtifacts":true}}'` for
+exactly that build, so a keyed run emits the macOS `.app.tar.gz`, Windows
+`*.nsis.zip` and Linux `*.AppImage.tar.gz` packages plus their `.sig` sidecars.
+`gh release view v1.1.0` contains no updater artifact at all, which is exactly
+the `absent` path above.
+
+### What is blocked on the user's private key / missing secrets
+
+Nothing in this branch can produce a signed artifact, because:
+
+1. `TAURI_SIGNING_PRIVATE_KEY` (and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`) are
+   **not configured** — the repository has **0** Actions secrets
+   (`gh api repos/TysAIs/xPST/actions/secrets --jq .total_count` → `0`). The
+   private key that matches the committed public key (minisign key id
+   `13F290B1316626E2`) belongs to the repository owner and is deliberately not
+   available; a manifest signature cannot be produced or faked without it.
+2. `TAURI_SIGNING_PRIVATE_KEY` being absent is *expected*, not a failure: the
+   release lane and `publish-updater.yml` both report the channel as blocked and
+   succeed, so the pipeline stays honest instead of shipping an unsigned entry.
+3. Publishing `updates/latest.json` to `main` additionally needs a push actor
+   with a branch-protection bypass (or a human merging the `updater/latest-json`
+   pull request), since `main` requires 13 status checks.
+
+To unblock: generate the release keypair, set the `TAURI_SIGNING_PRIVATE_KEY`
+secret, confirm `plugins.updater.pubkey` is the base64 of the matching `.pub`,
+and push a `v*` tag. See "Release signing keypair" below.
+
 
 
 ## Release signing keypair

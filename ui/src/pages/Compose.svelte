@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { api } from "../lib/api.js";
+  import { tokenHeaders } from "../lib/auth-token.js";
   import { destinationRows, formatBytes, postRequestSummary, targetSummary } from "../lib/firstRun.js";
   import {
     draftRequest,
@@ -14,11 +15,14 @@
     restoreDraft,
     selectedPlatforms,
   } from "../lib/drafts.js";
+  import { fileNameOf, mediaItemsFromPaths, mediaKind, mergeMedia, unsupportedPaths } from "../lib/media.js";
+  import { installShellDropTarget, pickMediaFile, shellAvailable } from "../lib/native.js";
   import { setLastPost } from "../lib/session.js";
   import Card from "../lib/components/Card.svelte";
   import EmptyState from "../lib/components/EmptyState.svelte";
   import ErrorState from "../lib/components/ErrorState.svelte";
   import LoadingSkeleton from "../lib/components/LoadingSkeleton.svelte";
+  import MediaPreview from "../lib/components/MediaPreview.svelte";
   import PlatformBadge from "../lib/components/PlatformBadge.svelte";
   import StatusBadge from "../lib/components/StatusBadge.svelte";
 
@@ -27,6 +31,14 @@
   let media = $state(null);
   let folder = $state("");
   let folderInput = $state("");
+
+  // Media added outside the scanned folder: the OS picker and OS drag-and-drop
+  // hand the composer absolute paths, never bytes (see lib/native.js).
+  let dropped = $state([]);
+  let dragging = $state(false);
+  let picking = $state(false);
+  let pickNotice = $state("");
+  const inShell = shellAvailable();
 
   let catalogState = $state("loading");
   let catalogError = $state("");
@@ -147,15 +159,43 @@
     const flush = () => flushDraft();
     window.addEventListener("pagehide", flush);
     window.addEventListener("beforeunload", flush);
+    // Native drops arrive from the shell (it owns the paths); a plain browser
+    // has no path to give, so this is a no-op outside the app window.
+    const removeDropTarget = installShellDropTarget((phase, paths) => {
+      if (phase === "enter") {
+        dragging = true;
+        return;
+      }
+      if (phase === "leave") {
+        dragging = false;
+        return;
+      }
+      dragging = false;
+      if (phase === "drop") acceptPaths(paths);
+    });
     return () => {
       window.removeEventListener("pagehide", flush);
       window.removeEventListener("beforeunload", flush);
       if (saveTimer) clearTimeout(saveTimer);
+      removeDropTarget();
     };
   });
 
   const destinations = $derived(destinationRows(catalog));
-  const items = $derived(media?.items ?? []);
+  const items = $derived(mergeMedia(media?.items ?? [], dropped));
+  const selectedItem = $derived(
+    items.find((item) => item.path === selectedMedia) ??
+      (selectedMedia ? { path: selectedMedia, name: fileNameOf(selectedMedia), type: mediaKind(selectedMedia) } : null)
+  );
+  // Files the engine will refuse are never offered for selection; the reason is
+  // shown instead of a silent gap in the list.
+  const skippedItems = $derived(media?.skipped ?? []);
+  const skippedCount = $derived(media?.skipped_count ?? 0);
+  const skipNote = $derived(
+    skippedCount
+      ? `${skippedCount} file${skippedCount === 1 ? "" : "s"} in this folder cannot be posted: ${skippedItems[0]?.reason ?? "unsupported file type"}`
+      : ""
+  );
   const chosen = $derived(destinations.filter((row) => selected[row.name] && row.ready));
   const summary = $derived(targetSummary(destinations));
   const canPost = $derived(Boolean(selectedMedia) && !posting && !savingDraft);
@@ -206,17 +246,12 @@
   function flushDraft() {
     if (!hasDraftContent({ mediaPath: selectedMedia, caption, platforms: selected })) return;
     const body = JSON.stringify(currentDraftRequest());
-    try {
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon("/api/drafts", new Blob([body], { type: "application/json" }));
-        return;
-      }
-    } catch {
-      // fall through to fetch
-    }
+    // The engine's mutating routes require the API token, and a pagehide
+    // beacon cannot set a header — so the flush must be a keepalive fetch,
+    // which carries the token and still lets the window close.
     fetch("/api/drafts", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...tokenHeaders() },
       body,
       keepalive: true,
     }).catch(() => {
@@ -245,6 +280,49 @@
     if (!row.ready) return;
     userEdited = true;
     selected = { ...selected, [row.name]: !selected[row.name] };
+  }
+
+  /** Adopt paths from the OS picker or a native drop as the current selection. */
+  function acceptPaths(paths) {
+    const accepted = mediaItemsFromPaths(paths);
+    const ignored = unsupportedPaths(paths);
+    pickNotice = ignored.length
+      ? `${ignored.length} file${ignored.length === 1 ? "" : "s"} ignored — xPST previews and posts video and image files only.`
+      : "";
+    if (!accepted.length) return;
+    dropped = mergeMedia(dropped, accepted);
+    // A pick or drop is a user edit: a draft restore that lands later must not
+    // overwrite the file the user just chose.
+    userEdited = true;
+    selectedMedia = accepted[0].path;
+  }
+
+  async function chooseFile() {
+    picking = true;
+    pickNotice = "";
+    const result = await pickMediaFile();
+    picking = false;
+    if (result.ok) {
+      acceptPaths([result.path]);
+      return;
+    }
+    if (result.reason === "cancelled") return;
+    if (result.reason === "unavailable") {
+      // Honest degradation: never invent a path in a plain browser.
+      pickNotice = "The OS file picker is only available in the xPST app window. Open the app, or point the folder field at your media.";
+      return;
+    }
+    pickNotice = `The app refused the file picker: ${result.error ?? "unknown reason"}`;
+  }
+
+  function onDomDrop(event) {
+    event.preventDefault();
+    dragging = false;
+    // The shell owns native drops and pushes real paths; a DOM drop in a
+    // browser carries no path, and reading the bytes would copy the whole file.
+    if (!shellAvailable()) {
+      pickNotice = "Dropping a file works in the xPST app window — a browser cannot hand xPST a filesystem path.";
+    }
   }
 
   async function runPreflight() {
@@ -377,48 +455,81 @@
 {/if}
 
 <div class="xpst-create-layout">
-  <Card title="Video" description="Local files only. Nothing is downloaded.">
+  <Card title="Media" description="Local files only. Nothing is downloaded.">
     <div class="xpst-field">
       <label class="xpst-field__label" for="compose-folder">Folder</label>
       <input id="compose-folder" class="xpst-field__input" bind:value={folderInput} placeholder="/path/to/your/videos" autocomplete="off" />
     </div>
     <div class="xpst-inline-actions">
       <button class="xpst-button" data-variant="secondary" type="button" onclick={() => loadMedia(folderInput)} disabled={mediaState === "loading"}>Scan folder</button>
+      <button class="xpst-button" data-variant="secondary" type="button" onclick={chooseFile} disabled={picking} aria-busy={picking ? "true" : undefined}>
+        {picking ? "Choosing…" : "Choose file…"}
+      </button>
     </div>
 
-    {#if mediaState === "loading"}
-      <LoadingSkeleton rows={4} label="Scanning for local videos" onRetry={() => loadMedia(folderInput)} />
-    {:else if mediaState === "error"}
-      <ErrorState title="Could not read that folder" message={mediaError} retry={() => loadMedia(folderInput)} />
-    {:else if items.length === 0}
-      <EmptyState
-        title={folder ? "No videos in this folder" : "No content folder yet"}
-        description={folder ? `xPST found no video or image files in ${folder}.` : (media?.hint ?? "Choose a content folder during setup.")}
-        actionLabel="Set up the folder"
-        actionHref="#/onboarding"
-      />
-    {:else}
-      <div class="xpst-create-platforms" role="radiogroup" aria-label="Choose a video">
-        {#each items as item (item.path)}
-          <button
-            class="xpst-create-platform"
-            class:is-selected={selectedMedia === item.path}
-            type="button"
-            role="radio"
-            aria-checked={selectedMedia === item.path ? "true" : "false"}
-            onclick={() => {
-              userEdited = true;
-              selectedMedia = item.path;
-            }}
-          >
-            <span>
-              <strong>{item.name}</strong>
-              <small>{item.type} · {formatBytes(item.size_bytes)}</small>
-            </span>
-          </button>
-        {/each}
-      </div>
+    <p class="xpst-field__hint">
+      {#if inShell}
+        Use the OS file picker, or drag a file onto this card.
+      {:else}
+        Drag-and-drop and the OS file picker are available in the xPST app window; this page reads the folder above.
+      {/if}
+    </p>
+    {#if pickNotice}
+      <p class="xpst-field__hint" role="status">{pickNotice}</p>
     {/if}
+
+    <div
+      class="xpst-dropzone"
+      class:is-active={dragging}
+      data-drop-active={dragging ? "true" : "false"}
+      ondragover={(event) => {
+        event.preventDefault();
+        dragging = true;
+      }}
+      ondragleave={() => (dragging = false)}
+      ondrop={onDomDrop}
+    >
+      {#if selectedItem}
+        <MediaPreview item={selectedItem} onClear={() => (selectedMedia = "")} />
+      {/if}
+
+      {#if mediaState === "loading"}
+        <LoadingSkeleton rows={4} label="Scanning for local videos" onRetry={() => loadMedia(folderInput)} />
+      {:else if mediaState === "error"}
+        <ErrorState title="Could not read that folder" message={mediaError} retry={() => loadMedia(folderInput)} />
+      {:else if items.length === 0}
+        <EmptyState
+          title={folder ? "No postable files in this folder" : "No content folder yet"}
+          description={folder ? (skipNote || `xPST found no files it can post in ${folder}.`) : (media?.hint ?? "Choose a content folder during setup.")}
+          actionLabel="Set up the folder"
+          actionHref="#/onboarding"
+        />
+      {:else}
+        <div class="xpst-create-platforms" role="radiogroup" aria-label="Choose a video">
+          {#each items as item (item.path)}
+            <button
+              class="xpst-create-platform"
+              class:is-selected={selectedMedia === item.path}
+              type="button"
+              role="radio"
+              aria-checked={selectedMedia === item.path ? "true" : "false"}
+              onclick={() => {
+                userEdited = true;
+                selectedMedia = item.path;
+              }}
+            >
+              <span>
+                <strong>{item.name}</strong>
+                <small>{item.type} · {item.size_bytes ? formatBytes(item.size_bytes) : "added just now"}</small>
+              </span>
+            </button>
+          {/each}
+        </div>
+        {#if skipNote}
+          <p class="xpst-field__hint" role="status">{skipNote}</p>
+        {/if}
+      {/if}
+    </div>
   </Card>
 
   <Card title="Caption and destinations" description="The caption is sent verbatim. Targets come from the canonical provider catalog.">

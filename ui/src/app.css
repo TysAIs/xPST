@@ -338,9 +338,33 @@ input,
   background: var(--xpst-color-danger-surface);
 }
 
-.xpst-status-badge[data-status="disabled"] {
+.xpst-status-badge[data-status="disabled"],
+.xpst-status-badge[data-status="source_only"] {
   color: var(--xpst-color-text-muted);
   background: var(--xpst-color-background);
+}
+
+/* Honest token-state badges (xpst.token_state). "connected" is the ONLY green
+   one — it requires a passing live check, so no other value may inherit it. */
+.xpst-status-badge[data-status="connected"] {
+  color: var(--xpst-color-success);
+  background: var(--xpst-color-success-surface);
+}
+
+.xpst-status-badge[data-status="expiring"] {
+  color: var(--xpst-color-warning);
+  background: var(--xpst-color-warning-surface);
+}
+
+.xpst-status-badge[data-status="needs_reauth"] {
+  color: var(--xpst-color-danger);
+  background: var(--xpst-color-danger-surface);
+}
+
+.xpst-badge-note {
+  margin: 0;
+  font: var(--xpst-type-caption);
+  color: var(--xpst-color-text-muted);
 }
 
 .xpst-platform-badge {
@@ -618,6 +642,71 @@ input,
 .xpst-table tr:last-child td { border-bottom: 0; }
 .xpst-table td[data-muted="true"] { color: var(--xpst-color-text-secondary); }
 
+/* Metric provenance: a recorded snapshot and a live fetch must never look
+   alike, and a platform with no data must not look like a measured zero. */
+.xpst-analytics-source {
+  margin: 0 0 var(--xpst-space-4);
+  color: var(--xpst-color-text-secondary);
+  font-size: 0.875rem;
+}
+
+.xpst-source-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--xpst-space-1);
+  padding: 2px 8px;
+  border: 1px solid var(--xpst-color-border);
+  border-radius: 999px;
+  font: var(--xpst-type-label);
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.xpst-source-badge[data-source="live"] {
+  border-color: var(--xpst-color-success);
+  background: var(--xpst-color-success-surface);
+  color: var(--xpst-color-success);
+}
+
+.xpst-source-badge[data-source="live"]::before {
+  content: "●";
+  font-size: 0.5rem;
+  line-height: 1;
+}
+
+.xpst-source-badge[data-source="recorded"] {
+  border-color: var(--xpst-color-border-strong);
+  background: var(--xpst-color-background);
+  color: var(--xpst-color-text-secondary);
+}
+
+.xpst-source-badge[data-source="recorded"]::before {
+  content: "◷";
+  font-size: 0.6rem;
+  line-height: 1;
+}
+
+.xpst-source-badge[data-source="none"] {
+  border-style: dashed;
+  border-color: var(--xpst-color-border-strong);
+  background: transparent;
+  color: var(--xpst-color-text-muted);
+}
+
+.xpst-source-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--xpst-color-text-muted);
+  font-size: 0.6875rem;
+}
+
+.xpst-table td[data-has-data="false"] {
+  color: var(--xpst-color-text-muted);
+  font-style: italic;
+}
+
 .xpst-settings-list {
   display: grid;
   gap: var(--xpst-space-4);
@@ -768,4 +857,71 @@ input,
 
 .xpst-inline-link:hover {
   color: var(--xpst-accent-hover);
+}
+
+/* ── Composer media preview + drop target ────────────────────────────── */
+
+.xpst-dropzone {
+  display: grid;
+  gap: var(--xpst-space-3);
+  padding: var(--xpst-space-3);
+  border: 1px dashed var(--xpst-color-border);
+  border-radius: var(--xpst-radius-md);
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.xpst-dropzone.is-active {
+  border-color: var(--xpst-color-primary);
+  background: var(--xpst-color-primary-soft);
+}
+
+.xpst-preview {
+  margin: 0;
+  display: grid;
+  gap: var(--xpst-space-2);
+}
+
+.xpst-preview__stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  max-height: 320px;
+  padding: var(--xpst-space-2);
+  background: var(--xpst-color-background);
+  border: 1px solid var(--xpst-color-border);
+  border-radius: var(--xpst-radius-md);
+  overflow: hidden;
+}
+
+.xpst-preview__media {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: var(--xpst-radius-sm);
+  object-fit: contain;
+}
+
+.xpst-preview[data-kind="video"] .xpst-preview__stage {
+  padding: 0;
+}
+
+.xpst-preview__caption {
+  display: flex;
+  align-items: baseline;
+  gap: var(--xpst-space-3);
+  min-width: 0;
+}
+
+.xpst-preview__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--xpst-color-text-primary);
+  font: var(--xpst-type-label);
+}
+
+.xpst-preview__meta {
+  flex: 1 1 auto;
+  color: var(--xpst-color-text-muted);
+  font: var(--xpst-type-label);
 }
