@@ -1,9 +1,11 @@
 <script>
   import { onMount } from "svelte";
-  import { api } from "../lib/api.js";
+  import { api, errorMessage } from "../lib/api.js";
+  import { bootFailureMessage, loadWhileEngineStarts } from "../lib/engineStartup.js";
   import { destinationRows, stepRows } from "../lib/firstRun.js";
   import Card from "../lib/components/Card.svelte";
   import EmptyState from "../lib/components/EmptyState.svelte";
+  import EngineStarting from "../lib/components/EngineStarting.svelte";
   import ErrorState from "../lib/components/ErrorState.svelte";
   import LoadingSkeleton from "../lib/components/LoadingSkeleton.svelte";
   import StatusBadge from "../lib/components/StatusBadge.svelte";
@@ -19,21 +21,29 @@
   let savedNote = $state("");
   let completing = $state(false);
 
+  // A brand-new install lands here (App.svelte opens the wizard on the first
+  // run), so this view can be the first thing a launch paints — before the
+  // engine sidecar answers. Same starting state as Home, not an error card.
   async function load() {
     state = "loading";
     error = "";
-    try {
-      const payload = await api.onboarding();
-      onboarding = payload;
-      folder = payload?.source?.path ?? "";
-      const next = {};
-      for (const row of destinationRows(payload)) next[row.name] = row.enabled;
-      selected = next;
-      state = "ready";
-    } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
+    const result = await loadWhileEngineStarts(() => api.onboarding(), {
+      onWaiting: () => {
+        state = "starting";
+      },
+    });
+    if (!result.ok) {
+      error = bootFailureMessage(result);
       state = "error";
+      return;
     }
+    const payload = result.value;
+    onboarding = payload;
+    folder = payload?.source?.path ?? "";
+    const next = {};
+    for (const row of destinationRows(payload)) next[row.name] = row.enabled;
+    selected = next;
+    state = "ready";
   }
 
   onMount(load);
@@ -60,7 +70,7 @@
         : "Nothing changed — the saved values already matched.";
       state = "ready";
     } catch (cause) {
-      saveError = cause instanceof Error ? cause.message : String(cause);
+      saveError = errorMessage(cause);
     } finally {
       saving = false;
     }
@@ -74,7 +84,7 @@
       await load();
       location.hash = "#/connect";
     } catch (cause) {
-      saveError = cause instanceof Error ? cause.message : String(cause);
+      saveError = errorMessage(cause);
     } finally {
       completing = false;
     }
@@ -91,6 +101,8 @@
 
 {#if state === "loading"}
   <LoadingSkeleton rows={5} label="Loading setup state" onRetry={load} />
+{:else if state === "starting"}
+  <EngineStarting />
 {:else if state === "error"}
   <ErrorState title="Could not load setup" message={error} retry={load} />
 {:else}
