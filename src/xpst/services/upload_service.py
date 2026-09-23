@@ -678,6 +678,125 @@ class UploadService:
                 platform=platform_name,
             )
 
+    async def upload_image_to_platform(
+        self,
+        uploader: PlatformUploader,
+        image_path: Path,
+        caption: str,
+        platform_name: str,
+        video_id: str,
+        source_platform: str = "",
+    ) -> UploadResult:
+        """Publish a single image to one platform.
+
+        Same pipeline as :meth:`upload_carousel_to_platform` (circuit breaker,
+        quota, content-hash dedup, retry, state, notification) minus encoding:
+        an image is never handed to ffmpeg, and the destination's own image
+        limits are enforced inside the adapter before any upload call.
+        """
+        if platform_name in _TOS_UNOFFICIAL_PLATFORMS:
+            logger.warning(
+                "Using unofficial API for %s - may violate platform ToS",
+                platform_name,
+            )
+
+        if not self.circuit_breakers.allow_request(platform_name):
+            logger.warning("Circuit breaker open for %s, skipping", platform_name)
+            return UploadResult(
+                success=False,
+                error="Circuit breaker open",
+                platform=platform_name,
+            )
+
+        try:
+            self.quota_manager.preflight(platform_name)
+        except QuotaExhaustedError as exc:
+            logger.warning("Pre-flight quota check failed for %s: %s", platform_name, exc)
+            return UploadResult(
+                success=False,
+                error=str(exc),
+                platform=platform_name,
+                metadata={"quota": exc.to_dict()},
+            )
+
+        # Idempotency guard, keyed on the image bytes + caption (the same
+        # content-hash mechanism the video and carousel paths use).
+        content_hash = compute_content_hash(
+            file_path=image_path,
+            filename=f"{image_path.name}|{caption}",
+        )
+        try:
+            existing_id = self.state.get_by_hash(content_hash)
+        except AttributeError:
+            existing_id = None
+        if existing_id and self.state.is_video_posted(existing_id, platform_name):
+            logger.info(
+                "Skipping %s image — identical image + caption already posted as %s",
+                platform_name,
+                existing_id,
+            )
+            return UploadResult(
+                success=True,
+                platform=platform_name,
+                metadata={"already_posted": True, "dedup": "content_hash"},
+            )
+
+        try:
+            tracker = create_upload_tracker(
+                f"{platform_name.title()} image upload",
+                image_path,
+            )
+
+            # ``ambiguous_safe=False``: a timeout/connection failure may mean the
+            # image was already published and the response was lost. Blindly
+            # retrying would double-post, which no platform here de-duplicates.
+            raw_upload_result = await retry_operation(
+                uploader.upload_image,
+                image_path,
+                caption,
+                config=STANDARD_RETRY,
+                platform=platform_name,
+                ambiguous_safe=False,
+            )
+            upload_result = normalize_upload_result(raw_upload_result, platform_name)
+
+            if upload_result.is_published:
+                tracker.complete()
+                self.state.mark_video_posted(
+                    video_id,
+                    platform_name,
+                    post_id=upload_result.post_id,
+                    post_url=upload_result.post_url,
+                    caption=caption,
+                    content_hash=content_hash,
+                    source_platform=source_platform,
+                )
+                self.circuit_breakers.record_success(platform_name)
+                self.quota_manager.record_upload(platform_name)
+                self.notifier.notify_upload_success(
+                    platform=platform_name,
+                    video_id=video_id,
+                    post_url=upload_result.post_url or "",
+                )
+            else:
+                tracker.fail(upload_result.error or "upload did not publish")
+                self.circuit_breakers.record_failure(platform_name, upload_result.error)
+                self.notifier.notify_upload_failure(
+                    platform=platform_name,
+                    video_id=video_id,
+                    error=upload_result.error or "Unknown error",
+                )
+
+            return upload_result
+
+        except Exception as e:  # noqa: BLE001 — a failed image upload is a result, not a crash
+            logger.error("Image upload failed for %s: %s", platform_name, e)
+            return UploadResult(
+                success=False,
+                error=f"Upload failed: {str(e)[:200]}",
+                platform=platform_name,
+            )
+
     async def _encode_for_platform(
         self,
         video_path: Path,

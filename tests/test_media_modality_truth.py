@@ -3,19 +3,22 @@
 Two contracts are pinned here.
 
 1. ``verify_media`` is modality-aware. An image at a destination that publishes
-   images is judged by image rules (container, dimensions, size); an image at a
-   destination that does not is refused with exactly ONE error that names the
-   destination. Before this, a JPEG tripped the video container rule *and* the
-   "real video stream present" rule and every surface showed the raw spec
-   comparison ``".jpg vs accepted .mp4, .mov"``.
+   images is judged by image rules (container, dimensions, aspect, size); an
+   image at a destination that does not is refused with exactly ONE error that
+   names the destination. Before this, a JPEG tripped the video container rule
+   *and* the "real video stream present" rule and every surface showed the raw
+   spec comparison ``".jpg vs accepted .mp4, .mov"``.
 2. ``/api/media`` offers only what a destination can actually publish, and moves
    everything else into ``skipped`` with the reason — the compose screen can no
-   longer list an image the post path refuses.
+   longer list a file the post path refuses.
 
 The destination capability that both contracts read is
-``PlatformSpec.modalities`` (``xpst.media.specs``). It is video-only for every
-destination today because no adapter has an image publish path; when one does,
-these tests are the ones that must change with it.
+``PlatformSpec.modalities`` (``xpst.media.specs``). Instagram and X declare the
+image modality because they now have a real ``upload_image`` path (see
+``tests/test_image_posts.py`` for the per-destination contract); YouTube,
+TikTok and Threads are video-only and must stay that way until they do. Adding a
+capability here without the adapter is exactly the defect this file guards, so
+these tests change only in the same PR as the adapter that earns it.
 """
 
 from __future__ import annotations
@@ -74,6 +77,24 @@ def _write_image(path: Path) -> Path:
     return path
 
 
+def _jpeg_bytes(width: int, height: int) -> bytes:
+    """A JPEG header declaring ``width`` x ``height`` (no ffmpeg needed).
+
+    The dimensions come from the SOF0 segment, which is what the preflight reads
+    from the image header — so a wrong-aspect fixture is a real file, not a mock.
+    """
+    app0 = b"\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+    sof0 = (
+        b"\xff\xc0"
+        + (17).to_bytes(2, "big")
+        + bytes([8])
+        + height.to_bytes(2, "big")
+        + width.to_bytes(2, "big")
+        + bytes([3, 1, 0x11, 0, 2, 0x11, 1, 3, 0x11, 1])
+    )
+    return b"\xff\xd8" + app0 + sof0 + b"\xff\xd9"
+
+
 def _open_app(tmp_path: Path) -> TestClient:
     """Bare router app (the media listing takes no auth of its own)."""
     app = FastAPI()
@@ -113,15 +134,22 @@ def _install_spec(monkeypatch: pytest.MonkeyPatch, name: str, spec: PlatformSpec
 
 
 class TestImageContainerVersusDestinationCapability:
-    def test_no_destination_declares_image_support_yet(self) -> None:
-        """The capability table must stay honest: images are not publishable."""
+    #: Destinations that really publish single images today. Written out
+    #: independently of the table so a silent capability change fails here.
+    IMAGE_DESTINATIONS: frozenset[str] = frozenset({"instagram", "x"})
+
+    def test_image_capability_is_declared_only_where_the_code_can_deliver(self) -> None:
+        """The capability table must stay honest, in both directions."""
+        declared = {name for name, spec in PLATFORM_SPECS.items() if spec.supports(MODALITY_IMAGE)}
+        assert declared == self.IMAGE_DESTINATIONS, (
+            "image capability changed — add/remove the adapter's upload_image in the same PR"
+        )
         for name, spec in PLATFORM_SPECS.items():
             assert spec.supports(MODALITY_VIDEO), f"{name} must publish video"
-            assert not spec.supports(MODALITY_IMAGE), (
-                f"{name} declares image support — only add it in the same PR as the adapter's image upload"
-            )
-            assert spec.image_containers == ()
-        assert destinations_for_modality(MODALITY_IMAGE) == ()
+            if name not in self.IMAGE_DESTINATIONS:
+                assert not spec.supports(MODALITY_IMAGE)
+                assert spec.image_containers == ()
+        assert set(destinations_for_modality(MODALITY_IMAGE)) == self.IMAGE_DESTINATIONS
         assert set(destinations_for_modality(MODALITY_VIDEO)) == set(PLATFORM_SPECS)
 
     def test_declared_image_capability_requires_image_containers(self) -> None:
@@ -132,7 +160,7 @@ class TestImageContainerVersusDestinationCapability:
                 f"{name}: image_containers and the declared image modality must agree"
             )
 
-    @pytest.mark.parametrize("platform", sorted(PLATFORM_SPECS))
+    @pytest.mark.parametrize("platform", ["youtube", "tiktok", "threads"])
     def test_image_is_rejected_by_a_video_only_destination(self, tmp_path: Path, platform: str) -> None:
         photo = _write_image(tmp_path / "photo.jpg")
 
@@ -147,7 +175,7 @@ class TestImageContainerVersusDestinationCapability:
         assert "image" in detail
         assert "vs accepted" not in detail, "no raw spec comparison in a user-facing message"
 
-    @pytest.mark.parametrize("platform", sorted(PLATFORM_SPECS))
+    @pytest.mark.parametrize("platform", ["youtube", "tiktok", "threads"])
     def test_image_produces_one_named_preflight_blocker(self, tmp_path: Path, platform: str) -> None:
         """Criterion 3: one clear preflight message naming the destination."""
         photo = _write_image(tmp_path / "photo.jpg")
@@ -177,19 +205,20 @@ class TestImageContainerVersusDestinationCapability:
         assert "jpg" in message
         assert plan["media"][0]["transform"] is None, "no transform plan for a refused file"
 
-    def test_image_is_accepted_by_a_destination_that_publishes_images(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize("platform", ["instagram", "x"])
+    def test_an_image_is_accepted_by_a_destination_that_publishes_images(
+        self, tmp_path: Path, platform: str
     ) -> None:
-        _install_spec(monkeypatch, "photo_place", _image_spec())
+        """The flip side: the two destinations with a real image path take it."""
         photo = _write_image(tmp_path / "photo.jpg")
 
-        report = verify_media(photo, "photo_place", check_loudness=False)
+        report = verify_media(photo, platform, check_loudness=False)
 
         assert report.ok, [c.detail for c in report.errors]
         assert MODALITY_CHECK not in {c.name for c in report.checks}
-        # Image rules ran; video-only rules did not.
         names = {c.name for c in report.checks}
         assert "container" in names
+        assert "dimensions" in names
         assert "video_stream" not in names
         assert "video_codec" not in names
         assert "pix_fmt" not in names
@@ -264,14 +293,73 @@ class TestImageContainerVersusDestinationCapability:
         assert detail.startswith("YouTube cannot accept an image file (.jpg).")
 
     def test_global_message_names_no_destination_and_gives_advice(self) -> None:
+        """With no destination named, the sentence must never contradict itself.
+
+        A publishable modality names who can take it; a modality nobody can take
+        (monkeypatched below) is the only case that gets the "No destination can
+        accept" head.
+        """
+        assert modality_unsupported_message(MODALITY_VIDEO, suffix=".mp4") == (
+            "A video file (.mp4) can be posted to YouTube, TikTok, Instagram Reels, X (Twitter), Threads."
+            " Choose a different file."
+        )
+        assert modality_unsupported_message(MODALITY_IMAGE, suffix=".png") == (
+            "An image file (.png) can be posted to Instagram Reels, X (Twitter)."
+            " Choose an image format your destinations accept, or a video file."
+        )
+
+    def test_global_message_still_says_nobody_can_when_nobody_can(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The no-image-path wording survives for a modality no destination takes."""
+        from dataclasses import replace
+
+        for name, spec in PLATFORM_SPECS.items():
+            monkeypatch.setitem(
+                PLATFORM_SPECS,
+                name,
+                replace(spec, modalities=(MODALITY_VIDEO,), image_containers=()),
+            )
+
         assert modality_unsupported_message(MODALITY_IMAGE, suffix=".png") == (
             "No destination can accept an image file (.png). "
             "xPST has no image publish path yet. "
-            "Choose a video file, or convert the image to a video first."
+            "Choose an image format your destinations accept, or a video file."
         )
-        assert modality_unsupported_message(MODALITY_VIDEO, suffix=".mp4").startswith(
-            "No destination can accept a video file (.mp4)."
+
+    @pytest.mark.parametrize(
+        ("platform", "width", "height", "expected_code"),
+        [
+            ("instagram", 3000, 1000, "MEDIA_SPEC_ASPECT_RATIO"),  # 3:1, Instagram stops at 1.91:1
+            ("x", 400, 4000, "MEDIA_SPEC_ASPECT_RATIO"),  # 1:10, X stops at 1:3
+        ],
+    )
+    def test_a_wrong_aspect_image_is_blocked_in_preflight(
+        self, tmp_path: Path, platform: str, width: int, height: int, expected_code: str
+    ) -> None:
+        """A destination's own limits are enforced before any upload, by name."""
+        photo = tmp_path / "wide.jpg"
+        photo.write_bytes(_jpeg_bytes(width, height))
+
+        plan = (
+            PostPreflightService(XPSTConfig())
+            .plan(
+                PostPlanRequest(
+                    media_paths=[photo],
+                    target_platforms=[platform],
+                    include_readiness=False,
+                    include_transform=False,
+                    check_loudness=False,
+                )
+            )
+            .to_dict()["platforms"][platform]
         )
+
+        codes = [blocker["code"] for blocker in plan["hard_blockers"]]
+        assert expected_code in codes, codes
+        message = next(b["message"] for b in plan["hard_blockers"] if b["code"] == expected_code)
+        assert destination_display_name(platform) in message
+        assert f"{width}x{height}" in message
 
 
 # ---------------------------------------------------------------------------
@@ -352,27 +440,49 @@ def test_api_media_offers_only_files_the_preflight_would_accept(tmp_path: Path) 
         data = client.get("/api/media", params={"folder": str(folder)}).json()
 
     assert data["ok"] is True
-    assert data["count"] == 1
-    assert [item["name"] for item in data["items"]] == ["clip.mp4"]
+    # Video is universal; the image is offered because Instagram and X publish
+    # images now — the listing follows the same capability table as the preflight.
+    assert sorted(item["name"] for item in data["items"]) == ["clip.mp4", "photo.jpg"]
     assert all(item["postable"] is True for item in data["items"])
+    assert data["skipped_count"] == 0
 
-    # Every offered entry survives the canonical preflight for its content type.
+    # Every offered entry survives the canonical preflight somewhere, and the
+    # destinations that refuse it are exactly the ones the capability table says
+    # cannot take that content type: the listing and the preflight are one fact.
     for item in data["items"]:
         modality = detect_modality(item["path"])
         assert modality is not None
-        for platform in PLATFORM_SPECS:
-            assert "MEDIA_MODALITY_UNSUPPORTED" not in _hard_blocker_codes(item["path"], platform), (
-                f"/api/media offered {item['name']} but {platform} hard-rejects its content type"
-            )
+        refusing = {
+            platform
+            for platform in PLATFORM_SPECS
+            if "MEDIA_MODALITY_UNSUPPORTED" in _hard_blocker_codes(item["path"], platform)
+        }
+        accepting = set(PLATFORM_SPECS) - refusing
+        assert accepting, f"/api/media offered {item['name']} but no destination accepts its content type"
+        assert accepting == set(destinations_for_modality(modality)), (
+            f"{item['name']}: offered, but the preflight disagrees about who can take it"
+        )
 
 
-def test_api_media_skips_an_image_with_its_reason(tmp_path: Path) -> None:
-    """The not-offered file is reported, never silently dropped (criterion 2)."""
+def test_api_media_skips_a_file_no_destination_can_publish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The not-offered file is reported, never silently dropped (criterion 2).
+
+    Images are publishable now, so the "skipped with a reason" contract is
+    exercised in the state that produces it: a modality no destination accepts
+    (exactly how images looked before this change).
+    """
+    from dataclasses import replace
+
+    for name, spec in PLATFORM_SPECS.items():
+        monkeypatch.setitem(PLATFORM_SPECS, name, replace(spec, modalities=(MODALITY_VIDEO,), image_containers=()))
     folder = _folder_with_video_and_image(tmp_path)
 
     with _open_app(tmp_path) as client:
         data = client.get("/api/media", params={"folder": str(folder)}).json()
 
+    assert data["count"] == 1
     assert data["skipped_count"] == 1
     skipped = data["skipped"][0]
     assert skipped["name"] == "photo.jpg"
@@ -433,7 +543,7 @@ def test_cli_verify_media_prints_one_modality_row(tmp_path: Path) -> None:
 
     result = CliRunner().invoke(
         main,
-        ["verify-media", str(photo), "--platform", "instagram", "--json"],
+        ["verify-media", str(photo), "--platform", "youtube", "--json"],
         obj={},
     )
 
@@ -444,8 +554,34 @@ def test_cli_verify_media_prints_one_modality_row(tmp_path: Path) -> None:
     errors = [check for check in checks if check["status"] == "error"]
     assert len(errors) == 1, [(c["name"], c["detail"]) for c in errors]
     assert errors[0]["name"] == MODALITY_CHECK
-    assert "Instagram Reels cannot accept an image file (.jpg)" in errors[0]["detail"]
+    assert "YouTube cannot accept an image file (.jpg)" in errors[0]["detail"]
     assert "vs accepted" not in json.dumps(payload)
+
+
+def test_cli_verify_media_accepts_an_image_at_a_destination_that_publishes_it(tmp_path: Path) -> None:
+    """The same command, at a destination with a real image path, reports ok."""
+    import json
+
+    from click.testing import CliRunner
+
+    from xpst.cli import main
+
+    photo = _write_image(tmp_path / "photo.jpg")
+
+    result = CliRunner().invoke(
+        main,
+        ["verify-media", str(photo), "--platform", "instagram", "--json"],
+        obj={},
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["ok"] is True
+    checks = payload["reports"][0]["checks"]
+    names = {check["name"] for check in checks}
+    assert "container" in names and "dimensions" in names
+    assert MODALITY_CHECK not in names
+    assert "video_stream" not in names
 
 
 def test_cli_verify_media_still_reports_a_distinct_blocker(tmp_path: Path) -> None:

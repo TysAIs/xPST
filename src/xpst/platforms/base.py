@@ -50,6 +50,43 @@ _DELETE_UI_MESSAGES: dict[DeleteOutcome, str] = {
     DeleteOutcome.UNSUPPORTED: "{platform} does not support deleting this post",
 }
 
+# UI-facing refusal for a destination whose adapter has no image publish path.
+# Substituted with the platform name so a user (or an agent) always learns *who*
+# cannot publish the image. Overridden by adapters that really can
+# (``InstagramUploader.upload_image``, ``XUploader.upload_image``).
+IMAGE_UNSUPPORTED_MESSAGE = "{platform} cannot publish image posts: it has no image upload path."
+
+# UI-facing refusal for a destination whose adapter has no *native* carousel
+# path. It replaced a fallback that stitched every item into one vertical video
+# and uploaded that, which turned a requested photo carousel into a video
+# without telling anyone. Overridden by adapters that really publish carousels
+# (``InstagramUploader.upload_carousel``, ``XUploader.upload_carousel``).
+CAROUSEL_UNSUPPORTED_MESSAGE = (
+    "{platform} cannot publish carousel posts: it has no native carousel upload path, and "
+    "xPST will not stitch your items into a single video and call that a carousel. "
+    "Post one video instead, or pick a destination that publishes carousels ({destinations})."
+)
+
+
+def carousel_destinations(exclude: str = "") -> str:
+    """Comma-separated destinations that really publish carousels today.
+
+    Read from the one capability table (:mod:`xpst.content`) so the refusal can
+    never name a destination that cannot do it. Imported lazily: this module is
+    imported by the platform adapters, and the capability table is the single
+    source of truth they are checked against.
+    """
+    from xpst.content import DESTINATION_CONTENT_PROFILES, ContentType
+
+    names = [
+        platform
+        for platform, profile in DESTINATION_CONTENT_PROFILES.items()
+        if profile.is_publishing
+        and profile.supports(ContentType.CAROUSEL)
+        and platform != str(exclude).strip().lower()
+    ]
+    return ", ".join(sorted(names)) or "none yet"
+
 
 def delete_ui_message(outcome: DeleteOutcome, platform: str) -> str:
     """Return the UI-facing message that corresponds to ``outcome``.
@@ -644,52 +681,58 @@ class PlatformUploader(ABC):
         """
         return 0
 
-    async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
-        """
-        Upload a carousel/multi-media post.
+    async def upload_image(self, image_path: Path, caption: str) -> UploadResult:
+        """Publish a single still image to this platform.
 
-        Override in subclasses that support native carousel uploads (e.g. Instagram).
-        Default: stitch all media into a single vertical video and upload normally.
+        Override in subclasses that have a real image publish path (Instagram
+        feed photos, X image posts). The default is an explicit, non-retryable
+        refusal that names the destination — never a silent video upload and
+        never a fabricated success.
 
         Args:
-            media_paths: List of paths to images/videos
-            caption: Caption/description for the post
+            image_path: Path to the image file.
+            caption: Caption/text for the post.
 
         Returns:
-            UploadResult with success status and metadata
+            UploadResult with success status and metadata.
         """
-        # Default: stitch into single video and upload
-        return await self._stitch_and_upload(media_paths, caption)
+        return UploadResult(
+            success=False,
+            error=IMAGE_UNSUPPORTED_MESSAGE.format(platform=self.platform_name),
+            platform=self.platform_name,
+            retryable=False,
+        )
 
-    async def _stitch_and_upload(self, media_paths: list[Path], caption: str) -> UploadResult:
+    async def upload_carousel(self, media_paths: list[Path], caption: str) -> UploadResult:
+        """Publish a carousel/multi-media post.
+
+        Override in subclasses that have a *native* carousel path
+        (``InstagramUploader.upload_carousel`` → instagrapi album,
+        ``XUploader.upload_carousel`` → one media per tweet). The default is an
+        explicit, non-retryable refusal that names the destination.
+
+        It used to stitch every item into one vertical video and upload that.
+        That is a silent transformation of what the user asked for — a photo
+        carousel became a video — so it is gone: a destination that cannot
+        publish a carousel says so, and the caller decides what to do instead.
+
+        Args:
+            media_paths: List of paths to images/videos, in post order.
+            caption: Caption/description for the post.
+
+        Returns:
+            UploadResult with success status and metadata.
         """
-        Stitch multiple media files into a single video and upload.
-
-        Used as fallback for platforms that don't support native carousels.
-        """
-        import tempfile
-
-        from xpst.utils.video import VideoProcessor
-
-        output_path: Path | None = None
-        try:
-            processor = VideoProcessor()
-            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-                output_path = Path(tmp.name)
-
-            processor.stitch_carousel_to_video(media_paths, output_path)
-            return await self.upload(output_path, caption)
-        except Exception as e:
-            logger.error(f"Stitch and upload failed: {e}")
-            return UploadResult(
-                success=False,
-                error=f"Carousel stitch failed: {str(e)[:200]}",
+        return UploadResult(
+            success=False,
+            error=CAROUSEL_UNSUPPORTED_MESSAGE.format(
                 platform=self.platform_name,
-            )
-        finally:
-            # The stitched video is a temp artifact — never leak it (ISC-91)
-            if output_path is not None:
-                output_path.unlink(missing_ok=True)
+                destinations=carousel_destinations(exclude=self.platform_name),
+            ),
+            platform=self.platform_name,
+            retryable=False,
+            metadata={"content_type": "carousel", "items": len(media_paths), "unsupported": True},
+        )
 
     def _validate_video(self, video_path: Path) -> None:
         """Validate that a video file exists, is non-empty, and within size limits.
