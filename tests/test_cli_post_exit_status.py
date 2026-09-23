@@ -52,7 +52,7 @@ class _CannedEngine:
     def __init__(self, result: CrossPostResult):
         self._result = result
 
-    async def post_manual(self, video_path, caption, platforms=None):  # noqa: ANN001
+    async def post_manual(self, video_path, caption, platforms=None, visibility=None):  # noqa: ANN001
         return self._result
 
     async def post_manual_carousel(self, media_paths, caption, platforms=None):  # noqa: ANN001

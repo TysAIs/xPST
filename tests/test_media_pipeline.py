@@ -177,8 +177,24 @@ class TestPlatformMatrix:
         assert loudness_target("threads") == loudness_target("instagram")
         assert loudness_target("unknown-platform") == -14.0
 
-    def test_threads_ships_instagram_spec(self):
-        assert PLATFORM_SPECS["threads"] is PLATFORM_SPECS["instagram"]
+    def test_threads_ingests_through_instagram_video_spec_without_its_image_path(self):
+        """Threads is a copy of Instagram's video profile, not an alias.
+
+        It uploads through the same video pipeline, so it must keep Instagram's
+        video numbers — but it has no image publish path, and an alias would hand
+        it one silently the moment Instagram gained it (which is exactly what
+        happened: see tests/test_image_posts.py).
+        """
+        threads = PLATFORM_SPECS["threads"]
+        instagram = PLATFORM_SPECS["instagram"]
+
+        assert threads is not instagram
+        assert threads.containers == instagram.containers
+        assert threads.file_size_cap_mb == instagram.file_size_cap_mb
+        assert threads.duration_cap_s == instagram.duration_cap_s
+        assert threads.display_name == "Threads"
+        assert threads.supports("video") and not threads.supports("image")
+        assert threads.image_containers == ()
 
 
 # ---------------------------------------------------------------------------

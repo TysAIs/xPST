@@ -644,6 +644,29 @@ class StateManager:
         """Get all tracked video IDs."""
         return list(self._state["posted_videos"].keys())
 
+    def find_video_id_by_platform_post(self, platform: str, post_id: str) -> str | None:
+        """Resolve the internal video id from a platform-side post id.
+
+        Matches against the stored platform entry's ``id`` or its ``url`` (so a
+        user can paste either the bare id or the full share URL after it has
+        been normalized to the id). Returns ``None`` when nothing matches.
+        """
+        if not platform or not post_id:
+            return None
+        candidate = str(post_id).strip()
+        if not candidate:
+            return None
+        for video_id, video in (self._state.get("posted_videos") or {}).items():
+            entry = (video.get("posted_to") or {}).get(platform)
+            if not entry:
+                continue
+            if str(entry.get("id") or "") == candidate:
+                return video_id
+            url = str(entry.get("url") or "")
+            if url and candidate in url:
+                return video_id
+        return None
+
     # ── Legacy compatibility API ─────────────────────────────────────────
     # These methods used to live on a second StateManager class inside
     # ``xpst/state.py`` that wrapped this one. They now live here: one state
