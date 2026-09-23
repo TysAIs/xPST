@@ -387,6 +387,14 @@ Page {
                                 Rectangle {
                                     width: 10; height: 10; radius: 5
                                     color: {
+                                        // Badge first (xpst.token_state): green is
+                                        // reserved for a live-proven "connected".
+                                        var b = modelData.badge || ""
+                                        if (b === "connected") return theme.success
+                                        if (b === "expiring") return theme.warning
+                                        if (b === "needs_reauth") return theme.error
+                                        if (b === "source_only" || b === "disabled") return theme.textMuted
+                                        if (b === "unknown") return theme.textMuted
                                         var s = modelData.status || "unknown"
                                         if (s === "disabled") return theme.textMuted
                                         if (s === "ok" || s === "healthy" || s === "connected") return theme.success
@@ -405,6 +413,13 @@ Page {
                                     }
                                     Text {
                                         text: {
+                                            var b = modelData.badge || ""
+                                            if (b === "connected") return "Connected — verified by a live check"
+                                            if (b === "expiring") return "Expiring soon — will refresh automatically"
+                                            if (b === "needs_reauth") return "Needs re-auth" + (modelData.badge_action ? " — " + modelData.badge_action : "")
+                                            if (b === "source_only") return "Source only — no posting access"
+                                            if (b === "disabled") return "Disabled"
+                                            if (b === "unknown") return "Not verified — no live check yet"
                                             var s = modelData.status || "unknown"
                                             if (s === "ok" || s === "healthy" || s === "connected") return "Connected"
                                             if (s === "warning" || s === "degraded") return "Degraded"
@@ -415,6 +430,7 @@ Page {
                                         }
                                         font.pixelSize: 12
                                         color: theme.textSecondary
+                                        wrapMode: Text.WordWrap
                                     }
                                 }
                                 Item { Layout.fillWidth: true }

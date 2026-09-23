@@ -1,0 +1,5 @@
+xPST is a cross-posting suite: it takes short-form video from a source (TikTok,
+Instagram Reels, YouTube, local files) and publishes it to YouTube Shorts, X/Twitter,
+Instagram Reels and Threads, tracking state and analytics locally. MIT OR Apache-2.0.
+TikTok publishing is not available yet — see the capability truth table in
+`docs/INSTALL.md`.

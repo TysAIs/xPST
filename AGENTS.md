@@ -2,8 +2,9 @@
 
 xPST is a cross-posting suite: it takes short-form video from a source (TikTok,
 Instagram Reels, YouTube, local files) and publishes it to YouTube Shorts, X/Twitter,
-Instagram Reels, TikTok and Threads, tracking state and analytics locally. MIT OR
-Apache-2.0.
+Instagram Reels and Threads, tracking state and analytics locally. MIT OR Apache-2.0.
+TikTok publishing is not available yet — see the capability truth table in
+`docs/INSTALL.md`.
 
 This file is the map an agent needs **before** touching the repo. Read it first. Other
 docs are written for humans and some of them still lag the code.
@@ -40,7 +41,7 @@ is the whole application; the shell is a wrapper.
 | **State** | `src/xpst/state_store.py`, `state_manager.py` | Atomic write-then-rename persistence, thread-safe business logic, crash recovery. |
 | **Config** | `src/xpst/config.py`, `config_migration.py` | Pydantic settings, schema auto-migration on load. |
 | **Credentials** | `src/xpst/utils/credentials.py` | Encrypted-at-rest store (Fernet file store by default; OS keyring is opt-in). |
-| **MCP** | `src/xpst/mcp/server.py` | 38 tools (stdio, typed schemas from `tools/list`, typed errors, fail-closed mutation guards). **Primary agent surface.** |
+| **MCP** | `src/xpst/mcp/server.py` | 40 tools (stdio, typed schemas from `tools/list`, typed errors, fail-closed mutation guards; post, health, config, state, platforms, scheduling incl. cancel, targeted failure retry, analytics, KB, captions, ideas, bio, transcripts, search, Messenger DM + comment auto-reply). **Primary agent surface.** |
 | **CLI** | `src/xpst/cli.py` | **Scriptable fallback.** `--json` (automatic on non-TTY), `--dry-run`, structured exit codes. |
 | **HTTP API + web UI** | `src/xpst/dashboard/server.py`, `ui/` | FastAPI + WebSocket serving the Svelte/Vite UI. **Internal to the app** — not a supported third-party API surface. |
 | **Desktop shell** | `src-tauri/src/` | Rust/Tauri shell (~850 LOC). Picks a free port, spawns the engine sidecar, waits for health, navigates the webview to it, forwards `xpst://` deep links to the engine's OAuth callback, kills the sidecar on exit, bounded crash-respawn. Everything product-facing lives in the engine, not here. |
@@ -101,7 +102,7 @@ python -m venv .venv && source .venv/bin/activate   # .venv\Scripts\activate on 
 pip install -e ".[dev,mcp]"
 ```
 
-The Click group in `src/xpst/cli.py` exposes 44 top-level commands (66 counting
+The Click group in `src/xpst/cli.py` exposes 46 top-level commands (69 counting
 subcommands); these are the ones an agent needs:
 
 ```bash
@@ -140,9 +141,10 @@ file does quote (MCP tools, CLI commands) are machine-checked: the MCP registry 
   to "delete a post", use the CLI path deliberately and say what it does.
 - **No OpenAI-compatible endpoint, and none should be added.** Agents speak MCP; the HTTP
   API exists for the UI. `/openapi.json` is there if you need to read schemas.
-- **MCP has no schedule-cancel and no targeted retry.** Those live in the CLI
-  (`python -m xpst schedule`, `python -m xpst failures`). Prefer adding the MCP tool over
-  teaching agents to shell out.
+- **MCP now covers schedule-cancel and targeted retry** (`xpst_schedule_cancel`,
+  `xpst_failures_retry`); the CLI equivalents (`python -m xpst schedule`,
+  `python -m xpst failures`) remain for scripting. Prefer the MCP tool over teaching
+  agents to shell out.
 
 ## Capability truth
 
