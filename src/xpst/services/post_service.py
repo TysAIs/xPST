@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from xpst.content import (
@@ -92,6 +93,7 @@ def serialize_post_attempt(
     results: dict[str, Any] | None = None,
     video_id: str = "",
     caption: str = "",
+    captions: Mapping[str, str] | None = None,
     content_type: str | None = None,
     dry_run: bool = False,
     blockers: list[str] | None = None,
@@ -102,7 +104,12 @@ def serialize_post_attempt(
         requested: destination platforms the caller asked for, in order.
         results: ``{platform: UploadResult}`` from the engine, if the post ran.
         video_id: engine-assigned id (empty for a dry run).
-        caption: the caption that was sent.
+        caption: the shared/default caption of the request.
+        captions: ``{platform: caption}`` — the copy each destination actually
+            receives. A destination absent from the mapping used ``caption``.
+            Rows and the top-level ``captions`` map are built from this, so a
+            per-destination override is visible in the outcome, not just the
+            request.
         content_type: the content type that was posted (``video``/``image``/
             ``carousel``/``text``/``thread``), so every surface reports the same
             modality vocabulary the request used.
@@ -117,6 +124,12 @@ def serialize_post_attempt(
         and every requested destination published.
     """
     results = results or {}
+    overrides = dict(captions or {})
+    per_destination = {str(name).strip().lower(): str(value) for name, value in overrides.items()}
+
+    def caption_for(platform: str) -> str:
+        return per_destination.get(str(platform).strip().lower(), caption)
+
     destinations: list[dict[str, Any]] = []
 
     for platform in requested:
@@ -135,6 +148,7 @@ def serialize_post_attempt(
                         "error": None,
                         "outcome": None,
                         "retryable": None,
+                        "caption": caption_for(platform),
                     }
                 )
                 continue
@@ -149,12 +163,14 @@ def serialize_post_attempt(
                     "error": NO_RESULT_ERROR.format(platform=platform),
                     "outcome": None,
                     "retryable": None,
+                    "caption": caption_for(platform),
                 }
             )
             continue
         row = _upload_to_dict(upload)
         row["platform"] = platform
         row["attempted"] = True
+        row["caption"] = caption_for(platform)
         destinations.append(row)
 
     # A platform the engine reported that the caller did not ask for is still
@@ -166,6 +182,7 @@ def serialize_post_attempt(
         row["platform"] = platform
         row["attempted"] = True
         row["unrequested"] = True
+        row["caption"] = caption_for(platform)
         destinations.append(row)
 
     uploaded = [row for row in destinations if row["success"] is True]
@@ -183,6 +200,7 @@ def serialize_post_attempt(
         "uploaded": bool(uploaded) and not dry_run,
         "video_id": video_id,
         "caption": caption,
+        "captions": {platform: caption_for(platform) for platform in requested},
         "content_type": content_type,
         "requested": list(requested),
         "destinations": destinations,
@@ -243,12 +261,18 @@ class PostService:
             blockers.extend(issue.message for issue in content_issues if issue.is_error)
 
         plan: dict[str, Any] | None = None
+        # The copy each destination will actually receive. Without this the
+        # preflight validated (and reported) the shared caption for every
+        # destination, so a per-destination override was never length-checked
+        # and never shown — the plan lied about what would be sent.
+        per_platform_captions = request.per_platform_texts(request.platforms)
         try:
             plan = PostPreflightService(self.config).plan(
                 PostPlanRequest(
                     media_paths=list(request.media_paths),
                     target_platforms=list(request.platforms),
                     base_caption=request.caption,
+                    per_platform_captions=per_platform_captions,
                 )
             ).to_dict()
             blockers.extend(issue["message"] for issue in plan["hard_blockers"])
@@ -260,6 +284,10 @@ class PostService:
             "ready": not blockers,
             "blockers": blockers,
             "plan": plan,
+            "caption": request.caption,
+            "captions": {
+                platform: request.text_for(platform) for platform in request.platforms
+            },
             "content_type": request.effective_content_type.value,
             "content_issues": [issue.to_dict() for issue in content_issues],
             "network_calls": False,
@@ -272,6 +300,7 @@ class PostService:
             requested=request.platforms,
             results={},
             caption=request.caption,
+            captions=verdict["captions"],
             content_type=request.effective_content_type.value,
             dry_run=True,
             blockers=verdict["blockers"],
@@ -302,6 +331,7 @@ class PostService:
             requested=request.platforms,
             results=results,
             caption=request.caption,
+            captions=request.per_platform_texts(request.platforms),
             content_type=content_type.value,
             dry_run=False,
         )
@@ -317,6 +347,7 @@ class PostService:
                 requested=request.platforms,
                 results={},
                 caption=request.caption,
+                captions=verdict["captions"],
                 content_type=request.effective_content_type.value,
                 dry_run=False,
                 blockers=verdict["blockers"],
@@ -345,34 +376,50 @@ class PostService:
                 requested=request.platforms,
                 results={},
                 caption=request.caption,
+                captions=request.per_platform_texts(request.platforms),
                 content_type=content_type.value,
                 dry_run=False,
                 blockers=[f"Posting engine unavailable: {str(exc)[:200]}"],
             ) | {"ready": True, "blocked": True}
 
+        # The per-destination copy: the engine hands each uploader its own text.
+        per_platform_captions = request.per_platform_texts(request.platforms)
         try:
             if content_type is ContentType.CAROUSEL:
-                result: CrossPostResult = await engine.post_manual_carousel(paths, request.caption, list(request.platforms))
+                result: CrossPostResult = await engine.post_manual_carousel(
+                    paths, request.caption, list(request.platforms), per_platform_captions
+                )
             elif content_type is ContentType.IMAGE:
                 result = await engine.post_manual_image(paths[0], request.caption, list(request.platforms))
             else:
-                result = await engine.post_manual(paths[0], request.caption, list(request.platforms))
+                result = await engine.post_manual(
+                    paths[0], request.caption, list(request.platforms), per_platform_captions
+                )
         except Exception as exc:  # noqa: BLE001 - the caller must see the failure
             logger.error("Manual post failed before producing results: %s", exc)
             return serialize_post_attempt(
                 requested=request.platforms,
                 results={},
                 caption=request.caption,
+                captions=per_platform_captions,
                 content_type=content_type.value,
                 dry_run=False,
                 blockers=[f"Post failed: {str(exc)[:200]}"],
             ) | {"ready": True, "blocked": False}
+
+        # What the engine actually handed each uploader wins over what the
+        # request asked for: the envelope reports the copy that was sent.
+        sent = getattr(result, "captions", None)
+        captions = dict(sent) if isinstance(sent, Mapping) else {}
+        for platform in request.platforms:
+            captions.setdefault(platform, request.text_for(platform))
 
         envelope = serialize_post_attempt(
             requested=request.platforms,
             results=dict(getattr(result, "results", {}) or {}),
             video_id=str(getattr(result, "video_id", "") or ""),
             caption=str(getattr(result, "caption", request.caption) or ""),
+            captions=captions,
             content_type=content_type.value,
             dry_run=False,
         )

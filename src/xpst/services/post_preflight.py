@@ -31,7 +31,13 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 _SUPPORTED_PLATFORMS = tuple(PLATFORM_SPECS)
-_CAPTION_LIMITS = {"threads": 500}
+# Caption limits a destination enforces for real. A caption over the limit used
+# to be truncated silently inside the uploader (X at 280, Instagram/TikTok at
+# 2200); it is now a named preflight blocker, so the user is told which
+# destination cannot take the copy instead of discovering it on the platform.
+# ``tests/test_per_destination_overrides.py`` pins every number here against the
+# uploader's own declaration so the two cannot drift.
+_CAPTION_LIMITS = {"x": 280, "instagram": 2200, "tiktok": 2200, "threads": 500}
 
 
 @dataclass(frozen=True)

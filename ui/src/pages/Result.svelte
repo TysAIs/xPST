@@ -121,6 +121,7 @@
               <th scope="col">Destination</th>
               <th scope="col">Outcome</th>
               <th scope="col">Detail</th>
+              <th scope="col">Caption sent</th>
             </tr>
           </thead>
           <tbody>
@@ -135,6 +136,13 @@
                     {row.detail}
                   {:else}
                     No error was reported.
+                  {/if}
+                </td>
+                <td data-muted="true">
+                  {#if row.caption}
+                    {row.caption}
+                  {:else}
+                    —
                   {/if}
                 </td>
               </tr>
