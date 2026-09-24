@@ -1249,6 +1249,22 @@ def create_api_router(
         schedules = ScheduleManager(config_dir).list()
         return {"schedules": schedules, "count": len(schedules)}
 
+    @router.post("/schedules/{entry_id}/cancel", dependencies=[Depends(require_api_token)])
+    def api_schedule_cancel(entry_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Cancel (remove) one persisted schedule entry.
+
+        Same verdict as ``xpst schedule remove`` and the MCP
+        ``xpst_schedule_cancel`` tool: an unknown id is a reported failure,
+        never a silent success. Local store only — published content is never
+        un-posted by this route.
+        """
+        from xpst.services.recovery_service import cancel_scheduled_post
+
+        result = cancel_scheduled_post(
+            config_dir, entry_id, dry_run=bool((payload or {}).get("dry_run"))
+        )
+        return result
+
     @router.get("/activity")
     def api_activity() -> dict[str, Any]:
         """Return recorded failures with targeted, truthful recovery metadata."""

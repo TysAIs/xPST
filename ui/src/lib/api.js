@@ -161,6 +161,8 @@ export const api = {
   settings: () => getJSON("/api/settings"),
   /** Persisted schedule entries (read-only; never starts the scheduler). */
   schedules: () => getJSON("/api/schedules"),
+  /** Cancel (remove) one persisted schedule entry. Local store only — never un-posts. */
+  cancelSchedule: (entryId) => postJSON(`/api/schedules/${encodeURIComponent(entryId)}/cancel`, {}),
   /** Renew due/expiring tokens now (bounded retry; no-op when nothing is due). */
   refreshTokens: () => postJSON("/api/refresh-tokens", {}),
   /** Recorded posting failures with truthful recovery metadata. */
