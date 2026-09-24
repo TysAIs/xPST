@@ -1413,6 +1413,50 @@ def create_api_router(
         service = DraftService(_load_ui_config(), config_dir)
         return {"ok": True, "deleted": bool(service.delete(draft_id)), "draft_id": draft_id}
 
+    @router.post("/posts/{video_id}/delete", dependencies=[Depends(require_api_token)])
+    async def api_post_delete(video_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Delete or unpublish a posted video — the engine's Phase-1.2 contract.
+
+        Same semantics as ``xpst delete`` / the MCP delete tool: ``video_id``
+        may be the internal id, a platform post id or a post URL (resolved via
+        stored state); every result carries an explicit outcome (deleted /
+        soft_hidden / pending / unsupported) so the UI can never fake a
+        removal the platform refused. ``soft`` + ``visibility`` unpublish
+        reversibly on platforms that support it.
+        """
+        from xpst.platforms.base import DeleteOutcome
+
+        body = payload or {}
+        platforms = [p for p in (body.get("platforms") or []) if isinstance(p, str) and p]
+        if not platforms:
+            cfg = _load_ui_config()
+            platforms = [
+                name for name, enabled in (
+                    ("youtube", getattr(cfg.youtube, "enabled", False)),
+                    ("x", getattr(cfg.x, "enabled", False)),
+                    ("instagram", getattr(cfg.instagram, "enabled", False)),
+                    ("tiktok", getattr(cfg.tiktok, "enabled", False)),
+                    ("threads", getattr(cfg.threads, "enabled", False)),
+                ) if enabled
+            ]
+        engine = engine_factory() if engine_factory else None
+        if engine is None:
+            from xpst.engine import CrossPostEngine
+
+            engine = CrossPostEngine(_load_ui_config())
+
+        soft = bool(body.get("soft"))
+        visibility = body.get("visibility") or None
+        results = []
+        for platform in platforms:
+            result = await engine.delete_post(video_id, platform, soft=soft, visibility=visibility)
+            results.append(result.to_dict())
+        ok = any(r.get("outcome") in (DeleteOutcome.DELETED.value, DeleteOutcome.SOFT_HIDDEN.value,
+                                      str(DeleteOutcome.DELETED), str(DeleteOutcome.SOFT_HIDDEN))
+                 for r in results)
+        return {"ok": ok, "video_id": video_id, "soft": soft, "results": results}
+
+
     @router.post("/preflight", dependencies=[Depends(require_api_token)])
     def api_preflight(payload: dict[str, Any]) -> dict[str, Any]:
         """Run the canonical, side-effect-free post preflight.

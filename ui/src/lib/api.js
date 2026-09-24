@@ -171,6 +171,9 @@ export const api = {
     ),
   /** Renew due/expiring tokens now (bounded retry; no-op when nothing is due). */
   refreshTokens: () => postJSON("/api/refresh-tokens", {}),
+  /** Delete/unpublish a posted video (engine's delete contract; soft=false hard-deletes). */
+  deletePost: (videoId, opts = {}) =>
+    postJSON(`/api/posts/${encodeURIComponent(videoId)}/delete`, opts),
   /** Recorded posting failures with truthful recovery metadata. */
   activity: () => getJSON("/api/activity"),
   /** Verified local library items. */
