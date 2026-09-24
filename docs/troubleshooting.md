@@ -84,3 +84,34 @@ free port.                      # exit code 3
 `xpst serve --port N` performs the same pre-flight and exits **3** with the same
 message before the scheduler starts. Choose another port with `--port` or
 `XPST_DASHBOARD_PORT`.
+
+### "Connected" means the capability actually exists
+
+Every surface reports two independent verdicts per platform: what it can be
+**read** from (source) and what it can be **sent** to (posting destination).
+They are answered by one function (`xpst.provider_truth.posting_truth`) and
+carried side by side, so no surface can promise a post the engine cannot make.
+
+| Field | Meaning |
+| --- | --- |
+| `can_post` | the posting role was verified ready by a live check |
+| `source_only` | the platform is wired up as a download source and has no usable posting destination |
+| `posting_state` / `posting_error` | the posting role's state and its exact blocker |
+| `source_ready` | the download side works (`doctor` only) |
+
+* `xpst doctor` prints a platform that is only a source as **ℹ️ source only**,
+  carries the reason as an `info` entry under `notes` (never under `issues`, so
+  it cannot make doctor exit non-zero), and reports `connected: false` for it.
+* `xpst health`, `xpst auth status`, `xpst readiness`, `POST /api/connect/<p>`,
+  `/api/health-status`, `/api/providers` and the MCP tools expose the same
+  fields, so the desktop app shows **Source only** instead of a green
+  "Connected" badge.
+* A failed probe's own error is surfaced verbatim rather than paraphrased:
+  `xpst doctor` reports Instagram's
+  `Instagram session expired or invalid. Re-run: xpst connect instagram
+  (username/password required for re-login)` instead of a generic
+  "credentials may be expired" sentence, because the exact command and the
+  requirement for a password are the parts a user has to act on.
+* `xpst connect --test --json` and `xpst onboard` list those platforms under
+  `source_only` / `ready_sources` and never count them as posting
+  destinations.
