@@ -29,8 +29,10 @@ from xpst.content import (
     PUBLISH_DESTINATIONS,
     ContentRequest,
     ContentType,
+    DestinationContentProfile,
     UnknownContentTypeError,
     UnsupportedContentTypeError,
+    _build_support,
     capability_matrix,
     coerce_content_type,
     content_profile,
@@ -43,6 +45,7 @@ from xpst.content import (
     validate_destination_content,
 )
 from xpst.platforms.base import PlatformHealth, PlatformRegistry, PlatformUploader, UploadResult
+from xpst.providers import ProviderRole
 
 # ── The capability matrix ───────────────────────────────────────────────────
 
@@ -58,8 +61,8 @@ EXPECTED_MATRIX: dict[tuple[str, str], bool] = {
     ("x", "video"): True,
     ("x", "image"): True,  # single image post (upload_image: twikit or v1.1 media + v2 tweet)
     ("x", "carousel"): True,  # published as a tweet thread, one media per tweet
-    ("x", "text"): False,
-    ("x", "thread"): False,  # declared by X, no text-thread implementation
+    ("x", "text"): True,  # post_text (280 characters, no media)
+    ("x", "thread"): False,  # no text-thread sender; multi-media posts are carousel
     ("instagram", "video"): True,
     ("instagram", "image"): True,  # feed photo (upload_image: instagrapi or the Graph image container)
     ("instagram", "carousel"): True,
@@ -73,7 +76,7 @@ EXPECTED_MATRIX: dict[tuple[str, str], bool] = {
     ("threads", "video"): True,
     ("threads", "image"): False,
     ("threads", "carousel"): False,
-    ("threads", "text"): False,  # declared by Threads, only media_type VIDEO exists
+    ("threads", "text"): True,  # post_text builds a media_type TEXT container
     ("threads", "thread"): False,
     # Facebook is Page-scoped and, in this wave, declares only feed video: the
     # photo/text publisher methods exist but are not wired to content types yet.
@@ -83,12 +86,6 @@ EXPECTED_MATRIX: dict[tuple[str, str], bool] = {
     ("facebook", "text"): False,
     ("facebook", "thread"): False,
 }
-
-#: Declared-but-unimplemented: an agent reading the manifest would try these.
-FALSE_DECLARATIONS: tuple[tuple[str, str], ...] = (
-    ("x", "thread"),
-    ("threads", "text"),
-)
 
 
 def _config() -> Any:
@@ -159,18 +156,45 @@ def test_declared_labels_match_the_provider_manifests() -> None:
         )
 
 
-@pytest.mark.parametrize(("platform", "content_type"), FALSE_DECLARATIONS)
-def test_declared_but_unimplemented_content_types_are_reported_as_false(platform: str, content_type: str) -> None:
-    profile = content_profile(platform)
-    assert profile is not None
-    resolved = coerce_content_type(content_type)
-    assert resolved in profile.declared
-    assert not profile.supports(resolved)
-    assert resolved in profile.declared_but_unimplemented
+def test_the_shipped_table_has_no_false_declarations() -> None:
+    """No destination declares a content type it cannot publish.
+
+    This is the invariant that stops an agent reading a capability list and
+    attempting an operation that cannot work; it is asserted over the whole
+    table, so re-adding a declaration without its implementation fails here.
+    """
+    for platform, profile in DESTINATION_CONTENT_PROFILES.items():
+        assert profile.declared_but_unimplemented == frozenset(), (
+            f"{platform} declares "
+            f"{sorted(item.value for item in profile.declared_but_unimplemented)} "
+            f"with no implementation"
+        )
+
+
+def test_a_false_declaration_is_refused_and_names_the_destination(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal behavior itself, on a profile that does declare a dead type.
+
+    Kept even though the shipped table has no false declarations: it is what a
+    future destination hits the moment it declares more than it can post.
+    """
+    profile = DestinationContentProfile(
+        platform="hypothetical",
+        display_name="Hypothetical",
+        role=ProviderRole.VIDEO_DESTINATION,
+        support=_build_support(("video", "text"), (ContentType.VIDEO,)),
+        declared_labels=("video", "text"),
+    )
+    monkeypatch.setitem(DESTINATION_CONTENT_PROFILES, "hypothetical", profile)
+
+    assert profile.declared_but_unimplemented == frozenset({ContentType.TEXT})
+    assert not profile.supports(ContentType.TEXT)
+    assert content_support_status("hypothetical", ContentType.TEXT) == "unsupported"
     with pytest.raises(UnsupportedContentTypeError) as excinfo:
-        validate_destination_content(platform, resolved)
+        validate_destination_content("hypothetical", ContentType.TEXT)
     message = str(excinfo.value)
-    assert platform in message, "the refusal must name the destination"
+    assert "hypothetical" in message, "the refusal must name the destination"
     assert "declared" in message, "a false declaration must be named as such"
 
 
@@ -207,7 +231,12 @@ def test_capability_matrix_is_json_serializable() -> None:
     payload = capability_matrix()
     json.dumps(payload)  # must not raise: CLI/MCP/dashboard all serialize this
     assert payload["content_types"] == [item.value for item in CONTENT_TYPES]
-    assert payload["platforms"]["threads"]["declared_but_unimplemented"] == ["text"]
+    # No destination declares a content type it cannot publish — the false
+    # declarations (threads/text, instagram/image, x/thread) are withdrawn.
+    assert payload["platforms"]["threads"]["declared_but_unimplemented"] == []
+    assert all(
+        profile["declared_but_unimplemented"] == [] for profile in payload["platforms"].values()
+    )
 
 
 # ── Vocabulary ──────────────────────────────────────────────────────────────
@@ -397,7 +426,9 @@ def test_override_content_type_is_validated_for_that_destination() -> None:
         {
             "media_paths": ["a.mp4"],
             "platforms": ["youtube", "x"],
-            "overrides": {"x": {"content_type": "text"}},
+            # x/thread is still unimplemented (x/text is implemented now — see
+            # tests/test_text_posts.py), so the override is refused for x only.
+            "overrides": {"x": {"content_type": "thread"}},
         }
     )
     issues = [issue for issue in validate_content_request(request) if issue.code == "content_type.unsupported"]
@@ -464,6 +495,17 @@ def _recording_uploader(platform: str, *, success: bool = True) -> MagicMock:
     )
     uploader.upload_carousel = AsyncMock(
         return_value=UploadResult(success=success, post_id="c1", post_url="https://example.invalid/c1", platform=platform)
+    )
+    # A double for a destination with no text path: the base class's default
+    # behaviour, spelled out so a text request still gets a destination-named
+    # refusal instead of a generic adapter error.
+    uploader.post_text = AsyncMock(
+        return_value=UploadResult(
+            success=False,
+            error=f"{platform.upper()}_TEXT_UNSUPPORTED: {platform} has no text-post path in xPST.",
+            platform=platform,
+            retryable=False,
+        )
     )
     uploader.check_health = AsyncMock(return_value=PlatformHealth(platform=platform, authenticated=True, session_valid=True))
     uploader.delete = MagicMock(return_value=True)
