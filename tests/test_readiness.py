@@ -69,11 +69,51 @@ def test_readiness_report_ready_with_local_source_and_one_destination(_which, _f
     config.x.enabled = False
     config.instagram.enabled = True
     Path(config.instagram.session_file).write_text("{}", encoding="utf-8")
+    # Threads is a real posting destination this install has not connected yet;
+    # with it enabled the report correctly carries a warning, so turn it off to
+    # keep this test about "one ready destination is enough to post".
+    config.threads.enabled = False
 
     report = build_readiness_report(config)
 
     assert report.ready is True
     assert report.summary == "Ready to post."
+
+
+@patch("xpst.readiness.check_yt_dlp", return_value="2026.1.1")
+@patch("xpst.readiness.check_ffmpeg", return_value=True)
+@patch("xpst.readiness.shutil.which", return_value="ffmpeg")
+def test_unconfigured_threads_warns_but_source_only_tiktok_does_not(_which, _ffmpeg, _ytdlp, tmp_path):
+    """A postable-but-unconnected destination warns; a source-only one informs.
+
+    The old rule keyed off the *name* (threads and tiktok were both handed
+    ``severity="info"``), so a genuinely postable platform that simply had not
+    been connected read as nothing to do, and TikTok read as an unconfigured
+    destination that a ``xpst connect tiktok`` would fix.
+    """
+    config = make_config(tmp_path)
+    create_required_dirs(tmp_path)
+    config.local.path = str(tmp_path / "downloads")
+    config.instagram.enabled = True
+    Path(config.instagram.session_file).write_text("{}", encoding="utf-8")
+    config.tiktok.enabled = True
+    config.tiktok.username = "creator"
+    config.threads.enabled = True
+
+    report = build_readiness_report(config)
+    warn_ids = {
+        check.id for check in report.checks if not check.ok and check.severity == "warning"
+    }
+    checks = {check.id: check for check in report.checks}
+
+    assert "threads_connection" in warn_ids
+    assert "tiktok_connection" not in warn_ids
+    tiktok = checks["tiktok_connection"]
+    assert tiktok.severity == "info"
+    assert tiktok.details["source_only"] is True
+    assert tiktok.details["can_post"] is False
+    assert "source only" in tiktok.message
+    assert "Connect TikTok" not in tiktok.action
 
 
 @patch("xpst.readiness.check_yt_dlp", return_value="2026.1.1")

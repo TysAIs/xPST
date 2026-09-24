@@ -60,6 +60,9 @@
   const badges = $derived(health?.badges ?? {});
 
   function statusFor(provider) {
+    // Source-only (TikTok in source mode) is not "invalid": the download side
+    // is wired up and posting is simply not a capability xPST has.
+    if (provider?.source_only) return "source_only";
     if (provider?.state === "disabled") return "disabled";
     if (provider?.state === "ready") return "success";
     if (provider?.state === "blocked_external_review") return "warning";
@@ -67,6 +70,7 @@
   }
 
   function statusLabel(provider) {
+    if (provider?.source_only) return "source only — not a posting destination";
     const state = provider?.state ?? "unknown";
     return state.replaceAll("_", " ");
   }

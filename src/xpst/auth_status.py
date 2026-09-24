@@ -531,6 +531,18 @@ PLATFORM_HEALTH_FIELDS: tuple[str, ...] = (
     "checked_at",
     "checked_at_iso",
     "check_age_seconds",
+    # Role-qualified posting truth (see xpst.provider_truth.posting_truth): a
+    # platform can be a healthy SOURCE and never accept a post, so "is this
+    # account connected" cannot be answered from ``authenticated`` alone.
+    # Carried here so every surface that renders this block (health, MCP) tells
+    # the same story as doctor/auth status without re-deriving it.
+    "posting_destination",
+    "posting_role",
+    "posting_state",
+    "posting_error",
+    "can_post",
+    "source_only",
+    "posting_note",
 )
 
 
