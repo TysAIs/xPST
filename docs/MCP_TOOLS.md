@@ -41,7 +41,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | Tool | Purpose | Mutates real accounts | Consent gate |
 |------|---------|-----------------------|--------------|
 | `xpst_run` | Check for new videos and cross-post them to configured platforms | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
-| `xpst_post` | Manually post a local video file or carousel to platforms. overrides writes a… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_post` | Post to platforms: one local video/image file, a carousel (carousel_paths), o… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_analytics` | Per-post and per-platform engagement metrics (views, likes, comments, shares)… | No | — |
 | `xpst_cross_post_analytics` | Cross-post correlation analytics (B1): one video posted to multiple platforms… | No | — |
 | `xpst_followers` | Follower counts per platform with growth history. Returns total followers acr… | No | — |
@@ -62,7 +62,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No | — |
 | `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No | — |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No | — |
-| `xpst_capabilities` | Return the canonical role-aware provider and capability contract without netw… | No | — |
+| `xpst_capabilities` | Return the canonical role-aware provider catalog AND the content contract wit… | No | — |
 | `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets… | No | — |
 | `xpst_readiness` | Return local setup readiness and actionable blockers without starting the pos… | No | — |
 | `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or acce… | No | — |
@@ -228,16 +228,28 @@ Live-run response: currently a plain confirmation string (`"Cross-post cycle com
 
 ## xpst_post
 
-Manually posts a local video file, or a carousel when `carousel_paths` is given. **Live mode posts to real accounts.**
+Posts one local video/image file, a carousel (when `carousel_paths` is given), or a
+**text post** (`content_type: "text"` with no file). `content_type` uses the canonical
+vocabulary (`video`, `image`, `carousel`, `text`, `thread`); omit it and the media decides
+(one file = video, several = carousel). **Live mode posts to real accounts.**
+
+A content type the chosen destination cannot publish is **refused before anything is
+uploaded**, with the reason in `blockers` and every requested destination reported as a
+failure — never as a success. Call `xpst_capabilities` first to see what each destination
+can really publish (`content.publish_routes`, `content.platforms.*.implemented`).
 
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| `video_path` | string | yes | — | Path to the video (or first carousel item). |
-| `caption` | string | yes | — | Caption/title for the post. The default for every destination without an entry in `overrides`. |
+| `video_path` | string | no | — | Path to the video/image file (or the first item for a carousel); omit for a text post. |
+| `caption` | string | no | `""` | Caption/title for the post. The default for every destination without an entry in `overrides`; the text itself for a text post. |
+| `text` | string | no | — | The body of a text-only post (no media). Same body as `caption`; sending `text` on its own (or with `content_type: "text"`) publishes a text post. |
+| `content_type` | string | no | inferred | `video`, `image`, `carousel`, or `text`. Omit to let the media decide (one file = video, several = carousel). Destinations with no text path refuse `text`. |
 | `overrides` | object | no | `{}` | Per-destination copy: `{"x": "short copy"}` or `{"x": {"text": "short copy"}}`. A destination not listed keeps `caption`. An override over that destination's own caption limit (X 280, Instagram 2200, TikTok 2200, Threads 500) is refused before anything is uploaded, and the response names the destination. |
 | `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`. |
 | `carousel_paths` | string[] | no | `[]` | Additional image/video paths for a carousel. |
 | `dry_run` | boolean | no | `false` | Preview without uploading. Always use first. |
+
+`caption` is required for media posts; for a text post supply `text` (or `caption`).
 
 Example call:
 
@@ -254,12 +266,43 @@ Example call:
 }
 ```
 
+Example text post (X and Threads both publish text; a text post carries no file):
+
+```json
+{
+  "name": "xpst_post",
+  "arguments": { "text": "Shipping the text-post path today.", "platforms": ["x", "threads"] }
+}
+```
+
+Example refusal (a text post to a destination with no text path):
+
+```json
+{
+  "name": "xpst_post",
+  "arguments": { "text": "hello", "platforms": ["youtube"] }
+}
+```
+
+```json
+{
+  "ok": false,
+  "uploaded": false,
+  "blocked": true,
+  "content_type": "text",
+  "blockers": ["youtube does not support text posts. Supported content types for youtube: video."],
+  "destinations": [{ "platform": "youtube", "success": false, "published": false }],
+  "content": { "effective_content_type": "text", "route": "text", "ok": false }
+}
+```
+
 Live response shape (per-platform upload results):
 
 ```json
 {
   "video_id": "demo",
   "caption": "New demo!",
+  "content_type": "video",
   "results": {
     "youtube": { "success": true, "url": "https://youtube.com/shorts/...", "error": null },
     "x": { "success": false, "url": null, "error": "..." }

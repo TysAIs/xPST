@@ -59,6 +59,31 @@ MEDIA_KIND_VIDEO = "video"
 MEDIA_KIND_IMAGE = "image"
 MEDIA_KIND_UNKNOWN = "unknown"
 
+# ── Text limits: one number per destination, in one place ───────────────────
+#: Maximum characters one post's text may carry, per destination.
+#:
+#: This is THE single source for the limit. The uploaders import it (so a sender
+#: cannot carry a different number than preflight enforces), each provider
+#: manifest reports it as ``extra["max_caption_length"]``, and
+#: ``tests/test_content_contract.py`` pins both directions — a destination whose
+#: sender or manifest disagrees with this table fails the suite rather than
+#: silently truncating a post at a number nobody else can see.
+#:
+#: A destination absent from this mapping has no *verified* limit, so nothing is
+#: checked for it: xPST does not invent a character count it has not confirmed.
+TEXT_LIMITS: dict[str, int] = {
+    "x": 280,
+    "threads": 500,
+    "instagram": 2200,
+    "tiktok": 2200,
+    "messenger": 640,
+}
+
+
+def text_limit(platform: str) -> int | None:
+    """Return the verified maximum text length for a destination, or ``None``."""
+    return TEXT_LIMITS.get(str(platform).strip().lower())
+
 
 def media_kind(path: str | Path) -> str:
     """Classify one media path as ``video``, ``image`` or ``unknown``.
@@ -409,11 +434,15 @@ class DestinationContentProfile:
 
 #: Uploader method that must exist (and be overridden) for a content type to
 #: count as implemented. Read by the contract tests, which check the real code.
+#: A *messaging* adapter (Messenger) is the exception: its text path is
+#: ``send_text`` and delivers a DM, so it is checked by name in
+#: ``test_message_destination_implements_only_its_message_path`` instead — a
+#: publishing destination implements ``post_text``.
 IMPLEMENTATION_METHODS: dict[ContentType, str] = {
     ContentType.VIDEO: "upload",
     ContentType.CAROUSEL: "upload_carousel",
     ContentType.IMAGE: "upload_image",
-    ContentType.TEXT: "send_text",
+    ContentType.TEXT: "post_text",
     ContentType.THREAD: "upload_thread",
 }
 
@@ -515,12 +544,13 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
     "x": _publish_profile(
         "x",
         "X",
-        declared_labels=("video", "thread", "image"),
-        implemented=(ContentType.VIDEO, ContentType.CAROUSEL, ContentType.IMAGE),
+        declared_labels=("video", "carousel", "text", "image"),
+        implemented=(ContentType.VIDEO, ContentType.CAROUSEL, ContentType.TEXT, ContentType.IMAGE),
         notes={
+            ContentType.TEXT: "one text post (280 characters max); no media, published via post_text",
             ContentType.THREAD: (
-                "declared as `thread`; a text-only thread has no implementation. "
-                "Multi-media posting works as a tweet thread and is reported as carousel."
+                "not declared: a text-only thread has no sender. Multi-media posting "
+                "works as a tweet thread and is reported as carousel."
             ),
             ContentType.CAROUSEL: (
                 "published as a tweet thread, one media item per tweet (upload_carousel), in the "
@@ -560,15 +590,15 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
         "threads",
         "Threads",
         declared_labels=("video", "text"),
-        implemented=(ContentType.VIDEO,),
+        implemented=(ContentType.VIDEO, ContentType.TEXT),
         notes={
+            ContentType.TEXT: "one text post (500 characters max) via the TEXT container, no media needed",
             ContentType.VIDEO: (
                 "published only from media that is already hosted at a public URL: the Threads API "
                 "retrieves the URL itself and has no binary upload, so a local file is refused before "
                 "any network call (see media_transport). xPST cannot deliver a media URL to any "
                 "uploader yet either, so no media publishing path reaches Threads today"
             ),
-            ContentType.TEXT: "declared as `text`; only media_type VIDEO exists, so there is no text path",
             ContentType.CAROUSEL: "no carousel path: a carousel request is refused by name, and nothing is stitched into a video",
         },
         # The Threads API is URL-fetch only (graph.threads.net/{user-id}/threads takes
@@ -578,9 +608,10 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
         media_transport_requirement=THREADS_PUBLIC_URL_REQUIREMENT,
         media_transport_error_code="THREADS_NEEDS_URL",
         note=(
-            "Threads is a URL-fetch destination: it publishes media it can download from a public URL, "
-            "never a local file — and xPST cannot hand it a URL yet, so media publishing is refused "
-            "today. Text posts would need no URL but have no implementation yet."
+            "Threads is a URL-fetch destination for media: it publishes what it can download from a "
+            "public URL, never a local file — and xPST cannot hand it a URL yet, so media publishing "
+            "is refused today. Text posts need no URL and are published verbatim through a "
+            "media_type TEXT container."
         ),
     ),
     "facebook": _publish_profile(
@@ -725,6 +756,36 @@ def capability_matrix() -> dict[str, Any]:
         "content_types": [item.value for item in CONTENT_TYPES],
         "publish_destinations": list(PUBLISH_DESTINATIONS),
         "platforms": {platform: profile.to_dict() for platform, profile in DESTINATION_CONTENT_PROFILES.items()},
+    }
+
+
+def capability_document() -> dict[str, Any]:
+    """THE capability document, from one source, for every surface.
+
+    The CLI (``xpst capabilities``), the MCP tool (``xpst_capabilities``) and
+    the HTTP API (``GET /api/capabilities``) all return this mapping verbatim —
+    so the list a human reads and the list an agent plans against cannot drift,
+    and there is exactly one place to add a capability.
+    """
+    matrix = capability_matrix()
+    return {
+        "contract_version": 1,
+        "content_types": matrix["content_types"],
+        "publish_destinations": matrix["publish_destinations"],
+        "platforms": matrix["platforms"],
+        # The publishing path each content type takes once its media requirement
+        # is met. A type that is absent here has no path yet, which is why it is
+        # absent from every destination's ``implemented`` list too.
+        "publish_routes": {
+            item.value: _ROUTE_BY_CONTENT_TYPE.get(item, PUBLISH_ROUTE_UNIMPLEMENTED) for item in CONTENT_TYPES
+        },
+        # No destination may declare a content type it cannot publish. This is
+        # the assertion the surfaces (and the test suite) read as data.
+        "declared_but_unimplemented": {
+            platform: sorted(item.value for item in profile.declared_but_unimplemented)
+            for platform, profile in DESTINATION_CONTENT_PROFILES.items()
+            if profile.declared_but_unimplemented
+        },
     }
 
 
@@ -932,6 +993,9 @@ class ContentRequest:
         media = tuple(str(item).strip() for item in (raw_media or []) if str(item).strip())[:MAX_MEDIA_ITEMS]
 
         raw_text = data.get("text")
+        # Whether the caller used the *typed* spelling of a body. `caption` is the
+        # legacy spelling (a caption for media) and keeps its old meaning below.
+        typed_text = raw_text is not None and str(raw_text).strip()
         if raw_text is None:
             raw_text = data.get("caption")
 
@@ -961,6 +1025,12 @@ class ContentRequest:
                 content_type = coerce_content_type(raw_content_type)
             except UnknownContentTypeError:
                 content_type = None
+        elif typed_text and not media:
+            # The typed spelling of a text post: `text` with no file and no stated
+            # type *is* a text post, not a file-less video request. Resolved here,
+            # in the one request parser, so no surface has to guess it (the legacy
+            # `caption` key keeps its old meaning: a caption for media).
+            content_type = ContentType.TEXT
 
         return cls(
             content_type=content_type,
@@ -1086,6 +1156,54 @@ def _media_issues(content_type: ContentType, media: Sequence[str]) -> list[Conte
     return issues
 
 
+def _text_issues(request: ContentRequest) -> list[ContentIssue]:
+    """Per-destination text findings: missing text, or text past the limit.
+
+    The limit comes from :data:`TEXT_LIMITS` — the same number the sender
+    imports — so a post is *refused with the destination and the limit named*
+    instead of being silently truncated to a length nobody can see. A messaging
+    destination is skipped here: it is refused for what it is, not for its size.
+    """
+    issues: list[ContentIssue] = []
+    for platform in request.platforms:
+        key = str(platform).strip().lower()
+        profile = content_profile(key)
+        if profile is not None and not profile.is_publishing:
+            continue
+        content_type = request.content_type_for(key)
+        body = request.text_for(key)
+        if content_type in _TEXT_ONLY and not body.strip():
+            issues.append(
+                ContentIssue(
+                    code="content_type.text_required",
+                    message=f"{content_type.label} for {key} need text: the request carried none.",
+                    severity="error",
+                    platform=key,
+                )
+            )
+            continue
+        limit = text_limit(key)
+        if limit is not None and len(body) > limit:
+            issues.append(
+                ContentIssue(
+                    code="content_type.text_too_long",
+                    message=(
+                        f"{key} accepts at most {limit} characters per post; this one has "
+                        f"{len(body)}. xPST will not truncate it — shorten the text"
+                        + (
+                            ""
+                            if request.override_for(key) is not None
+                            else f", or give {key} its own shorter text with a per-destination override."
+                        )
+                        + "."
+                    ),
+                    severity="error",
+                    platform=key,
+                )
+            )
+    return issues
+
+
 def validate_content_request(request: ContentRequest) -> tuple[ContentIssue, ...]:
     """Validate a request against the real capability table. Pure, no I/O.
 
@@ -1111,26 +1229,26 @@ def validate_content_request(request: ContentRequest) -> tuple[ContentIssue, ...
 
     content_type = request.effective_content_type
     issues.extend(_media_issues(content_type, request.media))
-
-    if content_type in _TEXT_ONLY and not request.text.strip():
-        issues.append(
-            ContentIssue(
-                code="content_type.text_required",
-                message=f"{content_type.label} need text: the request carried none.",
-                severity="error",
-            )
-        )
+    issues.extend(_text_issues(request))
 
     for name in request.overrides:
-        if str(name).strip().lower() not in {platform.lower() for platform in request.platforms}:
+        override_key = str(name).strip().lower()
+        if override_key not in {platform.lower() for platform in request.platforms}:
             issues.append(
                 ContentIssue(
                     code="content_type.override_destination",
                     message=(f"Per-destination overrides were given for {name}, which is not a requested destination."),
                     severity="error",
-                    platform=str(name).strip().lower(),
+                    platform=override_key,
                 )
             )
+            continue
+        # Per-destination copy is honoured on every route that can carry it: the
+        # text route reads its own text per destination (engine.post_text), and
+        # the media routes pass the per-destination caption down to each
+        # uploader (engine.post_manual / post_manual_carousel). There is
+        # therefore nothing to warn about — an override that reached this point
+        # is validated and sent.
 
     # An empty target list is the request-shape precondition owned by the
     # preflight service; there is nothing to validate a content type against.
@@ -1193,3 +1311,74 @@ UNIMPLEMENTED_PUBLISH_ERROR = (
 def blocking_issues(request: ContentRequest) -> list[ContentIssue]:
     """Just the error findings (with codes/platforms) for structured surfaces."""
     return [issue for issue in validate_content_request(request) if issue.is_error]
+
+
+# ── The surface-facing verdict and route ────────────────────────────────────
+
+
+def content_verdict(request: ContentRequest) -> dict[str, Any]:
+    """The ONE content answer every surface reports for a request.
+
+    CLI, MCP, HTTP and the dashboard all embed this mapping (or the fields it
+    carries) instead of re-deriving a content type, re-checking a destination
+    or re-writing a refusal message. Identical inputs therefore produce
+    byte-identical blockers on every surface; ``tests/test_content_surface_parity.py``
+    asserts exactly that.
+
+    Returns:
+        ``{content_type, effective_content_type, ok, blockers, warnings,
+        content_issues, overrides, route}`` — JSON-serializable, no I/O.
+    """
+    issues = validate_content_request(request)
+    return {
+        "content_type": request.content_type.value if isinstance(request.content_type, ContentType) else None,
+        "effective_content_type": request.effective_content_type.value,
+        "ok": not any(issue.is_error for issue in issues),
+        "blockers": [issue.message for issue in issues if issue.is_error],
+        "warnings": [issue.message for issue in issues if not issue.is_error],
+        "content_issues": [issue.to_dict() for issue in issues],
+        "overrides": {name: override.to_dict() for name, override in request.overrides.items()},
+        "route": publish_route(request),
+    }
+
+
+#: Publishing paths a validated request can take. ``UNIMPLEMENTED`` is a real
+#: answer, not an error: it is how a request that passes capability validation
+#: (a plugin destination, or a type no uploader implements yet) is reported
+#: instead of being uploaded "as a video just in case".
+PUBLISH_ROUTE_VIDEO = "video"
+PUBLISH_ROUTE_IMAGE = "image"
+PUBLISH_ROUTE_CAROUSEL = "carousel"
+PUBLISH_ROUTE_TEXT = "text"
+PUBLISH_ROUTE_UNIMPLEMENTED = "unimplemented"
+
+#: The publishing path a content type takes once its media requirement is met.
+#: A content type that is absent has no publishing path at all.
+_ROUTE_BY_CONTENT_TYPE: dict[ContentType, str] = {
+    ContentType.VIDEO: PUBLISH_ROUTE_VIDEO,
+    ContentType.IMAGE: PUBLISH_ROUTE_IMAGE,
+    ContentType.CAROUSEL: PUBLISH_ROUTE_CAROUSEL,
+    ContentType.TEXT: PUBLISH_ROUTE_TEXT,
+}
+
+
+def publish_route(request: ContentRequest) -> str:
+    """The ONE modality→publishing-path decision shared by every surface.
+
+    Before the content contract this decision was ``if len(paths) > 1`` inside
+    the posting service, with the CLI and MCP each re-deriving it from their own
+    argument shapes. It is now a function of the request's effective content
+    type, so all surfaces route a request the same way.
+    """
+    content_type = request.effective_content_type
+    media = [str(item) for item in request.media if str(item).strip()]
+    route = _ROUTE_BY_CONTENT_TYPE.get(content_type)
+    if route == PUBLISH_ROUTE_VIDEO and len(media) == 1:
+        return route
+    if route == PUBLISH_ROUTE_IMAGE and len(media) == 1:
+        return route
+    if route == PUBLISH_ROUTE_CAROUSEL and len(media) >= 2:
+        return route
+    if route == PUBLISH_ROUTE_TEXT and not media:
+        return route
+    return PUBLISH_ROUTE_UNIMPLEMENTED

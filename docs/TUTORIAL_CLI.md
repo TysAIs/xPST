@@ -2,7 +2,7 @@
 
 > **In-depth tutorial for every xPST CLI command with examples.**
 >
- xPST provides 37 top-level commands covering the entire cross-posting workflow.
+ xPST provides 47 top-level commands covering the entire cross-posting workflow.
 > This guide explains each one with real examples, flags, and expected output.
 
 ---
@@ -44,6 +44,7 @@
 - [Readiness & Providers](#readiness--providers)
   - [`xpst readiness`](#xpst-readiness)
   - [`xpst providers`](#xpst-providers)
+  - [`xpst capabilities`](#xpst-capabilities)
 - [Knowledge Base — `xpst kb`](#knowledge-base--xpst-kb)
 - [Surfaces](#surfaces)
   - [`xpst app`](#xpst-app)
@@ -53,7 +54,6 @@
 - [Maintenance](#maintenance)
   - [`xpst update`](#xpst-update)
   - [`xpst version`](#xpst-version)
-  - [`xpst build`](#xpst-build)
 - [Exit Codes Reference](#exit-codes-reference)
 - [JSON Output Mode for Scripting](#json-output-mode-for-scripting)
 - [Dry-Run Mode](#dry-run-mode)
@@ -413,7 +413,15 @@ Features during watch:
 
 ### `xpst post`
 
-Manually post a local video file or carousel to platforms. Use multiple `--video` flags for a carousel.
+Manually post a local video file, a carousel (multiple `--video` flags), or a text post
+(`--text "..."`, or `--caption` with `--content-type text`). `--content-type` states what
+the post is in the canonical vocabulary (`video`, `image`, `carousel`, `text`, `thread`);
+omit it and the media decides (one file = video, several = carousel). A text post carries no
+media at all: no file to encode and no ffmpeg needed.
+
+A content type the chosen destination cannot publish is refused **before anything is
+uploaded**, with the reason in `blockers` and exit code 1 — never reported as a success. Run
+`xpst capabilities` to see what each destination can actually publish.
 
 ```bash
 # Single video to all platforms
@@ -435,6 +443,15 @@ xpst post -v ./my-video.mp4 -c "Test" --dry-run
 # Post unlisted/private instead of public (YouTube only)
 xpst post -v ./my-video.mp4 -c "Test" -p youtube --visibility unlisted
 xpst post -v ./my-video.mp4 -c "Test" -p youtube --visibility private
+
+# State the modality explicitly
+xpst post -v ./clip.mp4 -c "Test" --content-type video -p youtube
+
+# Text post: no media pipeline, one API call per destination
+xpst post --text "Shipping the text-post path today." -p x,threads
+
+# A text post to a destination with no text path is refused, and it says why
+xpst post --text "hello world" -p youtube
 
 # JSON output
 xpst post -v ./my-video.mp4 -c "Test" --json
@@ -1044,6 +1061,44 @@ Destinations (where xPST posts):
 
 ---
 
+### `xpst capabilities`
+
+Show what xPST can publish, per destination: the content types each destination declares
+and the ones it can actually publish. This is the document a human reads and the one an
+agent plans against — it comes from a single source (`xpst.content`), the same one served
+by the MCP tool `xpst_capabilities` and `GET /api/capabilities`.
+
+A destination never declares a content type it cannot post, so anything listed under
+`implemented` has real code behind it (and the test suite fails if that stops being true).
+
+```bash
+xpst capabilities
+xpst capabilities --json
+```
+
+**Example:**
+
+```bash
+$ xpst capabilities
+```
+
+```
+What xPST can publish
+Vocabulary: video, image, carousel, text, thread
+
+| Destination            | Declared | Implemented | Notes |
+|------------------------|----------|-------------|-------|
+| YouTube Shorts (youtube) | video  | video       | always forced to Shorts … |
+| X (x)                  | video, carousel, text | video, carousel, text | carousel is a tweet thread, one media per tweet; text is one post (280 chars, no media) |
+| Instagram Reels (instagram) | video, carousel | video, carousel | native album upload (2-10 items) |
+| Threads (threads)      | video, text | video, text | video needs a public URL; text is a media_type TEXT container (500 chars) |
+```
+
+The JSON form also carries `publish_routes` (the publishing path per content type) and
+`declared_but_unimplemented` (empty — any entry there would be a false capability).
+
+---
+
 ## Knowledge Base — `xpst kb`
 
 The knowledge base ingests your videos, transcribes them, extracts cited knowledge "nuggets," embeds them, and stores them locally for semantic search.
@@ -1129,18 +1184,19 @@ xpst kb migrate-store
 
 ### `xpst app`
 
-Launch the native desktop app (PySide6/QML). It appears in your dock/taskbar.
+Launch the installed desktop app (the Tauri shell). It appears in your dock/taskbar.
 
 ```bash
 xpst app
-xpst app --no-splash     # skip the splash screen
 ```
 
-If PySide6 is not installed, `xpst app` prints an install hint and exits
-gracefully:
+`xpst app` locates the installed desktop app (the Tauri shell). It is not a
+Python module, so it is located on disk (`/Applications/xPST.app` or
+`~/Applications/xPST.app` on macOS, the installed executable elsewhere); when no
+build is installed it prints where to get one and exits gracefully:
 
 ```bash
-Desktop app not installed. Run: pip install xpst[desktop]
+Install a published bundle from https://github.com/TysAIs/xPST/releases
 ```
 
 See [TUTORIAL_APP.md](TUTORIAL_APP.md) for the full desktop app walkthrough.
@@ -1235,21 +1291,6 @@ xpst version --json
 
 ---
 
-### `xpst build`
-
-Build a standalone executable using PyInstaller.
-
-```bash
-xpst build                    # build for current OS
-xpst build --target macos      # build for macOS
-xpst build --target windows     # cross-compile for Windows (via Docker)
-xpst build --target linux       # build for Linux
-xpst build --spec-file ./custom.spec
-```
-
-Cross-compilation requires Docker. The command auto-detects the appropriate `.spec` file (`build_macos.spec`, `build_windows.spec`, `build_linux.spec`).
-
----
 
 ## Exit Codes Reference
 

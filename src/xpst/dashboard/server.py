@@ -295,9 +295,24 @@ def _create_app(config_dir: str = "~/.xpst", *, ui_token: str | None = None) -> 
         error_description = query.get("error_description", [None])[0]
 
         if code or error:
-            from xpst.utils.oauth_local import receive_external_code
+            # An in-app sign-in session (the UI's Sign in control) owns this
+            # callback when its expected state matches — it redeems the code on
+            # its own thread of control. Only when no session is waiting does
+            # the code stay in the legacy FIFO slot for a console
+            # `xpst connect` consumer to pick up.
+            consumed = False
+            try:
+                from xpst.auth_flow import get_auth_flow_manager
 
-            receive_external_code(code=code, state=state, error=error, error_description=error_description)
+                delivery = get_auth_flow_manager(str(Path(config_dir).expanduser())).deliver(url)
+                consumed = bool(delivery.get("delivered"))
+            except Exception as exc:  # noqa: BLE001 - deep-link intake must not fail the route
+                logger.debug("In-app sign-in delivery skipped: %s", exc)
+
+            if not consumed:
+                from xpst.utils.oauth_local import receive_external_code
+
+                receive_external_code(code=code, state=state, error=error, error_description=error_description)
         logger.info(
             "OAUTH_CALLBACK_RECEIVED source=%s code_present=%s state=%s error=%s",
             source,
@@ -817,7 +832,7 @@ def start_dashboard(
 
     The dashboard is self-contained pure FastAPI (the ``dashboard`` extra is a
     no-op since the NiceGUI fallback UI was removed). For a GUI, use
-    ``xpst app`` for the native PySide6 desktop application.
+    ``xpst app`` for the native desktop shell.
 
     Args:
         port: HTTP port to listen on. Defaults to 8080.
