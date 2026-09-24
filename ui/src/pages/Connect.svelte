@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { api } from "../lib/api.js";
+  import { api, errorMessage } from "../lib/api.js";
   import { destinationRows } from "../lib/firstRun.js";
   import Card from "../lib/components/Card.svelte";
   import EmptyState from "../lib/components/EmptyState.svelte";
@@ -28,7 +28,7 @@
       if (!activePlatform && first) activePlatform = first.name;
       if (activePlatform) await verify(activePlatform);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
+      error = errorMessage(cause);
       state = "error";
     }
   }
@@ -46,7 +46,7 @@
       report = await api.connect(platform, { dry_run: true, verify: true });
     } catch (cause) {
       report = null;
-      actionError = cause instanceof Error ? cause.message : String(cause);
+      actionError = errorMessage(cause);
     } finally {
       verifying = false;
     }
@@ -60,7 +60,7 @@
       report = await api.connect(platform, { dry_run: false, enable: true, verify: true });
       catalog = await api.providers();
     } catch (cause) {
-      actionError = cause instanceof Error ? cause.message : String(cause);
+      actionError = errorMessage(cause);
     } finally {
       enabling = false;
     }

@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { api } from "../lib/api.js";
+  import { api, errorMessage } from "../lib/api.js";
   import Card from "../lib/components/Card.svelte";
   import EmptyState from "../lib/components/EmptyState.svelte";
   import ErrorState from "../lib/components/ErrorState.svelte";
@@ -33,7 +33,7 @@
       health = nextHealth;
       state = "ready";
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
+      error = errorMessage(cause);
       state = "error";
     }
   }
@@ -49,7 +49,7 @@
         : "No token was due for refresh.";
       await load();
     } catch (cause) {
-      refreshNote = cause instanceof Error ? cause.message : String(cause);
+      refreshNote = errorMessage(cause);
     } finally {
       refreshing = false;
     }
