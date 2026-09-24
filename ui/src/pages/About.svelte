@@ -2,13 +2,17 @@
   import { onMount } from "svelte";
   import Card from "../lib/components/Card.svelte";
 
-  let version = $state("1.1.0");
-  let health = $state(null);
+  // No hardcoded fallback: an honest "unknown" beats a version that is always
+  // stale. The engine reports the running build's version from its own package
+  // metadata (engine_version on /api/health-status).
+  let version = $state("unknown");
+  let engineStatus = $state(null);
 
   onMount(async () => {
     try {
-      health = await fetch("/health", { headers: { Accept: "application/json" } }).then((res) => res.json());
-      version = health?.version ?? version;
+      const hs = await fetch("/api/health-status", { headers: { Accept: "application/json" } }).then((res) => res.json());
+      version = hs?.engine_version ?? version;
+      engineStatus = hs?.status ?? null;
     } catch {
       // About remains useful when the local engine is unavailable.
     }
@@ -26,7 +30,7 @@
   <Card title="xPST" description="Cross-posting control plane">
     <dl class="xpst-about-list">
       <div><dt>Version</dt><dd>{version}</dd></div>
-      <div><dt>Engine</dt><dd>{health?.status ?? "Not connected"}</dd></div>
+      <div><dt>Engine</dt><dd>{engineStatus ?? "Not connected"}</dd></div>
       <div><dt>Privacy</dt><dd>No telemetry by default; credentials stay local and encrypted.</dd></div>
       <div><dt>License</dt><dd>MIT OR Apache-2.0</dd></div>
     </dl>
