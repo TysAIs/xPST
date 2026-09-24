@@ -330,6 +330,12 @@
           </label>
         {/each}
       </fieldset>
+      {#if destinations.some((row) => row.sourceOnly)}
+        <p class="xpst-card__description">
+          Source only (never a posting destination): {destinations.filter((row) => row.sourceOnly).map((row) => row.displayName).join(", ")}.
+          xPST downloads from {destinations.filter((row) => row.sourceOnly).length === 1 ? "it" : "them"} and cannot post to {destinations.filter((row) => row.sourceOnly).length === 1 ? "it" : "them"}.
+        </p>
+      {/if}
       {#if summary.ready === 0}
         <p class="xpst-card__description">
           No destination is ready, so posting is refused by the engine. <a class="xpst-inline-link" href="#/connect">Connect a destination</a>.
