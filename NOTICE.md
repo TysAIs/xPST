@@ -38,17 +38,6 @@ xPST's dual MIT/Apache-2.0 license:
 
 These are installed only when explicitly requested (`pip install xpst[extra]`):
 
-### `desktop` extra — Desktop GUI
-
-| Package | License | Notes |
-|---------|---------|-------|
-| PySide6 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only | Qt bindings. **Users choose LGPL** at runtime — no copyleft obligation to xPST itself. The LGPL option allows linking without infecting xPST's MIT/Apache license. |
-
-> **LGPL Compliance:** PySide6 is used as a library via the LGPL-3.0 option.
-> xPST itself remains MIT/Apache-2.0 dual-licensed. Users who distribute xPST
-> with PySide6 must comply with LGPL-3.0 requirements (provide object files,
-> include LGPL notice). See: https://www.qt.io/licensing/
-
 ### `anti-ban` extra — TLS fingerprint hardening
 
 | Package | License | Purpose |
@@ -112,7 +101,6 @@ permissive licenses:
 
 | Package | License | Pulled in by |
 |---------|---------|-------------|
-| CairoSVG | LGPL-3.0-or-later | PySide6 (optional rendering) |
 | chardet | LGPL-2.1-or-later | Various (charset detection) |
 | docutils | BSD OR GPL OR Public Domain | Sphinx/documentation tools |
 

@@ -1,83 +1,95 @@
 # xPST Desktop App Tutorial
 
-> **Complete walkthrough** of the xPST PySide6/QML desktop application — from first launch to advanced workflows.
+> Walkthrough of the xPST desktop app — the **Tauri 2 shell** (`src-tauri/`)
+> that opens a native window on the local dashboard UI and runs the Python
+> engine as its bundled sidecar.
 
 ---
 
 ## Table of Contents
 
 1. [Installation](#installation)
-2. [First Launch](#first-launch)
-3. [Connecting Platforms](#connecting-platforms)
-4. [Composing & Posting](#composing--posting)
-5. [Managing Content](#managing-content)
-6. [Viewing Analytics](#viewing-analytics)
-7. [Scheduling Posts](#scheduling-posts)
-8. [Settings & Customization](#settings--customization)
-9. [Keyboard Shortcuts](#keyboard-shortcuts)
-10. [Troubleshooting](#troubleshooting)
+2. [Launching](#launching)
+3. [The app window](#the-app-window)
+4. [Connecting Platforms](#connecting-platforms)
+5. [Composing & Posting](#composing--posting)
+6. [The dashboard HTTP surface](#the-dashboard-http-surface)
+7. [Running from a checkout](#running-from-a-checkout)
+8. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Installation
 
+### Download a published installer
+
+Open the [GitHub Releases page](https://github.com/TysAIs/xPST/releases), expand
+**Assets**, and download the installer for your OS:
+
+| Operating system | Asset |
+|---|---|
+| macOS (arm64) | the `.dmg` |
+| Windows | the NSIS setup `.exe` (or `.msi`) |
+| Linux | `.AppImage` or `.deb` |
+
+Verify the release's checksum manifest before opening an artifact, and read
+[INSTALL.md](INSTALL.md) for the current signing/notarization status and the
+per-platform uninstall steps.
+
 ### Prerequisites
 
-- Python 3.10+
-- FFmpeg installed and on your PATH (`brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux)
-- Platform-specific requirements (see [Connecting Platforms](#connecting-platforms))
+- **FFmpeg** is not bundled: the engine uses a system `ffmpeg`, or downloads a
+  pinned, checksum-verified static build on first use (`xpst media fetch`).
+- A Python installation is **not** required — the engine ships inside the app as
+  a frozen sidecar.
 
-### Install with Desktop Support
+---
 
-```bash
-pip install 'xpst[desktop]'
-```
+## Launching
 
-### Launch the App
+From the app icon, or from the CLI when the app is installed:
 
 ```bash
 xpst app
 ```
 
-Or from source:
-
-```bash
-cd xPST
-source .venv/bin/activate
-python -m xpst app
-```
+`xpst app` locates the installed shell (`/Applications/xPST.app` and
+`~/Applications/xPST.app` on macOS; the installed executable on Windows/Linux),
+launches it, and exits. If no build is installed it prints where to get one
+instead of raising a traceback.
 
 ---
 
-## First Launch
+## The app window
 
-When you first open xPST, you'll see the **Dashboard** page. It will show empty states because no platforms are connected and no content has been posted yet.
+The shell is a window around the same web UI the browser serves: navigation
+lives in the sidebar and every section is a dashboard route.
 
-The sidebar on the left provides navigation to all 8 pages:
+| Section | What it does |
+|---------|--------------|
+| **Dashboard** | Overview of posted content, per-platform health, and quota status |
+| **Setup** | First-run wizard: connect accounts and complete onboarding |
+| **Connect** | Connect and manage configured social accounts; live status is in the [capability table](INSTALL.md#capability-truth-table) |
+| **Compose** | Pick a video file, write a caption, choose destinations, and submit |
+| **Preflight** | Check a media file against each destination's specs before uploading |
+| **Last post** | Per-destination results of the most recent post |
+| **Analytics** | Cross-platform engagement metrics with trend history |
+| **Videos** | Per-video performance detail |
+| **Accounts** | Account and credential state per platform |
+| **Schedule** | Create, view, and remove upcoming and recurring posts |
+| **Activity** | Failed posts and the dead-letter queue |
+| **Library** | Browse the downloaded content library |
+| **About** | Version info, dependency versions, links to docs and source |
+| **Settings** | Encoding profiles, rate limits, notifications, and preferences |
 
-| Page | Icon | Purpose |
-|------|------|---------|
-| **Dashboard** | Grid icon | Overview of posts, reach, and platform health |
-| **Compose** | Edit icon | Create and post new content from local files |
-| **Content** | Film icon | Browse and manage posted content |
-| **Analytics** | Chart icon | Cross-platform performance metrics |
-| **Connect** | Link icon | Connect social media platforms |
-| **Schedule** | Calendar icon | Schedule posts for future publishing |
-| **Settings** | Gear icon | Configure preferences, notifications, MCP |
-| **About** | Info icon | Version info, links, licenses |
-
-### First-Run Setup
-
-1. **Go to Connect** — Click "Connect" in the sidebar
-2. **Follow the setup checklist** — The page shows a readiness checklist with blocking items
-3. **Set your local content path** — Tell xPST where your video files live
-4. **Connect at least one platform** — See [Connecting Platforms](#connecting-platforms) below
+Writes from the shell are authorised automatically; see
+[Authentication inside the shell](#authentication-inside-the-shell).
 
 ---
 
 ## Connecting Platforms
 
-The **Connect** page has detailed setup guides for each platform. Here's a summary:
+Setup lives on the **Connect** and **Setup** sections. Here is a summary:
 
 ### YouTube (OAuth 2.0)
 
@@ -86,7 +98,7 @@ The **Connect** page has detailed setup guides for each platform. Here's a summa
 3. Create OAuth 2.0 credentials (Desktop app type)
 4. Download the `client_secret_*.json` file
 5. Place it at `~/.xpst/credentials/youtube_client_secret.json`
-6. Click **Connect YouTube** in the app — a browser window opens for OAuth consent
+6. Click **Connect YouTube** — a browser window opens for OAuth consent
 7. Authorize the app — your token is stored encrypted locally
 
 > **Note:** 2FA/2SV on your Google account works fine — the OAuth flow handles it. Default quota: 10,000 units/day.
@@ -100,7 +112,7 @@ The **primary** Instagram auth is the official Meta Graph API (`auth_mode: graph
 
 **Session fallback:**
 1. Log into [instagram.com](https://instagram.com) in your browser first
-2. Enter your Instagram username and password in the Connect page fields
+2. Enter your Instagram username and password in the Connect fields
 3. Click **Connect Instagram**
 4. Credentials are stored encrypted in `~/.xpst/credentials/`
 
@@ -111,8 +123,8 @@ The **primary** Instagram auth is the official Meta Graph API (`auth_mode: graph
 1. Log into [x.com](https://x.com) in your browser
 2. Export cookies using a browser extension (e.g., EditThisCookie) or DevTools
 3. Place cookies JSON at `~/.xpst/credentials/x_cookies.json`
-4. Or click **Paste Cookies** in the app and paste the JSON
-5. Alternatively, run `xpst auth x` in terminal for guided setup
+4. Or paste the JSON into the Connect fields
+5. Alternatively, run `xpst auth x` in a terminal for guided setup
 
 > **Note:** X destination uses twikit cookies (community/unofficial mode). Max caption 280 chars, video up to 140s. Carousels post as threads.
 
@@ -123,7 +135,7 @@ content to cross-post elsewhere. Destination publishing awaits external
 TikTok developer review and approved app credentials.
 
 1. Log into [tiktok.com](https://tiktok.com) in your browser to enable cookie-based source downloads (HD / no-watermark)
-2. Export cookies to `~/.xpst/credentials/tiktok_cookies.txt`, or run `xpst auth tiktok` in terminal
+2. Export cookies to `~/.xpst/credentials/tiktok_cookies.txt`, or run `xpst auth tiktok` in a terminal
 3. Do not configure TikTok as a destination until the external review is complete
 
 ### Threads (currently disabled)
@@ -139,161 +151,87 @@ as proof that posting is ready.
 
 ## Composing & Posting
 
-The **Compose** page is where you create new posts from local video files.
+Posting runs through the **Compose** section (preview and submit) and the
+**Preflight** section (checks a media file against each destination's specs
+before the upload is attempted).
 
-### Step-by-Step
+1. **Choose a video** — pick a local file
+2. **Write a caption** — the character budget per destination is enforced
+3. **Select destinations** — only configured, currently available ones can be chosen (YouTube, Instagram, and X are live-verified; TikTok is source-only; Threads is disabled)
+4. **Submit** — the engine encodes once per destination profile and fans the uploads out
 
-1. **Select a video folder** — Click "Browse" to pick a folder containing your videos
-2. **Choose a video** — The grid shows thumbnails of all video files in the folder
-3. **Write a caption** — Enter your post caption in the text area (character count shown)
-4. **Select platforms** — Check the boxes for platforms that are configured and currently available (YouTube, Instagram, and X are live-verified; TikTok is source-only; Threads is disabled)
-5. **Click "Post Now"** — The upload begins for the selected available destinations
+Progress and per-destination results land on **Last post**; failures are
+tracked in the dead-letter queue on **Activity** and can be retried with
+`xpst failures retry` or `xpst backfill`.
 
-### Upload Progress
+### Authentication inside the shell
 
-- Per-platform progress bars show upload status (0% → 100%)
-- The progress overlay appears at the bottom of the window
-- Each platform shows success/failure when complete
+Mutating routes require the xPST API token. The shell never reads the stored
+credential: it mints a **per-launch** token, passes it to the engine as
+`XPST_UI_TOKEN`, and opens its webview at
+`http://127.0.0.1:<port>/#xpst_token=<token>`. The UI reads the fragment, sends
+`X-API-Token` on writes, and strips the fragment from the URL immediately.
 
-### Post Results
+Consequences worth knowing:
 
-After posting, you'll see:
-- ✅ **Success** — Post URL is displayed
-- ❌ **Failure** — Error message is shown
-- ⚠️ **Partial** — Some platforms succeeded, others failed
-
----
-
-## Managing Content
-
-The **Content** page shows all your posted videos.
-
-### Features
-
-- **Grid view** of all posted content with thumbnails
-- **Filter** by platform, date, or status
-- **Search** by caption or video ID
-- **Click any post** to view details in the DetailPanel
-- **Delete** posts from specific platforms
-- **Edit** captions for existing posts
-- **Checkbox** selection for bulk operations
-
-### Detail Panel
-
-Clicking a post opens the **Detail Panel** which shows:
-- Video preview/thumbnail
-- Full caption and metadata
-- Per-platform tabs with analytics (views, likes, comments, shares)
-- Post URLs (clickable)
-- Delete button per platform
+- The token is regenerated on every launch; nothing is persisted for the shell.
+- A plain browser session is *not* authenticated for writes. Print the stored
+  token with `xpst auth api-token` when you need to drive those routes yourself.
+- The engine binds loopback only. Keep it that way: an API token on a routable
+  interface is a local-process-to-network escalation.
 
 ---
 
-## Viewing Analytics
+## The dashboard HTTP surface
 
-The **Analytics** page provides cross-platform performance metrics.
+Every page in the shell is a route served by the engine. The full table —
+endpoints, auth requirements, and response shapes — is in
+[DASHBOARD.md](DASHBOARD.md). The same UI is available in a browser with:
 
-### Features
-
-- **Platform selector** — View all platforms or filter to one
-- **Date range picker** — Filter by week, month, or all time
-- **Compare mode** — Toggle to compare current vs. previous period
-- **Metric cards** — Total views, likes, comments, shares
-- **Bar charts** — Per-platform breakdown of each metric
-- **Trending** — Shows which platforms are growing
-
-> **Note:** Analytics data comes from platform APIs. Some platforms may have delayed metrics.
+```bash
+xpst dashboard                # http://127.0.0.1:8080
+```
 
 ---
 
-## Scheduling Posts
+## Running from a checkout
 
-The **Schedule** page lets you plan future posts.
+Developers build the two halves themselves. Full instructions (prerequisites,
+bundle contents, CI lanes, size budgets) are in [PACKAGING.md](PACKAGING.md):
 
-### Creating a Schedule
+```bash
+python -m pip install -e ".[full]" pyinstaller
+cd ui && npm ci && npm run build && cd ..
+PYTHON="$(command -v python3 || command -v python)" scripts/build-engine.sh
+export PATH="$HOME/.cargo/bin:$PATH"
+cd src-tauri && cargo tauri build --bundles app
+```
 
-1. **Select a video** — Pick from your local content
-2. **Write a caption** — Enter the post caption
-3. **Choose platforms** — Select which platforms to post to
-4. **Set date and time** — When the post should go live
-5. **Set recurrence** — One-time, daily, or weekly
-6. **Click "Schedule"** — The post is added to the schedule
-
-### Managing Scheduled Posts
-
-- View all scheduled posts in a list
-- See countdown to next scheduled post
-- Delete scheduled posts
-- Calendar view shows posts on their scheduled dates
-
-> **Note:** The scheduler runs while xPST is open. For 24/7 scheduling, use `xpst watch` in terminal.
-
----
-
-## Settings & Customization
-
-The **Settings** page has several sections:
-
-### General
-
-- **Dark mode** toggle
-- **Language** selector (supports i18n)
-- **Local content path** — Default folder for video files
-
-### Notifications
-
-- **Upload completion** — Notify when a post finishes uploading
-- **Upload errors** — Notify when a post fails
-- **Rate limit warnings** — Notify when approaching platform limits
-
-### Rate Limits
-
-- **Posts per window** — Max posts per time period
-- **Window duration** — Time period in minutes
-- Per-platform rate limit overrides
-
-### MCP Server
-
-- **Start/Stop** the MCP server from the UI
-- Port configuration
-- Read-only mode toggle
-- Confirmation requirement for mutating tools
-
-### Keyboard Shortcuts
-
-- View and customize all keyboard shortcuts
-- Shortcuts persist across sessions
-
----
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+R` | Refresh data |
-| `Ctrl+Q` | Quit |
-| `Ctrl+,` | Open Settings |
-| `Ctrl+D` | Go to Dashboard |
-| `Ctrl+C` | Go to Compose |
-| `Ctrl+N` | Go to Content |
-| `Ctrl+A` | Go to Analytics |
-| `Ctrl+S` | Go to Schedule |
-
-> Shortcuts are customizable in Settings → Keyboard Shortcuts.
+Cross-compilation is not supported: the sidecar is a PyInstaller **host-OS**
+build, so each platform is packaged on its own machine — which is exactly what
+`.github/workflows/tauri-release.yml` does per tag.
 
 ---
 
 ## Troubleshooting
 
-### App won't launch
+### The window opens and closes immediately
 
-```bash
-# Check PySide6 is installed
-pip show PySide6
+The shell holds a single-instance lock at `<temp dir>/xpst-shell-single-instance.lock`.
+A stale copy of the app (for example a leftover test build) keeps the lock alive
+and every fresh launch exits at once. Quit the other copy — `pgrep -fl xPST` —
+and relaunch.
 
-# Try launching from terminal for error output
-python -m xpst app --no-splash
-```
+### `xpst app` says "xPST desktop app not found."
+
+No shell build was found on disk. Install a published bundle from the
+[Releases page](https://github.com/TysAIs/xPST/releases), or build one from a
+checkout (see [PACKAGING.md](PACKAGING.md)).
+
+### A write is rejected
+
+Writes need the API token. In the shell this is automatic; in a browser, set
+`XPST_API_TOKEN` or sign in with the dashboard credentials.
 
 ### FFmpeg not found
 
@@ -304,8 +242,11 @@ brew install ffmpeg
 # Linux
 sudo apt install ffmpeg
 
-# Or set the path explicitly
+# Or point xPST at an existing build
 export XPST_FFMPEG_PATH=/path/to/ffmpeg
+
+xpst media status   # which ffmpeg/ffprobe xPST will use, and from where
+xpst media fetch    # download a verified static build into ~/.xpst/bin
 ```
 
 ### Platform connection fails
@@ -316,10 +257,11 @@ export XPST_FFMPEG_PATH=/path/to/ffmpeg
 - **TikTok**: For source downloads, cookies expire — re-export periodically. For posting, ensure the Content Posting API OAuth tokens are valid
 - **Threads**: Verify the Meta Threads API OAuth credentials are valid
 
-### Thumbnails not showing
+### Nothing posts
 
-- Ensure FFmpeg is installed (used for frame extraction)
-- Check that video files are accessible (not on an unmounted drive)
+Check `xpst health --json` and the capability truth table in
+[INSTALL.md](INSTALL.md#capability-truth-table) — several integrations are
+source-only or disabled pending platform review.
 
 ### State corruption
 
@@ -327,23 +269,20 @@ If the app behaves unexpectedly:
 
 ```bash
 # Back up state
-xpst state export --output ~/xpst-backup.json
+xpst state export ~/xpst-backup.json
 
 # Reset state
 rm ~/.xpst/state.json
 
-# Restart app
+# Restart the app
 xpst app
 ```
 
 ### Crash recovery
 
-If the app crashes mid-upload, xPST will:
-1. Detect the incomplete upload on next launch
-2. Show a crash recovery dialog
-3. Offer to retry or skip the failed posts
-
-This prevents double-posting — already-uploaded posts are tracked in state.
+If the app crashes mid-upload, xPST detects the incomplete upload on the next
+launch and can retry or skip the failed posts. Already-uploaded posts are
+tracked in state, so a retry cannot double-post.
 
 ---
 
@@ -351,5 +290,6 @@ This prevents double-posting — already-uploaded posts are tracked in state.
 
 - 📖 [CLI Tutorial](TUTORIAL_CLI.md)
 - 🤖 [MCP Tutorial](TUTORIAL_MCP.md)
+- 📦 [Packaging the desktop app](PACKAGING.md)
 - 🐛 [Report Issues](https://github.com/TysAIs/xPST/issues)
 - 📚 [Documentation](https://github.com/TysAIs/xPST#readme)

@@ -105,11 +105,12 @@ token + HMAC signature).
 | `GET /health` | — | Aggregated platform health check: one entry per configured platform with `ok`, `detail`, and latency. |
 | `GET /metrics` | — | Prometheus text-format metrics (posting counters, upload durations, queue depths, health status). |
 | `GET /state` | Basic | Current xPST state summary: version, per-platform status, queued and completed post counts, dead-letter queue size. |
-| `GET /api/*` | Basic when configured | Web-UI JSON API (summary, videos, onboarding state, media, library, activity, schedules, providers, settings). Read-only. |
-| `POST /api/post` | API token | Plan (`dry_run: true`) or run a post through the real engine path. |
+| `GET /api/*` | Basic when configured | Web-UI JSON API (summary, videos, onboarding state, media, library, activity, schedules, providers, settings, capabilities). Read-only. |
+| `POST /api/post` | API token | Plan (`dry_run: true`) or run a post through the real engine path. Accepts `content_type` (`video`/`image`/`carousel`/`text`/`thread`); a type the destination cannot publish is refused with `409` before anything is uploaded. |
 | `POST /api/connect/{platform}` | API token | Inspect / enable / verify one destination platform. |
 | `POST /api/onboarding`, `POST /api/onboarding/complete` | API token | Persist the first-run choices and the "wizard finished" flag. |
-| `POST /api/preflight` | API token | Local, no-network post preflight. |
+| `POST /api/preflight` | API token | Local, no-network post preflight. Accepts `content_type` and reports the same `content` verdict the CLI and MCP return. |
+| `GET /api/capabilities` | Basic when configured | The canonical capability contract (one source: `xpst.content`): per destination, what it declares vs what it can publish, plus the publishing route per content type. |
 | `GET /bio` | — | Public link-in-bio page (meant to be shared). |
 | `GET/POST /bio/edit` | Basic or `?token=` | Admin editor for the link-in-bio page. |
 
@@ -181,6 +182,33 @@ xpst_upload_seconds_bucket{le="30.0"} 1
 xpst_health_up{platform="youtube"} 1
 ```
 
+## Durable drafts and the stale-plan gate
+
+The compose screen keeps its work in the engine, not in the page: a draft survives
+navigating away, closing the window, or restarting xPST. Drafts are local-only
+(`<config_dir>/drafts.json`, mode `0600`) and hold content only — media paths, the caption,
+destination names, and the preflight plan. No credential material is ever copied into one.
+
+| Method & Path | Auth | Description |
+|---------------|------|-------------|
+| `GET /api/drafts` | Basic when configured | Stored drafts, newest first, each revalidated against this machine right now. |
+| `POST /api/drafts` | API token | Create or update a draft (`draft_id`, `media_paths`, `caption`, `platforms`). Returns the stored draft and its verdict. An unknown `draft_id` creates a fresh draft and reports `recreated: true` rather than losing what was typed. |
+| `GET /api/drafts/{draft_id}` | Basic when configured | One draft plus a fresh verdict — the revalidation performed when a screen resumes. |
+| `DELETE /api/drafts/{draft_id}` | API token | Discard a draft. |
+
+A draft records **what it was validated against**: the local facts the verdict depended on
+(media existence/size/mtime, per-destination enabled flag and local auth readiness) plus a
+fingerprint over them. Revalidating recomputes those facts and diffs them, so `stale` always
+arrives with machine-readable `reasons` (`MEDIA_MISSING`, `MEDIA_CHANGED`, `DESTINATION_NOT_READY`,
+`DESTINATION_DISABLED`, `AUTH_CHANGED`, `CONTENT_CHANGED`, …).
+
+A plan whose destination, auth, media, or content state changed is **refused on the post path**:
+`POST /api/preflight` and `POST /api/post` with a `dry_run` record the plan, and a later
+`POST /api/post` bound to that `draft_id` returns `409` with `stale: true` and `stale_reasons`
+unless the caller passes `confirm_stale: true`. Re-confirmation re-stamps the draft and is
+recorded (`reconfirmations`) so the acceptance is auditable. A post that actually runs closes the
+draft out with `status: "posted"` and the engine's `video_id`.
+
 ## Messenger Webhook (opt-in)
 
 When `accounts.messenger.enabled: true`, the dashboard additionally mounts
@@ -204,7 +232,7 @@ server (`xpst_analytics`, `xpst_cross_post_analytics`) share this data.
 
 ## Related
 
-- [TUTORIAL_APP.md](TUTORIAL_APP.md) — the native PySide6/QML desktop app
+- [TUTORIAL_APP.md](TUTORIAL_APP.md) — the desktop app (Tauri shell)
 - [TUTORIAL_CLI.md](TUTORIAL_CLI.md) — the CLI surface
 - [TUTORIAL_MCP.md](TUTORIAL_MCP.md) — the MCP surface
 - [api.md](api.md) — Python API reference (engine, use-cases, providers)

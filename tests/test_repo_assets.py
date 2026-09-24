@@ -8,8 +8,6 @@ from urllib.parse import unquote
 
 import yaml
 
-from scripts.verify_desktop_package import _check_qt_lgpl_notice, verify_desktop_package
-
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL_MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\((?!https?://)([^)]+)\)")
 LOCAL_MARKDOWN_LINK = re.compile(
@@ -24,10 +22,10 @@ SKIPPED_MARKDOWN_DIRS = {
     "build",
     "dist",
     # Tauri build outputs (gitignored): the PyInstaller onedir engine ships
-    # third-party dist-info license markdown (NOTICES_QT_LGPL.md) whose
-    # relative links are unresolvable inside _internal/. Those files are
-    # artifacts, never reviewed content — checking them makes this test
-    # pass on a clean checkout but fail after `scripts/build-engine.sh`.
+    # third-party dist-info license markdown whose relative links are
+    # unresolvable inside _internal/. Those files are artifacts, never reviewed
+    # content — checking them makes this test pass on a clean checkout but fail
+    # after `scripts/build-engine.sh`.
     "target",
     "binaries",
     # npm installs (gitignored): third-party package READMEs carry relative
@@ -144,12 +142,11 @@ def test_release_workflow_preserves_required_ship_gates():
 
     assert workflow["permissions"]["id-token"] == "write"
     assert workflow["permissions"]["attestations"] == "write"
-    assert workflow["jobs"]["github-release"]["needs"] == ["build-python", "build-windows", "build-linux", "build-macos"]
-
-    # W3-2: the Linux desktop release lane must build, smoke, and attest a binary.
-    linux_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-linux"]["steps"])
-    assert "pyinstaller --clean --noconfirm build_linux.spec" in linux_steps
-    assert "scripts/verify_linux_binary.py" in linux_steps
+    # One desktop app: the Python lane is the only builder left in this workflow,
+    # and the release job depends on it alone. The desktop installers come from
+    # tauri-release.yml.
+    assert workflow["jobs"]["github-release"]["needs"] == ["build-python"]
+    assert set(workflow["jobs"]) == {"build-python", "github-release"}
 
     python_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-python"]["steps"])
     for required in [
@@ -161,8 +158,6 @@ def test_release_workflow_preserves_required_ship_gates():
         "python scripts/build_package.py",
         "python scripts/release_preflight.py --json",
         "python scripts/clean_install_smoke.py --dist dist --artifact both",
-        "python scripts/verify_desktop_package.py",
-        "QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py",
         "python scripts/release_artifacts.py --dist dist --output-dir release/python --skip-checks --lane python",
     ]:
         assert required in python_steps
@@ -171,100 +166,33 @@ def test_release_workflow_preserves_required_ship_gates():
     python_step_text = "\n".join(str(step) for step in workflow["jobs"]["build-python"]["steps"])
     assert "release/python/*" in python_step_text
 
-    windows_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-windows"]["steps"])
-    assert "pyinstaller --clean --noconfirm build_windows.spec" in windows_steps
-    assert "python scripts/verify_desktop_package.py" in windows_steps
-    assert "scripts\\sign_windows.ps1 -Path dist\\xPST.exe" in windows_steps
-    assert '$smokeArgs = @("--path", "dist\\xPST.exe", "--seconds", "12", "--json", "--clean-profile")' in windows_steps
-    assert '${{ github.event_name }}" -eq "push"' in windows_steps
-    assert '$smokeArgs += "--require-signed"' in windows_steps
-    assert "python scripts/verify_windows_exe.py @smokeArgs" in windows_steps
-    assert "python scripts/release_artifacts.py --dist dist --output-dir release/windows --skip-checks --lane windows" in windows_steps
-    windows_uses = "\n".join(str(step.get("uses", "")) for step in workflow["jobs"]["build-windows"]["steps"])
-    assert "actions/attest@v4" in windows_uses
-    windows_step_text = "\n".join(str(step) for step in workflow["jobs"]["build-windows"]["steps"])
-    assert "release/windows/*" in windows_step_text
 
-    macos_steps = "\n".join(str(step.get("run", "")) for step in workflow["jobs"]["build-macos"]["steps"])
-    assert "bash scripts/verify_macos.sh" in macos_steps
-    assert "macos_args+=(--public)" in macos_steps
-    macos_step_text = "\n".join(str(step) for step in workflow["jobs"]["build-macos"]["steps"])
-    assert "secrets.MACOS_CODESIGN_IDENTITY" in macos_step_text
-    assert "secrets.APPLE_APP_PASSWORD" in macos_step_text
-    macos_uses = "\n".join(str(step.get("uses", "")) for step in workflow["jobs"]["build-macos"]["steps"])
-    assert "actions/attest@v4" in macos_uses
-    assert "release/*" in macos_step_text
-    verify_macos = (ROOT / "scripts" / "verify_macos.sh").read_text(encoding="utf-8")
-    assert "MACOS_CODESIGN_IDENTITY" in verify_macos
-    assert "bash scripts/sign_macos.sh dist/xPST.app" in verify_macos
-    assert "--require-developer-id --require-notarized" in verify_macos
+def test_no_legacy_pyside_desktop_build_remains():
+    """The repo must build exactly ONE desktop app (the Tauri shell)."""
+    for legacy in ["build_macos.spec", "build_windows.spec", "build_linux.spec", "build.sh"]:
+        assert not (ROOT / legacy).exists(), f"{legacy} still exists"
+    assert not list((ROOT / "src").rglob("*.qml")), "QML desktop pages still exist"
+    assert (ROOT / "build_engine.spec").exists(), "the Tauri engine-sidecar spec must stay"
 
+    # No workflow may invoke PyInstaller against a desktop spec other than the
+    # sidecar's, and none may name the retired macOS bundle.
+    for workflow_path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        steps = [
+            step
+            for job in workflow.get("jobs", {}).values()
+            for step in job.get("steps", [])
+        ]
+        run_text = "\n".join(str(step.get("run", "")) for step in steps)
+        for legacy in ("build_macos.spec", "build_windows.spec", "build_linux.spec"):
+            assert legacy not in run_text, f"{workflow_path.name} still runs {legacy}"
+        if "pyinstaller" in run_text.lower():
+            assert "build_engine.spec" in run_text or "build-engine.sh" in run_text, (
+                f"{workflow_path.name} runs PyInstaller without build_engine.spec"
+            )
 
-def test_desktop_package_specs_include_runtime_assets_and_dynamic_imports():
-    result = verify_desktop_package(ROOT)
-
-    assert result["ok"] is True
-    assert {"DashboardPage.qml", "ConnectPage.qml"} <= set(result["qml_pages"])
-
-
-def test_desktop_package_gate_includes_qt_lgpl_notice():
-    result = verify_desktop_package(ROOT)
-
-    lgpl_checks = [check for check in result["checks"] if check["path"] == "NOTICES_QT_LGPL.md"]
-    assert lgpl_checks, "verify gate must check the Qt/PySide6 LGPL notice"
-    assert lgpl_checks[0]["ok"] is True
-
-
-def test_qt_lgpl_notice_gate_fails_when_notice_missing(tmp_path):
-    check = _check_qt_lgpl_notice(tmp_path)
-
-    assert check["ok"] is False
-    assert any("missing" in issue for issue in check["issues"])
-
-
-def test_qt_lgpl_notice_gate_fails_without_relink_offer(tmp_path):
-    (tmp_path / "NOTICES_QT_LGPL.md").write_text(
-        "PySide6/Qt under the LGPL, but no offer here.", encoding="utf-8"
-    )
-
-    check = _check_qt_lgpl_notice(tmp_path)
-
-    assert check["ok"] is False
-    assert any("relink" in issue for issue in check["issues"])
-
-
-def test_qt_lgpl_notice_gate_passes_with_complete_notice(tmp_path):
-    (tmp_path / "NOTICES_QT_LGPL.md").write_text(
-        "PySide6 / Qt are distributed under the LGPL. Written offer to relink "
-        "against a modified Qt is provided.",
-        encoding="utf-8",
-    )
-
-    check = _check_qt_lgpl_notice(tmp_path)
-
-    assert check["ok"] is True
-    assert check["issues"] == []
-
-
-def test_qt_lgpl_notice_documents_lgpl_attribution_and_relink_offer():
-    text = (ROOT / "NOTICES_QT_LGPL.md").read_text(encoding="utf-8")
-
-    assert "LGPL" in text
-    assert "PySide6" in text and "Qt" in text
-    assert "relink" in text.lower()
-
-
-def test_content_page_requires_post_preview_before_upload():
-    text = (ROOT / "src" / "xpst" / "desktop_app" / "qml" / "pages" / "ContentPage.qml").read_text(encoding="utf-8")
-
-    assert "controller.previewPost" in text
-    assert "postPreviewDialog.open()" in text
-    assert "batchPreviewDialog.open()" in text
-    assert "function confirmPendingPost()" in text
-    assert "function confirmBatchPost()" in text
-    assert "controller.postVideo(pendingPost.videoPath, pendingPost.caption)" in text
-    assert "controller.postVideo(item.videoPath, item.caption)" in text
-    assert 'showToast("Batch posting' not in text
+    tauri = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
+    assert "cargo tauri build" in tauri
 
 
 def test_security_docs_match_encrypted_credential_fallback():
