@@ -530,22 +530,33 @@ def run(ctx: click.Context, source: str, bidirectional: bool, dry_run: bool, as_
                 "readable; retry once connectivity returns.[/dim]"
             )
 
+    exit_code = EXIT_SUCCESS
     try:
-        _run_check_and_post(
+        exit_code = _run_check_and_post(
             engine, source, bidirectional, dry_run, as_json, quiet, network=network
         )
     finally:
         # Always release so a one-shot `run` never leaves a stale pidfile.
         engine.release_pidfile()
 
+    if exit_code != EXIT_SUCCESS:
+        # A run that published nothing must not read as success to cron or to
+        # an agent wrapper — the exit status is what they branch on.
+        sys.exit(exit_code)
+
 
 def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool, as_json: bool, quiet: bool,
-                        network: Any = None) -> None:
+                        network: Any = None) -> int:
     """Execute a single check-and-post cycle.
 
     Extracted from the ``run`` command so the pidfile guard in ``run`` can
     release the shared lock in a ``finally`` block (a one-shot ``run`` must
     never leave a stale pidfile behind).
+
+    Returns:
+        The exit code for this cycle (``_aggregate_post_exit_code``):
+        ``0`` when something was published or there was nothing to do,
+        otherwise the shared failure family of the results that failed.
     """
     # --source all implies bidirectional
     if source == "all":
@@ -580,7 +591,7 @@ def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool,
             else:
                 if not quiet:
                     console.print("[green]No new videos to post[/green]")
-        return
+        return EXIT_SUCCESS
 
     if bidirectional:
         if not as_json and not quiet:
@@ -597,14 +608,26 @@ def _run_check_and_post(engine, source: str, bidirectional: bool, dry_run: bool,
             json_output({"status": status, "network": network_payload, "results": []}, True)
         elif not quiet:
             console.print("[green]No new videos to post[/green]")
-        return
+        # Nothing was attempted because there was nothing to do (or no
+        # network) — the caller decides; this is not a failed post.
+        return EXIT_SUCCESS
+
+    exit_code = _aggregate_post_exit_code(results)
 
     if as_json:
         out = [_result_to_dict(r) for r in results]
-        json_output({"status": "ok", "network": network_payload, "results": out}, True)
+        payload = {"status": "ok", "network": network_payload, "results": out}
+        if exit_code != EXIT_SUCCESS:
+            # The payload keeps its shape; a failed batch names its exit code.
+            payload["exit_code"] = exit_code
+        json_output(payload, True)
     else:
         for result in results:
             _display_result(result)
+        if exit_code != EXIT_SUCCESS and not quiet:
+            console.print(f"[bold red]{_post_failure_message(exit_code)}[/bold red]")
+
+    return exit_code
 
 
 @main.command()
@@ -805,6 +828,44 @@ def _post_exit_code(result: CrossPostResult, requested: list[str] | None) -> int
     requested_norm = {name.strip().lower() for name in (requested or []) if name.strip()}
     if requested_norm - {name.strip().lower() for name in rows}:
         codes.add(EXIT_PLATFORM_UNAVAILABLE)
+
+    return codes.pop() if len(codes) == 1 else EXIT_GENERAL
+
+
+def _aggregate_post_exit_code(results: list[CrossPostResult]) -> int:
+    """Exit code for a command that posts several results in one run.
+
+    ``run`` and ``backfill`` post a *batch*: one invocation can process several
+    videos across several destinations. The rule is the one ``xpst post``
+    already uses (``_post_exit_code``), applied per result and then aggregated
+    (documented in ``docs/TUTORIAL_CLI.md`` → "Exit Codes Reference"):
+
+    * no results at all → ``0``: nothing was attempted because there was
+      nothing to do ("no new videos") — that is not a failure;
+    * any result that published something (or found it already posted) → ``0``;
+    * otherwise the shared failure family of the failed results: ``4`` quota /
+      rate limit, ``3`` authentication, ``10`` no destination attempted or
+      every destination unavailable / refusing the media, ``1`` for anything
+      else, including a mix of reasons.
+
+    Args:
+        results: the ``CrossPostResult`` list the engine returned, in order.
+
+    Returns:
+        The exit code the CLI should terminate with.
+    """
+
+    if not results:
+        # Nothing to do is not a failure: the caller reports "no new videos".
+        return EXIT_SUCCESS
+
+    codes: set[int] = set()
+    for result in results:
+        code = _post_exit_code(result, None)
+        if code == EXIT_SUCCESS:
+            # A partial success — or an idempotent "already posted" — is a success.
+            return EXIT_SUCCESS
+        codes.add(code)
 
     return codes.pop() if len(codes) == 1 else EXIT_GENERAL
 
@@ -1098,12 +1159,24 @@ def backfill(ctx: click.Context, platforms: str | None, limit: int, dry_run: boo
 
     results = asyncio.run(engine.backfill(platform_list, limit))
 
+    exit_code = _aggregate_post_exit_code(results)
+
     if as_json:
         out = [_result_to_dict(r) for r in results]
-        json_output({"status": "ok", "results": out}, True)
+        payload = {"status": "ok", "results": out}
+        if exit_code != EXIT_SUCCESS:
+            # The payload keeps its shape; a failed batch names its exit code.
+            payload["exit_code"] = exit_code
+        json_output(payload, True)
     else:
         for result in results:
             _display_result(result)
+        if exit_code != EXIT_SUCCESS and not quiet:
+            console.print(f"[bold red]{_post_failure_message(exit_code)}[/bold red]")
+
+    if exit_code != EXIT_SUCCESS:
+        # Every backfill attempt failed: the exit status must say so.
+        sys.exit(exit_code)
 
 
 @main.command()
@@ -4637,21 +4710,22 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
             json_output({"status": "nothing_due", "processed": 0}, True)
         else:
             console.print("[dim]No scheduled posts are due.[/dim]")
+        # Nothing was due, so nothing was attempted: not a failure.
         return
 
-    if as_json:
-        results = []
-        for entry in due:
-            results.append({"id": entry["id"], "status": "would_post" if dry_run else "pending"})
-        json_output({"status": "dry_run" if dry_run else "processing", "count": len(due), "posts": results}, True)
-        if dry_run:
-            return
-    else:
-        console.print(f"[bold blue]Found {len(due)} due post(s)[/bold blue]")
-        if dry_run:
+    quiet = ctx.obj.get("quiet", False) if ctx.obj else False
+
+    if dry_run:
+        if as_json:
+            results = [
+                {"id": entry["id"], "status": "would_post"} for entry in due
+            ]
+            json_output({"status": "dry_run", "count": len(due), "posts": results}, True)
+        else:
+            console.print(f"[bold blue]Found {len(due)} due post(s)[/bold blue]")
             for entry in due:
                 console.print(f"  Would post: {entry['id']} — {Path(entry['video_path']).name} → {', '.join(entry.get('platforms', ['all']))}")
-            return
+        return
 
     # Claim the due entries atomically (pending -> processing, under a
     # cross-process file lock) so concurrent invocations — e.g. cron and
@@ -4666,6 +4740,13 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
 
     engine = CrossPostEngine(config_obj)
 
+    # The batch verdict: per-entry failure families, aggregated with the same
+    # rule ``run``/``backfill`` use (_aggregate_post_exit_code) — any entry
+    # that published something makes the batch a success, otherwise the shared
+    # family of the entries that failed.
+    published = False
+    failure_codes: set[int] = set()
+
     for entry in due:
         entry_id = entry["id"]
         video_path = Path(entry["video_path"])
@@ -4676,6 +4757,7 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
             if not as_json:
                 console.print(f"  [red]✗[/red] {entry_id}: file not found — {video_path}")
             manager.mark_complete(entry_id, success=False, error=f"File not found: {video_path}")
+            failure_codes.add(EXIT_GENERAL)
             continue
 
         try:
@@ -4694,6 +4776,17 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
                 post_results=post_results,
             )
 
+            if success:
+                published = True
+            else:
+                entry_code = _post_exit_code(result, platforms)
+                if entry_code == EXIT_SUCCESS:
+                    # A partial success: something did reach a platform, so
+                    # this entry must not fail the batch.
+                    published = True
+                else:
+                    failure_codes.add(entry_code)
+
             if not as_json:
                 if success:
                     console.print(f"  [green]✓[/green] {entry_id}: posted successfully")
@@ -4701,11 +4794,35 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
                     console.print(f"  [yellow]⚠[/yellow] {entry_id}: partial — {error_msg}")
         except Exception as e:
             manager.mark_complete(entry_id, success=False, error=str(e))
+            failure_codes.add(EXIT_GENERAL)
             if not as_json:
                 console.print(f"  [red]✗[/red] {entry_id}: {e}")
 
-    if not as_json:
+    if published or not failure_codes:
+        # Something was published, or nothing failed at all.
+        exit_code = EXIT_SUCCESS
+    else:
+        exit_code = failure_codes.pop() if len(failure_codes) == 1 else EXIT_GENERAL
+
+    if as_json:
+        # Same payload shape as before (status/count/posts), emitted once the
+        # work is done so it can carry the verdict; exit_code only on failure.
+        payload: dict[str, Any] = {
+            "status": "processing",
+            "count": len(due),
+            "posts": [{"id": entry["id"], "status": "pending"} for entry in due],
+        }
+        if exit_code != EXIT_SUCCESS:
+            payload["exit_code"] = exit_code
+        json_output(payload, True)
+    else:
         console.print(f"\n[green]Processed {len(due)} scheduled post(s)[/green]")
+        if exit_code != EXIT_SUCCESS and not quiet:
+            console.print(f"[bold red]{_post_failure_message(exit_code)}[/bold red]")
+
+    if exit_code != EXIT_SUCCESS:
+        # Every due entry failed: the store records it, and so does the status.
+        sys.exit(exit_code)
 
 
 @schedule.command("install")
