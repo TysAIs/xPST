@@ -554,6 +554,7 @@ async def test_mcp_post_passes_the_overrides_to_the_engine(tmp_path: Path, monke
 
     monkeypatch.setenv("XPST_MCP_ALLOW_MUTATIONS", "1")
     engine = _mcp_engine(tmp_path)
+    engine._platforms["x"] = MagicMock()
     from xpst.engine import CrossPostResult
 
     engine.post_manual.return_value = CrossPostResult(
