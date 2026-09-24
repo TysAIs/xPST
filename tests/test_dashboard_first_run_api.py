@@ -110,6 +110,7 @@ class FakeEngine:
         #: Image posts recorded separately, so a test can prove which engine
         #: method the request reached (video vs carousel vs image).
         self.image_calls: list[tuple[str, tuple[str, ...]]] = []
+        self.captions: dict[str, str] = {}
 
     def _results(self, platforms) -> dict[str, Any]:  # noqa: ANN001
         results: dict[str, Any] = {}
@@ -122,12 +123,15 @@ class FakeEngine:
                 results[platform] = FakeUpload(True, platform).result
         return results
 
-    async def post_manual(self, video_path, caption, platforms=None):  # noqa: ANN001, ANN201
+    async def post_manual(  # noqa: ANN001, ANN201
+        self, video_path, caption, platforms=None, per_platform_captions=None, visibility=None
+    ):
         self.calls.append((str(video_path), tuple(platforms or ())))
+        self.captions.update(per_platform_captions or {})
         return FakePostResult("vid-1", caption, self._results(platforms))
 
-    async def post_manual_carousel(self, media_paths, caption, platforms=None):  # noqa: ANN001, ANN201
-        return await self.post_manual(media_paths[0], caption, platforms)
+    async def post_manual_carousel(self, media_paths, caption, platforms=None, per_platform_captions=None):  # noqa: ANN001, ANN201
+        return await self.post_manual(media_paths[0], caption, platforms, per_platform_captions)
 
     async def post_manual_image(self, image_path, caption, platforms=None):  # noqa: ANN001, ANN201
         """The image route: a single picture, recorded apart from the video path."""

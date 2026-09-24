@@ -425,6 +425,10 @@ xpst post -v ./my-video.mp4 -c "Check this out!" -p youtube,x
 # Carousel (multiple files = carousel post)
 xpst post -v ./img1.jpg -v ./img2.jpg -v ./img3.jpg -c "Swipe to see more!" -p instagram,x
 
+# Different caption per destination (override wins for that destination only)
+xpst post -v ./my-video.mp4 -c "Full story in the video!" -p youtube,x \
+  --caption-for x="Short version — full story on YouTube."
+
 # Dry run
 xpst post -v ./my-video.mp4 -c "Test" --dry-run
 
