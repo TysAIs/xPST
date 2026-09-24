@@ -1382,10 +1382,18 @@ def create_api_router(
         Every blocker, including the zero-destination ``NO_DESTINATIONS``
         refusal, is decided by that service and returned as the same
         ``{code, message}`` error object here, in the MCP server and in the UI.
+        Every media, caption, destination and **content-type** verdict is
+        canonical: the request goes through the one contract parser, so `text`
+        (a text post) reads the same here as over MCP and in the CLI.
         """
         from xpst.config import XPSTConfig
-        from xpst.content import ContentContractError, parse_destination_texts
-        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+        from xpst.content import (
+            ContentContractError,
+            ContentRequest,
+            content_verdict,
+            parse_destination_texts,
+        )
+        from xpst.services.post_preflight import PostPlanRequest, PostPreflightService, plan_content_type
 
         raw_paths = payload.get("media_paths")
         if raw_paths is None:
@@ -1395,7 +1403,8 @@ def create_api_router(
             raw_paths = [raw_paths]
         media_paths = [str(item).strip() for item in raw_paths if str(item).strip()]
         media_path = media_paths[0] if media_paths else ""
-        caption = str(payload.get("caption") or "")
+        # `text` is the text-post spelling of `caption`; both name the same body.
+        caption = str(payload.get("text") or payload.get("caption") or "")
         platforms = [
             str(item).lower()
             for item in (payload.get("platforms") or [])
@@ -1420,6 +1429,13 @@ def create_api_router(
         except ContentContractError as exc:
             request_blockers.append(f"Invalid per-destination caption payload: {exc}")
 
+        # One content verdict, from the contract module: the same request gets
+        # the same answer here, in the CLI, and over MCP. The payload goes through
+        # the one request parser, so `text` (a text post) is read the same way
+        # here as over MCP and in the CLI.
+        request = ContentRequest.from_payload(payload)
+        verdict = content_verdict(request)
+
         plan: dict[str, Any] | None = None
         canonical_blockers: list[str] = []
         canonical_warnings: list[str] = []
@@ -1435,6 +1451,11 @@ def create_api_router(
                     target_platforms=platforms,
                     base_caption=caption,
                     per_platform_captions=overrides,
+                    # A text post carries no file, so the media requirement must
+                    # not be applied to it (it would block every text preflight);
+                    # a request with neither a file nor a body keeps that
+                    # requirement instead of being read as a refused text post.
+                    content_type=plan_content_type(request),
                 )
             ).to_dict()
             canonical_blockers = [issue["message"] for issue in plan["hard_blockers"]]
@@ -1448,9 +1469,10 @@ def create_api_router(
         # user wrote one, else the shared caption. Reporting the shared caption
         # for every destination here was a lie as soon as overrides existed.
         per_platform_captions = {platform: overrides.get(platform, caption) for platform in platforms}
+        blockers = request_blockers + canonical_blockers + verdict["blockers"]
         payload_out: dict[str, Any] = {
-            "ok": not request_blockers and not canonical_blockers,
-            "ready": not request_blockers and not canonical_blockers,
+            "ok": not blockers,
+            "ready": not blockers,
             "media": {
                 "path": media_path,
                 "paths": media_paths,
@@ -1463,7 +1485,11 @@ def create_api_router(
                 "overrides": dict(overrides),
             },
             "platforms": platforms,
-            "blockers": list(canonical_blockers),
+            "content_type": verdict["content_type"] or verdict["effective_content_type"],
+            "effective_content_type": verdict["effective_content_type"],
+            "route": verdict["route"],
+            "content": verdict,
+            "blockers": blockers,
             "warnings": canonical_warnings,
             "error": (plan or {}).get("error"),
             "plan": plan,
@@ -1593,6 +1619,18 @@ def create_api_router(
             return _auth_flow().cancel(session_id)
         except SignInError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
+    @router.get("/capabilities")
+    def api_capabilities() -> dict[str, Any]:
+        """The canonical capability contract, from its one source.
+
+        The CLI ``capabilities`` command and the MCP ``xpst_capabilities`` tool
+        return the same document (``xpst.content.capability_document``), so a
+        dashboard, a human and an agent cannot disagree about what xPST can
+        publish. No network calls, no secrets.
+        """
+        from xpst.content import capability_document
+
+        return capability_document()
 
     @router.get("/settings")
     def api_settings() -> dict[str, Any]:
