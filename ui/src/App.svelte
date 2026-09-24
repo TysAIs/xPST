@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { api, isLandingHash, NAV_ITEMS, currentRoute } from "./lib/api.js";
   import { shouldStartOnboarding } from "./lib/firstRun.js";
+  import { storedTheme, applyTheme } from "./lib/theme.js";
   import Shell from "./lib/components/Shell.svelte";
   import Dashboard from "./pages/Dashboard.svelte";
   import Onboarding from "./pages/Onboarding.svelte";
@@ -68,6 +69,8 @@
   }
 
   onMount(() => {
+    // Restore the saved appearance before first paint of any page content.
+    applyTheme(storedTheme());
     window.addEventListener("hashchange", updateRoute);
     window.addEventListener("popstate", updateRoute);
     updateRoute();

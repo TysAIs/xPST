@@ -11,6 +11,9 @@
   let state = $state("loading");
   let schedules = $state([]);
   let error = $state("");
+  let cancellingId = $state("");
+  let cancelError = $state("");
+  let cancelledId = $state("");
 
   async function load() {
     state = "loading";
@@ -27,6 +30,27 @@
 
   onMount(load);
 
+  /** Cancel one persisted plan. Local store only — never un-posts live content. */
+  async function cancel(entryId) {
+    if (!entryId || cancellingId) return;
+    cancellingId = entryId;
+    cancelError = "";
+    cancelledId = "";
+    try {
+      const payload = await api.cancelSchedule(entryId);
+      if (payload?.cancelled) {
+        cancelledId = entryId;
+        await load();
+      } else {
+        cancelError = payload?.error || `The engine could not cancel ${entryId}.`;
+      }
+    } catch (cause) {
+      cancelError = errorMessage(cause);
+    } finally {
+      cancellingId = "";
+    }
+  }
+
   function statusFor(status) {
     return { pending: "warning", processing: "warning", completed: "success", failed: "error" }[status] ?? "neutral";
   }
@@ -41,9 +65,15 @@
 <header class="xpst-page-header">
   <div>
     <h1>Schedule</h1>
-    <p>Review persisted plans and their truthful state. This view never starts a worker or publishes a post.</p>
+    <p>Persisted plans and their truthful state. Cancelling removes the plan from the local store — it never un-posts content that already went out.</p>
   </div>
 </header>
+
+{#if cancelError}
+  <p class="xpst-field__error" role="status">{cancelError}</p>
+{:else if cancelledId}
+  <p class="xpst-field__hint" role="status">Schedule cancelled. It will not run.</p>
+{/if}
 
 {#if state === "loading"}
   <LoadingSkeleton rows={5} label="Loading schedule" onRetry={load} />
@@ -56,7 +86,7 @@
     <div class="xpst-table-wrap" style="box-shadow: none;">
       <table class="xpst-table">
         <thead>
-          <tr><th scope="col">Content</th><th scope="col">Destinations</th><th scope="col">When</th><th scope="col">State</th></tr>
+          <tr><th scope="col">Content</th><th scope="col">Destinations</th><th scope="col">When</th><th scope="col">State</th><th scope="col"><span class="sr-only">Actions</span></th></tr>
         </thead>
         <tbody>
           {#each schedules as entry (entry.id)}
@@ -76,6 +106,20 @@
               </td>
               <td>{formatTime(entry.scheduled_time)}</td>
               <td><StatusBadge status={statusFor(entry.status)} label={entry.status ?? "unknown"} /></td>
+              <td>
+                {#if ["pending", "processing", "failed"].includes(entry.status)}
+                  <button
+                    class="xpst-button"
+                    data-variant="secondary"
+                    type="button"
+                    onclick={() => cancel(entry.id)}
+                    disabled={cancellingId === entry.id}
+                    aria-busy={cancellingId === entry.id ? "true" : undefined}
+                  >
+                    {cancellingId === entry.id ? "Cancelling…" : "Cancel"}
+                  </button>
+                {/if}
+              </td>
             </tr>
           {/each}
         </tbody>
