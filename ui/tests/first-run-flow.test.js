@@ -311,7 +311,7 @@ test("each destination row reports its own outcome, including not-attempted", ()
 test("the request summary keeps only what was asked for", () => {
   assert.deepEqual(
     postRequestSummary({ media_paths: ["a.mp4"], caption: "hi", platforms: ["youtube"], dry_run: false, secret: "x" }),
-    { media_paths: ["a.mp4"], caption: "hi", platforms: ["youtube"], dry_run: false }
+    { media_paths: ["a.mp4"], caption: "hi", overrides: {}, captions: {}, platforms: ["youtube"], dry_run: false }
   );
   assert.equal(postRequestSummary(null), null);
   assert.equal(formatBytes(2048), "2.0 KB");

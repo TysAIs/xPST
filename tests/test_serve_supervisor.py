@@ -255,7 +255,7 @@ class _FakeEngine:
 
         self.state = _State()
 
-    async def post_manual(self, video_path, caption, platforms=None):  # type: ignore[no-untyped-def]
+    async def post_manual(self, video_path, caption, platforms=None, per_platform_captions=None):  # type: ignore[no-untyped-def]
         self.posted.append((str(video_path), caption, platforms))
         return _FakeResult()
 
