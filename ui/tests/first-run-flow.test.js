@@ -135,6 +135,54 @@ test("a ready destination is the only thing that counts as publishable", () => {
   assert.equal(destinationStateLabel("something_new"), "something new");
 });
 
+test("a source-only platform is never rendered as a connectable destination", () => {
+  // TikTok downloads work and posting does not exist until its Content
+  // Posting API app is approved. The row must not read "Not connected" (which
+  // invites `xpst connect tiktok`) and must never be selectable as a target.
+  const payload = {
+    providers: [
+      ...ONBOARDING.destinations,
+      {
+        name: "tiktok",
+        display_name: "TikTok",
+        enabled: true,
+        auth_mode: "source_only",
+        roles: ["source", "video_destination"],
+        can_post: false,
+        source_only: true,
+        posting_state: "unconfigured",
+        posting_error: "TikTok Content Posting API is not configured",
+        posting_note: "TikTok is a source only: xPST downloads from it, and it cannot be used as a posting destination.",
+        role_status: { video_destination: { state: "unconfigured", source_only: true } },
+      },
+    ],
+  };
+
+  const tiktok = destinationRows(payload).find((row) => row.name === "tiktok");
+
+  assert.equal(tiktok.ready, false);
+  assert.equal(tiktok.canPost, false);
+  assert.equal(tiktok.sourceOnly, true);
+  assert.equal(tiktok.status, "source_only");
+  assert.equal(tiktok.stateLabel, "Source only — not a posting destination");
+  assert.match(tiktok.note, /source only/i);
+  assert.deepEqual(readyDestinations(payload).map((row) => row.name), ["instagram"]);
+  // The verdict must come from the payload's source_only flag, not the name.
+  const plain = destinationRows({
+    providers: [
+      {
+        name: "tiktok",
+        display_name: "TikTok",
+        enabled: true,
+        roles: ["source", "video_destination"],
+        role_status: { video_destination: { state: "ready" } },
+      },
+    ],
+  })[0];
+  assert.equal(plain.sourceOnly, false);
+  assert.equal(plain.ready, true);
+});
+
 test("wizard steps mark exactly one current step and never claim an unfinished one", () => {
   const steps = stepRows(ONBOARDING);
   assert.equal(steps.filter((step) => step.current).length, 1);
