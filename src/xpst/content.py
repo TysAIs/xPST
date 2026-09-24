@@ -769,6 +769,27 @@ class DestinationOverride:
         }
 
 
+def parse_destination_texts(raw: Mapping[str, Any] | None) -> dict[str, str]:
+    """``{platform: caption}`` from a per-destination override payload.
+
+    Accepts the same two shapes :meth:`DestinationOverride.from_payload` does —
+    a bare string (``{"x": "short copy"}``) or an object
+    (``{"x": {"text": "short copy"}}``) — and drops entries that carry no text,
+    so a caller that falls back to the shared caption keeps the default.
+    Raises :class:`ContentContractError` for a value that is neither, so the
+    surface can report the bad payload instead of posting something else.
+    """
+    texts: dict[str, str] = {}
+    if not isinstance(raw, Mapping):
+        return texts
+    for name, value in raw.items():
+        override = DestinationOverride.from_payload(value)
+        key = str(name).strip().lower()
+        if key and override.text is not None:
+            texts[key] = override.text
+    return texts
+
+
 # ── The one typed request object ────────────────────────────────────────────
 
 
@@ -844,6 +865,30 @@ class ContentRequest:
             return override.text
         return self.text
 
+    def per_platform_texts(self, platforms: Sequence[str] | None = None) -> dict[str, str]:
+        """Captions that differ from the shared text, keyed by destination.
+
+        Destinations without a text override are *absent* from the mapping, so a
+        caller that falls back to :attr:`text` keeps the shared caption for
+        every destination the user did not write a specific one for. This is the
+        one shape every surface hands to the engine/preflight, so the copy that
+        is validated is the copy that is sent.
+        """
+        names = (
+            [str(item) for item in platforms]
+            if platforms is not None
+            else [str(item) for item in self.platforms]
+        )
+        captions: dict[str, str] = {}
+        for name in names:
+            key = str(name).strip().lower()
+            if not key:
+                continue
+            override = self.override_for(key)
+            if override is not None and override.text is not None:
+                captions[key] = override.text
+        return captions
+
     def content_type_for(self, platform: str) -> ContentType:
         """Content type for one destination: its override when set, else effective."""
         override = self.override_for(platform)
@@ -897,7 +942,12 @@ class ContentRequest:
                 seen.setdefault(name, None)
 
         overrides: dict[str, DestinationOverride] = {}
-        raw_overrides = data.get("overrides") or data.get("per_destination_overrides") or {}
+        raw_overrides = (
+            data.get("overrides")
+            or data.get("per_destination_overrides")
+            or data.get("per_platform_captions")
+            or {}
+        )
         if isinstance(raw_overrides, Mapping):
             for name, value in raw_overrides.items():
                 overrides[str(name)] = DestinationOverride.from_payload(value)

@@ -41,7 +41,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | Tool | Purpose | Mutates real accounts | Consent gate |
 |------|---------|-----------------------|--------------|
 | `xpst_run` | Check for new videos and cross-post them to configured platforms | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
-| `xpst_post` | Manually post a local video file or carousel to platforms | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_post` | Manually post a local video file or carousel to platforms. overrides writes a… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_analytics` | Per-post and per-platform engagement metrics (views, likes, comments, shares)… | No | — |
 | `xpst_cross_post_analytics` | Cross-post correlation analytics (B1): one video posted to multiple platforms… | No | — |
 | `xpst_followers` | Follower counts per platform with growth history. Returns total followers acr… | No | — |
@@ -233,7 +233,8 @@ Manually posts a local video file, or a carousel when `carousel_paths` is given.
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
 | `video_path` | string | yes | — | Path to the video (or first carousel item). |
-| `caption` | string | yes | — | Caption/title for the post. |
+| `caption` | string | yes | — | Caption/title for the post. The default for every destination without an entry in `overrides`. |
+| `overrides` | object | no | `{}` | Per-destination copy: `{"x": "short copy"}` or `{"x": {"text": "short copy"}}`. A destination not listed keeps `caption`. An override over that destination's own caption limit (X 280, Instagram 2200, TikTok 2200, Threads 500) is refused before anything is uploaded, and the response names the destination. |
 | `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`. |
 | `carousel_paths` | string[] | no | `[]` | Additional image/video paths for a carousel. |
 | `dry_run` | boolean | no | `false` | Preview without uploading. Always use first. |
@@ -245,7 +246,8 @@ Example call:
   "name": "xpst_post",
   "arguments": {
     "video_path": "/tmp/xpst/clips/demo.mp4",
-    "caption": "New demo!",
+    "caption": "New demo — full walkthrough in the description!",
+    "overrides": { "x": { "text": "New demo — short version." } },
     "platforms": ["youtube", "x"],
     "dry_run": true
   }
