@@ -161,6 +161,14 @@ export const api = {
   settings: () => getJSON("/api/settings"),
   /** Persisted schedule entries (read-only; never starts the scheduler). */
   schedules: () => getJSON("/api/schedules"),
+  /** Cancel (remove) one persisted schedule entry. Local store only — never un-posts. */
+  cancelSchedule: (entryId) => postJSON(`/api/schedules/${encodeURIComponent(entryId)}/cancel`, {}),
+  /** Retry one recorded failure through the engine's one-shot recovery. */
+  retryFailure: (videoId, platform, opts = {}) =>
+    postJSON(
+      `/api/failures/${encodeURIComponent(videoId)}/${encodeURIComponent(platform)}/retry`,
+      opts,
+    ),
   /** Renew due/expiring tokens now (bounded retry; no-op when nothing is due). */
   refreshTokens: () => postJSON("/api/refresh-tokens", {}),
   /** Recorded posting failures with truthful recovery metadata. */
@@ -216,20 +224,32 @@ export const api = {
 // to Dashboard in App.svelte.
 
 export const NAV_ITEMS = [
-  { id: "dashboard", href: "#/", label: "Dashboard", icon: "layout-dashboard" },
-  { id: "onboarding", href: "#/onboarding", label: "Setup", icon: "sparkles" },
-  { id: "connect", href: "#/connect", label: "Connect", icon: "plug" },
-  { id: "compose", href: "#/compose", label: "Compose", icon: "clapperboard" },
-  { id: "create", href: "#/create", label: "Preflight", icon: "square-pen" },
-  { id: "result", href: "#/result", label: "Last post", icon: "list-checks" },
-  { id: "analytics", href: "#/analytics", label: "Analytics", icon: "chart-no-axes-combined" },
-  { id: "videos", href: "#/videos", label: "Videos", icon: "video" },
-  { id: "accounts", href: "#/accounts", label: "Accounts", icon: "users" },
-  { id: "schedule", href: "#/schedule", label: "Schedule", icon: "calendar-clock" },
-  { id: "activity", href: "#/activity", label: "Activity", icon: "triangle-alert" },
-  { id: "library", href: "#/library", label: "Library", icon: "library" },
-  { id: "about", href: "#/about", label: "About", icon: "info" },
-  { id: "settings", href: "#/settings", label: "Settings", icon: "settings" },
+  // Primary — the daily loop.
+  { id: "dashboard", href: "#/", label: "Dashboard", icon: "layout-dashboard", group: "primary" },
+  { id: "compose", href: "#/compose", label: "Compose", icon: "clapperboard", group: "primary" },
+  { id: "connect", href: "#/connect", label: "Connect", icon: "plug", group: "primary" },
+  // Post flow — where a post goes before and after it runs.
+  { id: "create", href: "#/create", label: "Preflight", icon: "square-pen", group: "flow" },
+  { id: "schedule", href: "#/schedule", label: "Schedule", icon: "calendar-clock", group: "flow" },
+  { id: "result", href: "#/result", label: "Last post", icon: "list-checks", group: "flow" },
+  // Review — what happened.
+  { id: "analytics", href: "#/analytics", label: "Analytics", icon: "chart-no-axes-combined", group: "review" },
+  { id: "videos", href: "#/videos", label: "Videos", icon: "video", group: "review" },
+  { id: "activity", href: "#/activity", label: "Activity", icon: "triangle-alert", group: "review" },
+  // Accounts & system.
+  { id: "accounts", href: "#/accounts", label: "Accounts", icon: "users", group: "system" },
+  { id: "library", href: "#/library", label: "Library", icon: "library", group: "system" },
+  { id: "onboarding", href: "#/onboarding", label: "Setup", icon: "sparkles", group: "system" },
+  { id: "settings", href: "#/settings", label: "Settings", icon: "settings", group: "system" },
+  { id: "about", href: "#/about", label: "About", icon: "info", group: "system" },
+];
+
+/** Nav group headings, in display order. */
+export const NAV_GROUPS = [
+  { id: "primary", label: "Post" },
+  { id: "flow", label: "Plan" },
+  { id: "review", label: "Review" },
+  { id: "system", label: "System" },
 ];
 
 /** Current route id derived from a hash ("dashboard" by default). */

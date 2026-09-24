@@ -59,6 +59,7 @@
             <th scope="col">Views</th>
             <th scope="col">Likes</th>
             <th scope="col">Comments</th>
+            <th scope="col"><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
@@ -69,6 +70,9 @@
               <td>{video.views ?? "—"}</td>
               <td>{video.likes ?? "—"}</td>
               <td>{video.comments ?? "—"}</td>
+              <td>
+                <a class="xpst-button" data-variant="secondary" href={"#/compose"}>Compose</a>
+              </td>
             </tr>
           {/each}
         </tbody>
