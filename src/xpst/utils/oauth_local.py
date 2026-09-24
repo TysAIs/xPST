@@ -59,11 +59,12 @@ class AuthCodeResult:
     error_description: str | None = None
     port: int = 0
     path: str = "/callback"
+    public_host: str = "127.0.0.1"
 
     @property
     def redirect_uri(self) -> str:
         """The loopback redirect URI this result was captured on."""
-        return f"http://127.0.0.1:{self.port}{self.path}"
+        return f"http://{self.public_host}:{self.port}{self.path}"
 
 
 _SUCCESS_PAGE = """<!doctype html>
@@ -100,10 +101,20 @@ class LocalOAuthListener:
             authorize URL from this AFTER starting the listener.
     """
 
-    def __init__(self, port: int = 8085, path: str = "/callback", state: str | None = None) -> None:
+    def __init__(
+        self,
+        port: int = 8085,
+        path: str = "/callback",
+        state: str | None = None,
+        public_host: str = "127.0.0.1",
+    ) -> None:
         self.requested_port = port
         self.path = path if path.startswith("/") else f"/{path}"
         self.state = state
+        # Only the redirect_uri *string* uses this: the socket always binds
+        # IPv4 loopback. Providers that register ``http://localhost:PORT/...``
+        # need the URI spelled exactly that way to accept the exchange.
+        self.public_host = public_host
         self.port: int = 0
         self.redirect_uri: str | None = None
         self._result: AuthCodeResult | None = None
@@ -135,11 +146,22 @@ class LocalOAuthListener:
 
         self._server = server
         self.port = server.server_address[1]
-        self.redirect_uri = f"http://127.0.0.1:{self.port}{self.path}"
+        self.redirect_uri = f"http://{self.public_host}:{self.port}{self.path}"
         self._thread = threading.Thread(target=server.serve_forever, name="xpst-oauth-listener", daemon=True)
         self._thread.start()
         logger.info("OAuth redirect listener started: %s", self.redirect_uri)
         return self
+
+    def poll(self) -> AuthCodeResult | None:
+        """Return the captured redirect without blocking, else ``None``.
+
+        The non-blocking twin of :meth:`wait`, for callers that drive their own
+        polling loop (the in-app sign-in state machine) instead of parking a
+        thread on the redirect. The listener stays open either way.
+        """
+        if self._done.is_set():
+            return self._result
+        return None
 
     def wait(self, timeout: float | None = None) -> AuthCodeResult:
         """Block until the redirect is captured (or ``timeout`` elapses).
@@ -320,7 +342,7 @@ class _OAuthHandler(BaseHTTPRequestHandler):
             message = f"The provider returned an error: {error}"
             if error_description:
                 message += f" — {error_description}"
-            self._respond(200, message)
+            page = None
         elif code and listener.state is not None and state != listener.state:
             result = AuthCodeResult(
                 success=False,
@@ -331,10 +353,12 @@ class _OAuthHandler(BaseHTTPRequestHandler):
                 port=listener.port,
                 path=listener.path,
             )
-            self._respond(200, "Authorization failed: state mismatch. Please try again.")
+            message = "Authorization failed: state mismatch. Please try again."
+            page = None
         elif code:
             result = AuthCodeResult(success=True, code=code, state=state, port=listener.port, path=listener.path)
-            self._respond(200, "Authorization complete.", page=_SUCCESS_PAGE)
+            message = "Authorization complete."
+            page = _SUCCESS_PAGE
         else:
             result = AuthCodeResult(
                 success=False,
@@ -345,10 +369,20 @@ class _OAuthHandler(BaseHTTPRequestHandler):
                 port=listener.port,
                 path=listener.path,
             )
-            self._respond(200, "Authorization failed: no authorization code in redirect.")
+            message = "Authorization failed: no authorization code in redirect."
+            page = None
 
+        # Publish the capture BEFORE writing the response body. The browser
+        # renders the success page the moment the body is read, so a caller
+        # driving its own poll() loop (the in-app sign-in state machine) can
+        # poll as soon as the user sees "Authorization complete". Setting the
+        # result afterwards left a window where poll() still returned None
+        # after the redirect had visibly completed.
+        result.public_host = listener.public_host
         listener._result = result
         listener._done.set()
+
+        self._respond(200, message, page=page)
 
     def _respond(self, status: int, message: str, page: str | None = None) -> None:
         template = page if page is not None else _ERROR_PAGE
