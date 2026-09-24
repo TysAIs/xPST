@@ -901,6 +901,8 @@ def create_api_router(
             "media_paths": request.media_paths,
             "caption": request.caption,
             "platforms": request.platforms,
+            "overrides": {name: override.to_dict() for name, override in request.overrides.items()},
+            "captions": {platform: request.text_for(platform) for platform in request.platforms},
             "dry_run": dry_run,
         }
         blocked = bool(envelope.get("blocked")) or (not dry_run and not envelope.get("ok") and envelope.get("blockers"))
@@ -1229,6 +1231,7 @@ def create_api_router(
         ``{code, message}`` error object here, in the MCP server and in the UI.
         """
         from xpst.config import XPSTConfig
+        from xpst.content import ContentContractError, parse_destination_texts
         from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
 
         media_path = str(payload.get("media_path") or "").strip()
@@ -1238,6 +1241,24 @@ def create_api_router(
             for item in (payload.get("platforms") or [])
             if str(item).strip()
         ]
+
+        request_blockers: list[str] = []
+        if not platforms:
+            # An empty target list would produce an empty plan that reports
+            # "ready", so the request-shape precondition is decided here.
+            request_blockers.append("Choose at least one destination platform.")
+
+        # Per-destination copy. Parsed before the plan runs so a malformed
+        # payload is reported instead of silently posting the shared caption.
+        overrides: dict[str, str] = {}
+        try:
+            overrides = parse_destination_texts(
+                payload.get("overrides")
+                if payload.get("overrides") is not None
+                else payload.get("per_destination_overrides")
+            )
+        except ContentContractError as exc:
+            request_blockers.append(f"Invalid per-destination caption payload: {exc}")
 
         plan: dict[str, Any] | None = None
         canonical_blockers: list[str] = []
@@ -1253,6 +1274,7 @@ def create_api_router(
                     media_paths=[media_path] if media_path else [],
                     target_platforms=platforms,
                     base_caption=caption,
+                    per_platform_captions=overrides,
                 )
             ).to_dict()
             canonical_blockers = [issue["message"] for issue in plan["hard_blockers"]]
@@ -1262,6 +1284,10 @@ def create_api_router(
             canonical_blockers = [f"Preflight could not run: {str(exc)[:200]}"]
 
         media = Path(media_path).expanduser() if media_path else None
+        # What each destination would actually receive — the override when the
+        # user wrote one, else the shared caption. Reporting the shared caption
+        # for every destination here was a lie as soon as overrides existed.
+        per_platform_captions = {platform: overrides.get(platform, caption) for platform in platforms}
         return {
             "ok": not canonical_blockers,
             "ready": not canonical_blockers,
@@ -1272,7 +1298,8 @@ def create_api_router(
             },
             "caption": {
                 "length": len(caption),
-                "per_platform": {platform: caption for platform in platforms},
+                "per_platform": per_platform_captions,
+                "overrides": dict(overrides),
             },
             "platforms": platforms,
             "blockers": list(canonical_blockers),
