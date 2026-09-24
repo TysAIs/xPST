@@ -66,7 +66,8 @@
     }
   }
 
-  const connected = $derived(report ? report.connected === true : false);
+  const connected = $derived(report?.connected === true);
+  const sourceOnly = $derived(report?.source_only === true);
 </script>
 
 <header class="xpst-page-header">
@@ -114,8 +115,16 @@
       {:else if report}
         <div class="xpst-section__heading">
           <h2>{report.display_name}</h2>
-          <StatusBadge status={connected ? "success" : "error"} label={connected ? "Connected" : report.state} />
+          <StatusBadge
+            status={sourceOnly ? "source_only" : connected ? "success" : "error"}
+            label={sourceOnly ? "Source only" : connected ? "Connected" : report.state}
+          />
         </div>
+        {#if sourceOnly}
+          <p class="xpst-card__description">
+            {report.posting_note || `${report.display_name} is a source only: xPST downloads from it and cannot post to it.`}
+          </p>
+        {/if}
         <dl class="xpst-plan-summary">
           <div>
             <dt>Destination state</dt>
@@ -130,8 +139,8 @@
             <dd>{report.live_checked ? "Ran" : "Not run (destination disabled)"}</dd>
           </div>
           <div>
-            <dt>{connected ? "Account" : "Blocker"}</dt>
-            <dd>{connected ? "Verified by the engine." : report.error || "The engine reported no reason."}</dd>
+            <dt>{connected || sourceOnly ? "Account" : "Blocker"}</dt>
+            <dd>{sourceOnly ? "Used as a download source — not a posting destination." : connected ? "Verified by the engine." : report.error || "The engine reported no reason."}</dd>
           </div>
           <div>
             <dt>Sign-in path</dt>
@@ -140,7 +149,7 @@
         </dl>
         <div class="xpst-inline-actions">
           <button class="xpst-button" type="button" onclick={() => verify(activePlatform)} disabled={verifying}>Re-check</button>
-          {#if !report.enabled}
+          {#if !report.enabled && !sourceOnly}
             <button class="xpst-button" data-variant="secondary" type="button" onclick={() => enable(activePlatform)} disabled={enabling || verifying} aria-busy={enabling ? "true" : undefined}>
               {enabling ? "Enabling…" : "Enable this destination"}
             </button>

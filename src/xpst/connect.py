@@ -1725,30 +1725,81 @@ def connect_facebook(config: XPSTConfig) -> bool:
 # ──────────────────────────────────────────────
 
 class ConnectionResults(dict[str, bool]):
-    """Backward-compatible bool mapping carrying canonical probe details."""
+    """Backward-compatible bool mapping carrying canonical probe details.
 
-    def __init__(self, values: dict[str, bool], canonical_status: dict[str, Any]) -> None:
+    The boolean answers "is this provider usable for the role it is listed
+    as?" — for a provider that declares a POSTING role, True means its posting
+    role was verified ready. A source-only platform (TikTok before its Content
+    Posting API app is approved) is therefore False here even when the download
+    side is healthy: it is never a posting destination. ``posting_truth`` and
+    ``providers`` carry the per-role detail (including ``source_only`` and the
+    source verdict) for callers that need both facts.
+    """
+
+    def __init__(
+        self,
+        values: dict[str, bool],
+        canonical_status: dict[str, Any],
+        posting_truth: dict[str, dict[str, Any]] | None = None,
+        providers: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         super().__init__(values)
         self.canonical_status = canonical_status
+        self.posting_truth = posting_truth or {}
+        self.providers = providers or {}
+
+    @property
+    def source_only(self) -> list[str]:
+        """Providers that can be read from but never posted to."""
+        return sorted(
+            name
+            for name, truth in self.posting_truth.items()
+            if truth.get("source_only")
+        )
+
+    @property
+    def ready_sources(self) -> list[str]:
+        """Providers whose source role a live probe found ready."""
+        return sorted(
+            name
+            for name, entry in self.providers.items()
+            if (entry.get("role_status") or {}).get("source", {}).get("ready")
+        )
 
 
-async def test_connections(config: XPSTConfig) -> dict[str, bool]:
+async def test_connections(config: XPSTConfig) -> ConnectionResults:
     """Return backward-compatible booleans from canonical live checks.
 
     The old implementation had independent probes and passed serialized X
     cookies to ``twikit.load_cookies`` as a filename.  Keeping this wrapper's
     bool return shape lets existing callers survive while doctor/auth/API all
     share the same underlying canonical probe.
+
+    A "connected" boolean means the provider's POSTING role is ready, because
+    that is the capability every caller of this wrapper acts on. Reading the
+    platform-level ``authenticated`` flag instead reported TikTok as connected
+    on the strength of its download source — a posting destination the engine
+    cannot deliver. Source-only providers keep their source verdict available
+    through :attr:`ConnectionResults.posting_truth` / ``ready_sources``.
     """
     from xpst.auth_status import collect_live_auth_status_async
+    from xpst.provider_truth import canonical_status_report, posting_truth
 
     canonical = await collect_live_auth_status_async(config)
-    values = {
-        name: bool(entry.get("authenticated"))
-        for name, entry in canonical.items()
-        if name != "local"
-    }
-    return ConnectionResults(values, canonical)
+    providers = canonical_status_report(config, canonical)["providers"]
+    values: dict[str, bool] = {}
+    truth: dict[str, dict[str, Any]] = {}
+    for name, entry in providers.items():
+        if name == "local":
+            continue
+        verdict = posting_truth(entry)
+        truth[name] = verdict
+        values[name] = (
+            verdict["can_post"]
+            if verdict["posting_destination"]
+            else bool(entry.get("authenticated"))
+        )
+    return ConnectionResults(values, canonical, truth, providers)
 
 
 # ──────────────────────────────────────────────
@@ -1784,16 +1835,31 @@ def run_connect(
 
     if test_only:
         results = asyncio.run(test_connections(config))
+        # The posting verdict travels with the results: a source-only platform
+        # is False here (it can never be a posting destination) and must be
+        # reported as such instead of as a broken account to go fix.
+        posting_truth = getattr(results, "posting_truth", {})
+        source_only = [
+            name for name, truth in posting_truth.items() if truth.get("source_only")
+        ]
         # Filter results to requested platforms
         if platforms:
             results = {p: ok for p, ok in results.items() if p in platforms}
+            source_only = [name for name in source_only if name in platforms]
         console.print()
-        if all(results.values()):
-            console.print("[bold green]✅ All connections healthy![/bold green]")
+        for name in source_only:
+            console.print(
+                f"[cyan]ℹ️  {name.title()}: source only — xPST downloads from it and "
+                "cannot post to it until the provider approves an upload app.[/cyan]"
+            )
+        failed = [
+            p for p, ok in results.items() if not ok and p not in source_only
+        ]
+        if not failed:
+            console.print("[bold green]✅ All posting destinations healthy![/bold green]")
         else:
-            failed = [p for p, ok in results.items() if not ok]
             console.print(f"[yellow]⚠️  Issues with: {', '.join(failed)}[/yellow]")
-        return all(results.values())
+        return not failed
 
     # Determine which platforms to connect. Facebook is deliberately NOT in the
     # default "connect everything" sweep: it needs a BYO Meta app, so a

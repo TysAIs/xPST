@@ -320,11 +320,16 @@ SURFACE_FACTS: dict[str, tuple[tuple[str, ...], dict[str, str]]] = {
     "mcp xpst_auth_status": (FACTS, {}),
     "http /api/health-status": (FACTS, {}),
     "cli health": (FACTS, {}),
-    # `xpst doctor` reports the same live facts, but names the authentication
-    # bit ``connected`` and does not restate session_valid/live_checked.
+    # `xpst doctor` reports the same live facts and does not restate
+    # session_valid/live_checked.  Its ``connected`` verdict is deliberately
+    # NOT the alias of ``authenticated`` any more: ``connected`` answers the
+    # role-qualified question ("can xPST use this provider for what it is
+    # listed as?"), which for a source-only platform is False while the probe's
+    # ``authenticated`` verdict — the download side — is True.  Both facts are
+    # reported, so they are compared as themselves.
     "cli doctor": (
         ("authenticated", "state", "auth_mode"),
-        {"authenticated": "connected"},
+        {},
     ),
 }
 
@@ -378,11 +383,43 @@ def test_health_and_doctor_never_disagree_about_connected(provider: str) -> None
     surfaces = surface_data()
     health = surfaces["cli_health"]["platforms"][provider]
     doctor = surfaces["cli_doctor"]["platforms"][provider]
+    auth_status = surfaces["cli_auth_status"]["platforms"][provider]
 
-    assert health["authenticated"] is doctor["connected"], (
-        f"{provider}: health says authenticated={health['authenticated']!r} while "
+    # The posting verdict is a fact of its own and must agree everywhere.
+    for surface, entry in (
+        ("cli health", health),
+        ("cli doctor", doctor),
+        ("cli auth status", auth_status),
+        ("mcp xpst_auth_status", surfaces["mcp_auth_status"]["platforms"][provider]),
+        ("http /api/health-status", surfaces["http_health"]["auth"][provider]),
+    ):
+        assert "can_post" in entry and "source_only" in entry, (
+            f"{surface} does not report the posting verdict for {provider}"
+        )
+        assert entry["can_post"] is health["can_post"], (
+            f"{provider}: {surface} says can_post={entry['can_post']!r} while "
+            f"health says {health['can_post']!r}"
+        )
+        assert entry["source_only"] is health["source_only"], (
+            f"{provider}: {surface} says source_only={entry['source_only']!r} while "
+            f"health says {health['source_only']!r}"
+        )
+    assert health["can_post"] is doctor["connected"], (
+        f"{provider}: health says can_post={health['can_post']!r} while "
         f"doctor says connected={doctor['connected']!r}"
     )
+
+    if doctor["source_only"]:
+        # A download source: the probe verdict is True and posting is not a
+        # capability xPST has, so ``connected`` must not be True for it.
+        assert doctor["connected"] is False
+        assert doctor["source_ready"] is True
+        assert health["authenticated"] is True
+    else:
+        assert health["authenticated"] is doctor["connected"], (
+            f"{provider}: health says authenticated={health['authenticated']!r} while "
+            f"doctor says connected={doctor['connected']!r}"
+        )
     assert health["state"] == doctor["state"], (
         f"{provider}: health state={health['state']!r} vs doctor state={doctor['state']!r}"
     )

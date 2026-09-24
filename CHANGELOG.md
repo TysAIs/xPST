@@ -50,6 +50,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the composer says the picker is unavailable instead of inventing a path.
 
 ### Fixed
+- **A platform's download source was reported as a posting destination.**
+  `xpst doctor --json` derived its per-platform `connected` boolean from the
+  platform-level `authenticated` flag, which for TikTok (auth mode
+  `source_only`) is the verdict of its *download* probe. A healthy source
+  therefore read as `"connected": true, "problem": null` — a promise that the
+  posting destination exists when the engine has none until TikTok approves a
+  Content Posting API app. TikTok is now reported as `source_only` /
+  `can_post: false` with the reason attached, on every surface: `xpst doctor`
+  (as an informational `notes` entry, never an `issue`, so a healthy machine
+  still exits 0), `xpst health`, `xpst readiness`, `xpst connect --test
+  --json`, `xpst onboard`, `POST /api/connect/<platform>`, `/api/providers`,
+  `/api/health-status`, the MCP status tools and the desktop app's
+  Connect/Compose/Accounts screens. Posting truth is computed once, in
+  `xpst.provider_truth.posting_truth`, and every surface consumes that result
+  instead of inferring "connected" from whichever flag was at hand.
+
 - **The Home readiness panel no longer shows three identical-looking rows.** A
   platform holds several roles (source, video destination, analytics), and the
   panel rendered one row per role while printing only the platform — so the
