@@ -135,6 +135,22 @@ input,
   list-style: none;
 }
 
+.xpst-nav__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--xpst-space-1);
+  margin-bottom: var(--xpst-space-4);
+}
+
+.xpst-nav__group-label {
+  margin: 0 0 var(--xpst-space-1);
+  padding: 0 var(--xpst-space-3);
+  color: var(--xpst-color-text-muted);
+  font: var(--xpst-type-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .xpst-nav__link {
   display: flex;
   align-items: center;
