@@ -49,14 +49,24 @@ export function destinationRows(payload) {
     .map((provider) => {
       const role = provider?.role_status?.video_destination ?? {};
       const state = role.state ?? provider.destination_state ?? "unconfigured";
+      // A source-only platform (TikTok before its Content Posting API app is
+      // approved) has no posting destination at all. Its role state describes
+      // the uploader, so rendering it as "Not connected" would read as
+      // "connect it and post" — an upload the engine cannot deliver.
+      const sourceOnly = Boolean(provider.source_only ?? role.source_only);
       return {
         name: provider.name,
         displayName: provider.display_name ?? provider.name,
         enabled: Boolean(provider.enabled ?? role.enabled),
         state,
-        stateLabel: destinationStateLabel(state),
-        status: destinationStateStatus(state),
-        ready: state === "ready",
+        stateLabel: sourceOnly
+          ? "Source only — not a posting destination"
+          : destinationStateLabel(state),
+        status: sourceOnly ? "source_only" : destinationStateStatus(state),
+        ready: !sourceOnly && state === "ready",
+        canPost: sourceOnly ? false : Boolean(provider.can_post ?? state === "ready"),
+        sourceOnly,
+        note: provider.posting_note ?? null,
         authMode: provider.auth_mode ?? role.auth_mode ?? "unknown",
         official: Boolean(provider.is_official_api ?? provider.official_api),
         error: role.error ?? provider.destination_error ?? null,
