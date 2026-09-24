@@ -287,6 +287,18 @@ input,
   background: color-mix(in srgb, var(--xpst-color-primary) 10%, transparent);
 }
 
+/* Destructive actions: danger tint, themed for both modes via tokens. */
+.xpst-button[data-variant="danger"] {
+  color: var(--xpst-color-danger);
+  border-color: color-mix(in srgb, var(--xpst-color-danger) 45%, transparent);
+}
+
+.xpst-button[data-variant="danger"]:hover:not(:disabled) {
+  color: var(--xpst-color-on-danger, #fff);
+  background: var(--xpst-color-danger);
+  border-color: var(--xpst-color-danger);
+}
+
 .xpst-button[data-size="sm"] {
   min-height: 44px;
   padding-inline: var(--xpst-space-3);
