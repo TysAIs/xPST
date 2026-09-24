@@ -25,10 +25,9 @@ describe("theme preference", () => {
     const settings = await read("pages/Settings.svelte");
     assert.match(settings, /id="theme-select"/);
     assert.match(settings, /for="theme-select"/);
-    for (const option of ["auto", "light", "dark"]) {
-      assert.match(settings, new RegExp(`value=\\{option.value\\}`));
-      assert.match(settings, new RegExp(option));
-    }
+    // The options come from THEME_OPTIONS (imported from lib/theme.js).
+    assert.match(settings, /THEME_OPTIONS/);
+    assert.match(settings, /import \{[^}]*THEME_OPTIONS[^}]*\} from "\.\.\/lib\/theme\.js"/);
     // The control reports the live state honestly.
     assert.match(settings, /following your Mac's appearance/);
   });
