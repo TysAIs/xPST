@@ -31,20 +31,24 @@ shippable until every box in **Gate** and **Artifacts** is checked.
 - [ ] `python scripts/release_preflight.py --json` — local preflight passes
 - [ ] `python scripts/clean_install_smoke.py --dist dist --artifact both` —
       fresh-install of wheel and sdist succeeds in a clean venv
-- [ ] `python scripts/verify_desktop_package.py` — desktop package static checks
-- [ ] `QT_QPA_PLATFORM=offscreen python scripts/verify_qml_pages.py` — all
-      QML pages load
 - [ ] CLI smoke: `xpst version --json` and `xpst health --json` succeed from a
       clean install
 - [ ] `xpst diagnostics --json` produces a redacted bundle (no secrets leak)
 
-## 4. Platform artifacts
+## 4. Platform artifacts (one desktop app)
 
-- [ ] macOS: `bash scripts/verify_macos.sh` (and `--public` for signed +
-      notarized public release)
-- [ ] macOS: `python scripts/verify_macos_artifact.py --app dist/xPST.app --json`
-- [ ] Windows: `python scripts/verify_windows_exe.py --path dist/xPST.exe --json --clean-profile`
-- [ ] Windows public release: same with `--require-signed`
+There is exactly one desktop app: the Tauri shell built from `src-tauri/` plus
+the Python engine sidecar. `.github/workflows/tauri-release.yml` builds it and
+publishes the per-platform installers; the Python lane in `release.yml` must
+never produce a second bundle.
+
+- [ ] `.github/workflows/tauri-release.yml` completed green for this tag
+      (macOS `.dmg`, Windows NSIS `.exe`/`.msi`, Linux `.deb`/`.AppImage`) — its
+      lanes assert the installer exists, enforce the size budgets, and smoke-boot
+      the result with the engine sidecar
+- [ ] No `build_macos.spec` / `build_windows.spec` / `build_linux.spec` / `build.sh`
+      exists in the tree, and no workflow runs PyInstaller against a desktop spec
+      other than `build_engine.spec` (the sidecar)
 - [ ] Docker: `docker build -t xpst:ci .` and `docker run --rm xpst:ci version --json`
 
 ## 5. Release artifacts (Gate — must all be present)
@@ -77,7 +81,8 @@ shippable until every box in **Gate** and **Artifacts** is checked.
       `real_running_process: true` and `uninstall: true`.
 - [ ] Confirm the published macOS asset is the Tauri build: the evidence must
       report `stack: "tauri"`. A `legacy-pyside-qml` result means the published
-      installer is not the shipped desktop app and the check has failed.
+      installer is the retired PySide6/QML app, not the shipped desktop app, and
+      the check has failed.
 - [ ] `pip install xpst` works on a clean machine
 - [ ] Downloaded macOS `.app`/DMG opens
 - [ ] Downloaded Windows executable launches

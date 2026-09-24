@@ -35,7 +35,18 @@ from rich.panel import Panel
 from rich.table import Table
 
 from xpst.config import XPSTConfig
+from xpst.content import (
+    CONTENT_TYPES,
+    PUBLISH_ROUTE_TEXT,
+    ContentIssue,
+    ContentRequest,
+    blocking_issues,
+    capability_document,
+    content_verdict,
+    media_transport_blocker,
+)
 from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.services.post_service import refusal_envelope
 from xpst.setup_transaction import SetupTransactionService
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
@@ -887,9 +898,38 @@ def _parse_caption_for(values: tuple[str, ...]) -> dict[str, str]:
     return captions
 
 
+def _pre_upload_refusal_blockers(request: ContentRequest) -> list[ContentIssue]:
+    """The content blockers that refuse a post *before* any uploader runs.
+
+    Every content-type/capability finding is one of them (a destination with no
+    path for this type, text past a limit, a request shape the contract cannot
+    honour), because saying so before an uploader exists is the point of the
+    contract.
+
+    A media-transport refusal (``THREADS_NEEDS_URL``) is deliberately *not*:
+    the publishing pipeline reports it per destination — the row that says the
+    destination refused the local file — and main's exit-status contract
+    (``_post_exit_code``) reads it there, so it exits ``EXIT_PLATFORM_UNAVAILABLE``
+    with a row per requested destination. Gating it here too would pre-empt that
+    report with one envelope and change the documented exit code, so the refusal
+    is left to the pipeline that owns it. It is still part of the content verdict
+    every surface returns.
+    """
+    blockers: list[ContentIssue] = []
+    for issue in blocking_issues(request):
+        platform = str(issue.platform or "").strip().lower()
+        transport_issue = media_transport_blocker(platform, request.media) if platform else None
+        if transport_issue is not None and transport_issue.code == issue.code:
+            # Declared once in the destination profile; the pipeline and the
+            # uploader report this same code destination by destination.
+            continue
+        blockers.append(issue)
+    return blockers
+
+
 @main.command()
-@click.option("--video", "-v", required=True, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
-@click.option("--caption", "-c", required=True, help="Video caption")
+@click.option("--video", "-v", required=False, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
+@click.option("--caption", "-c", required=False, default=None, help="Post text/caption (required with --video)")
 @click.option(
     "--caption-for",
     "caption_for",
@@ -900,7 +940,28 @@ def _parse_caption_for(values: tuple[str, ...]) -> dict[str, str]:
         "--caption-for x='short copy'. Destinations without one use --caption."
     ),
 )
-@click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
+@click.option(
+    "--text",
+    "-t",
+    default=None,
+    help=(
+        "Text of a text-only post (no media). Equivalent to --caption with "
+        "--content-type text; `xpst post --text \"...\" -p x,threads` publishes a "
+        "text post to every destination that has a text path."
+    ),
+)
+@click.option(
+    "--content-type",
+    "content_type",
+    default=None,
+    type=click.Choice([item.value for item in CONTENT_TYPES], case_sensitive=False),
+    help=(
+        "What this post is, in the canonical vocabulary: video/image/carousel/"
+        "text/thread. Defaults to what the media implies. A type the chosen "
+        "destination cannot publish is refused before anything is uploaded."
+    ),
+)
+@click.option("--platforms", "--platform", "-p", default=None, help="Comma-separated platforms (default: all)")
 @click.option(
     "--visibility",
     type=click.Choice(["public", "unlisted", "private"]),
@@ -914,14 +975,21 @@ def _parse_caption_for(values: tuple[str, ...]) -> dict[str, str]:
 def post(
     ctx: click.Context,
     video: tuple[str, ...],
-    caption: str,
+    caption: str | None,
     caption_for: tuple[str, ...],
+    text: str | None,
+    content_type: str | None,
     platforms: str | None,
     visibility: str,
     dry_run: bool,
     as_json: bool,
 ):
-    """Manually post a video or carousel (multiple --video flags)"""
+    """Manually post a video, image, carousel, or text post.
+
+    One --video flag posts a single file; several build a carousel; --text (or
+    --content-type text) posts a text-only status. A content type the chosen
+    destination cannot publish is refused before anything is uploaded.
+    """
     config = load_config(ctx.obj.get("config_path"))
     quiet = ctx.obj.get("quiet", False)
     setup_logging(
@@ -933,49 +1001,100 @@ def post(
     media_paths = [Path(v) for v in video]
     platform_list = platforms.split(",") if platforms else None
 
+    # --text is the text-post spelling of --caption; both name the same body.
+    body = text if text is not None else (caption or "")
+
+    if not media_paths and not content_type and text is not None:
+        # `--text` with no file IS a text post: state it rather than inferring
+        # it, so the content verdict and the route agree on every surface.
+        content_type = "text"
+
+    if not media_paths and not content_type:
+        raise click.UsageError(
+            "Provide --video (a file to post), --text (a text post), or "
+            "--content-type (what this post is, e.g. --content-type text)."
+        )
+    if media_paths and not body.strip():
+        raise click.UsageError("Provide --caption for the media you are posting.")
+
     # Resolve destinations once, canonically: an explicit --platforms wins
     # (blank names dropped), otherwise every destination enabled in config.
     # An empty result is the meaningless-run case and is refused below — in
-    # dry-run too, so the plan and the run can never disagree.
+    # dry-run too, so the plan and the run can never disagree. No engine is
+    # built for this: its __init__ performs crash recovery and may write state.
     targets = _resolved_destinations(config, platform_list)
 
+    # ONE content answer, from the contract module: the same request produces
+    # the same verdict on the CLI, in MCP, and over HTTP.
+    request = ContentRequest.from_legacy(media_paths, body, targets, content_type=content_type)
+    verdict = content_verdict(request)
+    # Transport refusals are the pipeline's to report, destination by
+    # destination (see _pre_upload_refusal_blockers).
+    refusal_blockers = _pre_upload_refusal_blockers(request)
+
     if dry_run:
-        # Do NOT instantiate CrossPostEngine for a dry run: its __init__
-        # performs crash recovery and may create/rotate state files. Resolve
-        # targets straight from config flags instead.
         if not targets:
             _refuse_no_destinations(ctx, as_json, quiet)
         info = {
             "dry_run": True,
-            "video": str(media_paths[0]),
-            "caption": caption[:80],
+            "video": str(media_paths[0]) if media_paths else None,
+            "caption": body[:80],
+            "text": body[:80],
             "captions": {
-                target: per_platform_captions.get(target.strip().lower(), caption) for target in targets
+                target: per_platform_captions.get(target.strip().lower(), body) for target in targets
             },
             "carousel": len(media_paths) > 1,
             "items": len(media_paths),
             "targets": targets,
             "visibility": visibility,
+            "content_type": verdict["content_type"] or verdict["effective_content_type"],
+            "effective_content_type": verdict["effective_content_type"],
+            "route": verdict["route"],
+            "content": verdict,
+            "ready": verdict["ok"],
+            "blockers": verdict["blockers"],
         }
         if as_json:
             json_output(info, True)
         else:
             if not quiet:
                 console.print("[bold blue]Dry run — would post:[/bold blue]")
-            console.print(f"  File: {media_paths[0]}")
-            if len(media_paths) > 1:
-                console.print(f"  Carousel: {len(media_paths)} items")
-            console.print(f"  Caption: {caption[:80]}")
-            for target, text in info["captions"].items():
+            if media_paths:
+                console.print(f"  File: {media_paths[0]}")
+                if len(media_paths) > 1:
+                    console.print(f"  Carousel: {len(media_paths)} items")
+            console.print(f"  Content type: {verdict['effective_content_type']}")
+            console.print(f"  Caption: {body[:80]}")
+            for target, override_text in info["captions"].items():
                 if target.strip().lower() in per_platform_captions:
-                    console.print(f"  Caption for {target}: {text[:80]}")
+                    console.print(f"  Caption for {target}: {override_text[:80]}")
             console.print(f"  Targets: {', '.join(targets)}")
             console.print(f"  Visibility: {visibility}")
+            for blocker in verdict["blockers"]:
+                console.print(f"  [red]Blocked:[/red] {blocker}")
+        if refusal_blockers:
+            sys.exit(EXIT_GENERAL)
         return
+
+    if refusal_blockers:
+        # Refused before any upload, by the same rule every other surface uses.
+        # No engine is constructed and nothing is uploaded.
+        envelope = refusal_envelope(
+            request, [issue.message for issue in refusal_blockers], content=verdict
+        )
+        if as_json:
+            envelope["exit_code"] = EXIT_GENERAL
+            json_output(envelope, True)
+        else:
+            for issue in refusal_blockers:
+                console.print(f"[red]Refused:[/red] {issue.message}")
+        sys.exit(EXIT_GENERAL)
 
     if not as_json and not quiet:
         if len(media_paths) > 1:
             console.print(f"[bold blue]Posting carousel ({len(media_paths)} items) to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
+        elif verdict["route"] == PUBLISH_ROUTE_TEXT:
+            console.print(f"[bold blue]Posting text to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
         else:
             console.print(f"[bold blue]Posting to: {', '.join(platform_list or ['all platforms'])} (visibility: {visibility})[/bold blue]")
 
@@ -1001,15 +1120,26 @@ def post(
                 "manual post proceeds."
             )
 
-    if len(media_paths) > 1:
+    if verdict["route"] == PUBLISH_ROUTE_TEXT:
+        # The text route reads one text per destination, so a per-destination
+        # override is honoured (and validated) here too.
+        per_destination = {
+            platform: request.text_for(platform)
+            for platform in request.platforms
+            if request.override_for(platform) is not None
+        }
         result = asyncio.run(
-            engine.post_manual_carousel(media_paths, caption, platform_list, per_platform_captions)
+            engine.post_text(body, platform_list, per_destination=per_destination or None)
+        )
+    elif len(media_paths) > 1:
+        result = asyncio.run(
+            engine.post_manual_carousel(media_paths, body, platform_list, per_platform_captions)
         )
     else:
         result = asyncio.run(
             engine.post_manual(
                 media_paths[0],
-                caption,
+                body,
                 platform_list,
                 per_platform_captions,
                 visibility=visibility,
@@ -1030,6 +1160,8 @@ def post(
         # override is visible in the machine-readable outcome.
         if result.captions:
             out["captions"] = dict(result.captions)
+        out["content_type"] = verdict["effective_content_type"]
+        out["content"] = verdict
         if quota_blocked:
             out["error"] = {
                 "code": "QUOTA_EXHAUSTED",
@@ -1471,6 +1603,53 @@ def providers(ctx: click.Context, as_json: bool):
                 str(manifest["auth_mode"]),
             )
         console.print(table)
+
+
+@main.command()
+@json_option
+@click.pass_context
+def capabilities(ctx: click.Context, as_json: bool):
+    """Show what xPST can publish, per destination, in the canonical vocabulary
+
+    Reads the content contract (the same document the MCP tool
+    ``xpst_capabilities`` and ``GET /api/capabilities`` return), so what a human
+    reads here is exactly what an agent plans against. A content type listed as
+    implemented has real code behind it; a destination that cannot post a type
+    does not declare it.
+    """
+    document = capability_document()
+
+    if as_json:
+        json_output(document, True)
+        return
+
+    if not ctx.obj.get("quiet", False):
+        console.print("[bold blue]What xPST can publish[/bold blue]")
+        console.print("[dim]Vocabulary: " + ", ".join(document["content_types"]) + "[/dim]\n")
+
+    table = Table(title="Declared vs implemented")
+    table.add_column("Destination", style="cyan")
+    table.add_column("Declared")
+    table.add_column("Implemented")
+    table.add_column("Notes")
+    for platform in sorted(document["platforms"]):
+        profile = document["platforms"][platform]
+        declared = ", ".join(profile["declared"]) or "—"
+        implemented = ", ".join(profile["implemented"]) or "—"
+        note = profile.get("note") or ""
+        if profile.get("declared_but_unimplemented"):
+            note = (note + " " if note else "") + (
+                "FALSE DECLARATION: " + ", ".join(profile["declared_but_unimplemented"])
+            )
+        table.add_row(f"{profile['display_name']} ({platform})", declared, implemented, note)
+    console.print(table)
+
+    if document["declared_but_unimplemented"]:
+        console.print(
+            "[red]A destination declares a content type with no implementation: "
+            + ", ".join(f"{platform}={types}" for platform, types in document["declared_but_unimplemented"].items())
+            + "[/red]"
+        )
 
 
 @main.command()
@@ -3513,33 +3692,56 @@ def ui(ctx: click.Context, port: int, no_browser: bool, as_json: bool):
 # Desktop App Command
 # ──────────────────────────────────────────────
 
-@main.command()
-@click.option("--port", "-p", default=None, type=int, help="Dashboard HTTP port (default: auto-select free port)")
-@click.option("--no-splash", is_flag=True, help="Skip the splash screen on startup")
-@click.pass_context
-def app(ctx: click.Context, port: int | None, no_splash: bool):
-    """Launch xPST as a native desktop app (PySide6)"""
-    # PySide6 is an optional extra ('desktop' extra, ~983MB). Check for it
-    # before importing the launcher so a missing install prints a clear
-    # message instead of crashing with an ImportError/SystemExit traceback.
-    import importlib.util
 
-    if importlib.util.find_spec("PySide6") is None:
-        console.print("[yellow]Desktop app not installed. Run: pip install xpst\\[desktop][/yellow]")
+def _desktop_shell_candidates() -> list[Path]:
+    """Installed locations of the Tauri desktop shell, in preference order.
+
+    The shell is a native binary/``.app`` bundle (``com.tysais.xpst``), not a
+    Python module, so it is located on disk instead of imported.
+    """
+    home = Path.home()
+    if sys.platform == "darwin":
+        return [Path("/Applications/xPST.app"), home / "Applications" / "xPST.app"]
+    if sys.platform == "win32":
+        candidates: list[Path] = []
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            candidates.append(Path(local) / "xPST" / "xPST.exe")
+        for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+            base = os.environ.get(variable)
+            if base:
+                candidates.append(Path(base) / "xPST" / "xPST.exe")
+        return candidates
+    # Linux: the .deb installs `xPST` (capitalised — the lowercase `xpst`
+    # on PATH is this CLI), the AppImage is usually kept in ~/Applications.
+    return [
+        Path("/usr/bin/xPST"),
+        Path("/usr/local/bin/xPST"),
+        home / "Applications" / "xPST.AppImage",
+    ]
+
+
+@main.command()
+def app():
+    """Launch the installed xPST desktop app (Tauri shell).
+
+    The desktop app is the Tauri shell under ``src-tauri/``, which spawns the
+    bundled Python engine sidecar itself. Build it with
+    ``scripts/build-engine.sh`` + ``cargo tauri build`` (see docs/PACKAGING.md)
+    or install a published bundle from the GitHub Releases page.
+    """
+    import subprocess
+
+    target = next((path for path in _desktop_shell_candidates() if path.exists()), None)
+    if target is None:
+        console.print("[yellow]xPST desktop app not found.[/yellow]")
+        console.print("[dim]Install a published bundle from https://github.com/TysAIs/xPST/releases[/dim]")
+        console.print("[dim]or build one from a checkout: scripts/build-engine.sh && (cd src-tauri && cargo tauri build)[/dim]")
         sys.exit(EXIT_GENERAL)
 
-    from xpst.desktop_app.main import main as pyside_main
-
-    # Route through the shared pidfile helper (advisory): never block the
-    # desktop app because a daemon/CLI instance is running — warn instead.
-    from xpst.utils.pidfile import PidfileLock
-
-    _pid = PidfileLock(str(get_config_dir()))
-    if _pid.verify():
-        logger.info("Another xPST instance is running — desktop app proceeds alongside it.")
-
-    console.print("[bold blue]Launching xPST desktop app…[/bold blue]")
-    sys.exit(pyside_main(no_splash=no_splash))
+    console.print(f"[bold blue]Launching xPST desktop app…[/bold blue] [dim]{target}[/dim]")
+    command = ["open", str(target)] if sys.platform == "darwin" else [str(target)]
+    subprocess.Popen(command)
 
 
 # ──────────────────────────────────────────────
@@ -5671,219 +5873,6 @@ def plugins_list(ctx: click.Context, as_json: bool):
         )
 
     console.print(table)
-
-
-# ──────────────────────────────────────────────
-# Build Command
-# ──────────────────────────────────────────────
-
-@main.command()
-@click.option("--target", default=None, type=click.Choice(["macos", "windows", "linux"]), help="Target OS (default: current OS)")
-@click.option("--spec-file", default=None, type=click.Path(), help="PyInstaller .spec file path")
-@json_option
-@click.pass_context
-def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json: bool):
-    """Build a standalone executable using PyInstaller.
-
-    Auto-detects the appropriate .spec file for the current OS (or --target).
-    Checks for PyInstaller and offers to install if missing.
-    Supports cross-compilation via Docker when --target differs from current OS.
-    Streams PyInstaller output in real-time.
-    """
-    import platform as _platform
-    import shutil
-    import subprocess
-
-    # Determine current OS
-    system = _platform.system()
-    if system == "Darwin":
-        current_os = "macos"
-    elif system == "Windows":
-        current_os = "windows"
-    else:
-        current_os = "linux"
-
-    # Determine target OS
-    target_os = target if target else current_os
-
-    # Cross-compilation: if target differs from current OS, use Docker
-    use_docker = target is not None and target_os != current_os
-
-    # Find spec file
-    if spec_file:
-        spec_path = Path(spec_file)
-        if not spec_path.exists():
-            if as_json:
-                json_output({"ok": False, "error": f"Spec file not found: {spec_file}"}, True)
-            else:
-                console.print(f"[red]Spec file not found:[/red] {spec_file}")
-            sys.exit(EXIT_GENERAL)
-    else:
-        # Auto-detect spec file
-        spec_map = {
-            "macos": "build_macos.spec",
-            "windows": "build_windows.spec",
-            "linux": "build_linux.spec",
-        }
-        spec_name = spec_map.get(target_os)
-        spec_path = Path.cwd() / spec_name
-        if not spec_path.exists():
-            if as_json:
-                json_output({"ok": False, "error": f"Spec file not found: {spec_path}"}, True)
-            else:
-                console.print(f"[red]Spec file not found:[/red] {spec_path}")
-            sys.exit(EXIT_GENERAL)
-
-    # Docker-based cross-compilation
-    if use_docker:
-        docker_bin = shutil.which("docker")
-        if not docker_bin:
-            if as_json:
-                json_output({"ok": False, "error": "Docker is required for cross-compilation. Install Docker and try again."}, True)
-            else:
-                console.print("[red]Docker is required for cross-compilation.[/red]")
-                console.print("[dim]Install Docker: https://docs.docker.com/get-docker/[/dim]")
-            sys.exit(EXIT_GENERAL)
-
-        # Map target OS to Docker image
-        docker_images = {
-            "macos": "ghcr.io/cdrx/pyinstaller-windows:latest",  # macOS not natively possible in Docker
-            "windows": "ghcr.io/cdrx/pyinstaller-windows:latest",
-            "linux": "ghcr.io/cdrx/pyinstaller-linux:latest",
-        }
-        docker_image = docker_images.get(target_os, "python:3.11-slim")
-
-        if not as_json:
-            console.print(f"[bold blue]Cross-compiling for {target_os} via Docker...[/bold blue]")
-            console.print(f"  Docker image: {docker_image}")
-            console.print(f"  Spec file: {spec_path}\n")
-
-        docker_cmd = [
-            docker_bin, "run", "--rm",
-            "-v", f"{Path.cwd()}:/src",
-            "-w", "/src",
-            docker_image,
-            "pyinstaller", "--clean", "--noconfirm", str(spec_path),
-        ]
-
-        # Stream output in real-time
-        try:
-            proc = subprocess.Popen(
-                docker_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-            output_lines: list[str] = []
-            for line in proc.stdout:  # type: ignore[union-attr]
-                output_lines.append(line)
-                if not as_json:
-                    console.print(f"  [dim]{line.rstrip()}[/dim]")
-            proc.wait()
-
-            if proc.returncode == 0:
-                dist_dir = Path.cwd() / "dist"
-                if as_json:
-                    json_output({"ok": True, "target": target_os, "spec_file": str(spec_path), "dist_dir": str(dist_dir), "docker": True}, True)
-                else:
-                    console.print(f"\n[green]✓[/green] Cross-compilation complete for [bold]{target_os}[/bold]")
-                    console.print(f"  Output: {dist_dir}")
-            else:
-                stderr_text = "".join(output_lines)[-500:] if output_lines else "Build failed"
-                if as_json:
-                    json_output({"ok": False, "error": stderr_text}, True)
-                else:
-                    console.print("\n[red]Cross-compilation failed:[/red]")
-                    console.print(stderr_text)
-                sys.exit(EXIT_GENERAL)
-        except FileNotFoundError:
-            console.print("[red]Docker not found or not running.[/red]")
-            sys.exit(EXIT_GENERAL)
-        return
-
-    # Local build (same OS)
-    # Check for PyInstaller
-    pyinstaller_bin = shutil.which("pyinstaller")
-    if not pyinstaller_bin:
-        exe_name = "pyinstaller.exe" if current_os == "windows" else "pyinstaller"
-        candidate = Path(sys.executable).resolve().parent / exe_name
-        if candidate.exists():
-            pyinstaller_bin = str(candidate)
-    if not pyinstaller_bin:
-        # Check if it's in the current venv
-        if as_json:
-            json_output({"ok": False, "error": "PyInstaller not found. Install with: pip install pyinstaller"}, True)
-            sys.exit(EXIT_GENERAL)
-        else:
-            console.print("[yellow]PyInstaller not found.[/yellow]")
-            if confirm("Install PyInstaller now?"):
-                console.print("[dim]Installing PyInstaller...[/dim]")
-                result = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "pyinstaller"],
-                    capture_output=True, text=True,
-                )
-                if result.returncode != 0:
-                    console.print(f"[red]Installation failed:[/red] {result.stderr}")
-                    sys.exit(EXIT_GENERAL)
-                console.print("[green]✓[/green] PyInstaller installed")
-                pyinstaller_bin = shutil.which("pyinstaller")
-                if not pyinstaller_bin:
-                    exe_name = "pyinstaller.exe" if current_os == "windows" else "pyinstaller"
-                    candidate = Path(sys.executable).resolve().parent / exe_name
-                    if candidate.exists():
-                        pyinstaller_bin = str(candidate)
-            else:
-                sys.exit(EXIT_GENERAL)
-
-    if not pyinstaller_bin:
-        if as_json:
-            json_output({"ok": False, "error": "PyInstaller installed but executable was not found"}, True)
-        else:
-            console.print("[red]PyInstaller installed but executable was not found.[/red]")
-        sys.exit(EXIT_GENERAL)
-
-    if not as_json:
-        console.print(f"[bold blue]Building xPST for {target_os}...[/bold blue]")
-        console.print(f"  Spec file: {spec_path}")
-        console.print(f"  PyInstaller: {pyinstaller_bin}\n")
-
-    # Run PyInstaller with real-time streaming output
-    cmd = [pyinstaller_bin, "--clean", "--noconfirm", str(spec_path)]
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-    output_lines = []
-    for line in proc.stdout:  # type: ignore[union-attr]
-        output_lines.append(line)
-        if not as_json:
-            console.print(f"  [dim]{line.rstrip()}[/dim]")
-    proc.wait()
-
-    if proc.returncode == 0:
-        dist_dir = Path.cwd() / "dist"
-        if as_json:
-            json_output({
-                "ok": True,
-                "target": target_os,
-                "spec_file": str(spec_path),
-                "dist_dir": str(dist_dir),
-            }, True)
-        else:
-            console.print(f"[green]✓[/green] Build complete for [bold]{target_os}[/bold]")
-            console.print(f"  Output: {dist_dir}")
-    else:
-        stderr_text = "".join(output_lines)[-500:] if output_lines else "Build failed"
-        if as_json:
-            json_output({"ok": False, "error": stderr_text}, True)
-        else:
-            console.print("[red]Build failed:[/red]")
-            console.print(stderr_text)
-        sys.exit(EXIT_GENERAL)
 
 
 def confirm(message: str) -> bool:
