@@ -806,6 +806,16 @@ def _local_auth_readiness(platform: str, config: XPSTConfig) -> AuthReadiness:
     return AuthReadiness(False, "unsupported", f"No local auth readiness rule exists for {platform}.")
 
 
+def local_auth_readiness(platform: str, config: XPSTConfig) -> AuthReadiness:
+    """Public, network-free auth readiness for one platform.
+
+    The same rule the canonical planner applies, exposed so callers that only
+    need the local verdict (draft validation stamps, staleness diffs) never have
+    to re-implement it — or reach into the private helper.
+    """
+    return _local_auth_readiness(platform, config)
+
+
 __all__ = [
     "AuthReadiness",
     "AuthReadinessProvider",
@@ -818,4 +828,5 @@ __all__ = [
     "PreflightIssue",
     "QuotaReadiness",
     "build_post_plan",
+    "local_auth_readiness",
 ]
