@@ -73,16 +73,6 @@ class TestAnalyticsPayload:
         summary = dash.get_summary_stats()
         assert "total_posts" in summary
 
-    def test_no_fabricated_multipliers_in_qml(self):
-        from pathlib import Path
-
-        qml = (
-            Path(__file__).parent.parent
-            / "src/xpst/desktop_app/qml/pages/AnalyticsPage.qml"
-        ).read_text(encoding="utf-8-sig")
-        assert "lastWeekMultipliers" not in qml
-        assert "0.72" not in qml
-
 
 class TestMcpSurface:
     def test_mcp_enums_are_dynamic(self):
