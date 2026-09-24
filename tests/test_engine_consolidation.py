@@ -56,15 +56,11 @@ def test_mcp_server_uses_canonical_engine():
 
 
 def test_all_surfaces_share_one_engine_class():
-    """CLI, scheduler, and desktop backend resolve to the single engine class."""
+    """CLI and scheduler resolve to the single engine class."""
     from xpst import cli, scheduler
-    from xpst.desktop_app import backend
 
     assert cli.CrossPostEngine is CrossPostEngine
     assert scheduler.CrossPostEngine is CrossPostEngine
-    # Desktop backend lazily binds the engine (None until the optional desktop
-    # extra is importable); when bound it must be the canonical class.
-    assert backend.CrossPostEngine in (None, CrossPostEngine)
 
 
 # ── Tool-contract preservation (handler dispatch, live path) ──

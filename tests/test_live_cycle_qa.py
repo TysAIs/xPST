@@ -21,8 +21,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from xpst.analytics_store import AnalyticsStore
 from xpst.config import XPSTConfig
 from xpst.connect import disconnect_platform
@@ -70,54 +68,6 @@ def test_analytics_store_get_video_metrics_map(tmp_path):
     mapping = store.get_video_metrics_map(["p1", "p2"])
     assert set(mapping) == {"p1", "p2"}
     assert len(mapping["p1"]) == 1 and mapping["p1"][0]["views"] == 100
-
-
-# ── Analytics drill-down: desktop backend ────────────────────────────────────
-
-pytest.importorskip("PySide6", reason="desktop extra not installed")
-
-from xpst.desktop_app.backend import AppController  # noqa: E402
-
-
-def test_backend_get_video_metrics_drilldown(tmp_path):
-    config = XPSTConfig()
-    config.config_dir = str(tmp_path)
-
-    store = AnalyticsStore(Path(tmp_path) / "analytics.db")
-    store.record_snapshots([
-        {"platform": "youtube", "post_id": "yt-1", "views": 120, "likes": 12},
-    ])
-
-    video = {
-        "posted_to": {
-            "youtube": {"id": "yt-1", "url": "https://youtu.be/yt-1", "timestamp": "2026-08-29T00:00:00"},
-            "x": {"id": "x-1", "url": "https://x.com/x-1", "timestamp": "2026-08-29T00:00:00"},
-        }
-    }
-
-    controller = SimpleNamespace(
-        _state=SimpleNamespace(get_video=lambda vid: video),
-        _config=config,
-    )
-    raw = AppController.getVideoMetrics(controller, "vid-1")
-    data = json.loads(raw)
-
-    assert data["available"] is True
-    assert data["totals"]["views"] == 120
-    assert data["platforms"]["youtube"]["views"] == 120
-    assert data["platforms"]["x"]["views"] == 0  # no snapshot yet
-
-
-def test_backend_get_video_metrics_unknown_video(tmp_path):
-    config = XPSTConfig()
-    config.config_dir = str(tmp_path)
-    controller = SimpleNamespace(
-        _state=SimpleNamespace(get_video=lambda vid: None),
-        _config=config,
-    )
-    data = json.loads(AppController.getVideoMetrics(controller, "nope"))
-    assert data["available"] is False
-    assert "Unknown video" in data["error"]
 
 
 # ── Delete idempotency ────────────────────────────────────────────────────────

@@ -13,7 +13,7 @@
   <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-8-blue"></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/os-Linux%20|%20macOS%20|%20Windows-lightgrey"></a>
   <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-40%20tools-orange"></a>
-  <a href="#"><img alt="Desktop" src="https://img.shields.io/badge/desktop-PySide6%2FQML-blueviolet"></a>
+  <a href="#"><img alt="Desktop" src="https://img.shields.io/badge/desktop-Tauri%202-blueviolet"></a>
 </p>
 
 ---
@@ -47,8 +47,8 @@
 xPST includes integrations for **seven platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, Facebook Pages, and (opt-in) Facebook Messenger — but their current availability is not uniform. YouTube, X, and Instagram are live-verified; TikTok is currently source-only; Threads, Facebook Pages, and Messenger are not authenticated in the current live environment. See the [capability truth table](docs/INSTALL.md#capability-truth-table) before treating an integration as ready.
 
 It runs three ways:
-- **Desktop GUI** — PySide6/QML native app with 8 pages
-- **CLI** — 46 top-level commands (69 including subcommands) covering the entire workflow
+- **Desktop shell** — one Tauri 2 app (a native window over the local dashboard)
+- **CLI** — 45 top-level commands (68 including subcommands) covering the entire workflow
 - **MCP server** — 40 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
@@ -93,8 +93,8 @@ platform API calls you configure. See
 - **Agent-queryable** — Query your back catalog from the CLI or any AI agent over MCP
 
 ### Three Drivable Surfaces
-- **Desktop GUI** — PySide6/QML app with Dashboard, Compose, Content, Analytics, Connect, Schedule, Settings, and About pages + DetailPanel
-- **CLI** — 46 Click-based commands (69 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
+- **Desktop shell** — Tauri 2 wrapper around the local dashboard: one native app, built from `src-tauri/` plus the Python engine sidecar. Platform installers (`.dmg`, NSIS `.exe`/`.msi`, `.deb`/`.AppImage`) come from `.github/workflows/tauri-release.yml`
+- **CLI** — 45 Click-based commands (68 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
 - **MCP server** — 40 tools (34 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 #### Surface counts
@@ -105,8 +105,8 @@ These numbers are generated from the shipped code, not maintained by hand. `pyth
 | Surface | Count | Measured from |
 |---------|-------|---------------|
 | MCP tools | **40** | `tools/list` over a real stdio handshake with `xpst mcp start` |
-| CLI top-level commands | **46** | `xpst.cli.main.commands` |
-| CLI commands including subcommands | **69** | recursive walk of the Click command tree |
+| CLI top-level commands | **45** | `xpst.cli.main.commands` |
+| CLI commands including subcommands | **68** | recursive walk of the Click command tree |
 | HTTP routes (dashboard app) | **34** | FastAPI route table (30 xPST routes + 4 framework docs routes) |
 | Supported providers | **8** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
 
@@ -158,7 +158,7 @@ Other entry points:
 
 ```bash
 xpst dashboard    # local web dashboard at http://localhost:8080
-xpst app          # native desktop app (PySide6/QML)
+xpst app          # launch the installed desktop app (Tauri shell)
 xpst mcp          # MCP server for AI agents (stdio)
 xpst auth status  # check which platforms are connected
 ```
@@ -229,10 +229,9 @@ pip install -e .
 | `mcp` | MCP server (`xpst mcp`, `xpst-mcp`) |
 | `knowledge` | KB transcription/embeddings/LanceDB |
 | `dashboard` | Web dashboard (FastAPI + WebSocket) |
-| `desktop` | Native desktop GUI (PySide6/QML) |
 | `windows` | Windows-specific pywin32/winshell |
 | `dev` | pytest, ruff, mypy, import-linter |
-| `full` | Everything (`mcp,desktop,dashboard,windows,knowledge`) |
+| `full` | Everything (`mcp,dashboard,windows,knowledge`) |
 
 ### PyPI status
 
@@ -263,7 +262,7 @@ See `Dockerfile` and `docker-compose.yml` for details.
 
 ## CLI Reference
 
-xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 45 top-level commands (68 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 
 ### Setup & Accounts
 
@@ -347,7 +346,7 @@ xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help
 
 | Command | Description |
 |---------|-------------|
-| `xpst app` | Launch native desktop app (PySide6/QML); appears in your dock |
+| `xpst app` | Launch the installed desktop app (Tauri shell) |
 | `xpst dashboard` | Launch local web API dashboard at `http://localhost:8080` |
 | `xpst mcp` | Start MCP (Model Context Protocol) server over stdio |
 
@@ -369,8 +368,6 @@ xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help
 | `xpst version` | Show xPST version and all dependency versions |
 | `xpst plugins list` | List installed plugins |
 | `xpst plugins docs` | Generate markdown documentation for installed plugins |
-| `xpst build` | Build a standalone executable using PyInstaller |
-| `xpst build --target macos` | Cross-compile for a different OS via Docker |
 
 ### Global Options
 
@@ -416,33 +413,43 @@ xpst run --dry-run --json | jq '.videos[].video_id'
 
 ## Desktop App Guide
 
-The native desktop app is built with PySide6/QML and provides a polished, Apple-like UI with light/dark mode, the Inter font, and full accessibility support.
+The desktop app is a **Tauri 2 shell** (`src-tauri/`) that opens a native window onto
+the local dashboard UI, and spawns the Python engine as a bundled sidecar. There is
+exactly one desktop build — the shell plus the engine sidecar — and its installers are
+produced by `.github/workflows/tauri-release.yml` (`.dmg` on macOS, NSIS `.exe`/`.msi`
+on Windows, `.deb`/`.AppImage` on Linux). Packaging details: [docs/PACKAGING.md](docs/PACKAGING.md).
 
 ```bash
-xpst app          # launch the native desktop app
-xpst app --no-splash  # skip the splash screen
+xpst app                            # launch the installed desktop app
+scripts/build-engine.sh             # build the Python engine sidecar from a checkout
+cd src-tauri && cargo tauri build   # build the shell + installer for this OS
 ```
 
-### 8 Pages
+### Sections
 
-| Page | What it does |
-|------|-------------|
+| Section | What it does |
+|---------|--------------|
 | **Dashboard** | Overview of posted content, per-platform health, and quota status at a glance |
-| **Compose** | Compose a new post: select a video file, write a caption, choose target platforms, and submit |
-| **Content** | Browse your content library of posted videos with thumbnails, captions, and per-platform status |
-| **Analytics** | View cross-platform engagement metrics (views, likes, comments, shares) with trend history |
+| **Setup** | First-run wizard: connects your accounts and completes onboarding |
 | **Connect** | Connect and manage configured social accounts; current live status is in the [capability table](docs/INSTALL.md#capability-truth-table) |
-| **Schedule** | Manage scheduled posts: create, view, and remove upcoming and recurring posts |
-| **Settings** | Customize xPST settings: encoding profiles, rate limits, notifications, and preferences |
+| **Compose** | Compose a new post: select a video file, write a caption, choose target platforms, and submit |
+| **Preflight** | Check a media file against each destination's specs before uploading |
+| **Last post** | Per-destination results of the most recent post |
+| **Analytics** | Cross-platform engagement metrics (views, likes, comments, shares) with trend history |
+| **Videos** | Per-video performance detail |
+| **Accounts** | Account and credential state for each platform |
+| **Schedule** | Create, view, and remove upcoming and recurring posts |
+| **Activity** | Failed posts and the dead-letter queue |
+| **Library** | Browse the downloaded content library |
 | **About** | Version info, dependency versions, links to docs and source, acknowledgments |
+| **Settings** | Encoding profiles, rate limits, notifications, and preferences |
 
-### DetailPanel
-
-The DetailPanel is a slide-out panel that shows the full details of a selected post: all per-platform upload results, URLs, error messages, analytics metrics, and timestamps.
+The shell mints a per-launch API token and hands it to the engine, so the mutating
+dashboard routes stay authorised without the token being stored in the webview.
 
 ### First-Run Welcome
 
-On first launch, a welcome dialog guides you to the Connect page to set up your platform accounts. The app detects whether `~/.xpst/config.yaml` exists and routes you accordingly.
+On first launch, a welcome wizard guides you through account setup. The app detects whether `~/.xpst/config.yaml` exists and routes you accordingly.
 
 > **Screenshots:** Product banner and app icons ship under `docs/assets/`; page-level screenshots are a follow-up, not a blocker. Run `xpst app` to see the UI live, or see [docs/TUTORIAL_APP.md](docs/TUTORIAL_APP.md) for a full walkthrough.
 
@@ -479,9 +486,9 @@ Set the dashboard password (stored as a bcrypt hash) to also protect reads:
 xpst config set monitoring.dashboard_password mypassword
 ```
 
-For the full graphical experience use the native desktop app (`xpst app`,
-requires the `desktop` extra) or the NiceGUI dashboard (requires the
-`dashboard` extra). Endpoints, auth, and response shapes are documented in
+For the full graphical experience use the desktop app (`xpst app`, the Tauri
+shell) — it renders this same dashboard UI. Endpoints, auth, and response shapes
+are documented in
 [docs/DASHBOARD.md](docs/DASHBOARD.md).
 
 ---
@@ -907,7 +914,7 @@ xPST is organized as a small set of cooperating layers, each with a single respo
 - **Providers layer** — Every platform implements a common `PlatformUploader` interface declaring its role (source/destination), capabilities (upload, delete, health, analytics), and auth mode. The provider registry is what `xpst providers` and `xpst_providers` enumerate.
 - **Engine** — Orchestrates the cross-post: detect new content from sources, encode once per destination profile (with passthrough probing), fan out uploads, and record results. Circuit breakers and the dead-letter queue live here.
 - **State store** — Atomic, write-then-rename JSON state at `~/.xpst/state.json` with pidfile locking, plus the SQLite analytics database at `~/.xpst/analytics.db`.
-- **Surfaces** — The CLI (Click), the desktop app (PySide6/QML), and the MCP server are thin drivers over the same engine and state; nothing platform-specific lives in a surface.
+- **Surfaces** — The CLI (Click), the desktop shell (Tauri + the dashboard HTTP UI), and the MCP server are thin drivers over the same engine and state; nothing platform-specific lives in a surface.
 - **Knowledge base** — Transcription (faster-whisper), nugget extraction, and LanceDB embeddings, decoupled so it can be installed or omitted via the `knowledge` extra.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and [docs/adr.md](docs/adr.md) for architecture decision records.
@@ -964,4 +971,4 @@ xPST is dual-licensed under **MIT OR Apache-2.0**. You may choose either license
 
 ## Acknowledgments
 
-xPST stands on the shoulders of excellent open-source projects, including FFmpeg, yt-dlp, faster-whisper, LanceDB, PySide6/Qt, Click, httpx, twikit, and the Model Context Protocol. Thank you to all their maintainers.
+xPST stands on the shoulders of excellent open-source projects, including FFmpeg, yt-dlp, faster-whisper, LanceDB, Tauri, Click, httpx, twikit, and the Model Context Protocol. Thank you to all their maintainers.

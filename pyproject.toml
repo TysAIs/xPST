@@ -77,10 +77,6 @@ anti-ban = [
 mcp = [
     "mcp[cli]>=1.0.0,<2.0.0",
 ]
-desktop = [
-    # Full desktop app: native PySide6/QML UI.
-    "PySide6>=6.5.0,<7.0.0",
-]
 windows = [
     "pywin32>=306; platform_system == 'Windows'",
     "winshell>=0.6; platform_system == 'Windows'",
@@ -99,7 +95,7 @@ knowledge = [
     "lancedb>=0.5,<1.0",  # Legacy backend, still available
 ]
 full = [
-    "xpst[mcp,desktop,dashboard,windows,knowledge]",
+    "xpst[mcp,dashboard,windows,knowledge]",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -143,10 +139,6 @@ target-version = "py310"
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "TCH"]
 ignore = ["E501", "E402", "SIM105", "SIM117", "SIM102", "B904"]
 
-[tool.ruff.lint.per-file-ignores]
-"src/xpst/desktop_app/backend.py" = ["N802", "N815"]
-"src/xpst/desktop_app/models.py" = ["N802"]
-
 [tool.ruff.format]
 quote-style = "double"
 
@@ -178,8 +170,8 @@ disable_error_code = [
 
 # ── Architectural wall enforcement (import-linter / `lint-imports`) ──
 # Two structural guarantees the KB design depends on:
-#   1. The heavy KB dependencies (faster-whisper, fastembed, lancedb, torch,
-#      PySide6) never reach the cold path. They are imported ONLY inside the
+#   1. The heavy KB dependencies (faster-whisper, fastembed, lancedb, torch)
+#      never reach the cold path. They are imported ONLY inside the
 #      three adapter functions listed in `ignore_imports` (the lazy seams).
 #      Adding a new module-load-time heavy import anywhere on the cold path
 #      breaks this contract. The runtime `sys.modules` wall is additionally
@@ -217,7 +209,6 @@ forbidden_modules = [
     "fastembed",
     "lancedb",
     "torch",
-    "PySide6",
 ]
 # The three intentional lazy seams: heavy deps are imported INSIDE adapter
 # functions here, never at module load. These edges are the wall's pressure

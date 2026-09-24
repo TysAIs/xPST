@@ -37,7 +37,6 @@ PACKAGE_IMPORTS = {
     "fastapi": "fastapi",
     "pydantic": "pydantic",
     "pydantic-settings": "pydantic_settings",
-    "PySide6": "PySide6",
     "bcrypt": "bcrypt",
     "cryptography": "cryptography",
     "httpx": "httpx",

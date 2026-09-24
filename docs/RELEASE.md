@@ -114,10 +114,11 @@ desktop. A red workflow run is a real finding about the published artifact.
 The stack detector reports `tauri` only when both
 `Contents/Resources/ui/index.html` and
 `Contents/Resources/binaries/engine/xpst-engine` are present. A bundle carrying
-`Contents/Resources/xpst/desktop_app/qml/main.qml` or PySide6 is reported as
-`legacy-pyside-qml`; it may render a native QML window, but it fails the
-HTTP-engine and packaged-HTML assertions rather than being misreported as a
-Tauri pass.
+`Contents/Frameworks/PySide6` is reported as `legacy-pyside-qml`: it is the
+retired pre-Tauri desktop app, so it fails the HTTP-engine and packaged-HTML
+assertions rather than being misreported as a Tauri pass. The store no longer
+builds a PySide6 desktop bundle, so this classification only ever names an
+out-of-date published artifact.
 
 ### Gatekeeper and quarantine
 

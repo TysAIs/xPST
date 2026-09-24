@@ -53,7 +53,6 @@
 - [Maintenance](#maintenance)
   - [`xpst update`](#xpst-update)
   - [`xpst version`](#xpst-version)
-  - [`xpst build`](#xpst-build)
 - [Exit Codes Reference](#exit-codes-reference)
 - [JSON Output Mode for Scripting](#json-output-mode-for-scripting)
 - [Dry-Run Mode](#dry-run-mode)
@@ -1129,18 +1128,19 @@ xpst kb migrate-store
 
 ### `xpst app`
 
-Launch the native desktop app (PySide6/QML). It appears in your dock/taskbar.
+Launch the installed desktop app (the Tauri shell). It appears in your dock/taskbar.
 
 ```bash
 xpst app
-xpst app --no-splash     # skip the splash screen
 ```
 
-If PySide6 is not installed, `xpst app` prints an install hint and exits
-gracefully:
+`xpst app` locates the installed desktop app (the Tauri shell). It is not a
+Python module, so it is located on disk (`/Applications/xPST.app` or
+`~/Applications/xPST.app` on macOS, the installed executable elsewhere); when no
+build is installed it prints where to get one and exits gracefully:
 
 ```bash
-Desktop app not installed. Run: pip install xpst[desktop]
+Install a published bundle from https://github.com/TysAIs/xPST/releases
 ```
 
 See [TUTORIAL_APP.md](TUTORIAL_APP.md) for the full desktop app walkthrough.
@@ -1235,21 +1235,6 @@ xpst version --json
 
 ---
 
-### `xpst build`
-
-Build a standalone executable using PyInstaller.
-
-```bash
-xpst build                    # build for current OS
-xpst build --target macos      # build for macOS
-xpst build --target windows     # cross-compile for Windows (via Docker)
-xpst build --target linux       # build for Linux
-xpst build --spec-file ./custom.spec
-```
-
-Cross-compilation requires Docker. The command auto-detects the appropriate `.spec` file (`build_macos.spec`, `build_windows.spec`, `build_linux.spec`).
-
----
 
 ## Exit Codes Reference
 

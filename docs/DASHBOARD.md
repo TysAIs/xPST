@@ -204,7 +204,7 @@ server (`xpst_analytics`, `xpst_cross_post_analytics`) share this data.
 
 ## Related
 
-- [TUTORIAL_APP.md](TUTORIAL_APP.md) — the native PySide6/QML desktop app
+- [TUTORIAL_APP.md](TUTORIAL_APP.md) — the desktop app (Tauri shell)
 - [TUTORIAL_CLI.md](TUTORIAL_CLI.md) — the CLI surface
 - [TUTORIAL_MCP.md](TUTORIAL_MCP.md) — the MCP surface
 - [api.md](api.md) — Python API reference (engine, use-cases, providers)
