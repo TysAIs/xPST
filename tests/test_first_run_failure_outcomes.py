@@ -451,17 +451,27 @@ def test_doctor_missing_ytdlp_names_env_var(tmp_path, monkeypatch):
     assert "XPST_YTDLP_PATH" in ytdlp["fix"]
 
 
-def test_missing_engine_binary_style_extra_is_reported(monkeypatch):
-    """A missing optional runtime (desktop extra -- the UI shell) is a clear
-    one-liner with the install command, never an ImportError traceback."""
-    import importlib.util
+def test_missing_engine_binary_style_extra_is_reported(monkeypatch, tmp_path):
+    """A missing desktop install (no shell on disk) is a clear one-liner with
+    where to get one, never an ImportError traceback.
 
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    ``xpst app`` launches the native Tauri shell, so it is located on disk
+    rather than imported: patch the candidate list to point at a path that
+    cannot exist so the test is deterministic on a machine that does have the
+    app installed (it must never spawn a real one).
+    """
+    missing = tmp_path / "not-installed" / "xPST.app"
+    monkeypatch.setattr("xpst.cli._desktop_shell_candidates", lambda: [missing])
+    spawned: list[object] = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: spawned.append(args))
+
     result = CliRunner().invoke(main, ["app"])
+
     assert result.exit_code == 1
-    assert "Desktop app not installed" in result.output
-    assert "pip install" in result.output
+    assert "desktop app not found" in result.output
+    assert "github.com/TysAIs/xPST/releases" in result.output
     assert "Traceback" not in _flat(result.output)
+    assert spawned == [], "a missing app must not launch anything"
 
 
 # ═════════════════════════════════════════════════════════════════════════════

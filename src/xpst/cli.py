@@ -3513,33 +3513,56 @@ def ui(ctx: click.Context, port: int, no_browser: bool, as_json: bool):
 # Desktop App Command
 # ──────────────────────────────────────────────
 
-@main.command()
-@click.option("--port", "-p", default=None, type=int, help="Dashboard HTTP port (default: auto-select free port)")
-@click.option("--no-splash", is_flag=True, help="Skip the splash screen on startup")
-@click.pass_context
-def app(ctx: click.Context, port: int | None, no_splash: bool):
-    """Launch xPST as a native desktop app (PySide6)"""
-    # PySide6 is an optional extra ('desktop' extra, ~983MB). Check for it
-    # before importing the launcher so a missing install prints a clear
-    # message instead of crashing with an ImportError/SystemExit traceback.
-    import importlib.util
 
-    if importlib.util.find_spec("PySide6") is None:
-        console.print("[yellow]Desktop app not installed. Run: pip install xpst\\[desktop][/yellow]")
+def _desktop_shell_candidates() -> list[Path]:
+    """Installed locations of the Tauri desktop shell, in preference order.
+
+    The shell is a native binary/``.app`` bundle (``com.tysais.xpst``), not a
+    Python module, so it is located on disk instead of imported.
+    """
+    home = Path.home()
+    if sys.platform == "darwin":
+        return [Path("/Applications/xPST.app"), home / "Applications" / "xPST.app"]
+    if sys.platform == "win32":
+        candidates: list[Path] = []
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            candidates.append(Path(local) / "xPST" / "xPST.exe")
+        for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+            base = os.environ.get(variable)
+            if base:
+                candidates.append(Path(base) / "xPST" / "xPST.exe")
+        return candidates
+    # Linux: the .deb installs `xPST` (capitalised — the lowercase `xpst`
+    # on PATH is this CLI), the AppImage is usually kept in ~/Applications.
+    return [
+        Path("/usr/bin/xPST"),
+        Path("/usr/local/bin/xPST"),
+        home / "Applications" / "xPST.AppImage",
+    ]
+
+
+@main.command()
+def app():
+    """Launch the installed xPST desktop app (Tauri shell).
+
+    The desktop app is the Tauri shell under ``src-tauri/``, which spawns the
+    bundled Python engine sidecar itself. Build it with
+    ``scripts/build-engine.sh`` + ``cargo tauri build`` (see docs/PACKAGING.md)
+    or install a published bundle from the GitHub Releases page.
+    """
+    import subprocess
+
+    target = next((path for path in _desktop_shell_candidates() if path.exists()), None)
+    if target is None:
+        console.print("[yellow]xPST desktop app not found.[/yellow]")
+        console.print("[dim]Install a published bundle from https://github.com/TysAIs/xPST/releases[/dim]")
+        console.print("[dim]or build one from a checkout: scripts/build-engine.sh && (cd src-tauri && cargo tauri build)[/dim]")
         sys.exit(EXIT_GENERAL)
 
-    from xpst.desktop_app.main import main as pyside_main
-
-    # Route through the shared pidfile helper (advisory): never block the
-    # desktop app because a daemon/CLI instance is running — warn instead.
-    from xpst.utils.pidfile import PidfileLock
-
-    _pid = PidfileLock(str(get_config_dir()))
-    if _pid.verify():
-        logger.info("Another xPST instance is running — desktop app proceeds alongside it.")
-
-    console.print("[bold blue]Launching xPST desktop app…[/bold blue]")
-    sys.exit(pyside_main(no_splash=no_splash))
+    console.print(f"[bold blue]Launching xPST desktop app…[/bold blue] [dim]{target}[/dim]")
+    command = ["open", str(target)] if sys.platform == "darwin" else [str(target)]
+    subprocess.Popen(command)
 
 
 # ──────────────────────────────────────────────
@@ -5671,219 +5694,6 @@ def plugins_list(ctx: click.Context, as_json: bool):
         )
 
     console.print(table)
-
-
-# ──────────────────────────────────────────────
-# Build Command
-# ──────────────────────────────────────────────
-
-@main.command()
-@click.option("--target", default=None, type=click.Choice(["macos", "windows", "linux"]), help="Target OS (default: current OS)")
-@click.option("--spec-file", default=None, type=click.Path(), help="PyInstaller .spec file path")
-@json_option
-@click.pass_context
-def build(ctx: click.Context, target: str | None, spec_file: str | None, as_json: bool):
-    """Build a standalone executable using PyInstaller.
-
-    Auto-detects the appropriate .spec file for the current OS (or --target).
-    Checks for PyInstaller and offers to install if missing.
-    Supports cross-compilation via Docker when --target differs from current OS.
-    Streams PyInstaller output in real-time.
-    """
-    import platform as _platform
-    import shutil
-    import subprocess
-
-    # Determine current OS
-    system = _platform.system()
-    if system == "Darwin":
-        current_os = "macos"
-    elif system == "Windows":
-        current_os = "windows"
-    else:
-        current_os = "linux"
-
-    # Determine target OS
-    target_os = target if target else current_os
-
-    # Cross-compilation: if target differs from current OS, use Docker
-    use_docker = target is not None and target_os != current_os
-
-    # Find spec file
-    if spec_file:
-        spec_path = Path(spec_file)
-        if not spec_path.exists():
-            if as_json:
-                json_output({"ok": False, "error": f"Spec file not found: {spec_file}"}, True)
-            else:
-                console.print(f"[red]Spec file not found:[/red] {spec_file}")
-            sys.exit(EXIT_GENERAL)
-    else:
-        # Auto-detect spec file
-        spec_map = {
-            "macos": "build_macos.spec",
-            "windows": "build_windows.spec",
-            "linux": "build_linux.spec",
-        }
-        spec_name = spec_map.get(target_os)
-        spec_path = Path.cwd() / spec_name
-        if not spec_path.exists():
-            if as_json:
-                json_output({"ok": False, "error": f"Spec file not found: {spec_path}"}, True)
-            else:
-                console.print(f"[red]Spec file not found:[/red] {spec_path}")
-            sys.exit(EXIT_GENERAL)
-
-    # Docker-based cross-compilation
-    if use_docker:
-        docker_bin = shutil.which("docker")
-        if not docker_bin:
-            if as_json:
-                json_output({"ok": False, "error": "Docker is required for cross-compilation. Install Docker and try again."}, True)
-            else:
-                console.print("[red]Docker is required for cross-compilation.[/red]")
-                console.print("[dim]Install Docker: https://docs.docker.com/get-docker/[/dim]")
-            sys.exit(EXIT_GENERAL)
-
-        # Map target OS to Docker image
-        docker_images = {
-            "macos": "ghcr.io/cdrx/pyinstaller-windows:latest",  # macOS not natively possible in Docker
-            "windows": "ghcr.io/cdrx/pyinstaller-windows:latest",
-            "linux": "ghcr.io/cdrx/pyinstaller-linux:latest",
-        }
-        docker_image = docker_images.get(target_os, "python:3.11-slim")
-
-        if not as_json:
-            console.print(f"[bold blue]Cross-compiling for {target_os} via Docker...[/bold blue]")
-            console.print(f"  Docker image: {docker_image}")
-            console.print(f"  Spec file: {spec_path}\n")
-
-        docker_cmd = [
-            docker_bin, "run", "--rm",
-            "-v", f"{Path.cwd()}:/src",
-            "-w", "/src",
-            docker_image,
-            "pyinstaller", "--clean", "--noconfirm", str(spec_path),
-        ]
-
-        # Stream output in real-time
-        try:
-            proc = subprocess.Popen(
-                docker_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
-            output_lines: list[str] = []
-            for line in proc.stdout:  # type: ignore[union-attr]
-                output_lines.append(line)
-                if not as_json:
-                    console.print(f"  [dim]{line.rstrip()}[/dim]")
-            proc.wait()
-
-            if proc.returncode == 0:
-                dist_dir = Path.cwd() / "dist"
-                if as_json:
-                    json_output({"ok": True, "target": target_os, "spec_file": str(spec_path), "dist_dir": str(dist_dir), "docker": True}, True)
-                else:
-                    console.print(f"\n[green]✓[/green] Cross-compilation complete for [bold]{target_os}[/bold]")
-                    console.print(f"  Output: {dist_dir}")
-            else:
-                stderr_text = "".join(output_lines)[-500:] if output_lines else "Build failed"
-                if as_json:
-                    json_output({"ok": False, "error": stderr_text}, True)
-                else:
-                    console.print("\n[red]Cross-compilation failed:[/red]")
-                    console.print(stderr_text)
-                sys.exit(EXIT_GENERAL)
-        except FileNotFoundError:
-            console.print("[red]Docker not found or not running.[/red]")
-            sys.exit(EXIT_GENERAL)
-        return
-
-    # Local build (same OS)
-    # Check for PyInstaller
-    pyinstaller_bin = shutil.which("pyinstaller")
-    if not pyinstaller_bin:
-        exe_name = "pyinstaller.exe" if current_os == "windows" else "pyinstaller"
-        candidate = Path(sys.executable).resolve().parent / exe_name
-        if candidate.exists():
-            pyinstaller_bin = str(candidate)
-    if not pyinstaller_bin:
-        # Check if it's in the current venv
-        if as_json:
-            json_output({"ok": False, "error": "PyInstaller not found. Install with: pip install pyinstaller"}, True)
-            sys.exit(EXIT_GENERAL)
-        else:
-            console.print("[yellow]PyInstaller not found.[/yellow]")
-            if confirm("Install PyInstaller now?"):
-                console.print("[dim]Installing PyInstaller...[/dim]")
-                result = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "pyinstaller"],
-                    capture_output=True, text=True,
-                )
-                if result.returncode != 0:
-                    console.print(f"[red]Installation failed:[/red] {result.stderr}")
-                    sys.exit(EXIT_GENERAL)
-                console.print("[green]✓[/green] PyInstaller installed")
-                pyinstaller_bin = shutil.which("pyinstaller")
-                if not pyinstaller_bin:
-                    exe_name = "pyinstaller.exe" if current_os == "windows" else "pyinstaller"
-                    candidate = Path(sys.executable).resolve().parent / exe_name
-                    if candidate.exists():
-                        pyinstaller_bin = str(candidate)
-            else:
-                sys.exit(EXIT_GENERAL)
-
-    if not pyinstaller_bin:
-        if as_json:
-            json_output({"ok": False, "error": "PyInstaller installed but executable was not found"}, True)
-        else:
-            console.print("[red]PyInstaller installed but executable was not found.[/red]")
-        sys.exit(EXIT_GENERAL)
-
-    if not as_json:
-        console.print(f"[bold blue]Building xPST for {target_os}...[/bold blue]")
-        console.print(f"  Spec file: {spec_path}")
-        console.print(f"  PyInstaller: {pyinstaller_bin}\n")
-
-    # Run PyInstaller with real-time streaming output
-    cmd = [pyinstaller_bin, "--clean", "--noconfirm", str(spec_path)]
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
-    )
-    output_lines = []
-    for line in proc.stdout:  # type: ignore[union-attr]
-        output_lines.append(line)
-        if not as_json:
-            console.print(f"  [dim]{line.rstrip()}[/dim]")
-    proc.wait()
-
-    if proc.returncode == 0:
-        dist_dir = Path.cwd() / "dist"
-        if as_json:
-            json_output({
-                "ok": True,
-                "target": target_os,
-                "spec_file": str(spec_path),
-                "dist_dir": str(dist_dir),
-            }, True)
-        else:
-            console.print(f"[green]✓[/green] Build complete for [bold]{target_os}[/bold]")
-            console.print(f"  Output: {dist_dir}")
-    else:
-        stderr_text = "".join(output_lines)[-500:] if output_lines else "Build failed"
-        if as_json:
-            json_output({"ok": False, "error": stderr_text}, True)
-        else:
-            console.print("[red]Build failed:[/red]")
-            console.print(stderr_text)
-        sys.exit(EXIT_GENERAL)
 
 
 def confirm(message: str) -> bool:

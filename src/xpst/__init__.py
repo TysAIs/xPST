@@ -15,7 +15,7 @@ Key Features:
     - sqlite-vec vector store (<1MB, replaces LanceDB)
     - 24+ MCP tools for AI agent integration
     - 36+ CLI commands with --json
-    - PySide6/QML desktop app with accessibility (WCAG AA target)
+    - Tauri desktop shell (native window over the local dashboard)
     - Secure credential storage (Fernet + scrypt, OS keychain)
     - Circuit breaker, retry, crash recovery, graceful shutdown
 

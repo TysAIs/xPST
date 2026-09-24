@@ -24,16 +24,18 @@ The direct dependencies declared in `pyproject.toml` are compatible with open-so
 | BSD-3-Clause | click, uvicorn, httpx |
 | PSF | pywin32 |
 | Unlicense | yt-dlp |
-| LGPL/GPL/commercial | PySide6 / Qt |
 
 ## Desktop Packaging Notes
 
-PySide6/Qt is the dependency that needs the most care for bundled desktop releases:
+There is no Qt/PySide6 dependency to reconcile: the repository ships one desktop
+app, the Tauri 2 shell (MIT OR Apache-2.0) in `src-tauri/`, wrapping a
+PyInstaller-built Python engine sidecar whose dependency set is the same as the
+`full` extra. No desktop installer may nest a second, differently licensed GUI
+toolkit.
 
-- Include Qt/PySide6 copyright and license notices in desktop artifacts.
-- Prefer dynamic linking and standard PySide6 redistribution behavior for LGPL compliance.
-- Do not statically link Qt unless the release follows GPL-compatible or commercial-license requirements.
-- Include source-offer or relinking information if a packaging format requires it.
+- Include the Tauri/WebView2/WebKitGTK notices that the shell's bundler emits for each platform.
+- The engine sidecar ships the same third-party set as the wheel; that set is covered by this report.
+- If a future release bundles a new native toolkit, add its notice and relinking information here before shipping.
 
 ## Release Artifact Requirements
 
@@ -52,7 +54,7 @@ Run these before release:
 
 ```bash
 uv run pytest -q --timeout=60 --timeout-method=thread
-uv run ruff check src tests scripts/verify_qml_pages.py
+uv run ruff check src tests
 uv run mypy src/xpst
 uv build
 ```

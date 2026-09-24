@@ -569,10 +569,6 @@ xpst/
 ├── dashboard/          # Web API dashboard
 │   ├── server.py       # FastAPI server
 │   └── analytics.py    # Analytics aggregator
-├── desktop_app/        # PySide6/QML desktop app
-│   ├── backend.py      # QML bridge
-│   ├── main.py         # App entry point
-│   └── qml/            # QML pages (8 + DetailPanel)
 ├── knowledge/          # Content knowledge base
 │   ├── ingest/         # Transcription + extraction
 │   ├── organize/       # Clustering + difficulty

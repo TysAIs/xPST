@@ -817,7 +817,7 @@ def start_dashboard(
 
     The dashboard is self-contained pure FastAPI (the ``dashboard`` extra is a
     no-op since the NiceGUI fallback UI was removed). For a GUI, use
-    ``xpst app`` for the native PySide6 desktop application.
+    ``xpst app`` for the native desktop shell.
 
     Args:
         port: HTTP port to listen on. Defaults to 8080.

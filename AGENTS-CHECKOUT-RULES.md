@@ -4,7 +4,7 @@ The ~/xPST checkout is SHARED. Multiple bots and subagents have worked in it con
 
 1. Do NOT `git checkout` to another branch in ~/xPST.
 2. Do NOT `git reset/restore/clean` in ~/xPST.
-3. Do NOT run ./build.sh from ~/xPST.
+3. Do NOT run scripts/build-engine.sh or `cargo tauri build` from ~/xPST (they write into src-tauri/binaries/ and src-tauri/target/).
 
 INSTEAD:
 - Make a throwaway clone for your task: `git clone ~/xPST /tmp/xpst-work-<task> && cd /tmp/xpst-work-<task> && git checkout -b <your-branch>`
