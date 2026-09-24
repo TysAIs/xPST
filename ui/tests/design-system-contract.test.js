@@ -101,22 +101,26 @@ test("settings is readable and links to capability truth", async () => {
 test("navigation uses one local icon family and exposes all foundation routes", () => {
   assert.deepEqual(NAV_ITEMS.map((item) => item.id), [
     "dashboard",
-    "onboarding",
-    "connect",
     "compose",
+    "connect",
     "create",
+    "schedule",
     "result",
     "analytics",
     "videos",
-    "accounts",
-    "schedule",
     "activity",
+    "accounts",
     "library",
-    "about",
+    "onboarding",
     "settings",
+    "about",
   ]);
   for (const item of NAV_ITEMS) {
     assert.match(item.icon, /^[a-z-]+$/);
+  }
+  // Every item carries a group, and every group id is a declared group.
+  for (const item of NAV_ITEMS) {
+    assert.match(item.group, /^[a-z]+$/);
   }
 });
 
