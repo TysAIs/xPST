@@ -66,12 +66,19 @@ def test_readme_claims_match_live_counts(counts) -> None:
 
 
 def test_a_wrong_command_count_is_rejected(counts) -> None:
-    """The check must actually fail on mismatch, not merely pass today."""
-    tampered = _readme().replace("46 top-level commands", "38 top-level commands", 1)
+    """The check must actually fail on mismatch, not merely pass today.
+
+    Derived from the live count rather than hard-coded, so this guard survives a
+    legitimate change to the command surface.
+    """
+    claim = f"{counts.cli_top_level} top-level commands"
+    wrong = f"{counts.cli_top_level - 8} top-level commands"
+    assert claim in _readme(), "the README no longer claims a top-level command count"
+    tampered = _readme().replace(claim, wrong, 1)
 
     problems = check_claims(counts, tampered)
 
-    assert any("claims 38" in problem for problem in problems), problems
+    assert any(f"claims {counts.cli_top_level - 8}" in problem for problem in problems), problems
 
 
 def test_a_wrong_tool_badge_is_rejected(counts) -> None:

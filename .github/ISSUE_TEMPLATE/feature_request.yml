@@ -38,7 +38,7 @@ body:
       label: Surface
       options:
         - CLI
-        - Desktop app (PySide6/QML)
+        - Desktop app (Tauri shell)
         - Dashboard (FastAPI)
         - MCP server
         - Provider / platform integration
