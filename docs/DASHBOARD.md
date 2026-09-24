@@ -105,11 +105,12 @@ token + HMAC signature).
 | `GET /health` | — | Aggregated platform health check: one entry per configured platform with `ok`, `detail`, and latency. |
 | `GET /metrics` | — | Prometheus text-format metrics (posting counters, upload durations, queue depths, health status). |
 | `GET /state` | Basic | Current xPST state summary: version, per-platform status, queued and completed post counts, dead-letter queue size. |
-| `GET /api/*` | Basic when configured | Web-UI JSON API (summary, videos, onboarding state, media, library, activity, schedules, providers, settings). Read-only. |
-| `POST /api/post` | API token | Plan (`dry_run: true`) or run a post through the real engine path. |
+| `GET /api/*` | Basic when configured | Web-UI JSON API (summary, videos, onboarding state, media, library, activity, schedules, providers, settings, capabilities). Read-only. |
+| `POST /api/post` | API token | Plan (`dry_run: true`) or run a post through the real engine path. Accepts `content_type` (`video`/`image`/`carousel`/`text`/`thread`); a type the destination cannot publish is refused with `409` before anything is uploaded. |
 | `POST /api/connect/{platform}` | API token | Inspect / enable / verify one destination platform. |
 | `POST /api/onboarding`, `POST /api/onboarding/complete` | API token | Persist the first-run choices and the "wizard finished" flag. |
-| `POST /api/preflight` | API token | Local, no-network post preflight. |
+| `POST /api/preflight` | API token | Local, no-network post preflight. Accepts `content_type` and reports the same `content` verdict the CLI and MCP return. |
+| `GET /api/capabilities` | Basic when configured | The canonical capability contract (one source: `xpst.content`): per destination, what it declares vs what it can publish, plus the publishing route per content type. |
 | `GET /bio` | — | Public link-in-bio page (meant to be shared). |
 | `GET/POST /bio/edit` | Basic or `?token=` | Admin editor for the link-in-bio page. |
 
