@@ -27,6 +27,13 @@
     (catalog?.providers ?? []).filter((provider) => provider.roles?.includes("video_destination"))
   );
 
+  // A source-only platform (TikTok before its Content Posting API app is
+  // approved) cannot be a preflight target: offering the checkbox would invite
+  // a plan for a post the engine cannot deliver.
+  function isSourceOnly(provider) {
+    return Boolean(provider?.source_only ?? provider?.role_status?.video_destination?.source_only);
+  }
+
   async function preflight() {
     state = "loading";
     error = "";
@@ -64,8 +71,13 @@
     <legend>Destinations</legend>
     {#each destinations as provider (provider.name)}
       <label class="xpst-inline-meta">
-        <input type="checkbox" checked={platforms.includes(provider.name)} onchange={() => togglePlatform(provider.name)} />
-        {provider.display_name}
+        <input
+          type="checkbox"
+          checked={platforms.includes(provider.name)}
+          disabled={isSourceOnly(provider)}
+          onchange={() => togglePlatform(provider.name)}
+        />
+        {provider.display_name}{isSourceOnly(provider) ? " — source only" : ""}
       </label>
     {/each}
   </fieldset>
