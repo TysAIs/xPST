@@ -1275,6 +1275,20 @@ its shape — `all_success`, `partial_success`, and per-platform
 xpst post -v ./clip.mp4 -c "…" -p youtube,x --json || echo "post failed"
 ```
 
+**Batch rule (`xpst run`, `xpst backfill`, `xpst schedule run`).** Commands that
+post a batch use the same families, aggregated per result. The run exits `0`
+when **at least one** result published something (a partial success is a
+success, and so is an idempotent "already posted" no-op). When nothing was
+published, the exit code names the shared reason across the results that
+failed — `4` quota/rate limits, `3` authentication, `10` when no destination
+was attempted at all or every destination was unavailable / refused the media,
+and `1` for anything else, including a mix of reasons. **"No new videos" and
+"nothing due" exit `0`**: nothing was attempted because there was nothing to do,
+which is not a failure — a deliberate difference from `xpst post`, where a run
+with no attemptable destination is a failure. A non-zero batch adds
+`exit_code` to its `--json` payload; everything else in that payload
+(`all_success` / `partial_success` / per-platform fields) is unchanged.
+
 Use these in shell scripts:
 
 ```bash
