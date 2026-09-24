@@ -196,6 +196,27 @@ def _has_cached_auth(config_dir: str) -> bool:
         return str(config_dir) in _AUTH_STATUS_CACHE
 
 
+def _engine_version() -> str:
+    """The running engine's version, from the installed package metadata.
+
+    The About page used to hardcode a version string, so every build reported
+    the same stale number no matter what shipped. The package metadata is the
+    single source of truth; ``unknown`` is the honest answer when it cannot be
+    read (e.g. a raw source checkout without an install).
+    """
+    from importlib import metadata
+
+    try:
+        return metadata.version("xpst")
+    except Exception:  # noqa: BLE001 - an unreadable version must not 500 the page
+        try:
+            from xpst import __version__
+
+            return __version__
+        except Exception:  # noqa: BLE001
+            return "unknown"
+
+
 def _badge_summary(auth: Mapping[str, Any] | None) -> dict[str, str]:
     """``{platform: badge}`` from a live-auth mapping (never invents a badge)."""
     summary: dict[str, str] = {}
@@ -1063,6 +1084,10 @@ def create_api_router(
             "readiness": readiness,
             "next_action": next_action,
             "can_create_post": destination_ready,
+            # The real engine version, read from the installed package — the UI
+            # previously hardcoded a fallback that could never change, so every
+            # build reported the same stale number.
+            "engine_version": _engine_version(),
         }
 
 
