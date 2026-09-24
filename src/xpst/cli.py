@@ -35,7 +35,18 @@ from rich.panel import Panel
 from rich.table import Table
 
 from xpst.config import XPSTConfig
+from xpst.content import (
+    CONTENT_TYPES,
+    PUBLISH_ROUTE_TEXT,
+    ContentIssue,
+    ContentRequest,
+    blocking_issues,
+    capability_document,
+    content_verdict,
+    media_transport_blocker,
+)
 from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.services.post_service import refusal_envelope
 from xpst.setup_transaction import SetupTransactionService
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
@@ -887,9 +898,38 @@ def _parse_caption_for(values: tuple[str, ...]) -> dict[str, str]:
     return captions
 
 
+def _pre_upload_refusal_blockers(request: ContentRequest) -> list[ContentIssue]:
+    """The content blockers that refuse a post *before* any uploader runs.
+
+    Every content-type/capability finding is one of them (a destination with no
+    path for this type, text past a limit, a request shape the contract cannot
+    honour), because saying so before an uploader exists is the point of the
+    contract.
+
+    A media-transport refusal (``THREADS_NEEDS_URL``) is deliberately *not*:
+    the publishing pipeline reports it per destination — the row that says the
+    destination refused the local file — and main's exit-status contract
+    (``_post_exit_code``) reads it there, so it exits ``EXIT_PLATFORM_UNAVAILABLE``
+    with a row per requested destination. Gating it here too would pre-empt that
+    report with one envelope and change the documented exit code, so the refusal
+    is left to the pipeline that owns it. It is still part of the content verdict
+    every surface returns.
+    """
+    blockers: list[ContentIssue] = []
+    for issue in blocking_issues(request):
+        platform = str(issue.platform or "").strip().lower()
+        transport_issue = media_transport_blocker(platform, request.media) if platform else None
+        if transport_issue is not None and transport_issue.code == issue.code:
+            # Declared once in the destination profile; the pipeline and the
+            # uploader report this same code destination by destination.
+            continue
+        blockers.append(issue)
+    return blockers
+
+
 @main.command()
-@click.option("--video", "-v", required=True, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
-@click.option("--caption", "-c", required=True, help="Video caption")
+@click.option("--video", "-v", required=False, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
+@click.option("--caption", "-c", required=False, default=None, help="Post text/caption (required with --video)")
 @click.option(
     "--caption-for",
     "caption_for",
@@ -900,7 +940,28 @@ def _parse_caption_for(values: tuple[str, ...]) -> dict[str, str]:
         "--caption-for x='short copy'. Destinations without one use --caption."
     ),
 )
-@click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
+@click.option(
+    "--text",
+    "-t",
+    default=None,
+    help=(
+        "Text of a text-only post (no media). Equivalent to --caption with "
+        "--content-type text; `xpst post --text \"...\" -p x,threads` publishes a "
+        "text post to every destination that has a text path."
+    ),
+)
+@click.option(
+    "--content-type",
+    "content_type",
+    default=None,
+    type=click.Choice([item.value for item in CONTENT_TYPES], case_sensitive=False),
+    help=(
+        "What this post is, in the canonical vocabulary: video/image/carousel/"
+        "text/thread. Defaults to what the media implies. A type the chosen "
+        "destination cannot publish is refused before anything is uploaded."
+    ),
+)
+@click.option("--platforms", "--platform", "-p", default=None, help="Comma-separated platforms (default: all)")
 @click.option(
     "--visibility",
     type=click.Choice(["public", "unlisted", "private"]),
@@ -914,14 +975,21 @@ def _parse_caption_for(values: tuple[str, ...]) -> dict[str, str]:
 def post(
     ctx: click.Context,
     video: tuple[str, ...],
-    caption: str,
+    caption: str | None,
     caption_for: tuple[str, ...],
+    text: str | None,
+    content_type: str | None,
     platforms: str | None,
     visibility: str,
     dry_run: bool,
     as_json: bool,
 ):
-    """Manually post a video or carousel (multiple --video flags)"""
+    """Manually post a video, image, carousel, or text post.
+
+    One --video flag posts a single file; several build a carousel; --text (or
+    --content-type text) posts a text-only status. A content type the chosen
+    destination cannot publish is refused before anything is uploaded.
+    """
     config = load_config(ctx.obj.get("config_path"))
     quiet = ctx.obj.get("quiet", False)
     setup_logging(
@@ -933,49 +1001,100 @@ def post(
     media_paths = [Path(v) for v in video]
     platform_list = platforms.split(",") if platforms else None
 
+    # --text is the text-post spelling of --caption; both name the same body.
+    body = text if text is not None else (caption or "")
+
+    if not media_paths and not content_type and text is not None:
+        # `--text` with no file IS a text post: state it rather than inferring
+        # it, so the content verdict and the route agree on every surface.
+        content_type = "text"
+
+    if not media_paths and not content_type:
+        raise click.UsageError(
+            "Provide --video (a file to post), --text (a text post), or "
+            "--content-type (what this post is, e.g. --content-type text)."
+        )
+    if media_paths and not body.strip():
+        raise click.UsageError("Provide --caption for the media you are posting.")
+
     # Resolve destinations once, canonically: an explicit --platforms wins
     # (blank names dropped), otherwise every destination enabled in config.
     # An empty result is the meaningless-run case and is refused below — in
-    # dry-run too, so the plan and the run can never disagree.
+    # dry-run too, so the plan and the run can never disagree. No engine is
+    # built for this: its __init__ performs crash recovery and may write state.
     targets = _resolved_destinations(config, platform_list)
 
+    # ONE content answer, from the contract module: the same request produces
+    # the same verdict on the CLI, in MCP, and over HTTP.
+    request = ContentRequest.from_legacy(media_paths, body, targets, content_type=content_type)
+    verdict = content_verdict(request)
+    # Transport refusals are the pipeline's to report, destination by
+    # destination (see _pre_upload_refusal_blockers).
+    refusal_blockers = _pre_upload_refusal_blockers(request)
+
     if dry_run:
-        # Do NOT instantiate CrossPostEngine for a dry run: its __init__
-        # performs crash recovery and may create/rotate state files. Resolve
-        # targets straight from config flags instead.
         if not targets:
             _refuse_no_destinations(ctx, as_json, quiet)
         info = {
             "dry_run": True,
-            "video": str(media_paths[0]),
-            "caption": caption[:80],
+            "video": str(media_paths[0]) if media_paths else None,
+            "caption": body[:80],
+            "text": body[:80],
             "captions": {
-                target: per_platform_captions.get(target.strip().lower(), caption) for target in targets
+                target: per_platform_captions.get(target.strip().lower(), body) for target in targets
             },
             "carousel": len(media_paths) > 1,
             "items": len(media_paths),
             "targets": targets,
             "visibility": visibility,
+            "content_type": verdict["content_type"] or verdict["effective_content_type"],
+            "effective_content_type": verdict["effective_content_type"],
+            "route": verdict["route"],
+            "content": verdict,
+            "ready": verdict["ok"],
+            "blockers": verdict["blockers"],
         }
         if as_json:
             json_output(info, True)
         else:
             if not quiet:
                 console.print("[bold blue]Dry run — would post:[/bold blue]")
-            console.print(f"  File: {media_paths[0]}")
-            if len(media_paths) > 1:
-                console.print(f"  Carousel: {len(media_paths)} items")
-            console.print(f"  Caption: {caption[:80]}")
-            for target, text in info["captions"].items():
+            if media_paths:
+                console.print(f"  File: {media_paths[0]}")
+                if len(media_paths) > 1:
+                    console.print(f"  Carousel: {len(media_paths)} items")
+            console.print(f"  Content type: {verdict['effective_content_type']}")
+            console.print(f"  Caption: {body[:80]}")
+            for target, override_text in info["captions"].items():
                 if target.strip().lower() in per_platform_captions:
-                    console.print(f"  Caption for {target}: {text[:80]}")
+                    console.print(f"  Caption for {target}: {override_text[:80]}")
             console.print(f"  Targets: {', '.join(targets)}")
             console.print(f"  Visibility: {visibility}")
+            for blocker in verdict["blockers"]:
+                console.print(f"  [red]Blocked:[/red] {blocker}")
+        if refusal_blockers:
+            sys.exit(EXIT_GENERAL)
         return
+
+    if refusal_blockers:
+        # Refused before any upload, by the same rule every other surface uses.
+        # No engine is constructed and nothing is uploaded.
+        envelope = refusal_envelope(
+            request, [issue.message for issue in refusal_blockers], content=verdict
+        )
+        if as_json:
+            envelope["exit_code"] = EXIT_GENERAL
+            json_output(envelope, True)
+        else:
+            for issue in refusal_blockers:
+                console.print(f"[red]Refused:[/red] {issue.message}")
+        sys.exit(EXIT_GENERAL)
 
     if not as_json and not quiet:
         if len(media_paths) > 1:
             console.print(f"[bold blue]Posting carousel ({len(media_paths)} items) to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
+        elif verdict["route"] == PUBLISH_ROUTE_TEXT:
+            console.print(f"[bold blue]Posting text to: {', '.join(platform_list or ['all platforms'])}[/bold blue]")
         else:
             console.print(f"[bold blue]Posting to: {', '.join(platform_list or ['all platforms'])} (visibility: {visibility})[/bold blue]")
 
@@ -1001,15 +1120,26 @@ def post(
                 "manual post proceeds."
             )
 
-    if len(media_paths) > 1:
+    if verdict["route"] == PUBLISH_ROUTE_TEXT:
+        # The text route reads one text per destination, so a per-destination
+        # override is honoured (and validated) here too.
+        per_destination = {
+            platform: request.text_for(platform)
+            for platform in request.platforms
+            if request.override_for(platform) is not None
+        }
         result = asyncio.run(
-            engine.post_manual_carousel(media_paths, caption, platform_list, per_platform_captions)
+            engine.post_text(body, platform_list, per_destination=per_destination or None)
+        )
+    elif len(media_paths) > 1:
+        result = asyncio.run(
+            engine.post_manual_carousel(media_paths, body, platform_list, per_platform_captions)
         )
     else:
         result = asyncio.run(
             engine.post_manual(
                 media_paths[0],
-                caption,
+                body,
                 platform_list,
                 per_platform_captions,
                 visibility=visibility,
@@ -1030,6 +1160,8 @@ def post(
         # override is visible in the machine-readable outcome.
         if result.captions:
             out["captions"] = dict(result.captions)
+        out["content_type"] = verdict["effective_content_type"]
+        out["content"] = verdict
         if quota_blocked:
             out["error"] = {
                 "code": "QUOTA_EXHAUSTED",
@@ -1471,6 +1603,53 @@ def providers(ctx: click.Context, as_json: bool):
                 str(manifest["auth_mode"]),
             )
         console.print(table)
+
+
+@main.command()
+@json_option
+@click.pass_context
+def capabilities(ctx: click.Context, as_json: bool):
+    """Show what xPST can publish, per destination, in the canonical vocabulary
+
+    Reads the content contract (the same document the MCP tool
+    ``xpst_capabilities`` and ``GET /api/capabilities`` return), so what a human
+    reads here is exactly what an agent plans against. A content type listed as
+    implemented has real code behind it; a destination that cannot post a type
+    does not declare it.
+    """
+    document = capability_document()
+
+    if as_json:
+        json_output(document, True)
+        return
+
+    if not ctx.obj.get("quiet", False):
+        console.print("[bold blue]What xPST can publish[/bold blue]")
+        console.print("[dim]Vocabulary: " + ", ".join(document["content_types"]) + "[/dim]\n")
+
+    table = Table(title="Declared vs implemented")
+    table.add_column("Destination", style="cyan")
+    table.add_column("Declared")
+    table.add_column("Implemented")
+    table.add_column("Notes")
+    for platform in sorted(document["platforms"]):
+        profile = document["platforms"][platform]
+        declared = ", ".join(profile["declared"]) or "—"
+        implemented = ", ".join(profile["implemented"]) or "—"
+        note = profile.get("note") or ""
+        if profile.get("declared_but_unimplemented"):
+            note = (note + " " if note else "") + (
+                "FALSE DECLARATION: " + ", ".join(profile["declared_but_unimplemented"])
+            )
+        table.add_row(f"{profile['display_name']} ({platform})", declared, implemented, note)
+    console.print(table)
+
+    if document["declared_but_unimplemented"]:
+        console.print(
+            "[red]A destination declares a content type with no implementation: "
+            + ", ".join(f"{platform}={types}" for platform, types in document["declared_but_unimplemented"].items())
+            + "[/red]"
+        )
 
 
 @main.command()

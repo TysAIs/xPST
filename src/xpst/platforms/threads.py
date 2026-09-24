@@ -27,7 +27,7 @@ from pathlib import Path
 import httpx
 
 from xpst.config import XPSTConfig
-from xpst.content import media_transport_blocker
+from xpst.content import TEXT_LIMITS, media_transport_blocker
 from xpst.platforms.base import (
     DeleteOutcome,
     DeleteResult,
@@ -50,8 +50,11 @@ THREADS_API_VERSION = "v1.0"
 class ThreadsUploader(PlatformUploader):
     """Threads uploader using the official Meta Threads API."""
 
-    # Threads limits
-    MAX_CAPTION_LENGTH = 500
+    # Threads limits. The text limit comes from the content contract's single
+    # source (xpst.content.TEXT_LIMITS) so preflight and this sender can never
+    # enforce different numbers; a missing entry is a loud KeyError at import.
+    MAX_TEXT_LENGTH = TEXT_LIMITS["threads"]
+    MAX_CAPTION_LENGTH = MAX_TEXT_LENGTH
     MAX_VIDEO_DURATION_SECONDS = 300
     MAX_VIDEO_SIZE_GB = 1
     # Rate limit: 250 posts / 24h (enforced server-side)
@@ -80,13 +83,20 @@ class ThreadsUploader(PlatformUploader):
             auth_mode=AuthMode.OAUTH,
             is_official_api=True,
             docs_url="https://developers.facebook.com/docs/threads",
-            notes="Uploads media and text via the Meta Threads API container publish model.",
+            notes="Publishes text and media via the Meta Threads API container publish model.",
             extra={
+                # "text" was declared here with no implementation behind it: the
+                # adapter only ever built a ``media_type: VIDEO`` container, so
+                # there was no text path. An agent reading "Threads supports
+                # text" attempted a post that could not work. It is declared
+                # again now that ``post_text`` (a media_type TEXT container)
+                # exists; the content contract's drift test fails if this label
+                # and the real method ever disagree.
                 "content": ("video", "text"),
                 # Declared, drift-checked capability: this destination retrieves
                 # media from a public URL and cannot accept an uploaded file.
                 "media_transport": "public_url",
-                "max_caption_length": self.MAX_CAPTION_LENGTH,
+                "max_caption_length": self.MAX_TEXT_LENGTH,
                 "max_video_duration_seconds": self.MAX_VIDEO_DURATION_SECONDS,
                 "rate_limit_per_day": self.RATE_LIMIT_PER_DAY,
             },
@@ -179,9 +189,18 @@ class ThreadsUploader(PlatformUploader):
         Returns:
             UploadResult with post ID and URL
         """
-        # Truncate caption if needed
+        # An over-long caption is refused, not truncated: a silently shortened
+        # caption is a caption the user never approved (same rule as post_text).
         if len(caption) > self.MAX_CAPTION_LENGTH:
-            caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
+            return UploadResult(
+                success=False,
+                error=(
+                    f"THREADS_CAPTION_TOO_LONG: {len(caption)} characters exceeds the "
+                    f"{self.MAX_CAPTION_LENGTH}-character limit for Threads. Shorten the caption."
+                ),
+                platform="threads",
+                retryable=False,
+            )
 
         video_str = str(video_path)
 
@@ -303,6 +322,144 @@ class ThreadsUploader(PlatformUploader):
                 error=f"THREADS_UPLOAD_ERROR: {str(e)[:200]}",
                 platform="threads",
             )
+
+    # ── Text posts (content_type: text) ─────────────────────────────────
+
+    async def post_text(self, text: str) -> UploadResult:
+        """Publish a text-only post to Threads.
+
+        The Meta Threads API takes a text post as a ``media_type: TEXT``
+        container with a ``text`` field — no public URL and no media pipeline,
+        which is why this is the cheapest complete modality xPST can ship.
+
+        Flow:
+        1. POST /v1.0/{threads_user_id}/threads — create the TEXT container
+        2. POST /v1.0/{threads_user_id}/threads_publish — publish it
+
+        The text is sent **verbatim**: empty text, or text past Threads' limit,
+        is refused with an explicit error naming the limit — never truncated.
+        The limit is read from the content contract's single source
+        (:data:`xpst.content.TEXT_LIMITS`).
+
+        Args:
+            text: the post's text (no media).
+
+        Returns:
+            UploadResult with the published post id and URL, or an explicit
+            failure naming the cause (auth, limit, network, API error).
+        """
+        violation = self._text_limit_violation(text)
+        if violation is not None:
+            return violation
+
+        try:
+            token = await self._get_access_token()
+        except ValueError as e:
+            return UploadResult(
+                success=False,
+                error=str(e)[:300],
+                platform="threads",
+                retryable=False,
+            )
+
+        user_id = self._threads_user_id or self.config.threads.threads_user_id
+        if not user_id:
+            return UploadResult(
+                success=False,
+                error="THREADS_NOT_CONFIGURED: threads_user_id is required.",
+                platform="threads",
+                retryable=False,
+            )
+
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                logger.info(f"Threads: creating text container ({len(text)} characters)")
+                container_resp = await client.post(
+                    f"{THREADS_API_BASE}/{THREADS_API_VERSION}/{user_id}/threads",
+                    params={
+                        "media_type": "TEXT",
+                        "text": text,
+                        "access_token": token,
+                    },
+                )
+                container_resp.raise_for_status()
+                container_id = container_resp.json().get("id")
+                if not container_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"THREADS_CONTAINER_ERROR: No container ID in response: {container_resp.text[:200]}",
+                        platform="threads",
+                        retryable=False,
+                    )
+
+                logger.info(f"Threads: publishing text container {container_id}")
+                publish_resp = await client.post(
+                    f"{THREADS_API_BASE}/{THREADS_API_VERSION}/{user_id}/threads_publish",
+                    params={"creation_id": container_id, "access_token": token},
+                )
+                publish_resp.raise_for_status()
+                media_id = publish_resp.json().get("id")
+                if not media_id:
+                    return UploadResult(
+                        success=False,
+                        error=f"THREADS_PUBLISH_ERROR: No media ID in response: {publish_resp.text[:200]}",
+                        platform="threads",
+                        retryable=False,
+                    )
+
+                post_url = await self._fetch_permalink(client, media_id, token, user_id)
+                logger.info(f"Posted text to Threads: {post_url}")
+                return UploadResult(
+                    success=True,
+                    post_id=str(media_id),
+                    post_url=post_url,
+                    platform="threads",
+                    metadata={
+                        "container_id": container_id,
+                        "text_length": len(text),
+                        "media_type": "TEXT",
+                        "content_type": "text",
+                    },
+                )
+
+        except httpx.HTTPStatusError as e:
+            error_body = e.response.text[:300] if e.response else str(e)
+            logger.error(f"Threads text post HTTP error: {e}")
+            return self._handle_http_error(e, error_body)
+        except httpx.HTTPError as e:
+            logger.error(f"Threads text post network error: {e}")
+            return UploadResult(
+                success=False,
+                error=f"THREADS_NETWORK_ERROR: {str(e)[:200]}",
+                platform="threads",
+            )
+        except Exception as e:
+            logger.error(f"Threads text post failed: {e}")
+            return UploadResult(
+                success=False,
+                error=f"THREADS_POST_TEXT_ERROR: {str(e)[:200]}",
+                platform="threads",
+            )
+
+    async def _fetch_permalink(self, client: httpx.AsyncClient, media_id: str, token: str, user_id: str) -> str:
+        """Return the public permalink for a published container.
+
+        A permalink lookup that fails must not turn a published post into an
+        error: the fallback URL is built from the media id, and a real
+        identifier alone is proof of publication for the result normalizer.
+        """
+        try:
+            permalink_resp = await client.get(
+                f"{THREADS_API_BASE}/{THREADS_API_VERSION}/{media_id}",
+                params={"fields": "permalink", "access_token": token},
+            )
+            permalink_resp.raise_for_status()
+            permalink = permalink_resp.json().get("permalink", "")
+            if permalink:
+                return str(permalink)
+        except Exception as e:  # noqa: BLE001 - the id-based URL is the fallback
+            logger.debug(f"Threads permalink lookup failed for {media_id}: {e}")
+        return f"https://www.threads.net/@{_safe_handle(user_id)}/post/{media_id}"
 
     def _handle_http_error(self, e: httpx.HTTPStatusError, error_body: str) -> UploadResult:
         """Map an HTTPStatusError to a typed UploadResult."""
