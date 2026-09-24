@@ -107,7 +107,7 @@ These numbers are generated from the shipped code, not maintained by hand. `pyth
 | MCP tools | **40** | `tools/list` over a real stdio handshake with `xpst mcp start` |
 | CLI top-level commands | **46** | `xpst.cli.main.commands` |
 | CLI commands including subcommands | **69** | recursive walk of the Click command tree |
-| HTTP routes (dashboard app) | **45** | FastAPI route table (41 xPST routes + 4 framework docs routes) |
+| HTTP routes (dashboard app) | **46** | FastAPI route table (42 xPST routes + 4 framework docs routes) |
 | Supported providers | **8** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
 
 Regenerate and verify with `python scripts/generate_counts.py --write` / `--check`; the check runs in CI, so these numbers cannot drift silently.
