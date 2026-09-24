@@ -55,6 +55,7 @@ import logging
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
+from xpst.content import ContentType, implemented_content_types
 from xpst.media.image_header import read_image_dimensions
 from xpst.media.modality import (
     MODALITY_IMAGE,
@@ -122,13 +123,47 @@ class PlatformSpec:
         return self.containers
 
 
+def publish_modalities(platform: str) -> tuple[str, ...]:
+    """Modalities ``platform`` can really publish, GENERATED from the contract.
+
+    The publish capability has exactly one source: :mod:`xpst.content`
+    (``DESTINATION_CONTENT_PROFILES[...].implemented``). A destination that
+    implements ``ContentType.IMAGE`` is image-capable here in the same instant,
+    so the offer surface (``/api/media``, the preflight, the CLI) cannot drift
+    from the publish contract. ``image_containers`` remains a per-destination
+    ingest detail that must be filled in the same change (the test suite fails
+    if a destination claims images with no accepted image container).
+    """
+    implemented = implemented_content_types(platform)
+    modalities: list[str] = []
+    if ContentType.VIDEO in implemented:
+        modalities.append(MODALITY_VIDEO)
+    if ContentType.IMAGE in implemented:
+        modalities.append(MODALITY_IMAGE)
+    return tuple(modalities)
+
+
+def _spec(platform: str, **ingest_rules: Any) -> PlatformSpec:
+    """Build a built-in destination spec with its capability generated.
+
+    Only ingest rules are passed here; ``modalities``/``image_containers`` are
+    never hand-written for a built-in destination, so no surface can declare a
+    modality the publish contract does not implement.
+    """
+    return PlatformSpec(modalities=publish_modalities(platform), **ingest_rules)
+
+
 PLATFORM_SPECS: dict[str, PlatformSpec] = {
-    # A destination declares MODALITY_IMAGE only in the same PR as its adapter's
-    # image upload (``upload_image``), because this flag is the single switch
-    # that makes a destination offerable for images everywhere at once
-    # (/api/media, preflight, CLI, desktop picker). Instagram and X have that
-    # path; YouTube, TikTok and Threads do not.
-    "youtube": PlatformSpec(
+    # Capability is generated (see ``_spec``), so ``modalities`` is never
+    # hand-written for a built-in destination: it comes from
+    # :mod:`xpst.content`'s ``implemented`` set for this platform. X and
+    # Instagram implement ``ContentType.IMAGE`` there, so they are offered for
+    # images everywhere at once (/api/media, preflight, CLI, desktop picker);
+    # YouTube, TikTok and Threads are not. Adding ``ContentType.IMAGE`` to a
+    # destination's implemented set plus its ``image_containers`` here is the
+    # single switch — do it in the same PR as the adapter's image upload.
+    "youtube": _spec(
+        "youtube",
         display_name="YouTube",
         containers=(".mp4", ".mov"),
         video_codec="h264",
@@ -142,7 +177,8 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         file_size_cap_mb=256 * 1024,
         duration_cap_s=None,
     ),
-    "tiktok": PlatformSpec(
+    "tiktok": _spec(
+        "tiktok",
         display_name="TikTok",
         containers=(".mp4", ".mov"),
         video_codec="h264",
@@ -156,7 +192,8 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         file_size_cap_mb=1024,
         duration_cap_s=600,
     ),
-    "instagram": PlatformSpec(
+    "instagram": _spec(
+        "instagram",
         display_name="Instagram Reels",
         containers=(".mp4", ".mov"),
         video_codec="h264",
@@ -171,13 +208,13 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         duration_cap_s=900,
         # Feed photo (single image). Meta publishes JPEG only, 8 MB maximum,
         # aspect ratio within 4:5–1.91:1.
-        modalities=(MODALITY_VIDEO, MODALITY_IMAGE),
         image_containers=(".jpg", ".jpeg"),
         image_file_size_cap_mb=8,
         image_aspect_min=4 / 5,
         image_aspect_max=1.91,
     ),
-    "x": PlatformSpec(
+    "x": _spec(
+        "x",
         display_name="X (Twitter)",
         containers=(".mp4", ".mov"),
         video_codec="h264",
@@ -191,7 +228,6 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         file_size_cap_mb=512,
         duration_cap_s=140,
         # Single image post: ≤ 5 MB, JPG/PNG/WEBP, aspect ratio 1:3–3:1.
-        modalities=(MODALITY_VIDEO, MODALITY_IMAGE),
         image_containers=(".jpg", ".jpeg", ".png", ".webp"),
         image_file_size_cap_mb=5,
         image_aspect_min=1 / 3,

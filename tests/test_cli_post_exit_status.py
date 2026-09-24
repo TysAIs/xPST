@@ -330,10 +330,21 @@ class TestJsonPayloadUnchanged:
         assert row["success"] is False
         assert row["outcome"] == "failed"
         assert row["error"].startswith("THREADS_NEEDS_URL:")
-        # The only added key is exit_code, and only on a failed run.
+        # The legacy keys stay put. A failed run adds exit_code, and the content
+        # contract adds the one verdict it computed for the request — the same
+        # ``content``/``content_type`` fields the MCP ``xpst_post`` result and
+        # ``POST /api/post`` report, so a parsed payload can be compared across
+        # surfaces. Nothing else moved.
         assert set(out) - {"video_id", "caption", "all_success", "partial_success", "platforms"} == {
-            "exit_code"
+            "exit_code",
+            "content",
+            "content_type",
         }
+        assert out["content_type"] == "video"
+        assert out["content"]["effective_content_type"] == "video"
+        # A refused destination is still reported per destination: the media
+        # transport refusal reaches the pipeline, not a pre-upload envelope.
+        assert out["exit_code"] == EXIT_PLATFORM_UNAVAILABLE
 
 
 # ── the rule is documented where callers look for it ─────────────────────

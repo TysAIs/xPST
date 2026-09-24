@@ -48,7 +48,7 @@ xPST includes integrations for **seven platforms** — YouTube, Instagram, X/Twi
 
 It runs three ways:
 - **Desktop shell** — one Tauri 2 app (a native window over the local dashboard)
-- **CLI** — 45 top-level commands (68 including subcommands) covering the entire workflow
+- **CLI** — 46 top-level commands (69 including subcommands) covering the entire workflow
 - **MCP server** — 40 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
@@ -94,7 +94,7 @@ platform API calls you configure. See
 
 ### Three Drivable Surfaces
 - **Desktop shell** — Tauri 2 wrapper around the local dashboard: one native app, built from `src-tauri/` plus the Python engine sidecar. Platform installers (`.dmg`, NSIS `.exe`/`.msi`, `.deb`/`.AppImage`) come from `.github/workflows/tauri-release.yml`
-- **CLI** — 45 Click-based commands (68 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
+- **CLI** — 46 Click-based commands (69 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
 - **MCP server** — 40 tools (34 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 #### Surface counts
@@ -105,9 +105,9 @@ These numbers are generated from the shipped code, not maintained by hand. `pyth
 | Surface | Count | Measured from |
 |---------|-------|---------------|
 | MCP tools | **40** | `tools/list` over a real stdio handshake with `xpst mcp start` |
-| CLI top-level commands | **45** | `xpst.cli.main.commands` |
-| CLI commands including subcommands | **68** | recursive walk of the Click command tree |
-| HTTP routes (dashboard app) | **34** | FastAPI route table (30 xPST routes + 4 framework docs routes) |
+| CLI top-level commands | **46** | `xpst.cli.main.commands` |
+| CLI commands including subcommands | **69** | recursive walk of the Click command tree |
+| HTTP routes (dashboard app) | **43** | FastAPI route table (39 xPST routes + 4 framework docs routes) |
 | Supported providers | **8** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
 
 Regenerate and verify with `python scripts/generate_counts.py --write` / `--check`; the check runs in CI, so these numbers cannot drift silently.
@@ -262,7 +262,7 @@ See `Dockerfile` and `docker-compose.yml` for details.
 
 ## CLI Reference
 
-xPST provides 45 top-level commands (68 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 
 ### Setup & Accounts
 
@@ -296,6 +296,7 @@ xPST provides 45 top-level commands (68 including subcommands). Run `xpst --help
 | `xpst watch` | Continuous monitoring loop (runs until Ctrl+C) |
 | `xpst watch --interval 300` | Check every 300 seconds (default: from config) |
 | `xpst post -v VIDEO -c CAPTION` | Manually post a video file; use multiple `-v` for carousel |
+| `xpst post --text 'TEXT' -p x,threads` | Publish a text-only post (no file, no ffmpeg) to destinations with a text path |
 | `xpst post -v v.mp4 -c 'text' -p youtube,x,instagram` | Post to specific platforms only |
 | `xpst post -v v.mp4 -c 'text' -p youtube --visibility unlisted` | Post unlisted/private instead of public (YouTube only; default `public`) |
 | `xpst backfill` | Retry failed or incomplete posts from history |
@@ -475,7 +476,9 @@ xpst dashboard --port 9000    # custom port
 | `GET /health` | none | Aggregated per-platform health (`healthy` / `degraded`) |
 | `GET /metrics` | none | Prometheus text-format metrics |
 | `GET /state` | Basic | Posting summary: totals, per-platform counts, health, best platform |
-| `POST /api/post` | API token | Plan (`dry_run`) or publish through the real engine |
+| `GET /api/capabilities` | Basic when configured | The canonical capability contract: what each destination declares and can actually publish |
+| `POST /api/post` | API token | Plan (`dry_run`) or publish through the real engine (accepts `content_type`) |
+| `POST /api/preflight` | API token | Local, no-network post preflight (accepts `content_type`) |
 | `POST /api/connect/{platform}` | API token | Inspect / enable / verify one destination |
 | `GET /webhook/messenger` | none | Meta webhook handshake (only when Messenger is enabled) |
 | `POST /webhook/messenger` | none | Messenger events, verified with `X-Hub-Signature-256` |

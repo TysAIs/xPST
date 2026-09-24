@@ -300,6 +300,9 @@ xpst post -v video.mp4 -c "My caption"
 # Carousel (multiple images/videos)
 xpst post -v img1.jpg -v img2.jpg -v img3.jpg -c "Carousel post"
 
+# Text post (no media at all: X and Threads publish it directly)
+xpst post --text "Shipping the text-post path today." -p x,threads
+
 # Specific platforms
 xpst post -v video.mp4 -c "Test" -p youtube,instagram
 
