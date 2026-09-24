@@ -834,7 +834,17 @@ def create_api_router(
         source_only = bool(truth["source_only"])
         # ``live_checked`` is None for a skipped probe; None is falsy, so the
         # connected verdict stays conservative without claiming a check ran.
-        connected = bool(truth["can_post"] and live_checked)
+        # An account can be authenticated (e.g. TikTok source cookies) while the
+        # *destination* credential is still unconfigured — that is not connected
+        # for posting, and claiming otherwise hides the sign-in / setup step the
+        # user still has to do. ``verified_ready`` is the role state the provider
+        # truth reports; posting truth still gates the final verdict below.
+        verified_ready = state == "ready"
+        connected = bool(
+            (verified_ready or (authenticated and state != "unconfigured"))
+            and truth["can_post"]
+            and live_checked
+        )
 
         enabled_now = bool(getattr(getattr(config, key, None), "enabled", False))
         if source_only:
@@ -878,6 +888,7 @@ def create_api_router(
             "docs_url": provider.get("docs_url") or "",
             "guide": _guide_payload(key),
             "next_action": next_action,
+            "sign_in": _sign_in_support(key, config),
         }
 
     @router.post("/post", dependencies=[Depends(require_api_token)])
@@ -1308,6 +1319,99 @@ def create_api_router(
             "plan": plan,
             "network_calls": False,
         }
+
+    def _sign_in_support(platform: str, config: Any) -> dict[str, Any]:
+        """Whether the in-app Sign in control can start this platform's flow.
+
+        Config-only truth (no probe, no network): the UI needs to know whether
+        to render an enabled control, and — when it cannot — the honest reason
+        and where to read more.
+        """
+        from xpst.auth_flow import browser_name
+
+        support = _auth_flow().support(platform, config)
+        return {
+            "available": bool(support.available),
+            "transport": support.transport,
+            "browser": browser_name() if support.available else "",
+            "reason": support.reason,
+            "docs_url": support.docs_url,
+        }
+
+    def _auth_flow() -> Any:
+        """This config dir's in-app sign-in manager (one per engine process)."""
+        from xpst.auth_flow import get_auth_flow_manager
+
+        return get_auth_flow_manager(str(Path(config_dir).expanduser()))
+
+    @router.get("/auth/signin")
+    def api_signin_active(platform: str | None = None) -> dict[str, Any]:
+        """Live (non-terminal) sign-in sessions, newest first."""
+        return {"ok": True, "sessions": _auth_flow().active(platform)}
+
+    @router.post("/auth/signin/{platform}", dependencies=[Depends(require_api_token)])
+    def api_signin_start(platform: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Start the xPST-owned OAuth flow for one platform.
+
+        The consent page is opened in the configured browser (Brave by
+        default) and the returned envelope is polled with
+        ``GET /api/auth/signin/{session_id}``. Nothing here decides whether the
+        account is connected — the caller re-verifies with
+        ``POST /api/connect/{platform}`` after the phase turns ``succeeded``.
+        """
+        from xpst.auth_flow import SignInError, SignInNotAvailableError
+
+        config = _load_ui_config()
+        flow = _auth_flow()
+        key = str(platform).strip().lower()
+        if key not in flow.providers():
+            raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
+
+        data = payload or {}
+        try:
+            timeout_s = float(data.get("timeout_s") or 300.0)
+        except (TypeError, ValueError):
+            timeout_s = 300.0
+
+        try:
+            envelope = flow.start(
+                key,
+                config,
+                timeout_s=timeout_s,
+                open_browser=bool(data.get("open_browser", True)),
+            )
+        except SignInNotAvailableError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail=str(exc) or "This platform cannot be signed in from inside the app yet.",
+            ) from None
+        except SignInError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
+        except Exception as exc:  # noqa: BLE001 - report the reason, never a bare 500
+            raise HTTPException(status_code=500, detail=f"Sign-in could not be started: {exc}") from None
+
+        envelope["sign_in"] = _sign_in_support(key, config)
+        return envelope
+
+    @router.get("/auth/signin/{session_id}")
+    def api_signin_status(session_id: str) -> dict[str, Any]:
+        """Poll one sign-in session; this call advances the state machine."""
+        from xpst.auth_flow import SignInError
+
+        try:
+            return _auth_flow().status(session_id)
+        except SignInError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
+
+    @router.post("/auth/signin/{session_id}/cancel", dependencies=[Depends(require_api_token)])
+    def api_signin_cancel(session_id: str) -> dict[str, Any]:
+        """Abandon a sign-in session — no credential is written."""
+        from xpst.auth_flow import SignInError
+
+        try:
+            return _auth_flow().cancel(session_id)
+        except SignInError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
 
     @router.get("/settings")
     def api_settings() -> dict[str, Any]:
