@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { api } from "../lib/api.js";
+  import { api, errorMessage } from "../lib/api.js";
   import EmptyState from "../lib/components/EmptyState.svelte";
   import ErrorState from "../lib/components/ErrorState.svelte";
   import LoadingSkeleton from "../lib/components/LoadingSkeleton.svelte";
@@ -18,7 +18,7 @@
       videos = await api.videos();
       state = "ready";
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause);
+      error = errorMessage(cause);
       state = "error";
     }
   }
