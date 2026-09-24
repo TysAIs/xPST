@@ -153,7 +153,7 @@
       };
       schedule(envelope.poll_after_ms);
     } catch (cause) {
-      signIn = { ...signIn, phase: "failed", error: cause instanceof Error ? cause.message : String(cause) };
+      signIn = { ...signIn, phase: "failed", error: errorMessage(cause) };
     }
   }
 
@@ -184,7 +184,7 @@
       schedule(envelope.poll_after_ms);
     } catch (cause) {
       stopPolling();
-      signIn = { ...signIn, phase: "failed", error: cause instanceof Error ? cause.message : String(cause) };
+      signIn = { ...signIn, phase: "failed", error: errorMessage(cause) };
     }
   }
 
@@ -195,7 +195,7 @@
       const envelope = await api.cancelSignIn(sessionId);
       signIn = { ...signIn, phase: envelope.phase, detail: envelope.detail, error: "" };
     } catch (cause) {
-      signIn = { ...signIn, phase: "failed", error: cause instanceof Error ? cause.message : String(cause) };
+      signIn = { ...signIn, phase: "failed", error: errorMessage(cause) };
     }
   }
 
