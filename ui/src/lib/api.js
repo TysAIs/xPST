@@ -163,6 +163,12 @@ export const api = {
   schedules: () => getJSON("/api/schedules"),
   /** Cancel (remove) one persisted schedule entry. Local store only — never un-posts. */
   cancelSchedule: (entryId) => postJSON(`/api/schedules/${encodeURIComponent(entryId)}/cancel`, {}),
+  /** Retry one recorded failure through the engine's one-shot recovery. */
+  retryFailure: (videoId, platform, opts = {}) =>
+    postJSON(
+      `/api/failures/${encodeURIComponent(videoId)}/${encodeURIComponent(platform)}/retry`,
+      opts,
+    ),
   /** Renew due/expiring tokens now (bounded retry; no-op when nothing is due). */
   refreshTokens: () => postJSON("/api/refresh-tokens", {}),
   /** Recorded posting failures with truthful recovery metadata. */
