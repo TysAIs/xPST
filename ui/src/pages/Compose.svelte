@@ -1,6 +1,6 @@
 <script>
   import { onMount } from "svelte";
-  import { api } from "../lib/api.js";
+  import { api, errorMessage } from "../lib/api.js";
   import { composePostLabel, composePostState, destinationRows, formatBytes, postRequestSummary, targetSummary } from "../lib/firstRun.js";
   import { fileNameOf, mediaItemsFromPaths, mediaKind, mergeMedia, unsupportedPaths } from "../lib/media.js";
   import { installShellDropTarget, pickMediaFile, shellAvailable } from "../lib/native.js";
@@ -58,7 +58,7 @@
         selectedMedia = payload.items.find((item) => item.type === "video")?.path ?? payload.items[0].path;
       }
     } catch (cause) {
-      mediaError = cause instanceof Error ? cause.message : String(cause);
+      mediaError = errorMessage(cause);
       mediaState = "error";
     }
   }
@@ -73,7 +73,7 @@
       selected = next;
       catalogState = "ready";
     } catch (cause) {
-      catalogError = cause instanceof Error ? cause.message : String(cause);
+      catalogError = errorMessage(cause);
       catalogState = "error";
     }
   }
@@ -182,7 +182,7 @@
       });
     } catch (cause) {
       preflight = null;
-      postError = cause instanceof Error ? cause.message : String(cause);
+      postError = errorMessage(cause);
     } finally {
       preflighting = false;
     }
@@ -208,9 +208,9 @@
       if (body && typeof body === "object") {
         setLastPost({ result: body, request, error: null });
       } else {
-        setLastPost({ result: null, request, error: cause instanceof Error ? cause.message : String(cause) });
+        setLastPost({ result: null, request, error: errorMessage(cause) });
       }
-      postError = cause instanceof Error ? cause.message : String(cause);
+      postError = errorMessage(cause);
       location.hash = "#/result";
     } finally {
       posting = false;

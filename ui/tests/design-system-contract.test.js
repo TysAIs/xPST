@@ -73,6 +73,7 @@ test("all design-system primitives exist and declare accessible contracts", asyn
     "EmptyState",
     "LoadingSkeleton",
     "ErrorState",
+    "EngineStarting",
     "FormField",
     "Shell",
     "Nav",
@@ -86,6 +87,7 @@ test("all design-system primitives exist and declare accessible contracts", asyn
   assert.match(await text(join(UI_ROOT, "src/lib/components/FormField.svelte")), /aria-describedby/);
   assert.match(await text(join(UI_ROOT, "src/lib/components/LoadingSkeleton.svelte")), /aria-busy/);
   assert.match(await text(join(UI_ROOT, "src/lib/components/ErrorState.svelte")), /Retry/);
+  assert.match(await text(join(UI_ROOT, "src/lib/components/EngineStarting.svelte")), /aria-busy/);
   assert.match(await text(join(UI_ROOT, "src/lib/components/BrandMark.svelte")), /assets\/icon\.png/);
 });
 
