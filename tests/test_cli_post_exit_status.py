@@ -52,10 +52,14 @@ class _CannedEngine:
     def __init__(self, result: CrossPostResult):
         self._result = result
 
-    async def post_manual(self, video_path, caption, platforms=None, visibility=None):  # noqa: ANN001
+    async def post_manual(  # noqa: ANN001
+        self, video_path, caption, platforms=None, per_platform_captions=None, visibility=None
+    ):
         return self._result
 
-    async def post_manual_carousel(self, media_paths, caption, platforms=None):  # noqa: ANN001
+    async def post_manual_carousel(  # noqa: ANN001
+        self, media_paths, caption, platforms=None, per_platform_captions=None
+    ):
         return self._result
 
 
