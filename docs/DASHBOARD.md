@@ -181,6 +181,33 @@ xpst_upload_seconds_bucket{le="30.0"} 1
 xpst_health_up{platform="youtube"} 1
 ```
 
+## Durable drafts and the stale-plan gate
+
+The compose screen keeps its work in the engine, not in the page: a draft survives
+navigating away, closing the window, or restarting xPST. Drafts are local-only
+(`<config_dir>/drafts.json`, mode `0600`) and hold content only — media paths, the caption,
+destination names, and the preflight plan. No credential material is ever copied into one.
+
+| Method & Path | Auth | Description |
+|---------------|------|-------------|
+| `GET /api/drafts` | Basic when configured | Stored drafts, newest first, each revalidated against this machine right now. |
+| `POST /api/drafts` | API token | Create or update a draft (`draft_id`, `media_paths`, `caption`, `platforms`). Returns the stored draft and its verdict. An unknown `draft_id` creates a fresh draft and reports `recreated: true` rather than losing what was typed. |
+| `GET /api/drafts/{draft_id}` | Basic when configured | One draft plus a fresh verdict — the revalidation performed when a screen resumes. |
+| `DELETE /api/drafts/{draft_id}` | API token | Discard a draft. |
+
+A draft records **what it was validated against**: the local facts the verdict depended on
+(media existence/size/mtime, per-destination enabled flag and local auth readiness) plus a
+fingerprint over them. Revalidating recomputes those facts and diffs them, so `stale` always
+arrives with machine-readable `reasons` (`MEDIA_MISSING`, `MEDIA_CHANGED`, `DESTINATION_NOT_READY`,
+`DESTINATION_DISABLED`, `AUTH_CHANGED`, `CONTENT_CHANGED`, …).
+
+A plan whose destination, auth, media, or content state changed is **refused on the post path**:
+`POST /api/preflight` and `POST /api/post` with a `dry_run` record the plan, and a later
+`POST /api/post` bound to that `draft_id` returns `409` with `stale: true` and `stale_reasons`
+unless the caller passes `confirm_stale: true`. Re-confirmation re-stamps the draft and is
+recorded (`reconfirmations`) so the acceptance is auditable. A post that actually runs closes the
+draft out with `status: "posted"` and the engine's `video_id`.
+
 ## Messenger Webhook (opt-in)
 
 When `accounts.messenger.enabled: true`, the dashboard additionally mounts

@@ -194,6 +194,20 @@ export const api = {
   signIns: () => getJSON("/api/auth/signin"),
   /** Plan (dry_run: true) or run a post through the real engine path. */
   post: (payload) => postJSON("/api/post", payload),
+
+  // ── Durable drafts ───────────────────────────────────────────────
+  /** Stored drafts, newest first, each revalidated against this machine now. */
+  drafts: () => getJSON("/api/drafts"),
+  /** Create or update the current draft (autosave). */
+  saveDraft: (payload) => postJSON("/api/drafts", payload),
+  /** One draft plus its fresh verdict (used when a screen resumes). */
+  draft: (draftId) => getJSON(`/api/drafts/${encodeURIComponent(draftId)}`),
+  /** Discard a draft. */
+  deleteDraft: (draftId) =>
+    requestJSON(`/api/drafts/${encodeURIComponent(draftId)}`, {
+      method: "DELETE",
+      headers: { ...JSON_HEADERS, ...tokenHeaders() },
+    }),
 };
 
 // ── Hash routing ──────────────────────────────────────────────────────
