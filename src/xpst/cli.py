@@ -4913,9 +4913,12 @@ def schedule_list(ctx: click.Context, as_json: bool):
         caption = entry.get("caption", "")[:37]
         if len(entry.get("caption", "")) > 37:
             caption += "..."
-        scheduled = entry.get("scheduled_time", "")
+        # Show local time: the store keeps UTC, the table shows the wall clock
+        # the user typed (the manager adds the derived local rendering).
+        scheduled = str(entry.get("scheduled_time_local") or entry.get("scheduled_time", ""))
         if "T" in scheduled:
             scheduled = scheduled.replace("T", " ").split(".")[0]
+            scheduled = scheduled[:16]
         platforms = ", ".join(entry.get("platforms", [])) or "all"
         status = status_styles.get(entry.get("status", "pending"), entry.get("status", ""))
         table.add_row(entry.get("id", "?"), file_name, caption, scheduled, platforms, status)

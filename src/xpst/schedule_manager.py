@@ -6,14 +6,25 @@ Schedule Manager for xPST
 Manages scheduled posts that should be published at a specific time.
 Stores entries in ~/.xpst/schedule.json.
 
+**Time contract.** Times are entered by the user in *local* time, persisted as
+an explicit *UTC* instant (``scheduled_time`` is ISO-8601 with a ``+00:00``
+offset), and rendered back in local time (:meth:`ScheduleManager.local_time`,
+and the derived ``scheduled_time_local`` key that :meth:`ScheduleManager.list`
+adds for every surface).  Due comparison is instant-based, so a job scheduled
+across a DST transition fires at the wall-clock time the user picked — the
+stored offset, not the machine's offset at check time, decides.
+Legacy entries written by older builds (naive local strings) are still read as
+local wall-clock time.
+
 Each entry:
     {
         "id": "<uuid>",
         "video_path": "/path/to/video.mp4",
         "caption": "Post caption",
         "platforms": ["youtube", "instagram"],
-        "scheduled_time": "2026-06-08T10:00:00",
-        "status": "pending" | "completed" | "failed",
+        "scheduled_time": "2026-06-08T16:00:00+00:00",   # UTC instant
+        "timezone": "America/Denver",                     # zone used to enter it
+        "status": "pending" | "processing" | "completed" | "failed",
         "created_at": "2026-06-07T12:00:00",
         "completed_at": null,
         "error": null,
@@ -28,9 +39,10 @@ import threading
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from xpst.utils.atomic import replace_with_retry
 
@@ -55,6 +67,77 @@ logger = get_logger(__name__)
 # far below unbounded payload sizes (e.g. accidental 1 MB shell arguments).
 MAX_CAPTION_LENGTH = 100_000
 
+_UTC = timezone.utc
+
+# Sentinel for edit(): distinguishes "leave this field alone" from "set it to
+# None" (which is meaningful for repeat_rule).
+_UNSET: Any = object()
+
+# In-process abort signals, keyed by (config_dir, entry_id) so every
+# ScheduleManager instance in the process — the app, the dashboard API, a
+# worker thread — observes the same cancellation. Cross-process cancellation is
+# covered by the store itself: cancel() removes the entry, so a worker in
+# another process sees it vanish (see is_aborted()).
+_ABORT_LOCK = threading.Lock()
+_ABORT_EVENTS: dict[tuple[str, str], threading.Event] = {}
+
+
+def local_zone() -> tzinfo:
+    """Return the machine's local timezone as a DST-aware zone.
+
+    Prefers the ``TZ`` environment variable, then the ``/etc/localtime``
+    symlink (macOS/Linux), and finally falls back to the current fixed offset.
+    A DST-aware zone matters: a naive local wall-clock time must be converted
+    to UTC with the offset that applies *on that date*, not today's.
+    """
+    name = os.environ.get("TZ", "").strip()
+    if name:
+        try:
+            return ZoneInfo(name)
+        except Exception:  # noqa: BLE001 - unknown TZ value, keep looking
+            pass
+    try:
+        parts = Path("/etc/localtime").resolve().parts
+        if "zoneinfo" in parts:
+            zone = "/".join(parts[parts.index("zoneinfo") + 1:])
+            return ZoneInfo(zone)
+    except Exception:  # noqa: BLE001 - no usable system zone
+        pass
+    fixed = datetime.now().astimezone().tzinfo
+    return fixed or _UTC
+
+
+def zone_name(tz: tzinfo | None) -> str | None:
+    """Return the IANA name of ``tz`` when it has one (ZoneInfo), else None."""
+    key = getattr(tz, "key", None)
+    return key if isinstance(key, str) and key else None
+
+
+def to_utc(dt: datetime, tz: tzinfo | None = None) -> datetime:
+    """Interpret ``dt`` as an instant and return it in UTC.
+
+    Naive values are local wall-clock time in ``tz`` (default: the machine's
+    local zone); aware values keep their instant. DST is handled by the zone,
+    so 12:00 on 2026-10-31 (MDT) and 12:00 on 2026-11-01 (MST) map to instants
+    one hour further apart than their wall-clock difference.
+    """
+    zone = tz or local_zone()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=zone)
+    return dt.astimezone(_UTC)
+
+
+def to_local(dt: datetime, tz: tzinfo | None = None) -> datetime:
+    """Return ``dt`` in local time (``tz`` defaulting to the machine's zone)."""
+    zone = tz or local_zone()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=zone)
+    return dt.astimezone(zone)
+
+
+def _abort_key(config_dir: str | Path, entry_id: str) -> tuple[str, str]:
+    return (str(Path(config_dir).expanduser()), str(entry_id))
+
 
 def _clamp_day(day: int, year: int, month: int) -> int:
     """Clamp a day-of-month to the maximum valid day for the given month/year.
@@ -75,14 +158,16 @@ class ScheduleManager:
     """Manages scheduled posts for xPST.
 
     Stores scheduled posts in ~/.xpst/schedule.json and provides
-    methods to add, list, remove, and process due posts.
+    methods to add, edit, list, cancel (remove), and process due posts.
     """
 
-    def __init__(self, config_dir: str = "~/.xpst"):
+    def __init__(self, config_dir: str = "~/.xpst", *, tz: tzinfo | None = None):
         """Initialize the schedule manager.
 
         Args:
             config_dir: Path to the xPST config directory.
+            tz: Local zone used to interpret naive times and to render local
+                displays. Defaults to the machine's local zone.
         """
         self.config_dir = Path(config_dir).expanduser()
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -92,6 +177,7 @@ class ScheduleManager:
         self._lockfile = self.config_dir / ".schedule.lock"
         self._lock = threading.RLock()
         self._entries: list[dict[str, Any]] = []
+        self._tz: tzinfo = tz or local_zone()
         self._load()
 
     # ── locking helpers ───────────────────────────────────────────────
@@ -138,17 +224,123 @@ class ScheduleManager:
                     except (AttributeError, OSError):  # pragma: no cover
                         pass
 
+    # ── timezone helpers ──────────────────────────────────────────────
+
     @staticmethod
     def _normalize_to_naive_local(dt: datetime) -> datetime:
         """Convert a tz-aware datetime to naive local time.
 
-        The schedule store compares against datetime.now() (naive local),
-        so aware values must be normalized or comparisons raise TypeError.
-        DST semantics: wall-clock time is preserved across the conversion.
+        Legacy helper for entries written before UTC storage. DST semantics:
+        wall-clock time is preserved across the conversion.
         """
         if dt.tzinfo is None:
             return dt
         return dt.astimezone().replace(tzinfo=None)
+
+    def _zone_for_entry(self, entry: dict[str, Any]) -> tzinfo:
+        """The zone an entry was entered in (falls back to the manager zone)."""
+        name = entry.get("timezone") if isinstance(entry, dict) else None
+        if isinstance(name, str) and name:
+            try:
+                return ZoneInfo(name)
+            except Exception:  # noqa: BLE001 - tzdata may not know the name
+                pass
+        return self._tz
+
+    def _entry_instant(self, raw: Any) -> datetime | None:
+        """Parse a stored ``scheduled_time`` into a UTC instant.
+
+        Naive values (legacy entries) are read as local wall-clock time.
+        Returns None for anything unparseable so a corrupt entry can never
+        crash a scheduler tick.
+        """
+        try:
+            dt = datetime.fromisoformat(raw)
+        except (ValueError, TypeError):
+            return None
+        return to_utc(dt, self._tz)
+
+    def _now_utc(self, now: datetime | None = None) -> datetime:
+        """Resolve a comparison clock to UTC (naive input = local wall clock)."""
+        if now is None:
+            return datetime.now(_UTC)
+        if not isinstance(now, datetime):
+            raise TypeError(f"now must be a datetime, got {type(now).__name__}")
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=self._tz)
+        return now.astimezone(_UTC)
+
+    def local_time(self, entry: Any, tz: tzinfo | None = None) -> datetime:
+        """Return an entry's scheduled instant in local time (display helper).
+
+        Args:
+            entry: A schedule entry dict (or a raw stored/ISO time string).
+            tz: Override the display zone (default: the entry's own zone, so a
+                job entered in another timezone still shows the time the user
+                typed).
+
+        Returns:
+            A timezone-aware datetime in local time.
+        """
+        if isinstance(entry, dict):
+            raw = entry.get("scheduled_time")
+            zone = tz or self._zone_for_entry(entry)
+        else:
+            raw, zone = entry, tz or self._tz
+        if not isinstance(raw, str):
+            raise ValueError("schedule entry has no scheduled_time to display")
+        try:
+            dt = datetime.fromisoformat(raw)
+        except ValueError as exc:
+            raise ValueError(f"invalid scheduled_time: {raw!r}") from exc
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=self._tz)
+        return dt.astimezone(zone)
+
+    def _with_local_view(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Copy of ``entry`` plus its local rendering for display surfaces."""
+        view = dict(entry)
+        try:
+            view["scheduled_time_local"] = self.local_time(entry).isoformat()
+        except (ValueError, TypeError):
+            # Corrupt/legacy entry: expose it verbatim rather than failing the
+            # whole listing (the dashboard, CLI and MCP all share list()).
+            view["scheduled_time_local"] = None
+        return view
+
+    # ── abort / cancel signalling ─────────────────────────────────────
+
+    def abort_event(self, entry_id: str) -> threading.Event:
+        """Return the (process-wide) abort signal for one schedule entry."""
+        key = _abort_key(self.config_dir, entry_id)
+        with _ABORT_LOCK:
+            return _ABORT_EVENTS.setdefault(key, threading.Event())
+
+    def _clear_abort(self, entry_id: str) -> None:
+        """Clear any pending abort signal for ``entry_id`` (re-armed job)."""
+        with _ABORT_LOCK:
+            event = _ABORT_EVENTS.get(_abort_key(self.config_dir, entry_id))
+            if event is not None:
+                event.clear()
+
+    def is_aborted(self, entry_id: str) -> bool:
+        """True when a claimed plan must not proceed.
+
+        Two independent reasons count as abort:
+
+        - an in-process cancel signalled this id (instant), or
+        - the entry is no longer in the store (a cancel from another process,
+          which only has the file to talk through).
+
+        Call this only for an id that was claimed: an id that never existed is
+        indistinguishable from a cancelled one by design.
+        """
+        if self.abort_event(entry_id).is_set():
+            return True
+        with self._process_lock():
+            with self._lock:
+                self._reload_locked()
+                return all(e.get("id") != entry_id for e in self._entries)
 
     def _load(self) -> None:
         """Load schedule entries from disk.
@@ -194,7 +386,8 @@ class ScheduleManager:
                 except OSError:
                     logger.error(
                         "Schedule file %s is corrupt (%s) and could not be "
-                        "quarantined.", self.schedule_file, e,
+                        "quarantined.",
+                        self.schedule_file, e,
                     )
                 self._entries = []
         else:
@@ -229,6 +422,8 @@ class ScheduleManager:
         """Re-read the schedule from disk. Caller must hold the process lock."""
         self._load()
 
+    # ── create ────────────────────────────────────────────────────────
+
     def add(
         self,
         video_path: str,
@@ -236,20 +431,23 @@ class ScheduleManager:
         scheduled_time: datetime,
         platforms: list[str] | None = None,
         repeat_rule: str | None = None,
+        *,
+        tz: tzinfo | None = None,
     ) -> dict[str, Any]:
         """Add a new scheduled post.
 
         Args:
             video_path: Path to the video file.
             caption: Post caption text (max 100,000 characters).
-            scheduled_time: When to publish. Naive datetimes are taken as
-                local wall-clock time; aware datetimes are converted to
-                local wall-clock time.
+            scheduled_time: When to publish. Naive datetimes are the local
+                wall-clock time the user typed (in ``tz``); aware datetimes
+                keep their instant. Either way it is stored as UTC.
             platforms: Target platforms (None = all enabled).
             repeat_rule: Repeat rule - 'daily', 'weekly', 'monthly', or None.
+            tz: Zone that naive ``scheduled_time`` values are entered in.
 
         Returns:
-            The created schedule entry.
+            The created schedule entry (with its local rendering).
 
         Raises:
             ValueError: If repeat_rule is invalid, caption exceeds
@@ -274,16 +472,19 @@ class ScheduleManager:
             )
         clean_platforms = [p.strip() for p in (platforms or []) if p and p.strip()]
 
-        scheduled_time = self._normalize_to_naive_local(scheduled_time)
+        zone = tz or self._tz
+        scheduled_utc = to_utc(scheduled_time, zone)
 
+        entry_id = str(uuid.uuid4())[:8]
         entry: dict[str, Any] = {
-            "id": str(uuid.uuid4())[:8],
+            "id": entry_id,
             "operation_id": (operation_id := str(uuid.uuid4())),
             "idempotency_key": operation_id,
             "video_path": str(video_path),
             "caption": caption,
             "platforms": clean_platforms,
-            "scheduled_time": scheduled_time.isoformat(),
+            "scheduled_time": scheduled_utc.isoformat(),
+            "timezone": zone_name(zone) or zone_name(self._tz),
             "status": "pending",
             "created_at": datetime.now().isoformat(),
             "completed_at": None,
@@ -300,20 +501,144 @@ class ScheduleManager:
                 self._reload_locked()
                 self._entries.append(entry)
                 self._save()
-        logger.info(f"Scheduled post {entry['id']} for {scheduled_time}")
-        return entry
+        self._clear_abort(entry_id)
+        logger.info(f"Scheduled post {entry['id']} for {scheduled_utc} (UTC)")
+        return self._with_local_view(entry)
+
+    # ── edit ──────────────────────────────────────────────────────────
+
+    def edit(
+        self,
+        entry_id: str,
+        *,
+        video_path: str | None = None,
+        caption: str | None = None,
+        scheduled_time: datetime | None = None,
+        platforms: list[str] | None = None,
+        repeat_rule: Any = _UNSET,
+        tz: tzinfo | None = None,
+    ) -> dict[str, Any] | None:
+        """Edit a pending scheduled post in place.
+
+        Only the fields passed are changed. ``id``, ``operation_id`` and
+        ``idempotency_key`` are never re-issued, so a retry or a recovery
+        lookup keyed on the original identity keeps working. A ``failed``
+        entry is re-armed to ``pending`` (its error is cleared) because the
+        user is fixing it; anything else keeps its status.
+
+        Args:
+            entry_id: The id of the entry to edit.
+            video_path: New media path.
+            caption: New caption (validated like :meth:`add`).
+            scheduled_time: New publish time (naive = local wall clock in
+                ``tz``); stored as UTC.
+            platforms: New platform list (empty list = all enabled).
+            repeat_rule: 'daily' | 'weekly' | 'monthly' | None. Omitted =
+                unchanged.
+            tz: Zone that a naive ``scheduled_time`` is entered in.
+
+        Returns:
+            The updated entry, or None when no entry has that id.
+
+        Raises:
+            ValueError: On an invalid repeat_rule, oversized caption, or a
+                non-datetime scheduled_time.
+        """
+        if repeat_rule is not _UNSET and repeat_rule not in (None, "daily", "weekly", "monthly"):
+            raise ValueError(
+                f"Invalid repeat_rule: {repeat_rule!r}. "
+                f"Must be one of: None, 'daily', 'weekly', 'monthly'"
+            )
+        if scheduled_time is not None and not isinstance(scheduled_time, datetime):
+            raise ValueError(
+                f"scheduled_time must be a datetime, got {type(scheduled_time).__name__}."
+            )
+        if caption is not None:
+            caption = caption if isinstance(caption, str) else str(caption)
+            if len(caption) > MAX_CAPTION_LENGTH:
+                raise ValueError(
+                    f"Caption is {len(caption):,} characters; the maximum is "
+                    f"{MAX_CAPTION_LENGTH:,}. Shorten the caption before scheduling."
+                )
+        clean_platforms = (
+            [p.strip() for p in (platforms or []) if p and p.strip()]
+            if platforms is not None
+            else None
+        )
+        zone = tz or self._tz
+
+        with self._process_lock():
+            with self._lock:
+                # Reload so an edit applies on top of the latest on-disk state
+                # (another process may have added or claimed entries).
+                self._reload_locked()
+                entry = next((e for e in self._entries if e.get("id") == entry_id), None)
+                if entry is None:
+                    return None
+
+                if video_path is not None:
+                    entry["video_path"] = str(video_path)
+                if caption is not None:
+                    entry["caption"] = caption
+                if clean_platforms is not None:
+                    entry["platforms"] = clean_platforms
+                if repeat_rule is not _UNSET:
+                    entry["repeat_rule"] = repeat_rule
+                if scheduled_time is not None:
+                    entry["scheduled_time"] = to_utc(scheduled_time, zone).isoformat()
+                    entry["timezone"] = zone_name(zone) or entry.get("timezone")
+                entry["updated_at"] = datetime.now().isoformat()
+                if entry.get("status") == "failed":
+                    entry["status"] = "pending"
+                    entry["error"] = None
+                    entry["completed_at"] = None
+                self._save()
+                updated = self._with_local_view(entry)
+
+        # A re-armed entry is allowed to run again.
+        self._clear_abort(entry_id)
+        logger.info("Edited scheduled post %s", entry_id)
+        return updated
+
+    # ── read ──────────────────────────────────────────────────────────
 
     def list(self) -> list[dict[str, Any]]:
         """List all scheduled posts, sorted by scheduled_time.
+
+        Every entry carries a ``scheduled_time_local`` display value so the
+        CLI, dashboard and UI all show local time while the store stays UTC.
 
         Returns:
             List of schedule entries.
         """
         with self._lock:
-            return sorted(self._entries, key=lambda e: e.get("scheduled_time", ""))
+            ordered = sorted(self._entries, key=lambda e: e.get("scheduled_time", ""))
+            return [self._with_local_view(e) for e in ordered]
+
+    # ── cancel / remove ───────────────────────────────────────────────
+
+    def cancel(self, entry_id: str) -> bool:
+        """Cancel a scheduled post: remove it *and* abort any in-flight plan.
+
+        The abort signal is raised before the removal, so a worker that already
+        claimed the entry sees the cancellation even if it is mid-post, and a
+        worker about to post it skips it. Removal from the store is what makes
+        the cancellation durable (and visible to other processes).
+
+        Returns:
+            True if the entry was removed, False if it was already gone.
+        """
+        self.abort_event(entry_id).set()
+        removed = self.remove(entry_id)
+        if removed:
+            logger.info("Cancelled scheduled post %s (abort signalled)", entry_id)
+        return removed
 
     def remove(self, entry_id: str) -> bool:
-        """Remove a scheduled post by ID.
+        """Remove a scheduled post by ID (no abort signal).
+
+        Prefer :meth:`cancel` for user-facing cancellation: it also aborts a
+        plan that is already in flight.
 
         Args:
             entry_id: The ID of the entry to remove.
@@ -336,41 +661,51 @@ class ScheduleManager:
             logger.info(f"Removed scheduled post {entry_id}")
         return removed
 
-    def get_due(self) -> list[dict[str, Any]]:
+    # ── due processing ────────────────────────────────────────────────
+
+    def get_due(self, *, now: datetime | None = None) -> list[dict[str, Any]]:
         """Get posts that are due for publishing.
 
-        Returns entries where scheduled_time <= now and status == "pending".
-        Timezone-aware stored times are normalized to local wall-clock time
-        before comparison (legacy entries written by other tools).
+        Returns entries where the stored instant <= now and status ==
+        "pending". Comparison is instant-based: stored UTC times and legacy
+        naive local times are both resolved to an instant, so a job scheduled
+        across a DST transition fires when the user's wall clock reaches it.
 
         Note: this is a read-only view. Workers that post must use
         :meth:`claim_due` / :meth:`claim` to guarantee exactly-once
         processing under concurrent cron + daemon invocations.
 
+        Args:
+            now: Comparison clock (defaults to the real clock). Naive values
+                are read as local wall-clock time.
+
         Returns:
             List of due schedule entries.
         """
-        now = datetime.now()
         with self._lock:
-            due = []
-            for entry in self._entries:
-                if entry.get("status") != "pending":
-                    continue
-                try:
-                    scheduled = datetime.fromisoformat(entry["scheduled_time"])
-                    scheduled = self._normalize_to_naive_local(scheduled)
-                    if scheduled <= now:
-                        due.append(entry)
-                except (ValueError, KeyError, TypeError):
-                    continue
-            return due
+            return [self._with_local_view(e) for e in self._due_entries(now)]
 
-    def claim_due(self) -> list[dict[str, Any]]:
+    def _due_entries(self, now: datetime | None) -> list[dict[str, Any]]:
+        """Due entries as the live records (callers that mutate must hold the lock)."""
+        cutoff = self._now_utc(now)
+        due = []
+        for entry in self._entries:
+            if entry.get("status") != "pending":
+                continue
+            instant = self._entry_instant(entry.get("scheduled_time"))
+            if instant is not None and instant <= cutoff:
+                due.append(entry)
+        return due
+
+    def claim_due(self, *, now: datetime | None = None) -> list[dict[str, Any]]:
         """Atomically claim all due entries for this worker.
 
         Transitions each due entry from ``pending`` to ``processing`` and
         persists the change under a cross-process file lock, so when cron
         and the serve daemon fire simultaneously only one of them posts.
+
+        Args:
+            now: Comparison clock (defaults to the real clock).
 
         Returns:
             The list of entries claimed by this worker (now status
@@ -379,42 +714,42 @@ class ScheduleManager:
         with self._process_lock():
             with self._lock:
                 self._reload_locked()
-                due = [e for e in self.get_due()]
+                due = self._due_entries(now)
                 for entry in due:
                     entry["status"] = "processing"
                     entry["claimed_at"] = datetime.now().isoformat()
                 if due:
                     self._save()
-                return due
+                return [self._with_local_view(e) for e in due]
 
-    def claim(self, entry_id: str) -> bool:
+    def claim(self, entry_id: str, *, now: datetime | None = None) -> bool:
         """Atomically claim a single entry by ID.
 
         Re-reads the store from disk first, so it is safe across both
         threads and OS processes.
 
+        Args:
+            entry_id: The id to claim.
+            now: Comparison clock (defaults to the real clock).
+
         Returns:
             True if this worker claimed the entry, False if another worker
             already claimed it, it is not pending, or it is not yet due.
         """
+        cutoff = self._now_utc(now)
         with self._process_lock():
             with self._lock:
                 self._reload_locked()
-                now = datetime.now()
                 for entry in self._entries:
                     if entry.get("id") != entry_id:
                         continue
                     if entry.get("status") != "pending":
                         return False
-                    try:
-                        scheduled = datetime.fromisoformat(entry["scheduled_time"])
-                        scheduled = self._normalize_to_naive_local(scheduled)
-                    except (ValueError, KeyError, TypeError):
-                        return False
-                    if scheduled > now:
+                    instant = self._entry_instant(entry.get("scheduled_time"))
+                    if instant is None or instant > cutoff:
                         return False
                     entry["status"] = "processing"
-                    entry["claimed_at"] = now.isoformat()
+                    entry["claimed_at"] = datetime.now().isoformat()
                     self._save()
                     return True
                 return False
@@ -452,6 +787,11 @@ class ScheduleManager:
     def _create_next_occurrence(self, entry: dict[str, Any]) -> None:
         """Create the next occurrence of a recurring schedule entry.
 
+        The next occurrence advances by *local wall clock* in the entry's own
+        zone and is then stored as UTC, so a 09:00 daily/weekly/monthly job
+        keeps firing at 09:00 local across a DST transition instead of
+        drifting by an hour.
+
         Args:
             entry: The completed schedule entry to base the next occurrence on.
         """
@@ -459,11 +799,15 @@ class ScheduleManager:
         if not repeat_rule:
             return
 
-        try:
-            current_time = datetime.fromisoformat(entry["scheduled_time"])
-        except (ValueError, KeyError):
-            logger.warning("Cannot create next occurrence: invalid scheduled_time in entry %s", entry.get("id"))
+        instant = self._entry_instant(entry.get("scheduled_time"))
+        if instant is None:
+            logger.warning(
+                "Cannot create next occurrence: invalid scheduled_time in entry %s",
+                entry.get("id"),
+            )
             return
+        zone = self._zone_for_entry(entry)
+        current_time = instant.astimezone(zone)
 
         if repeat_rule == "daily":
             next_time = current_time + timedelta(days=1)
@@ -493,7 +837,8 @@ class ScheduleManager:
             "video_path": entry["video_path"],
             "caption": entry["caption"],
             "platforms": entry.get("platforms", []),
-            "scheduled_time": next_time.isoformat(),
+            "scheduled_time": next_time.astimezone(_UTC).isoformat(),
+            "timezone": zone_name(zone) or entry.get("timezone"),
             "status": "pending",
             "created_at": datetime.now().isoformat(),
             "completed_at": None,
@@ -506,3 +851,13 @@ class ScheduleManager:
             "Created next %s occurrence %s for %s",
             repeat_rule, new_entry["id"], next_time,
         )
+
+
+__all__ = [
+    "MAX_CAPTION_LENGTH",
+    "ScheduleManager",
+    "local_zone",
+    "to_local",
+    "to_utc",
+    "zone_name",
+]
