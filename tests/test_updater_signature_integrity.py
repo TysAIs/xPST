@@ -79,7 +79,7 @@ class TestUpdaterPublicKey:
         key_id = raw.splitlines()[0].rsplit(":", 1)[-1].strip()
         assert re.fullmatch(r"[0-9A-F]{16}", key_id)
         # A rotation must update this test deliberately, not slip through.
-        assert key_id == "13F290B1316626E2"
+        assert key_id == "211CB930A5FA2F74"  # release keypair rotated 2026-09-25 (old key had no private half)
 
 
 class TestNoVerificationBypass:
