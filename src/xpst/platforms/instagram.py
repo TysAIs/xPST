@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     import httpx
 
     from xpst.config import XPSTConfig
+from xpst.content import TEXT_LIMITS
 from xpst.platforms.base import (
     DeleteOutcome,
     DeleteResult,
@@ -60,7 +61,10 @@ class InstagramUploader(PlatformUploader):
     """Instagram Reels uploader with session persistence and quality encoding."""
 
     # Instagram limits
-    MAX_CAPTION_LENGTH = 2200
+    #: The same number the preflight gate refuses on (``xpst.content``): the
+    #: uploader truncates at it, so a local literal here could silently disagree
+    #: with what preflight allowed. One table, read by both.
+    MAX_CAPTION_LENGTH = TEXT_LIMITS["instagram"]
     MAX_HASHTAGS = 30
     # One carousel holds at most this many items. It is a refusal boundary, not
     # a truncation boundary: xPST never silently drops items from a carousel.
