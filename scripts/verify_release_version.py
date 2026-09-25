@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED_RELEASE_VERSION = "1.1.0"
+REQUIRED_RELEASE_VERSION = "1.2.0"
 
 
 def _read_python_version(root: Path) -> str:
