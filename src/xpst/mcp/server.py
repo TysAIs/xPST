@@ -826,13 +826,18 @@ TOOLS: list[Tool] = [
     Tool(
         name="xpst_delete",
         description=(
-            "Delete a post RECORD from local xPST state only (operation="
-            "delete_record, scope=local_state_only). This does NOT delete the "
-            "post on YouTube/X/Instagram/TikTok: the live post stays up and "
-            "remains publicly visible. The response always carries "
-            "platform_deleted=false. Use the CLI `xpst delete <video_id>` for "
-            "real platform deletion. Removing the record also makes the engine "
-            "treat the video as new again, so treat this as destructive."
+            "Delete a post for REAL on the platform and remove its local "
+            "record. Calls the platform delete API for every destination the "
+            "video was posted to and reports each destination's outcome: "
+            "deleted, soft_hidden (unpublished but recoverable), pending "
+            "(could not confirm — remove manually via the returned share_url), "
+            "or unsupported (that platform has no delete path, e.g. Messenger). "
+            "The response carries platform_deleted per destination plus a "
+            "boolean aggregate (true only when every destination is gone). "
+            "Destination platforms (YouTube, X, Instagram, TikTok, Threads, "
+            "Facebook) all support deletion today. Removing the record also "
+            "makes the engine treat the video as new again, so treat the call "
+            "as destructive and confirm with the user first."
         ),
         inputSchema={
             "type": "object",
@@ -840,11 +845,11 @@ TOOLS: list[Tool] = [
                 "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
                 "video_id": {
                     "type": "string",
-                    "description": "Video ID whose local record should be removed",
+                    "description": "Video ID to delete on the platform(s) and drop from local state",
                 },
                 "platform": {
                     "type": "string",
-                    "description": "Platform record to remove (or all)",
+                    "description": "Destination platform to delete from (or all)",
                     "enum": [*_PLATFORM_ENUM, "all"],
                     "default": "all",
                 },
@@ -2542,35 +2547,43 @@ async def _handle_messenger_check_comments(config: XPSTConfig, args: dict[str, A
 async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallToolResult:
     """Handle xpst_delete tool.
 
-    Removes a post *record* from local state — NEVER the live post. ``scope``
-    and ``platform_deleted: false`` say so in the payload, because the CLI
-    ``delete`` command is the same-looking operation with a different (real)
-    scope, and an agent that confuses the two believes it deleted a post it did
-    not. ``platform="all"`` removes the record for every platform the video was
-    recorded against.
+    Performs a REAL platform takedown: for every destination the video was
+    recorded against, it calls :meth:`CrossPostEngine.delete_post` and reports
+    that destination's Phase-1.2 outcome verbatim — ``deleted`` / ``soft_hidden``
+    / ``pending`` / ``unsupported`` — plus ``platform_deleted`` for that
+    destination. The local record is always removed afterwards.
+
+    The engine is the single source of truth for "can this platform delete?":
+    an adapter with no delete path (or none initialised) yields ``unsupported``,
+    which the payload carries instead of a fabricated success. ``platform="all"``
+    targets every platform the video was recorded against.
     """
+    from xpst.platforms.base import DeleteOutcome
+    from xpst.services.recovery_service import PLATFORM_DELETE_SCOPE
+
     video_id = args["video_id"]
     platform = args.get("platform", "all")
     scope_note = (
-        "Local xPST state only — the post on the platform was NOT deleted and is "
-        "still publicly visible. Use the CLI `xpst delete <video_id>` to delete "
-        "on the platform."
+        "Deleted on each destination where xPST supports it and removed the "
+        "local record. Per-destination outcomes say exactly what happened on "
+        "the platform."
     )
 
     video = engine.state.get_video(video_id)
     if video is None:
-        # QA-wave fix: an unknown video is a caller error, not a success.
-        # Return an explicit failure payload so agents can distinguish
-        # "record removed" from "record never existed".
+        # An unknown video is a caller error, not a success: return an explicit
+        # failure payload so agents can distinguish "record removed" from
+        # "record never existed".
         result = {
             "ok": False,
             "video_id": video_id,
             "platform": platform,
             "removed": [],
             "success": False,
-            "operation": "delete_record",
-            "scope": "local_state_only",
+            "operation": "delete",
+            "scope": PLATFORM_DELETE_SCOPE,
             "platform_deleted": False,
+            "results": [],
             "note": scope_note,
             "error": f"Unknown video: {video_id} (not found in state)",
         }
@@ -2581,11 +2594,40 @@ async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallT
 
     posted_to = video.get("posted_to") or {}
     platforms = list(posted_to.keys()) if platform == "all" else [platform]
-    # Only records that actually exist can be removed: claiming success for a
-    # platform the video was never posted to is the same fabricated success.
+    # Only records that actually exist can be processed: claiming anything for
+    # a platform the video was never posted to is the same fabricated success.
     removable = [plat for plat in platforms if plat in posted_to]
 
+    destination_results: list[dict[str, Any]] = []
     for plat in removable:
+        try:
+            outcome = await engine.delete_post(video_id, plat)
+            detail = outcome.to_dict()
+        except Exception as exc:  # noqa: BLE001 — report, never raise
+            # A crash in the platform path is an unconfirmed delete, never a
+            # silent success: surface it as pending with the share URL absent.
+            logger.error("MCP delete_post failed for %s on %s: %s", video_id, plat, exc)
+            detail = {
+                "outcome": DeleteOutcome.PENDING.value,
+                "platform": plat,
+                "post_id": "",
+                "message": f"Delete pending on {plat} - remove manually",
+                "share_url": None,
+                "detail": str(exc)[:200],
+                "deleted": False,
+            }
+        destination_results.append({
+            "platform": plat,
+            "outcome": detail.get("outcome"),
+            "platform_deleted": bool(detail.get("deleted")),
+            "post_id": detail.get("post_id", ""),
+            "message": detail.get("message", ""),
+            "share_url": detail.get("share_url"),
+            "detail": detail.get("detail"),
+            "local_record_removed": True,
+        })
+        # The local record is removed regardless of the platform outcome, so the
+        # two effects are independent and both are reported above.
         engine.state.remove_post(video_id, plat)
     if removable:
         engine.state.save()
@@ -2596,9 +2638,13 @@ async def _handle_delete(engine: CrossPostEngine, args: dict[str, Any]) -> CallT
         "platform": platform,
         "removed": removable,
         "success": bool(removable),
-        "operation": "delete_record",
-        "scope": "local_state_only",
-        "platform_deleted": False,
+        "operation": "delete",
+        "scope": PLATFORM_DELETE_SCOPE,
+        # Aggregate: only true when every attempted destination is really gone
+        # from the platform (deleted or soft-hidden).
+        "platform_deleted": bool(destination_results)
+        and all(r["platform_deleted"] for r in destination_results),
+        "results": destination_results,
         "note": scope_note,
     }
     if not removable:

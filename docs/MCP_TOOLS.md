@@ -30,7 +30,7 @@ You can also start the server with `xpst-mcp` or `xpst mcp`.
 1. Use `dry_run: true` first and show the user what would happen.
 2. Get explicit user confirmation before a live `xpst_run` or `xpst_post`.
 3. `xpst_backfill` also performs live uploads when not in dry-run mode.
-4. `xpst_delete` removes **local post records only** — it never deletes the post on the platform (`platform_deleted: false` in every response). Deleting a record for content that is still live on a platform can cause the engine to consider it "new" again. Treat it as destructive, and use the CLI `xpst delete <video_id>` when the user actually wants the post taken down.
+4. `xpst_delete` performs a **real platform takedown**: it calls the platform delete API for every destination the video was posted to, then removes the local record. Each destination gets its own outcome (`deleted`, `soft_hidden`, `pending`, `unsupported`) and `platform_deleted` flag; the top-level `platform_deleted` is true only when every destination is really gone. `pending`/`unsupported` results mean the live post may still be public — act on the returned `share_url`. Removing the record can also cause the engine to consider the content "new" again, so treat the call as destructive and confirm with the user.
 
 Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers`, `xpst_config_show`, `xpst_auth_status`) never initialize the posting engine and are safe to call. `xpst_auth_start` is also side-effect-free: it returns a human action plan and never opens a browser or accepts secrets.
 
@@ -68,7 +68,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or acce… | No | — |
 | `xpst_providers` | List supported content sources and posting destinations with capabilities | No | — |
 | `xpst_disconnect` | Disconnect a platform: remove its stored account credentials (tokens, cookies… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
-| `xpst_delete` | Delete a post RECORD from local xPST state only (operation=delete_record, sco… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_delete` | Delete a post for REAL on the platform and remove its local record. Calls the… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `messenger_send` | Send a text message to a Messenger recipient (page-scoped PSID) via the Meta… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `messenger_set_rules` | Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->re… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_messenger_check_comments` | Fetch recent comments on an Instagram or Facebook post and auto-reply per the… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
@@ -374,12 +374,19 @@ limit, `3` authentication, `10` unavailable / refused, `1` otherwise), while
 
 ## xpst_delete
 
-Removes a post **record** from local state. This is state-only: it does NOT call any platform's delete API and the live post **stays up and publicly visible** (use the CLI `xpst delete` for live deletion). Every response carries `"scope": "local_state_only"` and `"platform_deleted": false` so an agent cannot mistake this for a platform deletion. Removing a record can make previously-posted content look "new" to the engine again, so confirm with the user.
+Deletes a post **for real on the platform** and removes its local record. For every destination the video was posted to it calls the platform delete API (`CrossPostEngine.delete_post`) and reports that destination's Phase-1.2 outcome:
+
+- `deleted` — hard delete confirmed (`platform_deleted: true`).
+- `soft_hidden` — reversible unpublish, e.g. YouTube `privacyStatus=private` (`platform_deleted: true`; not publicly visible).
+- `pending` — deletion could not be confirmed; remove manually via the returned `share_url` (`platform_deleted: false`).
+- `unsupported` — that destination has no delete path (`platform_deleted: false`).
+
+Every destination record also carries `platform_deleted`; the top-level `platform_deleted` is true only when **every** destination is gone. The local record is removed for all destinations regardless of outcome. Removing a record can make previously-posted content look "new" to the engine again, so confirm with the user.
 
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| `video_id` | string | yes | — | Video ID to remove from state. |
-| `platform` | string | no | `"all"` | `youtube`, `instagram`, `x`, `tiktok`, `threads`, or `all`. |
+| `video_id` | string | yes | — | Video ID to delete on the platform(s) and drop from local state. |
+| `platform` | string | no | `"all"` | `youtube`, `instagram`, `x`, `tiktok`, `threads`, `facebook`, or `all`. |
 
 Example call:
 
@@ -391,8 +398,15 @@ Example response:
 
 ```json
 { "ok": true, "video_id": "7301234567890", "platform": "all", "removed": ["youtube", "x"], "success": true,
-  "operation": "delete_record", "scope": "local_state_only", "platform_deleted": false,
-  "note": "Local xPST state only — the post on the platform was NOT deleted and is still publicly visible. Use the CLI `xpst delete <video_id>` to delete on the platform." }
+  "operation": "delete", "scope": "platform_and_local_state", "platform_deleted": true,
+  "results": [
+    { "platform": "youtube", "outcome": "deleted", "platform_deleted": true, "post_id": "RZ6i-0HM5dM",
+      "message": "Deleted from youtube", "share_url": null, "detail": null, "local_record_removed": true },
+    { "platform": "x", "outcome": "pending", "platform_deleted": false, "post_id": "111",
+      "message": "Delete pending on x - remove manually: https://x.com/i/status/111", "share_url": "https://x.com/i/status/111",
+      "detail": "429", "local_record_removed": true }
+  ],
+  "note": "Deleted on each destination where xPST supports it and removed the local record. Per-destination outcomes say exactly what happened on the platform." }
 ```
 
 ## messenger_send
