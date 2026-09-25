@@ -15,7 +15,7 @@ extraction step — uvicorn cold start is a few hundred ms.  The tradeoff
 documented in the shell code and the PR.
 
 Size strategy (target: shell .app total <= 120 MB):
-    - Dashboard-only entrypoint: bypasses the CLI and the PySide6 desktop app.
+    - Dashboard-only entrypoint: bypasses the CLI and the retired PySide6 desktop app.
     - PySide6/Qt excluded entirely (the shell's webview replaces it).
     - av/faster_whisper excluded (PyAV 18 ships dylibs under av/__dot__dylibs/
       which trips PyInstaller's bundle step — see PR #61 notes); both are
@@ -23,7 +23,7 @@ Size strategy (target: shell .app total <= 120 MB):
     - numpy/pandas/scipy/matplotlib/torch excluded: never imported by the
       dashboard code path.
     - googleapiclient static discovery docs stripped except youtube.v3
-      (same approach as build_macos.spec).
+      (same approach the retired build_macos.spec used).
 
 Build:
     scripts/build-engine.sh
