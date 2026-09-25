@@ -110,7 +110,7 @@ class _FakeInstagrapiClient:
     """Scripted instagrapi client: records every call it receives."""
 
     def __init__(self, *, media_id: int = 987654321, code: str = "IMGp0st") -> None:
-        self.user_id = "80131363736"
+        self.user_id = "12345678901"
         self.calls: list[tuple[Any, ...]] = []
         self._media_id = media_id
         self._code = code

@@ -32,7 +32,7 @@ class _FakeClient:
     """Scripted instagrapi client: records every call it receives."""
 
     def __init__(self, *, media=None, listing_error=None) -> None:
-        self.user_id = "80131363736"
+        self.user_id = "12345678901"
         self.username = "tysn.dev"
         self._media = media if media is not None else []
         self._listing_error = listing_error
