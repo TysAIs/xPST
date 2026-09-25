@@ -522,42 +522,44 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 
 <!-- BEGIN GENERATED README TOOL INDEX -->
 
-### 38 Tools
+### 40 Tools
 
 Generated from the live registry — full schemas, consent gates, and per-tool notes live in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
 
 | Tool | Purpose | Mutates real accounts |
 |------|---------|-----------------------|
 | `xpst_run` | Check for new videos and cross-post them to configured platforms | **Yes** |
-| `xpst_post` | Manually post a local video file or carousel to platforms | **Yes** |
-| `xpst_analytics` | Per-post and per-platform engagement metrics (views, likes, comments, shares) with persisted sn… | No |
-| `xpst_cross_post_analytics` | Cross-post correlation analytics (B1): one video posted to multiple platforms shown as a single… | No |
-| `xpst_followers` | Follower counts per platform with growth history. Returns total followers across all platforms,… | No |
-| `xpst_best_time` | Best time to post per platform, based on engagement history. Analyzes when your posts get the h… | No |
-| `xpst_security_audit` | Run an automated security check on the xPST installation. Verifies credential file permissions,… | No |
-| `xpst_suggest_caption` | Generate AI caption suggestions for a video file. Uses the video's transcript to generate 3 cap… | No |
-| `xpst_generate_ideas` | Generate post ideas for a content topic (AI content studio). Uses the KB LLM when configured (X… | No |
-| `xpst_transcript` | Get the transcript for a video by its content_hash or video_id. Returns the full transcript tex… | No |
-| `xpst_search` | Search the knowledge base for nuggets, clips, and topics. Returns matching knowledge nuggets wi… | No |
-| `xpst_activity` | List recorded platform failures with targeted retry or review actions (read-only) | No |
+| `xpst_post` | Post to platforms: one local video/image file, a carousel (carousel_paths), o… | **Yes** |
+| `xpst_analytics` | Per-post and per-platform engagement metrics (views, likes, comments, shares)… | No |
+| `xpst_cross_post_analytics` | Cross-post correlation analytics (B1): one video posted to multiple platforms… | No |
+| `xpst_followers` | Follower counts per platform with growth history. Returns total followers acr… | No |
+| `xpst_best_time` | Best time to post per platform, based on engagement history. Analyzes when yo… | No |
+| `xpst_security_audit` | Run an automated security check on the xPST installation. Verifies credential… | No |
+| `xpst_suggest_caption` | Generate AI caption suggestions for a video file. Uses the video's transcript… | No |
+| `xpst_generate_ideas` | Generate post ideas for a content topic (AI content studio). Uses the KB LLM… | No |
+| `xpst_transcript` | Get the transcript for a video by its content_hash or video_id. Returns the f… | No |
+| `xpst_search` | Search the knowledge base for nuggets, clips, and topics. Returns matching kn… | No |
+| `xpst_activity` | List recorded platform failures with targeted retry or review actions (read-o… | No |
 | `xpst_schedule_list` | List scheduled posts (pending, completed, failed) with times and targets | No |
-| `xpst_schedule_add` | Schedule a post for later: local video file + caption + ISO-8601 time, optional platform list a… | **Yes** |
+| `xpst_schedule_add` | Schedule a post for later: local video file + caption + ISO-8601 time, option… | **Yes** |
+| `xpst_schedule_cancel` | Cancel a scheduled post by entry id — the MCP equivalent of `xpst schedule re… | **Yes** |
+| `xpst_failures_retry` | Retry ONE recorded upload failure, identified by video_id + platform — the MC… | **Yes** |
 | `xpst_health` | Test connectivity to all platforms and sources (no uploads) | No |
 | `xpst_status` | Show cross-posting statistics and health status | No |
 | `xpst_backfill` | Retry failed or incomplete posts from history | **Yes** |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No |
-| `xpst_auth_status` | Show live authentication status for every provider — the same verdict as `xpst auth status` (ro… | No |
-| `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the public /bio URL, the pa… | No |
-| `xpst_capabilities` | Return the canonical role-aware provider and capability contract without network calls | No |
-| `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets (media, caption,… | No |
-| `xpst_readiness` | Return local setup readiness and actionable blockers without starting the posting engine | No |
-| `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or accepts secrets | No |
+| `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No |
+| `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No |
+| `xpst_capabilities` | Return the canonical role-aware provider catalog AND the content contract wit… | No |
+| `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets… | No |
+| `xpst_readiness` | Return local setup readiness and actionable blockers without starting the pos… | No |
+| `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or acce… | No |
 | `xpst_providers` | List supported content sources and posting destinations with capabilities | No |
-| `xpst_disconnect` | Disconnect a platform: remove its stored account credentials (tokens, cookies, session files) a… | **Yes** |
-| `xpst_delete` | Delete a post record from state | **Yes** |
-| `messenger_send` | Send a text message to a Messenger recipient (page-scoped PSID) via the Meta Graph API. Require… | **Yes** |
-| `messenger_set_rules` | Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->reply map (the '*' k… | **Yes** |
-| `xpst_messenger_check_comments` | Fetch recent comments on an Instagram or Facebook post and auto-reply per the configured reply_… | **Yes** |
+| `xpst_disconnect` | Disconnect a platform: remove its stored account credentials (tokens, cookies… | **Yes** |
+| `xpst_delete` | Delete a post RECORD from local xPST state only (operation=delete_record, sco… | **Yes** |
+| `messenger_send` | Send a text message to a Messenger recipient (page-scoped PSID) via the Meta… | **Yes** |
+| `messenger_set_rules` | Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->re… | **Yes** |
+| `xpst_messenger_check_comments` | Fetch recent comments on an Instagram or Facebook post and auto-reply per the… | **Yes** |
 | `kb_add` | Ingest a local file or URL into the knowledge base | **Yes** |
 | `kb_query` | Return stored knowledge nuggets whose text matches the query | No |
 | `kb_organize` | Discover areas, tag difficulty, and assign nuggets | **Yes** |

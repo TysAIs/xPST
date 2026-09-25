@@ -16,10 +16,14 @@ issue to propose or upvote an item.
 
 ## Shipped in v1.0.0
 
-- ✅ **Five-platform posting** — YouTube Shorts, X, Instagram Reels, TikTok,
-  Threads, across engine, scheduler, dashboard, desktop app, and
-  analytics.
-- ✅ **TikTok posting** via the official Content Posting API v2.
+- ✅ **Multi-destination posting** — YouTube Shorts, X, and Instagram Reels are the
+  live-verified destinations, wired across engine, scheduler, dashboard, and
+  analytics; the TikTok (source-only) and Threads destination code paths ship
+  behind the capability truth table in
+  [docs/INSTALL.md](docs/INSTALL.md#capability-truth-table).
+- ⏳ **TikTok destination posting** — the Content Posting API v2 code path exists
+  but publishing stays disabled pending external TikTok app review; TikTok is a
+  **source** today (see [docs/setup-tiktok.md](docs/setup-tiktok.md)).
 - ✅ **Official-API-first auth** — Instagram Graph API as primary mode; official
   paths preferred across platforms with documented fallbacks.
 - ✅ **Per-video and cross-post analytics** — per-platform metrics plus combined
