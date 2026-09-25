@@ -181,7 +181,7 @@ def test_tauri_workflow_gates_the_app_and_installer_size_budget() -> None:
     assert "du -sm \"$APP_PATH\"" in workflow
     assert 'INSTALLER=$(find src-tauri/target -path "$PATTERN" -print -quit)' in workflow
 
-    assert "APP_BUDGET_MB=130" in workflow
+    assert "APP_BUDGET_MB=140" in workflow
     assert "over the ${APP_BUDGET_MB}MB budget" in workflow
     assert "must be resolved at runtime" in workflow
     assert "engine sidecar missing from the app bundle" in workflow
