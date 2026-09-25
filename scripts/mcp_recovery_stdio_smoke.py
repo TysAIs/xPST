@@ -6,11 +6,12 @@ This probe covers the *mutating* recovery surface over the same real transport,
 in a throwaway config directory, and fails non-zero on any deviation:
 
   * ``tools/list`` advertises the schedule-cancel and targeted-retry tools, and
-    the ``xpst_delete`` schema states its local-record scope;
+    the ``xpst_delete`` schema states its real platform-takedown scope;
   * ``xpst_schedule_cancel`` cancels a real entry and refuses an unknown one;
   * ``xpst_failures_retry`` refuses an unplannable target instead of reporting a
     retry it never attempted;
-  * ``xpst_delete`` reports ``scope: local_state_only`` / ``platform_deleted: false``;
+  * ``xpst_delete`` reports ``scope: platform_and_local_state`` and names each
+    destination's outcome / ``platform_deleted``;
   * with no mutation opt-in, every one of them is refused fail-closed.
 
 Nothing here touches a real account, the network, or the operator's own
@@ -112,8 +113,9 @@ async def _run(config_path: Path, *, allow_mutations: bool = True) -> dict:
 
             description = tools["xpst_delete"].description or ""
             _require(
-                "local xPST state" in description and "does NOT delete" in description,
-                "xpst_delete does not state its local-record scope",
+                "platform delete API" in description
+                and "platform_deleted per destination" in description,
+                "xpst_delete does not state its platform-takedown scope",
             )
             report["steps"].append({"step": "tools/list xpst_delete scope wording", "ok": True})
 
@@ -195,20 +197,27 @@ async def _run(config_path: Path, *, allow_mutations: bool = True) -> dict:
             )
             report["steps"].append({"step": "xpst_failures_retry refuses unknown video", "ok": True})
 
-            # Delete: always local-record scope.
+            # Delete: an unknown video is an error; nothing reaches a platform.
             deleted = await session.call_tool("xpst_delete", {"video_id": "ghost"})
             deleted_payload = _payload(deleted)
             _require(deleted.isError is True, "deleting an unknown video was not an error")
-            _require(deleted_payload["scope"] == "local_state_only", "delete scope is wrong")
+            _require(
+                deleted_payload["scope"] == "platform_and_local_state",
+                "delete scope is wrong",
+            )
             _require(
                 deleted_payload["platform_deleted"] is False,
                 "delete claimed a platform deletion",
             )
             _require(
-                deleted_payload["operation"] == "delete_record",
+                deleted_payload["operation"] == "delete",
                 "delete payload does not name its operation",
             )
-            report["steps"].append({"step": "xpst_delete states local_state_only scope", "ok": True})
+            _require(
+                deleted_payload["results"] == [],
+                "an unknown video produced per-destination results",
+            )
+            report["steps"].append({"step": "xpst_delete states platform_and_local_state scope", "ok": True})
 
     report["ok"] = True
     return report
