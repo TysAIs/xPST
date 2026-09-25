@@ -22,16 +22,14 @@ the shutdown grace period).
 
 from __future__ import annotations
 
-import asyncio
 import os
 import signal
 import threading
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from xpst.engine import CrossPostEngine
-from xpst.schedule_manager import ScheduleManager
 from xpst.scheduler import Scheduler
+from xpst.scheduling_engine import SchedulingEngine
 from xpst.utils.logger import get_logger
 from xpst.utils.net import port_in_use, port_remedy
 from xpst.utils.pidfile import PidfileLock, PidfileLockError
@@ -84,6 +82,16 @@ class ServeSupervisor:
         # Keep one Scheduler instance so its optional analytics cadence
         # survives across the supervisor's individual watch cycles.
         self._watch_scheduler = Scheduler(self.engine, self.config)
+        # The due-post pass (in-app scheduling). The supervisor's own worker
+        # thread is the interval loop: `_worker_loop` runs a cycle immediately
+        # on start and then every `check_interval`, so a job that becomes due
+        # while the app is running is picked up without a restart.
+        self._scheduling = SchedulingEngine(
+            self.engine,
+            config=self.config,
+            config_dir=self.config.config_dir,
+            interval=self.check_interval,
+        )
         self.pidfile = PidfileLock(config.config_dir)
 
         self._stop = threading.Event()
@@ -132,71 +140,25 @@ class ServeSupervisor:
     # ── scheduler work ────────────────────────────────────────────────
 
     def _process_due_posts(self) -> dict[str, int]:
-        """Publish due scheduled posts via the existing ScheduleManager API.
+        """Publish due scheduled posts via the scheduling engine.
+
+        Delegates to :class:`xpst.scheduling_engine.SchedulingEngine`, which
+        claims each due entry atomically (so a concurrent `xpst schedule run`
+        from cron cannot double-post) and refuses to record a completion for an
+        entry the user cancelled while its post was in flight.
 
         Returns:
-            Per-status counts (due, posted, failed).
+            Per-status counts (due, posted, failed) — the shape callers and
+            tests already rely on.
         """
-        counts = {"due": 0, "posted": 0, "failed": 0}
-        manager = ScheduleManager(self.config.config_dir)
-
-        # Claim due entries atomically so a concurrent `xpst schedule run`
-        # (cron) cannot double-post the same entry.
-        due = manager.claim_due()
-        if not due:
-            return counts
-        counts["due"] = len(due)
-
-        for entry in due:
-            entry_id = entry["id"]
-            video_path = Path(entry["video_path"])
-            caption = entry["caption"]
-            platforms = entry.get("platforms") or None
-
-            if not video_path.exists():
-                manager.mark_complete(entry_id, success=False, error=f"File not found: {video_path}")
-                counts["failed"] += 1
-                logger.warning(
-                    "xpst serve: scheduled post %s skipped — file missing: %s",
-                    entry_id,
-                    video_path,
-                )
-                continue
-
-            try:
-                # The worker runs in a non-async thread; drive the async
-                # engine call the same way the `schedule run` command does.
-                result = asyncio.run(self.engine.post_manual(video_path, caption, platforms))
-                success = result.all_success
-                error_msg = None
-                if not success:
-                    error_msg = "; ".join(f"{p}: {ur.error}" for p, ur in result.results.items() if not ur.success)
-                post_results = {platform: upload_result.to_dict() for platform, upload_result in result.results.items()}
-                manager.mark_complete(
-                    entry_id,
-                    success=success,
-                    error=error_msg,
-                    post_results=post_results,
-                )
-                if success:
-                    counts["posted"] += 1
-                    logger.info("xpst serve: scheduled post %s published", entry_id)
-                else:
-                    counts["failed"] += 1
-                    logger.warning(
-                        "xpst serve: scheduled post %s partial/failed: %s",
-                        entry_id,
-                        error_msg,
-                    )
-            except Exception as exc:  # noqa: BLE001 - keep the daemon alive
-                manager.mark_complete(entry_id, success=False, error=str(exc))
-                counts["failed"] += 1
-                logger.error(
-                    "xpst serve: scheduled post %s raised %s",
-                    entry_id,
-                    exc,
-                )
-        return counts
+        result = self._scheduling.run_due()
+        if result.get("aborted"):
+            logger.info("xpst serve: %d scheduled post(s) aborted by cancel", result["aborted"])
+        return {
+            "due": result.get("due", 0),
+            "posted": result.get("posted", 0),
+            "failed": result.get("failed", 0),
+        }
 
     def _run_watch_check(self) -> None:
         """Run one new-video/catch-up check via the existing Scheduler logic."""
