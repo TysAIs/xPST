@@ -35,6 +35,7 @@ from xpst.platforms.base import (
     UploadResult,
 )
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
+from xpst.reconcile import PublishAttempt, ReconcileOutcome, ReconcileResult
 from xpst.utils.logger import get_logger
 from xpst.utils.probe_errors import classify_probe_failure, probe_details_from_error
 
@@ -515,6 +516,40 @@ class InstagramUploader(PlatformUploader):
             if _normalize_caption(getattr(item, "caption_text", "")) == target:
                 return item
         return None
+
+    async def reconcile_publish(self, attempt: PublishAttempt) -> ReconcileResult:
+        """Read-only: is the attempted Reel on the account after all?
+
+        Used by the retry gate after an unknown outcome (timeout, connection
+        drop, post-publish error). Lists recent media through the same
+        read-only path as :meth:`_reconcile_published_media` — no publish or
+        delete call — and only reports FOUND on a caption match inside the
+        window.
+
+        A single feed listing cannot prove a Reel is missing, so a miss is
+        ``UNKNOWN`` (the gate then blocks the retry) rather than ``ABSENT``.
+        """
+        media = await self._reconcile_published_media(attempt.caption, within=_RECONCILE_WINDOW)
+        if media is None:
+            return ReconcileResult(
+                outcome=ReconcileOutcome.UNKNOWN,
+                detail=(
+                    "the account's recent reels do not show this caption; "
+                    "absence is not proven by a feed listing"
+                ),
+            )
+        media_id = getattr(media, "pk", None) or getattr(media, "id", None)
+        code = getattr(media, "code", None)
+        return ReconcileResult(
+            outcome=ReconcileOutcome.FOUND,
+            post_id=str(media_id) if media_id is not None else attempt.post_id,
+            post_url=(
+                f"https://www.instagram.com/reel/{code}/"
+                if code
+                else attempt.post_url
+            ),
+            detail="listed by the account inside the reconciliation window",
+        )
 
     async def _upload_instagrapi(self, video_path: Path, caption: str) -> UploadResult:
         """Upload via instagrapi (session-based, unofficial path).
