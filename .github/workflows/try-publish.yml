@@ -1,0 +1,31 @@
+name: Try PyPI publish with stored credential
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Fetch wheel from release
+        run: |
+          gh release download v1.2.0 --repo TysAIs/xPST --pattern "xpst-1.2.0-py3-none-any.whl" --dir dist
+          ls -la dist/
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Upload with stored credential (honest outcome either way)
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          pip install twine
+          python -m twine upload --non-interactive dist/xpst-1.2.0-py3-none-any.whl \
+            --repository-url https://upload.pypi.org/legacy/ \
+            --username __token__ --password "$PYPI_TOKEN" 2>&1 | tee upload.log
+          # exit code: 0 = published. Non-zero = refused; print the reason.
+          exit ${PIPESTATUS[0]}
