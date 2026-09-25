@@ -122,6 +122,12 @@ def cancel_scheduled_post(
     Semantics are identical to ``xpst schedule remove``: an unknown id is a
     failure (``POST_NOT_FOUND``), never a silent no-op success. The operation
     only touches the local schedule store — it never un-posts live content.
+
+    Cancellation also *aborts* a plan that is already in flight: the manager
+    raises an abort signal before removing the entry, so a due-post pass that
+    already claimed it skips the upload (or discards a result that arrives
+    after the cancel) instead of recording a completion for a job the user
+    cancelled.
     """
     manager = _schedule_manager(config_dir)
     entry = next((e for e in manager.list() if e.get("id") == entry_id), None)
@@ -132,7 +138,7 @@ def cancel_scheduled_post(
     if not plan.found:
         return plan.to_payload(dry_run=False, cancelled=False)
 
-    if not manager.remove(entry_id):
+    if not manager.cancel(entry_id):
         # Lost a race with another process between the read and the write:
         # report the truth (nothing was cancelled) instead of a success.
         logger.info("schedule cancel: %s vanished before removal", entry_id)
