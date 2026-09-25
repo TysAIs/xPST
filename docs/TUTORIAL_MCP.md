@@ -135,7 +135,9 @@ Manually post a video file to selected platforms.
 
 #### `xpst_delete`
 
-Remove a post record from local state (does not call a platform delete API).
+Delete a post for real on the platform(s) and remove its local record. Calls the
+platform delete API for each destination and reports a per-destination outcome
+(`deleted`, `soft_hidden`, `pending`, `unsupported`) plus `platform_deleted`.
 
 ```json
 {
@@ -419,7 +421,7 @@ The following tools are classified as **mutating** (can change state):
 
 - `xpst_run` — Posts videos
 - `xpst_post` — Posts videos
-- `xpst_delete` — Removes local post **records** only (the live post stays up; use the CLI `xpst delete` for platform deletion)
+- `xpst_delete` — Deletes the post on the platform(s) and removes the local record (per-destination outcome: deleted / soft_hidden / pending / unsupported)
 - `xpst_backfill` — Retries failed posts
 - `xpst_schedule_add` — Creates schedules
 - `kb_add` — Adds to knowledge base
