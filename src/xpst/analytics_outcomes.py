@@ -37,6 +37,7 @@ from xpst.analytics import (
     _coerce_metric,
     _freshness_metadata,
 )
+from xpst.state_schema import resolve_platform_post_id
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -72,7 +73,7 @@ def _outcome_status(info: Mapping[str, Any], error: Any) -> str:
     """
     if info.get("deleted"):
         return "deleted"
-    if not info.get("id") and error:
+    if not resolve_platform_post_id(info) and error:
         return "failed"
     if info.get("soft_hidden") or str(info.get("visibility") or "").lower() in {"private", "unlisted"}:
         return "hidden"
@@ -201,7 +202,7 @@ def build_outcome_report(
                 continue
             errors = video_data.get("errors") or {}
             error = errors.get(platform) if isinstance(errors, Mapping) else None
-            post_id = str(info.get("id") or info.get("post_id") or "").strip()
+            post_id = resolve_platform_post_id(info)
             status = _outcome_status(info, error)
             if not verified:
                 dropped_unverified += 1
