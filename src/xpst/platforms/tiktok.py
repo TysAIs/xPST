@@ -22,6 +22,7 @@ from pathlib import Path
 import httpx
 
 from xpst.config import XPSTConfig
+from xpst.content import TEXT_LIMITS
 from xpst.platforms.base import (
     DeleteOutcome,
     DeleteResult,
@@ -62,7 +63,9 @@ class TikTokUploader(PlatformUploader):
     """TikTok uploader using the official Content Posting API (Direct Post)."""
 
     # TikTok limits
-    MAX_CAPTION_LENGTH = 2200
+    #: The same number the preflight gate refuses on (``xpst.content``); the
+    #: uploader truncates at it, so it must not be a second, drifting literal.
+    MAX_CAPTION_LENGTH = TEXT_LIMITS["tiktok"]
     # Rate limit: 6 req/min per user (enforced server-side)
     RATE_LIMIT_PER_MIN = 6
 
