@@ -21,22 +21,32 @@ from pathlib import Path
 import pytest
 
 from scripts.e2e_install_from_artifact import (
+    DEFAULT_WORK_BASE,
     E2EError,
+    WorkDir,
+    architecture_match_score,
     artifact_type,
+    checksum_source_candidates,
     default_platform,
     derive_checksum_source,
     emit_summary,
     engine_processes,
     gatekeeper_report,
+    host_arch,
+    installer_candidates,
+    load_first_checksum_source,
     local_urls_from_log,
     main,
     parse_checksums,
     platform_key,
+    release_assets,
+    release_assets_from_html,
     safe_extract_zip,
     select_release_asset,
     sniff_artifact_kind,
     uninstall_artifact,
     verify_checksum,
+    walk_app_bundles,
 )
 
 SHA_A = "a" * 64
@@ -787,3 +797,196 @@ def test_ci_workflow_install_tests_a_published_artifact():
     assert "--require-published" in workflow
     assert "--evidence-out" in workflow
     assert "upload-artifact" in workflow
+
+
+# ---------------------------------------------------------------------------
+# Regression coverage for the v1.2.1 stranger-install run: the published Tauri
+# release uses `xPST_<version>_<arch>.<ext>` asset names and ships a single
+# aggregate SHA256SUMS, and a foreign engine may already be running.
+# ---------------------------------------------------------------------------
+
+V121_ASSETS = [
+    {"name": "CHANGELOG.md", "browser_download_url": "https://example.invalid/changelog"},
+    {"name": "SHA256SUMS", "browser_download_url": "https://example.invalid/sums"},
+    {"name": "latest.json", "browser_download_url": "https://example.invalid/latest"},
+    {"name": "xPST.app.tar.gz", "browser_download_url": "https://example.invalid/tar"},
+    {"name": "xPST.app.tar.gz.sig", "browser_download_url": "https://example.invalid/sig"},
+    {"name": "xPST_1.2.1_aarch64.dmg", "browser_download_url": "https://example.invalid/dmg"},
+    {"name": "xPST_1.2.1_amd64.AppImage", "browser_download_url": "https://example.invalid/appimage"},
+    {"name": "xPST_1.2.1_amd64.deb", "browser_download_url": "https://example.invalid/deb"},
+    {"name": "xPST_1.2.1_x64-setup.exe", "browser_download_url": "https://example.invalid/exe"},
+    {"name": "xPST_1.2.1_x64_en-US.msi", "browser_download_url": "https://example.invalid/msi"},
+    {"name": "xpst-1.2.1-py3-none-any.whl", "browser_download_url": "https://example.invalid/whl"},
+]
+
+
+def test_installer_candidates_ignore_sidecars_and_signatures():
+    names = [asset["name"] for asset in installer_candidates(V121_ASSETS, "macos")]
+
+    assert names == ["xPST_1.2.1_aarch64.dmg"]
+    assert all(not name.endswith(".sig") for name in names)
+    assert all(".tar" not in name for name in names)
+
+
+def test_select_release_asset_recognizes_the_tauri_installer_naming():
+    """v1.2.1 publishes no xPST.dmg; the harness must still find the installer."""
+
+    macos = select_release_asset(V121_ASSETS, "macos")["name"]
+    windows = select_release_asset(V121_ASSETS, "windows")["name"]
+    linux = select_release_asset(V121_ASSETS, "linux")["name"]
+
+    assert macos.startswith("xPST_1.2.1_") and macos.endswith(".dmg")
+    assert windows in {"xPST_1.2.1_x64-setup.exe", "xPST_1.2.1_x64_en-US.msi"}
+    assert linux in {"xPST_1.2.1_amd64.AppImage", "xPST_1.2.1_amd64.deb"}
+
+
+def test_select_release_asset_prefers_the_host_architecture():
+    assets = [
+        {"name": "xPST_1.2.1_x64_en-US.msi", "browser_download_url": "https://example.invalid/x"},
+        {"name": "xPST_1.2.1_arm64_en-US.msi", "browser_download_url": "https://example.invalid/a"},
+    ]
+
+    chosen = select_release_asset(assets, "windows")["name"]
+
+    assert architecture_match_score(chosen, host_arch()) > 0
+
+
+def test_checksum_source_candidates_prefer_platform_then_aggregate():
+    release_url = "https://github.com/TysAIs/xPST/releases/download/v1.2.1/xPST_1.2.1_aarch64.dmg"
+
+    candidates = checksum_source_candidates(release_url, "xPST_1.2.1_aarch64.dmg", "macos", "x", None)
+
+    assert candidates == [
+        "https://github.com/TysAIs/xPST/releases/download/v1.2.1/macos-SHA256SUMS",
+        "https://github.com/TysAIs/xPST/releases/download/v1.2.1/SHA256SUMS",
+    ]
+    local = checksum_source_candidates(
+        "/tmp/xPST_1.2.1_aarch64.dmg", "xPST_1.2.1_aarch64.dmg", "macos", "TysAIs/xPST", "v1.2.1"
+    )
+    assert local[-1].endswith("/SHA256SUMS")
+
+
+def test_load_first_checksum_source_falls_back_to_a_later_candidate(tmp_path):
+    present = tmp_path / "SHA256SUMS"
+    present.write_text(f"{SHA_A}  xPST_1.2.1_aarch64.dmg\n", encoding="utf-8")
+
+    text, provenance = load_first_checksum_source(
+        [str(tmp_path / "macos-SHA256SUMS"), str(present)],
+        tmp_path / "downloaded-SHA256SUMS",
+    )
+
+    assert SHA_A in text
+    assert provenance == str(present)
+
+
+def test_load_first_checksum_source_fails_closed_when_none_exist(tmp_path):
+    with pytest.raises(E2EError):
+        load_first_checksum_source(
+            [str(tmp_path / "a"), str(tmp_path / "b")], tmp_path / "out"
+        )
+
+
+def test_walk_app_bundles_does_not_follow_symlinks(tmp_path):
+    root = tmp_path / "image"
+    root.mkdir()
+    (root / "xPST.app").mkdir()
+    outside = tmp_path / "outside"
+    (outside / "Other.app").mkdir(parents=True)
+    (root / "Applications").symlink_to(outside, target_is_directory=True)
+
+    found = [path.name for path in walk_app_bundles(root)]
+
+    assert found == ["xPST.app"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group teardown semantics differ")
+def test_foreign_engine_already_running_is_not_blamed_as_a_leftover(tmp_path, capsys, monkeypatch):
+    """The developer's own running app must not fail the stranger-install run."""
+    artifact, checksums = build_fake_published_artifact(tmp_path)
+    evidence = tmp_path / "evidence.json"
+    foreign = {
+        "pid": "53252",
+        "command": "/Users/dev/xPST/dist/xPST.app/Contents/Resources/binaries/engine/xpst-engine --port 65498",
+    }
+    monkeypatch.setattr(
+        "scripts.e2e_install_from_artifact.engine_processes", lambda: [dict(foreign)]
+    )
+
+    code = main(
+        [
+            str(artifact),
+            "--checksums",
+            str(checksums),
+            "--no-require-visible-window",
+            "--evidence-out",
+            str(evidence),
+        ]
+    )
+    capsys.readouterr()
+    summary = json.loads(evidence.read_text(encoding="utf-8"))
+
+    assert code == 0, summary["failures"]
+    assert summary["checks"]["zero_xpst_engine_processes"] is True
+    assert summary["evidence"]["engine_processes_after_shutdown"] == []
+    assert summary["evidence"]["preexisting_engine_processes"] == [foreign]
+    assert any("already running before this run" in finding for finding in summary["findings"])
+
+
+# ---------------------------------------------------------------------------
+# API-free release resolution: a stranger has no GITHUB_TOKEN and the
+# unauthenticated API limit is 60 requests/hour, which the harness must survive.
+# ---------------------------------------------------------------------------
+
+EXPANDED_ASSETS_HTML = """
+<div>
+  <a href="/TysAIs/xPST/releases/download/v1.2.1/SHA256SUMS">SHA256SUMS</a>
+  <a href="/TysAIs/xPST/releases/download/v1.2.1/xPST.app.tar.gz">xPST.app.tar.gz</a>
+  <a href="/TysAIs/xPST/releases/download/v1.2.1/xPST_1.2.1_aarch64.dmg">xPST_1.2.1_aarch64.dmg</a>
+</div>
+"""
+
+
+def test_release_assets_from_html_parses_the_public_asset_page(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.e2e_install_from_artifact.http_get_text", lambda url, **kwargs: EXPANDED_ASSETS_HTML
+    )
+
+    assets = release_assets_from_html("TysAIs/xPST", "v1.2.1")
+
+    assert [asset["name"] for asset in assets] == [
+        "SHA256SUMS",
+        "xPST.app.tar.gz",
+        "xPST_1.2.1_aarch64.dmg",
+    ]
+    assert assets[-1]["browser_download_url"] == (
+        "https://github.com/TysAIs/xPST/releases/download/v1.2.1/xPST_1.2.1_aarch64.dmg"
+    )
+
+
+def test_release_assets_falls_back_to_html_when_the_api_is_rate_limited(monkeypatch):
+    def rate_limited(url):
+        raise E2EError(f"GitHub API returned HTTP 403 for {url}: API rate limit exceeded")
+
+    monkeypatch.setattr("scripts.e2e_install_from_artifact.github_api_json", rate_limited)
+    monkeypatch.setattr(
+        "scripts.e2e_install_from_artifact.http_get_text", lambda url, **kwargs: EXPANDED_ASSETS_HTML
+    )
+
+    assets = release_assets("TysAIs/xPST", "v1.2.1")
+
+    assert select_release_asset(assets, "macos")["name"] == "xPST_1.2.1_aarch64.dmg"
+
+
+def test_default_work_dir_is_canonical_and_removable():
+    """The app must be launched via a canonical path (no symlinked component)."""
+
+    work = WorkDir(None)
+    try:
+        assert work.path.exists()
+        assert work.path == work.path.resolve()
+        if sys.platform == "darwin":
+            assert DEFAULT_WORK_BASE == "/private/tmp"
+            assert str(work.path).startswith("/private/tmp/")
+    finally:
+        assert work.cleanup(False) is True
+    assert not work.path.exists()
