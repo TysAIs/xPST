@@ -35,7 +35,7 @@ def test_release_surfaces_are_all_110() -> None:
         "ui": _json("ui/package.json")["version"],
         "ui-lock": _json("ui/package-lock.json")["packages"][""]["version"],
     }
-    assert versions == {name: "1.1.0" for name in versions}
+    assert versions == {name: "1.2.0" for name in versions}
 
 
 def test_release_version_verification_path_passes() -> None:
@@ -47,7 +47,7 @@ def test_release_version_verification_path_passes() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "1.1.0" in result.stdout
+    assert "1.2.0" in result.stdout
     assert "python-runtime" in result.stdout
 
 
@@ -268,10 +268,10 @@ def test_release_asset_assertion_runs_and_gates(tmp_path: Path) -> None:
         )
 
     complete = {
-        "mac/dmg/xPST_1.1.0_aarch64.dmg": "dmg",
+        "mac/dmg/xPST_1.2.0_aarch64.dmg": "dmg",
         "mac/dmg/media-binaries-PROVENANCE-aarch64-apple-darwin.txt": "prov",
-        "win/nsis/xPST_1.1.0_x64-setup.exe": "exe",
-        "linux/appimage/xPST_1.1.0_amd64.AppImage": "appimage",
+        "win/nsis/xPST_1.2.0_x64-setup.exe": "exe",
+        "linux/appimage/xPST_1.2.0_amd64.AppImage": "appimage",
     }
     proc = run(complete)
     assert proc.returncode == 0, proc.stderr
@@ -293,7 +293,7 @@ def test_release_asset_assertion_requires_the_provenance_record(tmp_path: Path) 
     jobs = _workflow_jobs()
     step = [s for s in jobs["publish-release"]["steps"] if s.get("id") == "assets"][0]["run"]
     (tmp_path / "release-artifacts").mkdir()
-    for name in ("xPST_1.1.0_aarch64.dmg", "xPST_1.1.0_x64-setup.exe", "xPST_1.1.0_amd64.AppImage"):
+    for name in ("xPST_1.2.0_aarch64.dmg", "xPST_1.2.0_x64-setup.exe", "xPST_1.2.0_amd64.AppImage"):
         (tmp_path / "release-artifacts" / name).write_text("x", encoding="utf-8")
     script = tmp_path / "step.sh"
     script.write_text(step, encoding="utf-8")

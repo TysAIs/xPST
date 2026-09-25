@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-09-25
+
+### Added
+- **In-app post deletion**: the Library page can delete or unpublish any verified
+  post through the engine's delete contract (`POST /api/posts/{id}/delete`);
+  per-platform outcomes are explicit and a refused deletion is never reported
+  as removed. YouTube supports reversible soft-unpublish.
+- **Appearance control**: light / dark / auto theme in Settings, remembered
+  across launches and applied before first paint (no flash).
+- **Grouped navigation**: the sidebar is organised Post / Plan / Review / System
+  so the daily loop reads first.
+- **Working actions on formerly read-only pages**: cancel a schedule entry
+  (Schedule), retry a recorded failure through one-shot recovery (Activity),
+  return to Compose from any tracked post (Videos).
+- Durable compose drafts, per-destination copy overrides, and in-app platform
+  sign-in flows.
+- Remote media door: post media by URL without pre-downloading.
+
+### Changed
+- **One desktop app.** The legacy PySide6/QML shell and its build lanes are
+  removed; the Tauri shell + Python engine is the only desktop product
+  (~108 MB bundle, ffmpeg no longer bundled).
+- One `content_type` contract across CLI, MCP and HTTP; truthful exit codes
+  for `run`, `backfill` and `run --due`; honest source-only posting badges.
+
+### Fixed
+- App icon now renders the real brand artwork in the dock (regenerated from
+  `assets/icon.png`; was solid-green placeholders in every earlier Tauri build).
+- About page reports the true running version; engine-starting state no longer
+  flashes a raw error card on first paint; health probe caching boundary fixed;
+  encode cache codec fix.
+
+### Removed
+- The legacy PySide6/QML desktop app (see [Unreleased] notes in previous
+  versions for the full removal list).
+
 ### Removed
 - **The legacy PySide6/QML desktop app is gone; there is exactly one desktop
   app.** `src/xpst/desktop_app/` (23 files), its `build_macos.spec` /
