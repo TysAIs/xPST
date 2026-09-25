@@ -1,5 +1,15 @@
 # xPST v1.0.0 — Final Gap Analysis
 
+> **Dated point-in-time audit (kept for the record).** The surface counts and file
+> paths quoted below describe the v1.0.0 tree, not current `main`: the registry now
+> serves **40** MCP tools and the Click group exposes **46** top-level / **69** leaf
+> CLI commands (see the generated block in [README.md](README.md) and
+> `python scripts/generate_counts.py --json`). The PySide6/QML desktop lane
+> (`src/xpst/desktop_app/`, `*.qml`, `backend.py`) referenced below has been
+> **retired** — the desktop surface is the Tauri shell over the local dashboard.
+> Read the counts here as history; the capability truth table in
+> [docs/INSTALL.md](docs/INSTALL.md#capability-truth-table) is authoritative today.
+
 **Scope:** Full-codebase, read-only audit across 5 platforms (YouTube, Instagram, X/Twitter, TikTok, Threads) and 28 MCP tools.
 **Verdict:** No CRITICAL data-loss or crash bugs. The headline claims (5 platforms, 28 MCP tools, 38 CLI commands, 1555 tests) are literally true. **The dominant theme is a "two-tier platform" reality: the 4 original platforms (YouTube, Instagram, X, TikTok) are wired everywhere, while the newest (Threads) — and sometimes TikTok — are dropped by hardcoded platform tuples scattered across the CLI, desktop backend, QML, and stats.** A canonical `PLATFORMS` constant already exists (`src/xpst/desktop_app/backend.py:168`) but is widely ignored.
 

@@ -7,7 +7,14 @@ regenerating the docs fails here.
 
 from __future__ import annotations
 
-from scripts.generate_mcp_docs import DOC_PATH, render_block
+from scripts.generate_mcp_docs import (
+    DOC_PATH,
+    DOCS_README_PATH,
+    README_PATH,
+    render_block,
+    render_docs_readme_block,
+    render_readme_block,
+)
 
 
 def test_mcp_tool_index_is_not_stale() -> None:
@@ -18,6 +25,50 @@ def test_mcp_tool_index_is_not_stale() -> None:
         "docs/MCP_TOOLS.md tool index is stale; run "
         "`python scripts/generate_mcp_docs.py --write`"
     )
+
+
+def test_readme_tool_index_is_not_stale() -> None:
+    text = README_PATH.read_text(encoding="utf-8")
+
+    assert "<!-- BEGIN GENERATED README TOOL INDEX -->" in text, (
+        "README generated block markers are missing"
+    )
+    assert render_readme_block() in text, (
+        "README tool index is stale; run `python scripts/generate_mcp_docs.py --write`"
+    )
+
+
+def test_readme_tool_index_lists_every_served_tool() -> None:
+    from xpst.mcp import server as mcp_server
+
+    block = render_readme_block()
+
+    for tool in mcp_server.TOOLS:
+        assert f"`{tool.name}`" in block, f"{tool.name} missing from the README index"
+    assert f"### {len(mcp_server.TOOLS)} Tools" in block, (
+        "the README index heading must equal the live registry size"
+    )
+
+
+def test_docs_readme_tool_index_is_not_stale() -> None:
+    text = DOCS_README_PATH.read_text(encoding="utf-8")
+
+    assert "<!-- BEGIN GENERATED DOCS README TOOL INDEX -->" in text, (
+        "docs/README.md generated block markers are missing"
+    )
+    assert render_docs_readme_block() in text, (
+        "docs/README.md tool index is stale; run "
+        "`python scripts/generate_mcp_docs.py --write`"
+    )
+
+
+def test_docs_readme_tool_index_lists_every_served_tool() -> None:
+    from xpst.mcp import server as mcp_server
+
+    block = render_docs_readme_block()
+
+    for tool in mcp_server.TOOLS:
+        assert f"`{tool.name}`" in block, f"{tool.name} missing from the docs/README.md index"
 
 
 def test_generated_index_lists_every_served_tool() -> None:

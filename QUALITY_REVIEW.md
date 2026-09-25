@@ -1,5 +1,13 @@
 # xPST — Final QA Quality Review
 
+> **Dated point-in-time review (kept for the record).** The findings below were
+> read against the v1.0.0 tree. The PySide6/QML desktop lane they reference
+> (`desktop_app/`, `*.qml`, `backend.py`) has since been **retired** — the desktop
+> surface is the Tauri shell over the local dashboard — and the suite is no longer
+> 1555 tests. Treat the `desktop_app/*` locations as historical; current
+> architecture and counts live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
+> the generated block in [README.md](README.md).
+
 **Scope:** Read-only quality pass focused on edge cases, race conditions, resource
 leaks, and failure modes that the 1555-test suite does not exercise. No code was
 modified.
