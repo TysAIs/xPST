@@ -324,19 +324,94 @@ def test_a_long_shared_caption_is_not_refused_when_the_destination_has_a_short_o
     assert result.platforms["threads"].effective_caption == "fits"
 
 
-def test_caption_limits_match_the_uploaders_own_declaration() -> None:
-    """One vocabulary: the preflight limit IS the uploader's declared limit."""
+@pytest.mark.parametrize("platform", ["x", "instagram", "tiktok", "threads"])
+def test_an_override_over_any_destination_limit_is_refused_with_that_destination_named(
+    tmp_path: Path, platform: str
+) -> None:
+    """Every silent-truncation destination refuses instead, by name.
+
+    The numbers come from the enforced table (``xpst.content.text_limit``) — not
+    from literals restated here — so this test cannot disagree with the gate.
+    """
+    from xpst.content import text_limit
+
+    limit = text_limit(platform)
+    assert limit is not None, platform
+
+    result = _plan(
+        tmp_path,
+        base_caption="shared caption",
+        overrides={platform: "t" * (limit + 1)},
+        platforms=("youtube", platform),
+    )
+
+    issues = [
+        issue
+        for issue in result.platforms[platform].hard_blockers
+        if issue.code == "CAPTION_TOO_LONG"
+    ]
+    assert len(issues) == 1, result.platforms[platform].hard_blockers
+    assert platform in issues[0].message
+    assert str(limit + 1) in issues[0].message
+    assert str(limit) in issues[0].message
+    assert result.ready is False
+
+    # A destination that kept the shared caption carries no such blocker.
+    assert [
+        issue
+        for issue in result.platforms["youtube"].hard_blockers
+        if issue.code == "CAPTION_TOO_LONG"
+    ] == []
+    assert result.platforms["youtube"].effective_caption == "shared caption"
+
+
+def test_every_enforced_caption_limit_is_the_uploaders_own_declaration() -> None:
+    """The number the preflight refuses on IS the number the sender enforces.
+
+    ``xpst.content.text_limit`` is what ``_plan_platform`` reads; each sender
+    must declare the same number rather than carrying its own.
+    """
     from xpst.config import XPSTConfig
+    from xpst.content import text_limit
     from xpst.platforms.instagram import InstagramUploader
     from xpst.platforms.threads import ThreadsUploader
     from xpst.platforms.tiktok import TikTokUploader
     from xpst.platforms.x import XUploader
-    from xpst.services.post_preflight import _CAPTION_LIMITS
 
-    assert _CAPTION_LIMITS["instagram"] == InstagramUploader.MAX_CAPTION_LENGTH
-    assert _CAPTION_LIMITS["tiktok"] == TikTokUploader.MAX_CAPTION_LENGTH
-    assert _CAPTION_LIMITS["threads"] == ThreadsUploader.MAX_CAPTION_LENGTH
-    assert _CAPTION_LIMITS["x"] == XUploader(XPSTConfig()).manifest.extra["max_caption_length"]
+    assert text_limit("x") == XUploader.MAX_TEXT_LENGTH
+    assert text_limit("threads") == ThreadsUploader.MAX_CAPTION_LENGTH
+    assert text_limit("instagram") == InstagramUploader.MAX_CAPTION_LENGTH
+    assert text_limit("tiktok") == TikTokUploader.MAX_CAPTION_LENGTH
+    assert XUploader(XPSTConfig()).manifest.extra["max_caption_length"] == text_limit("x")
+
+
+def test_the_senders_import_the_one_caption_limit_table() -> None:
+    """No sender restates a caption limit; they all read ``content.TEXT_LIMITS``.
+
+    Instagram and TikTok used to declare ``MAX_CAPTION_LENGTH = 2200`` locally
+    while the preflight gate read ``content.text_limit``. The two agreed by
+    luck: nothing failed if one moved. Reading the same table means a sender
+    cannot truncate at a number the preflight does not enforce.
+    """
+    from xpst.content import TEXT_LIMITS
+    from xpst.platforms import instagram, tiktok
+
+    assert instagram.TEXT_LIMITS is TEXT_LIMITS
+    assert tiktok.TEXT_LIMITS is TEXT_LIMITS
+    assert TEXT_LIMITS["instagram"] == instagram.InstagramUploader.MAX_CAPTION_LENGTH
+    assert TEXT_LIMITS["tiktok"] == tiktok.TikTokUploader.MAX_CAPTION_LENGTH
+
+
+def test_the_post_path_carries_no_orphan_caption_limit_table() -> None:
+    """The enforced limit has exactly one home in the post path.
+
+    ``post_preflight`` used to carry its own ``_CAPTION_LIMITS`` table that the
+    gate never read (``_plan_platform`` calls ``content.text_limit``), so the
+    test pinning it pinned a number nothing enforced.
+    """
+    import xpst.services.post_preflight as post_preflight
+
+    assert not hasattr(post_preflight, "_CAPTION_LIMITS")
 
 
 # ── PostService: the HTTP/UI/MCP dry-run surface ────────────────────────────
