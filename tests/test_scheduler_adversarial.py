@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -121,14 +121,22 @@ class TestDSTBoundary:
 
     def test_monthly_recurrence_across_dst_month(self, manager):
         """Monthly recurrence over a DST boundary month must keep the same
-        wall-clock time (no 1-hour drift)."""
+        wall-clock time (no 1-hour drift).
+
+        Recurrence is stored as a UTC instant; the wall clock the user picked
+        is read back through ``local_time`` (the same rendering the UI shows).
+        """
         m = manager
         entry = m.add("/tmp/v.mp4", "c", datetime(2026, 10, 15, 9, 0), repeat_rule="monthly")
         m.mark_complete(entry["id"], success=True)
         entries = [e for e in m.list() if e["status"] == "pending"]
         assert len(entries) == 1
-        nxt = datetime.fromisoformat(entries[0]["scheduled_time"])
+        nxt = m.local_time(entries[0])
         assert (nxt.month, nxt.day, nxt.hour, nxt.minute) == (11, 15, 9, 0)
+        # Stored as an explicit UTC instant, not a naive wall clock.
+        stored = datetime.fromisoformat(entries[0]["scheduled_time"])
+        assert stored.tzinfo is not None
+        assert stored.astimezone(timezone.utc) == nxt.astimezone(timezone.utc)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -463,7 +471,7 @@ class TestInputFuzz:
         )
         manager.mark_complete(entry["id"], success=True)
         pending = [e for e in manager.list() if e["status"] == "pending"]
-        nxt = datetime.fromisoformat(pending[0]["scheduled_time"])
+        nxt = manager.local_time(pending[0])
         assert (nxt.month, nxt.day) == (2, 28)
 
 
