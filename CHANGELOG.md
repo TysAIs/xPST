@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-09-25
+
+### Fixed
+- **Auto-updater actually works now.** The release updater signing key had no
+  private half in any repo secret or on the signing machine, so every earlier
+  release shipped unsigned updater artifacts and the update channel stayed
+  404. Rotated to a fresh keypair whose private half is stored as a repo
+  secret (#249); the next tagged build signs `latest.json` and the updater
+  manifests, so installed apps can self-update from this release forward.
+  (The old key never signed anything, so no trust anchor is lost.)
+- One-off CI experiment workflow removed from the default branch.
+
 ## [1.2.0] — 2026-09-25
 
 ### Added
