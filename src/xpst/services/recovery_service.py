@@ -5,8 +5,9 @@ different things per surface:
 
 * cancelling a scheduled post (CLI ``schedule remove`` had no MCP equivalent),
 * retrying one recorded failure (CLI ``failures retry`` had no MCP equivalent),
-* deleting a post (CLI ``delete`` deletes on the platform; MCP ``xpst_delete``
-  only dropped the local record and still reported ``success: true``).
+* deleting a post (CLI ``delete`` and MCP ``xpst_delete`` both delete on the
+  platform via the engine's Phase-1.2 delete contract, then drop the local
+  record — the MCP tool used to drop only the record and still report success).
 
 An agent that believes it cancelled the right entry, retried the item it named,
 or deleted a live post is a fabricated-success machine. So the business logic
@@ -44,6 +45,10 @@ logger = get_logger(__name__)
 SCHEDULE_CANCEL_SCOPE = "local_schedule_store"
 FAILURE_RETRY_SCOPE = "platform_upload"
 DELETE_RECORD_SCOPE = "local_state_only"
+# xpst_delete performs a REAL platform takedown (engine.delete_post) AND removes
+# the local record, so its scope names both effects. DELETE_RECORD_SCOPE remains
+# for callers that still branch on the legacy local-only semantics.
+PLATFORM_DELETE_SCOPE = "platform_and_local_state"
 
 # Error codes shared by both surfaces (the CLI already ships these strings).
 SCHEDULE_ENTRY_NOT_FOUND = "POST_NOT_FOUND"
@@ -304,6 +309,7 @@ async def retry_failed_post(
 __all__ = [
     "DELETE_RECORD_SCOPE",
     "FAILURE_RETRY_SCOPE",
+    "PLATFORM_DELETE_SCOPE",
     "SCHEDULE_CANCEL_SCOPE",
     "FailureRetryPlan",
     "ScheduleCancelPlan",
