@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from xpst.state_schema import resolve_platform_post_id
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -361,10 +362,8 @@ class AnalyticsCollector:
             info = posted_to.get(platform) or {}
             if not isinstance(info, dict):
                 continue
-            # Production state stores the platform id under "id"; legacy
-            # fixtures used "post_id".
-            post_id = info.get("id") or info.get("post_id")
-            candidate = str(post_id).strip() if post_id is not None else ""
+            post_id = resolve_platform_post_id(info)
+            candidate = post_id
             if candidate:
                 ids.add(candidate)
         return True, ids
@@ -1371,8 +1370,9 @@ class AnalyticsCollector:
         for _video_id, data in state.get("posted_videos", {}).items():
             platforms = data.get("posted_to", {})
             for platform, info in platforms.items():
-                # Support both "id" (production state.json) and "post_id" (legacy/test fixtures)
-                post_id = info.get("id") or info.get("post_id")
+                # Canonical "id" (production state.json) with the legacy
+                # "post_id" spelling accepted on read (state_schema).
+                post_id = resolve_platform_post_id(info)
                 if post_id:
                     # Unknown platforms (e.g. "messenger" posts in real state)
                     # must never crash discovery — setdefault degrades to []
