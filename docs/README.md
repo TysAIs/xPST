@@ -434,7 +434,7 @@ xPST exposes 40 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 
 | Tool | Description |
 |------|-------------|
-| `xpst_run` | Check for new videos and cross-post them to configured platforms |
+| `xpst_run` | Check for new videos and cross-post them to configured platforms. A batch whe… |
 | `xpst_post` | Post to platforms: one local video/image file, a carousel (carousel_paths), o… |
 | `xpst_analytics` | Per-post and per-platform engagement metrics (views, likes, comments, shares)… |
 | `xpst_cross_post_analytics` | Cross-post correlation analytics (B1): one video posted to multiple platforms… |
@@ -452,7 +452,7 @@ xPST exposes 40 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 | `xpst_failures_retry` | Retry ONE recorded upload failure, identified by video_id + platform — the MC… |
 | `xpst_health` | Test connectivity to all platforms and sources (no uploads) |
 | `xpst_status` | Show cross-posting statistics and health status |
-| `xpst_backfill` | Retry failed or incomplete posts from history |
+| `xpst_backfill` | Retry failed or incomplete posts from history. `attempted` / `successful` are… |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) |
 | `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… |
