@@ -528,7 +528,7 @@ Generated from the live registry — full schemas, consent gates, and per-tool n
 
 | Tool | Purpose | Mutates real accounts |
 |------|---------|-----------------------|
-| `xpst_run` | Check for new videos and cross-post them to configured platforms | **Yes** |
+| `xpst_run` | Check for new videos and cross-post them to configured platforms. A batch whe… | **Yes** |
 | `xpst_post` | Post to platforms: one local video/image file, a carousel (carousel_paths), o… | **Yes** |
 | `xpst_analytics` | Per-post and per-platform engagement metrics (views, likes, comments, shares)… | No |
 | `xpst_cross_post_analytics` | Cross-post correlation analytics (B1): one video posted to multiple platforms… | No |
@@ -546,7 +546,7 @@ Generated from the live registry — full schemas, consent gates, and per-tool n
 | `xpst_failures_retry` | Retry ONE recorded upload failure, identified by video_id + platform — the MC… | **Yes** |
 | `xpst_health` | Test connectivity to all platforms and sources (no uploads) | No |
 | `xpst_status` | Show cross-posting statistics and health status | No |
-| `xpst_backfill` | Retry failed or incomplete posts from history | **Yes** |
+| `xpst_backfill` | Retry failed or incomplete posts from history. `attempted` / `successful` are… | **Yes** |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No |
 | `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No |
