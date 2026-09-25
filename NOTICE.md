@@ -59,11 +59,6 @@ These are installed only when explicitly requested (`pip install xpst[extra]`):
 | sqlite-vec | MIT | Vector storage |
 | lancedb | Apache-2.0 | Legacy vector backend |
 
-### `desktop` extra — Web-based desktop fallback
-
-| Package | License | Purpose |
-|---------|---------|---------|
-
 ### `dashboard` extra — Web dashboard
 
 | Package | License | Purpose |

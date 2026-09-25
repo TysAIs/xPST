@@ -109,12 +109,13 @@ Signing is optional and never changes *what* is built:
 
 ## Known gaps (honest list)
 
-- **Two lanes publish to the same tag.** `release.yml` (the legacy PySide6/QML
-  app, `dist/xPST.app`, `xPST.dmg`, `xPST.exe`) still triggers on `v*.*.*` and
-  uploads to the same GitHub release. That is why v1.1.0's published macOS
-  `.dmg` is the old app and not this one. Until the legacy lane is retired or
-  restricted, "the release asset" is ambiguous - check the asset name against
-  the lane above, and use
+- **This lane is the only desktop publisher.** The legacy PySide6/QML lane that
+  used to build `dist/xPST.app` / `xPST.dmg` / `xPST.exe` from `build_macos.spec`
+  and friends was deleted, so `release.yml` is now the Python lane only
+  (wheel + sdist + SBOM; no installers) and the desktop installers below are the
+  only ones a `v*.*.*` tag publishes. This is why v1.1.0's published macOS
+  `.dmg` is a *retired* app: it predates the retirement, not a second live lane.
+  Check the asset name against the lane above, and use
   `scripts/e2e_install_from_artifact.sh --release <tag> --require-published`
   (which resolves a specific asset) rather than assuming.
 - **No signing/notarization secrets are configured**, so released installers are
