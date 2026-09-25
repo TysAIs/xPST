@@ -40,13 +40,14 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 _SUPPORTED_PLATFORMS = tuple(PLATFORM_SPECS)
-# Caption limits a destination enforces for real. A caption over the limit used
-# to be truncated silently inside the uploader (X at 280, Instagram/TikTok at
-# 2200); it is now a named preflight blocker, so the user is told which
-# destination cannot take the copy instead of discovering it on the platform.
-# ``tests/test_per_destination_overrides.py`` pins every number here against the
-# uploader's own declaration so the two cannot drift.
-_CAPTION_LIMITS = {"x": 280, "instagram": 2200, "tiktok": 2200, "threads": 500}
+# Caption limits come from ``xpst.content.text_limit`` — the same table the
+# senders read — so a caption over a destination's real limit (X at 280,
+# Instagram/TikTok at 2200, Threads at 500) is a named preflight blocker instead
+# of being truncated silently inside the uploader.  ``_plan_platform`` reads it
+# directly; there is deliberately no second table here, because a copy the gate
+# never reads would let a test pin a number nothing enforces
+# (``tests/test_per_destination_overrides.py`` pins the enforced table against
+# each uploader's own declaration).
 
 # ── Canonical zero-destination guard ───────────────────────────────────────
 # A post with no destination uploads nothing, yet every surface used to report
