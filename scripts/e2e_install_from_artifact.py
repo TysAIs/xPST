@@ -34,13 +34,14 @@ class E2EError(RuntimeError):
     """A user-facing harness failure with a concise message."""
 
 
-#: macOS puts TMPDIR under ``/var/folders/<id>/T``, a sandbox-managed per-user
-#: temp directory, and ``/tmp`` is a symlink to ``/private/tmp``. The published
-#: Tauri shell cannot resolve its bundle resource directory when the ``.app`` is
-#: launched from either (it logs ``FATAL: no resource dir`` and never starts the
-#: engine), so the clean-profile install defaults to the canonical ``/private/tmp``
-#: — a real, user-visible location a stranger could install into. ``--work-dir``
-#: still overrides it.
+#: macOS puts TMPDIR under ``/var/folders/<id>/T`` and symlinks ``/tmp`` ->
+#: ``/private/tmp`` and ``/var`` -> ``/private/var``. The published Tauri shell
+#: cannot resolve its bundle resource directory when the ``.app`` is launched
+#: through either of those symlinked components in their un-resolved form (it
+#: logs ``FATAL: no resource dir`` and never starts the engine), so the
+#: clean-profile install defaults to the canonical ``/private/tmp`` — a real,
+#: user-visible location a stranger could install into. ``--work-dir`` still
+#: overrides it.
 DEFAULT_WORK_BASE = (
     str(Path("/tmp").resolve()) if sys.platform == "darwin" else None  # nosec B108 - deliberate canonical location
 )
@@ -970,11 +971,10 @@ def first_run_findings(
     if "no resource dir" in log_text:
         findings.append(
             "The published shell logged 'FATAL: no resource dir' and never started the engine. "
-            "This is observed when the .app is launched via a non-canonical path: through a "
-            "symlinked directory component (e.g. /tmp -> /private/tmp) or from the macOS per-user "
-            "temp dir (/var/folders/<id>/T). The bundle depends on Tauri's resource_dir() "
-            "resolving there, and it returns UnknownPath. Install and launch the app from a "
-            "canonical location such as /private/tmp, ~/Applications or /Applications."
+            "This is observed when the .app is launched through a symlinked path component in its "
+            "un-resolved form (/tmp -> /private/tmp, /var -> /private/var): the bundle depends on "
+            "Tauri's resource_dir() resolving there, and it returns UnknownPath. Launch the app "
+            "from a canonical path (resolve the install location first)."
         )
     error_markers = [
         line.strip()
