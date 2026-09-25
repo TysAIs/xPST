@@ -25,7 +25,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": [
+      "app"
+    ],
     "category": "DeveloperTool",
     "shortDescription": "Cross-posting suite for short-form video",
     "resources": {
@@ -47,11 +49,13 @@
       "endpoints": [
         "https://tysais.github.io/xPST/updates/latest.json"
       ],
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDEzRjI5MEIxMzE2NjI2RTIKUldUaUptWXhzWkR5RXdZdUVuaU9MdjFEM1NSREt5eVVBSEVQRXUzb3gwd2t4MkRZczRXdUFyZ3QK"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIxMUNCOTMwQTVGQTJGNzQKUldSMEwvcWxNTGtjSWZibHBLc3hHOWlUZGJ4VmxnZXRsbXo1QkorL1JvT2R6dm5CM0RFcXVLNGwK"
     },
     "deep-link": {
       "desktop": {
-        "schemes": ["xpst"]
+        "schemes": [
+          "xpst"
+        ]
       }
     }
   }
