@@ -46,6 +46,7 @@ from xpst.content import (
     media_transport_blocker,
 )
 from xpst.engine import CrossPostEngine, CrossPostResult
+from xpst.services import batch_outcome as _batch_outcome
 from xpst.services.post_service import refusal_envelope
 from xpst.setup_transaction import SetupTransactionService
 from xpst.state import StateManager
@@ -59,14 +60,24 @@ logger = get_logger(__name__)
 
 
 # ── Meaningful exit codes ───────────────────────
+# Defined once, in ``xpst.services.batch_outcome``, so the CLI, MCP and any
+# other surface name the same failure the same way; re-exported here because
+# scripts and tests import them from ``xpst.cli``.
 # Note: Click itself uses exit code 2 for usage errors (bad command/options),
-# so we align CONFIG_ERROR with 2 and use 3/4 for auth/rate-limit.
-EXIT_SUCCESS = 0
-EXIT_GENERAL = 1
-EXIT_CONFIG_ERROR = 2
-EXIT_AUTH_FAILURE = 3
-EXIT_RATE_LIMIT = 4
-EXIT_PLATFORM_UNAVAILABLE = 10
+# so CONFIG_ERROR is aligned with 2 and 3/4 carry auth/rate-limit.
+EXIT_SUCCESS = _batch_outcome.EXIT_SUCCESS
+EXIT_GENERAL = _batch_outcome.EXIT_GENERAL
+EXIT_CONFIG_ERROR = _batch_outcome.EXIT_CONFIG_ERROR
+EXIT_AUTH_FAILURE = _batch_outcome.EXIT_AUTH_FAILURE
+EXIT_RATE_LIMIT = _batch_outcome.EXIT_RATE_LIMIT
+EXIT_PLATFORM_UNAVAILABLE = _batch_outcome.EXIT_PLATFORM_UNAVAILABLE
+
+# The one post/batch post rule (see ``xpst.services.batch_outcome``), under the
+# names the rest of this module and its tests use.
+_post_exit_code = _batch_outcome.post_exit_code
+_post_failure_exit_code = _batch_outcome.post_failure_exit_code
+_post_failure_message = _batch_outcome.post_failure_message
+_aggregate_post_exit_code = _batch_outcome.aggregate_batch_exit_code
 
 
 def _session_health(config) -> dict[str, dict]:
@@ -732,153 +743,11 @@ def watch(ctx: click.Context, interval: int | None, source: str, bidirectional: 
 # ``xpst post`` reports the outcome twice: the JSON payload is the detailed
 # report, the exit status is the verdict. Shell scripts and agents branch on
 # the verdict (`xpst post … && echo ok`), so a post where nothing was published
-# must not exit 0. One rule, documented in docs/TUTORIAL_CLI.md:
-#
-#   0   at least one attempted destination published — a partial success is a
-#       success — or every destination was already posted (idempotent no-op)
-#   4   every attempted destination failed for quota / rate-limit reasons
-#   3   every attempted destination failed to authenticate
-#   10  no destination was attempted at all, or every attempted destination is
-#       unavailable or refused the media (e.g. THREADS_NEEDS_URL)
-#   1   every attempted destination failed for any other reason, including a
-#       mix of reasons
-#
-# The families below match the provider error codes the uploaders emit as
-# "CODE: message" plus their plain-language variants. Order matters: quota is
-# checked before auth, because "quota exceeded" never means re-authenticate.
-_POST_RATE_MARKERS = (
-    "QUOTA_EXHAUSTED",
-    "RATE_LIMITED",
-    "RATE_LIMIT",
-    "TOO MANY REQUESTS",
-    "429",
-)
-_POST_AUTH_MARKERS = (
-    "AUTH_EXPIRED",
-    "AUTH_FAILURE",
-    "AUTHENTICATION",
-    "SESSION_EXPIRED",
-    "INVALID_GRANT",
-    "NOT_CONFIGURED",
-    "UNAUTHORIZED",
-    "TOKEN EXPIRED",
-    "LOGIN REQUIRED",
-    "CREDENTIALS",
-    "401",
-)
-_POST_UNAVAILABLE_MARKERS = (
-    "NEEDS_URL",
-    "UNSUPPORTED",
-    "NOT SUPPORTED",
-    "UNAVAILABLE",
-    "NOT AVAILABLE",
-    "DISABLED",
-)
-
-_POST_EXIT_CODE_LABELS = {
-    EXIT_GENERAL: "post failed",
-    EXIT_AUTH_FAILURE: "authentication failed",
-    EXIT_RATE_LIMIT: "quota or rate limit reached",
-    EXIT_PLATFORM_UNAVAILABLE: "destination unavailable",
-}
-
-
-def _post_failure_exit_code(error: str | None) -> int:
-    """Map one destination's failure text to the exit-code family it belongs to."""
-
-    text = (error or "").upper()
-    for markers, code in (
-        (_POST_RATE_MARKERS, EXIT_RATE_LIMIT),
-        (_POST_AUTH_MARKERS, EXIT_AUTH_FAILURE),
-        (_POST_UNAVAILABLE_MARKERS, EXIT_PLATFORM_UNAVAILABLE),
-    ):
-        if any(marker in text for marker in markers):
-            return code
-    return EXIT_GENERAL
-
-
-def _post_failure_message(exit_code: int) -> str:
-    """One-line human summary of why a post published nothing."""
-
-    return (
-        f"nothing was published — {_POST_EXIT_CODE_LABELS.get(exit_code, 'post failed')} "
-        f"(exit code {exit_code})."
-    )
-
-
-def _post_exit_code(result: CrossPostResult, requested: list[str] | None) -> int:
-    """Exit code for one ``xpst post`` run — the single rule above.
-
-    Args:
-        result: the CrossPostResult the engine returned.
-        requested: the platform names the caller asked for, or None for
-            "all enabled platforms" (the engine then decides).
-
-    Returns:
-        The exit code the CLI should terminate with.
-    """
-
-    rows = result.results
-    if not rows:
-        # Nothing was attempted (no destination was available/enabled), so
-        # nothing was posted: a failure, not a silent success.
-        return EXIT_PLATFORM_UNAVAILABLE
-
-    attempted = [p for p, ur in rows.items() if "already_posted" not in (ur.metadata or {})]
-    if not attempted:
-        # Every destination was already posted — nothing to do, nothing failed.
-        return EXIT_SUCCESS
-    if any(rows[p].success for p in attempted):
-        # A partial success is a success; the per-platform detail is in the report.
-        return EXIT_SUCCESS
-
-    codes = {_post_failure_exit_code(rows[p].error) for p in attempted}
-
-    # A requested destination with no result row was never attempted at all
-    # (its uploader is not available) — that failed the caller too.
-    requested_norm = {name.strip().lower() for name in (requested or []) if name.strip()}
-    if requested_norm - {name.strip().lower() for name in rows}:
-        codes.add(EXIT_PLATFORM_UNAVAILABLE)
-
-    return codes.pop() if len(codes) == 1 else EXIT_GENERAL
-
-
-def _aggregate_post_exit_code(results: list[CrossPostResult]) -> int:
-    """Exit code for a command that posts several results in one run.
-
-    ``run`` and ``backfill`` post a *batch*: one invocation can process several
-    videos across several destinations. The rule is the one ``xpst post``
-    already uses (``_post_exit_code``), applied per result and then aggregated
-    (documented in ``docs/TUTORIAL_CLI.md`` → "Exit Codes Reference"):
-
-    * no results at all → ``0``: nothing was attempted because there was
-      nothing to do ("no new videos") — that is not a failure;
-    * any result that published something (or found it already posted) → ``0``;
-    * otherwise the shared failure family of the failed results: ``4`` quota /
-      rate limit, ``3`` authentication, ``10`` no destination attempted or
-      every destination unavailable / refusing the media, ``1`` for anything
-      else, including a mix of reasons.
-
-    Args:
-        results: the ``CrossPostResult`` list the engine returned, in order.
-
-    Returns:
-        The exit code the CLI should terminate with.
-    """
-
-    if not results:
-        # Nothing to do is not a failure: the caller reports "no new videos".
-        return EXIT_SUCCESS
-
-    codes: set[int] = set()
-    for result in results:
-        code = _post_exit_code(result, None)
-        if code == EXIT_SUCCESS:
-            # A partial success — or an idempotent "already posted" — is a success.
-            return EXIT_SUCCESS
-        codes.add(code)
-
-    return codes.pop() if len(codes) == 1 else EXIT_GENERAL
+# must not exit 0. The rule itself lives in ``xpst.services.batch_outcome``
+# (imported above as ``_post_exit_code`` / ``_aggregate_post_exit_code`` /
+# ``_post_failure_exit_code`` / ``_post_failure_message``) so that MCP and every
+# other surface report the same family for the same outcome instead of keeping
+# a second copy of it. Documented in ``docs/TUTORIAL_CLI.md``.
 
 
 def _parse_caption_for(values: tuple[str, ...]) -> dict[str, str]:
