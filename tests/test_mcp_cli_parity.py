@@ -491,23 +491,26 @@ def test_both_surfaces_call_the_same_service_functions(tmp_path, monkeypatch, sc
     assert seen == ["cancel", "cancel", "retry"]
 
 
-# ── xpst_delete scope honesty ────────────────────────────────────────────────
+# ── xpst_delete platform-takedown parity ─────────────────────────────────────
 
 
-def test_delete_tool_description_states_its_scope():
-    """tools/list must advertise xpst_delete as a local-record operation."""
+def test_delete_tool_description_states_its_scope() -> None:
+    """tools/list must advertise xpst_delete as a REAL platform deletion."""
     tools = __import__("asyncio").run(mcp_server.list_tools()).tools
     delete = next(tool for tool in tools if tool.name == "xpst_delete")
     description = delete.description or ""
 
-    assert "RECORD" in description
-    assert "local xPST state" in description
-    assert "does NOT delete" in description
-    assert "platform_deleted=false" in description
-    assert "`xpst delete" in description  # points at the surface that does delete
-    # The schema must not promise a platform deletion it cannot perform.
-    assert "record" in delete.inputSchema["properties"]["video_id"]["description"]
-    assert "record" in delete.inputSchema["properties"]["platform"]["description"]
+    assert "REAL" in description
+    assert "platform delete API" in description
+    # Every Phase-1.2 outcome is named so an agent cannot mistake the verdict.
+    for outcome in ("deleted", "soft_hidden", "pending", "unsupported"):
+        assert outcome in description
+    # Honesty: per-destination platform_deleted, and its aggregate is qualified.
+    assert "platform_deleted per destination" in description
+    assert "aggregate" in description
+    # The schema now promises a platform deletion, and says so.
+    assert "platform" in delete.inputSchema["properties"]["video_id"]["description"]
+    assert "Destination platform" in delete.inputSchema["properties"]["platform"]["description"]
 
 
 def test_new_parity_tools_are_registered_and_gated(allow_mutations):
@@ -519,8 +522,11 @@ def test_new_parity_tools_are_registered_and_gated(allow_mutations):
 
 def test_delete_payload_states_its_scope():
     """The response payload is where an agent actually reads what happened."""
+    from xpst.platforms.base import DeleteOutcome, DeleteResult
+
     video = {"posted_to": {"youtube": {"id": "yt-9"}}}
     removed: list[tuple[str, str]] = []
+    calls: list[tuple[str, str]] = []
 
     class _State:
         def get_video(self, _vid):
@@ -532,21 +538,30 @@ def test_delete_payload_states_its_scope():
         def save(self):
             pass
 
+    class _Engine:
+        state = _State()
+
+        async def delete_post(self, video_id, platform, **_kw):
+            calls.append((video_id, platform))
+            return DeleteResult(DeleteOutcome.DELETED, platform, "yt-9")
+
     result = __import__("asyncio").run(
-        mcp_server._handle_delete(SimpleNamespace(state=_State()), {"video_id": "v1"})
+        mcp_server._handle_delete(_Engine(), {"video_id": "v1"})
     )
     payload = _mcp_payload(result)
 
     assert payload["success"] is True
     assert payload["removed"] == ["youtube"]
-    assert payload["operation"] == "delete_record"
-    assert payload["scope"] == recovery_service.DELETE_RECORD_SCOPE
-    assert payload["platform_deleted"] is False
-    assert "NOT deleted" in payload["note"]
+    assert payload["operation"] == "delete"
+    assert payload["scope"] == recovery_service.PLATFORM_DELETE_SCOPE
+    assert payload["scope"] == "platform_and_local_state"
+    assert payload["platform_deleted"] is True
+    assert payload["results"][0]["platform_deleted"] is True
+    assert calls == [("v1", "youtube")]
     assert removed == [("v1", "youtube")]
 
 
-def test_delete_reports_failure_when_it_removed_nothing():
+def test_delete_reports_failure_when_it_removed_nothing() -> None:
     """A record for a platform the video was never posted to is not a success."""
     class _State:
         def get_video(self, _vid):
@@ -558,14 +573,21 @@ def test_delete_reports_failure_when_it_removed_nothing():
         def save(self):  # pragma: no cover - must not be called
             raise AssertionError("nothing should be saved")
 
+    class _Engine:
+        state = _State()
+
+        async def delete_post(self, _vid, _plat, **_kw):  # pragma: no cover
+            raise AssertionError("nothing should be deleted")
+
     result = __import__("asyncio").run(
-        mcp_server._handle_delete(SimpleNamespace(state=_State()), {"video_id": "v1", "platform": "tiktok"})
+        mcp_server._handle_delete(_Engine(), {"video_id": "v1", "platform": "tiktok"})
     )
     payload = _mcp_payload(result)
 
     assert payload["ok"] is False
     assert payload["success"] is False
     assert payload["removed"] == []
+    assert payload["results"] == []
     assert payload["platform_deleted"] is False
     assert "tiktok" in payload["error"]
     assert result.isError is True
