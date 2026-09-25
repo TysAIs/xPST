@@ -40,7 +40,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 
 | Tool | Purpose | Mutates real accounts | Consent gate |
 |------|---------|-----------------------|--------------|
-| `xpst_run` | Check for new videos and cross-post them to configured platforms | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_run` | Check for new videos and cross-post them to configured platforms. A batch whe… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_post` | Post to platforms: one local video/image file, a carousel (carousel_paths), o… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_analytics` | Per-post and per-platform engagement metrics (views, likes, comments, shares)… | No | — |
 | `xpst_cross_post_analytics` | Cross-post correlation analytics (B1): one video posted to multiple platforms… | No | — |
@@ -58,7 +58,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_failures_retry` | Retry ONE recorded upload failure, identified by video_id + platform — the MC… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_health` | Test connectivity to all platforms and sources (no uploads) | No | — |
 | `xpst_status` | Show cross-posting statistics and health status | No | — |
-| `xpst_backfill` | Retry failed or incomplete posts from history | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
+| `xpst_backfill` | Retry failed or incomplete posts from history. `attempted` / `successful` are… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No | — |
 | `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No | — |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No | — |
@@ -224,7 +224,28 @@ Dry-run response shape:
 }
 ```
 
-Live-run response: currently a plain confirmation string (`"Cross-post cycle completed successfully"`). Per-post results with URLs are on the roadmap; use `xpst_status` to inspect outcomes after a run.
+Live-run response shape:
+
+```json
+{
+  "ok": false,
+  "attempted": 1,
+  "uploads": 2,
+  "published": 1,
+  "processed": 1,
+  "exit_code": 0,
+  "batch_status": "partial",
+  "failed_destinations": [
+    { "video_id": "7301...", "platform": "threads", "attempted": true, "error": "THREADS_NEEDS_URL: requires a public URL", "exit_code": 10, "reason": "destination unavailable" }
+  ],
+  "results": [ { "video_id": "7301...", "results": { "youtube": { "success": true } }, "all_success": false, "partial_success": true } ]
+}
+```
+
+`exit_code` is the exit status the CLI (`xpst run`) would terminate with for the
+same batch, `batch_status` is one of `published` / `partial` / `failed` /
+`nothing_to_do`, and `failed_destinations` names every destination that failed —
+so a batch where nothing was published is not mistaken for a successful run.
 
 ## xpst_post
 
@@ -335,9 +356,21 @@ Live response shape:
 {
   "attempted": 2,
   "successful": 1,
+  "exit_code": 0,
+  "batch_status": "partial",
+  "failed_destinations": [
+    { "video_id": "...", "platform": "x", "attempted": true, "error": "X_UPLOAD_ERROR: No tweet ID in response", "exit_code": 1, "reason": "post failed" }
+  ],
   "results": [ { "video_id": "...", "results": { "youtube": { "success": true } }, "all_success": true, "partial_success": false } ]
 }
 ```
+
+`exit_code` / `batch_status` / `failed_destinations` are the same aggregate the
+CLI (`xpst backfill`) exits on: a backfill where **every** destination failed
+reports `"batch_status": "failed"` with a non-zero `exit_code` (`4` quota/rate
+limit, `3` authentication, `10` unavailable / refused, `1` otherwise), while
+`"nothing_to_do"` with `"exit_code": 0` means there was nothing to retry.
+`attempted` / `successful` alone cannot tell those two apart.
 
 ## xpst_delete
 
