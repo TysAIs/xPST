@@ -30,7 +30,7 @@ the README and docs can speak to a "beat the incumbents" story with facts, not h
 5. **Cross-platform packaging paths** (macOS/Windows/Linux, Docker, PyInstaller)
    exist, but each published artifact and platform lane still needs its own
    verification; see [INSTALL.md](INSTALL.md).
-6. **1524 tests, enterprise-hardened** — thread-safe state, circuit breakers, anti-bot jitter, rate-limit calendars, MCP security hardening.
+6. **Full test suite in CI, enterprise-hardened** — thread-safe state, circuit breakers, anti-bot jitter, rate-limit calendars, MCP security hardening.
 
 ## Features where we're now parity-or-better (built 2026-08-24)
 
