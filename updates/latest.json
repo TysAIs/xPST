@@ -1,0 +1,12 @@
+{
+  "version": "1.2.1",
+  "notes": "xPST v1.2.1 desktop release - see the GitHub release notes.",
+  "platforms": {
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSMEwvcWxNTGtjSVFVakhHN2lvbTRSSlljUXZJZUpNMTJyUCtNeExjL3l3L1JTZVpsNzd3YVZHa3pXVUQ2VTRKUnl6NFhHMDlSbitPNyswRysrZVZ5dGtMUHVrbjdtdUE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMzM4MDcwCWZpbGU6eFBTVC5hcHAudGFyLmd6CnRVTG82WWpNSytuUDA3WFpUd2tOTFJCVVFLZlR2MklVa3JhMllSQ1l6ZktVTS9ObnNZUTlrajJ2bDFVS1MxK3FUTTdrYlhwOFhwazRiTlhTMHZOWkFnPT0K",
+      "sha512": "2e969c3d2afd727ca8ce2509d21eba08a8fb54d1503d81b0aac55f158217d36e27b4bffad3d1d22abb78a9bb71e89154a374041d50c963a62a1cf6cbfdd82737",
+      "url": "https://github.com/TysAIs/xPST/releases/download/v1.2.1/xPST.app.tar.gz"
+    }
+  },
+  "pub_date": "2026-09-25T12:14:24Z"
+}
