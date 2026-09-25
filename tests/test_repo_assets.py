@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
 from urllib.parse import unquote
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -193,6 +195,22 @@ def test_no_legacy_pyside_desktop_build_remains():
 
     tauri = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
     assert "cargo tauri build" in tauri
+
+
+def test_removed_legacy_desktop_modules_are_not_importable() -> None:
+    """The deleted PySide6/QML desktop must not be importable.
+
+    Deleting the files is not enough on its own: a stray module on ``sys.path``
+    (an old editable install, a leftover build tree) would otherwise keep
+    resolving ``xpst.desktop_app`` and the suite would silently exercise a
+    module the repository no longer ships.
+    """
+    for module in ("xpst.desktop_app", "xpst.desktop"):
+        assert importlib.util.find_spec(module) is None, (
+            f"{module} still resolves — a deleted desktop module is back on sys.path"
+        )
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module)
 
 
 def test_security_docs_match_encrypted_credential_fallback():
