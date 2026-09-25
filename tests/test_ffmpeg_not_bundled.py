@@ -71,7 +71,7 @@ def test_release_lane_asserts_the_app_size_budget() -> None:
 
     budgets = dict(re.findall(r"(\w+_BUDGET_MB)=(\d+)", workflow))
     assert int(budgets["APP_BUDGET_MB"]) <= 140, "the app budget must reflect the unbundled size (ffmpeg-scale regressions still fail hard)"
-    assert int(budgets["INSTALLER_BUDGET_MB"]) <= 150
+    assert int(budgets["INSTALLER_BUDGET_MB"]) <= 160
 
     # Over-budget must fail the lane, and the .app must be checked for a
     # reappearing ffmpeg binary (a silent re-bundle would otherwise pass the

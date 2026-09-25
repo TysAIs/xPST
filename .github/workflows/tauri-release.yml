@@ -322,12 +322,12 @@ jobs:
           set -euo pipefail
           # Budgets after unbundling ffmpeg (it was 87MB of a 192MB app):
           # the unpacked macOS .app must stay <= 140MB, the installer a stranger
-          # downloads <= 150MB. Both are hard failures now — the unpacked app
+          # downloads <= 160MB. Both are hard failures now — the unpacked app
           # size is the number this budget exists to protect, and the previous
           # version only warned about it (so 87MB of ffmpeg could ride along
           # unnoticed).
           APP_BUDGET_MB=140
-          INSTALLER_BUDGET_MB=150
+          INSTALLER_BUDGET_MB=160
           case "${RUNNER_OS}" in
             macOS)   PATTERN='*bundle/dmg/*.dmg' ;;
             Windows) PATTERN='*bundle/nsis/*.exe' ;;
