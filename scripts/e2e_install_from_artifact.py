@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform as host_platform
 import plistlib
 import re
 import shutil
@@ -33,6 +34,18 @@ class E2EError(RuntimeError):
     """A user-facing harness failure with a concise message."""
 
 
+#: macOS puts TMPDIR under ``/var/folders/<id>/T``, a sandbox-managed per-user
+#: temp directory, and ``/tmp`` is a symlink to ``/private/tmp``. The published
+#: Tauri shell cannot resolve its bundle resource directory when the ``.app`` is
+#: launched from either (it logs ``FATAL: no resource dir`` and never starts the
+#: engine), so the clean-profile install defaults to the canonical ``/private/tmp``
+#: — a real, user-visible location a stranger could install into. ``--work-dir``
+#: still overrides it.
+DEFAULT_WORK_BASE = (
+    str(Path("/tmp").resolve()) if sys.platform == "darwin" else None  # nosec B108 - deliberate canonical location
+)
+
+
 class WorkDir:
     """Own the throwaway directory and clean it up unless requested otherwise."""
 
@@ -44,7 +57,13 @@ class WorkDir:
             self.path.mkdir(parents=True, exist_ok=True)
             self.owned = True
         else:
-            self.path = Path(tempfile.mkdtemp(prefix="xpst-stranger-install-"))
+            try:
+                created = tempfile.mkdtemp(prefix="xpst-stranger-install-", dir=DEFAULT_WORK_BASE)
+            except OSError:
+                created = tempfile.mkdtemp(prefix="xpst-stranger-install-")
+            # Canonicalize so the app is never launched through a symlinked
+            # directory component (for example /tmp -> /private/tmp).
+            self.path = Path(created).resolve()
             self.owned = True
 
     def cleanup(self, keep: bool) -> bool:
@@ -183,6 +202,51 @@ def derive_checksum_source(
             "a local artifact needs --checksums or --release-tag so its release SHA256SUMS can be fetched"
         )
     return f"https://github.com/{repo}/releases/download/{release_tag}/{platform}-SHA256SUMS"
+
+
+def checksum_source_candidates(
+    source: str,
+    asset_name: str,
+    platform: str,
+    repo: str,
+    release_tag: str | None,
+) -> list[str]:
+    """Candidate checksum files for an artifact, most specific first.
+
+    Releases have published both per-platform ``<platform>-SHA256SUMS`` and a
+    single aggregate ``SHA256SUMS``. The Tauri lane publishes only the
+    aggregate, so a missing per-platform file must fall back to the aggregate
+    instead of aborting the install.
+    """
+    parsed = urllib.parse.urlparse(source)
+    if parsed.scheme in {"http", "https"}:
+        path = parsed.path
+        marker = "/releases/download/"
+        if marker not in path:
+            raise E2EError(
+                "an asset URL must be a GitHub release download URL or provide --checksums"
+            )
+        base = path.rsplit("/", 1)[0]
+        head = urllib.parse.urlunparse(parsed._replace(path=f"{base}/", query="", fragment=""))
+        return [f"{head}{platform}-SHA256SUMS", f"{head}SHA256SUMS"]
+    if not release_tag:
+        raise E2EError(
+            "a local artifact needs --checksums or --release-tag so its release SHA256SUMS can be fetched"
+        )
+    root = f"https://github.com/{repo}/releases/download/{release_tag}/"
+    return [f"{root}{platform}-SHA256SUMS", f"{root}SHA256SUMS"]
+
+
+def load_first_checksum_source(sources: list[str], destination: Path) -> tuple[str, str]:
+    """Load the first checksum source that exists, reporting which one was used."""
+    errors: list[str] = []
+    for source in sources:
+        try:
+            return load_checksum_source(source, destination)
+        except E2EError as exc:
+            errors.append(str(exc))
+    joined = "; ".join(errors) or "no candidate was checked"
+    raise E2EError(f"no release checksum file could be loaded: {joined}")
 
 
 def load_checksum_source(source: str, destination: Path) -> tuple[str, str]:
@@ -331,10 +395,42 @@ def cross_platform_hint(content_kind: str | None, host_kind: str | None) -> str:
     )
 
 
+def walk_app_bundles(root: Path, max_depth: int = 6) -> list[Path]:
+    """Find ``.app`` directories without descending through symlinks.
+
+    A macOS installer image carries a symlink to ``/Applications``; following it
+    would scan the whole machine and could return an unrelated installed bundle
+    instead of the one shipped in the artifact.
+    """
+    found: list[Path] = []
+    queue: list[tuple[Path, int]] = [(root, 0)]
+    while queue:
+        directory, depth = queue.pop()
+        if depth > max_depth:
+            continue
+        try:
+            entries = sorted(directory.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_symlink():
+                    continue
+            except OSError:
+                continue
+            if not entry.is_dir():
+                continue
+            if entry.name.lower().endswith(".app"):
+                found.append(entry)
+            else:
+                queue.append((entry, depth + 1))
+    return found
+
+
 def find_app(root: Path) -> Path | None:
     """Find an application bundle, preferring xPST.app."""
     direct = sorted(root.glob("*.app"))
-    recursive = sorted(path for path in root.rglob("*.app") if path.is_dir())
+    recursive = walk_app_bundles(root)
     candidates = list(dict.fromkeys(direct + recursive))
     for candidate in candidates:
         if candidate.name.lower() == "xpst.app":
@@ -871,6 +967,15 @@ def first_run_findings(
         findings.append(
             "The artifact carries com.apple.quarantine; macOS may block launch until the user uses Finder's Open/Privacy & Security approval path."
         )
+    if "no resource dir" in log_text:
+        findings.append(
+            "The published shell logged 'FATAL: no resource dir' and never started the engine. "
+            "This is observed when the .app is launched via a non-canonical path: through a "
+            "symlinked directory component (e.g. /tmp -> /private/tmp) or from the macOS per-user "
+            "temp dir (/var/folders/<id>/T). The bundle depends on Tauri's resource_dir() "
+            "resolving there, and it returns UnknownPath. Install and launch the app from a "
+            "canonical location such as /private/tmp, ~/Applications or /Applications."
+        )
     error_markers = [
         line.strip()
         for line in log_text.splitlines()
@@ -886,20 +991,58 @@ def first_run_findings(
 # ---------------------------------------------------------------------------
 
 
-def github_api_json(url: str) -> Any:
-    """GET a public GitHub API URL without a token or third-party client."""
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "xPST-stranger-install-e2e",
-            "Accept": "application/vnd.github+json",
-        },
-    )
+def http_get_text(url: str, *, accept: str | None = None) -> str:
+    """GET a public URL and return its body as text.
+
+    An optional ``GH_TOKEN``/``GITHUB_TOKEN`` (as CI provides) is sent when
+    present so the unauthenticated GitHub API limit is not the only path.
+    """
+    headers = {"User-Agent": "xPST-stranger-install-e2e"}
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if accept:
+        headers["Accept"] = accept
+    request = urllib.request.Request(url, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - loopback probe built by this script
+        with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - public release URL built by this script
+            return response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8", errors="replace").strip()
+        except OSError:
+            body = ""
+        detail = f": {body[:200]}" if body else ""
+        raise E2EError(f"HTTP {exc.code} for {url}{detail}") from exc
+    except (OSError, urllib.error.URLError) as exc:
+        raise E2EError(f"request failed for {url}: {exc}") from exc
+
+
+def github_api_json(url: str) -> Any:
+    """GET a public GitHub API URL without a third-party client.
+
+    Sends ``GH_TOKEN``/``GITHUB_TOKEN`` when the environment provides one; the
+    caller falls back to the public release page when the unauthenticated
+    rate limit (60/hour) is exhausted.
+    """
+    headers = {
+        "User-Agent": "xPST-stranger-install-e2e",
+        "Accept": "application/vnd.github+json",
+    }
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:  # nosec B310 - public release URL built by this script
             return json.loads(response.read().decode("utf-8", errors="replace"))
     except urllib.error.HTTPError as exc:
-        raise E2EError(f"GitHub API returned HTTP {exc.code} for {url}") from exc
+        try:
+            body = exc.read().decode("utf-8", errors="replace").strip()
+        except OSError:
+            body = ""
+        detail = f": {body[:200]}" if body else ""
+        raise E2EError(f"GitHub API returned HTTP {exc.code} for {url}{detail}") from exc
     except (OSError, urllib.error.URLError, ValueError) as exc:
         raise E2EError(f"GitHub API request failed for {url}: {exc}") from exc
 
@@ -920,11 +1063,99 @@ PUBLISHED_ASSET_NAMES = {
     "linux": ("xpst", "xpst.appimage", "xpst.deb", "xpst.rpm"),
 }
 
+#: Installer extensions per platform, used to recognise the Tauri asset naming
+#: (``xPST_<version>_<arch>.<ext>``) that the published releases actually use.
+PLATFORM_ASSET_SUFFIXES = {
+    "macos": (".dmg", ".pkg"),
+    "windows": (".exe", ".msi"),
+    "linux": (".appimage", ".deb", ".rpm"),
+}
+
+#: Architecture tokens, most specific first, so a host prefers its own build.
+ARCH_ALIASES = {
+    "arm64": ("aarch64", "arm64"),
+    "aarch64": ("aarch64", "arm64"),
+    "x86_64": ("x86_64", "x64", "amd64"),
+    "amd64": ("x86_64", "x64", "amd64"),
+}
+
+
+def host_arch() -> str:
+    """Return the host CPU token used to rank architecture-specific assets."""
+    return host_platform.machine().lower()
+
+
+def architecture_match_score(name: str, arch: str) -> int:
+    """Rank how well an asset name matches the host architecture (higher wins)."""
+    aliases = ARCH_ALIASES.get(arch)
+    if not aliases:
+        return 0
+    lower = name.lower()
+    for rank, alias in enumerate(aliases):
+        if alias in lower:
+            return len(aliases) - rank
+    return 0
+
+
+def installer_candidates(
+    assets: list[dict[str, Any]], platform: str
+) -> list[dict[str, Any]]:
+    """Return release assets that are installers for ``platform``.
+
+    This is the fallback for releases whose assets follow the Tauri
+    ``xPST_<version>_<arch>.<ext>`` naming instead of the flat names in
+    :data:`PUBLISHED_ASSET_NAMES`. Updater sidecars and signature files are
+    excluded so a ``.sig`` can never be mistaken for the installer.
+    """
+    suffixes = PLATFORM_ASSET_SUFFIXES.get(platform, ())
+    candidates: list[dict[str, Any]] = []
+    for asset in assets:
+        name = str(asset.get("name", ""))
+        lower = name.lower()
+        if not suffixes or not lower.endswith(suffixes):
+            continue
+        if lower.endswith(".sig") or ".tar" in lower:
+            continue
+        candidates.append(asset)
+    return candidates
+
+
+def release_assets_from_html(repo: str, tag: str) -> list[dict[str, Any]]:
+    """List release assets from the public asset page, with no API quota.
+
+    GitHub renders ``/releases/expanded_assets/<tag>`` as a static fragment that
+    links every asset. This is the fallback a stranger with no token can use when
+    the unauthenticated API limit (60/hour) is exhausted.
+    """
+    url = f"https://github.com/{repo}/releases/expanded_assets/{urllib.parse.quote(tag)}"
+    html = http_get_text(url)
+    assets: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for match in re.finditer(r'href="(/[^"]+/releases/download/[^"]+)"', html):
+        path = match.group(1)
+        name = Path(urllib.parse.unquote(path)).name
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        assets.append({"name": name, "browser_download_url": f"https://github.com{path}"})
+    if not assets:
+        raise E2EError(f"could not list any asset for release {tag} in {repo}")
+    return assets
+
 
 def release_assets(repo: str, tag: str) -> list[dict[str, Any]]:
     """Return the asset records of one *published* GitHub release."""
     url = f"https://api.github.com/repos/{repo}/releases/tags/{urllib.parse.quote(tag)}"
-    payload = github_api_json(url)
+    try:
+        payload = github_api_json(url)
+    except E2EError as exc:
+        assets = release_assets_from_html(repo, tag)
+        print(
+            f"[e2e] GitHub API unusable ({exc}); listed {len(assets)} assets from the "
+            "public release page instead (no asset size/digest cross-check)",
+            flush=True,
+        )
+        return assets
     assets = payload.get("assets") if isinstance(payload, dict) else None
     if not isinstance(assets, list) or not assets:
         raise E2EError(f"published release {tag} in {repo} has no assets")
@@ -945,6 +1176,17 @@ def select_release_asset(
     for candidate in PUBLISHED_ASSET_NAMES.get(platform, ()):
         if candidate in by_name:
             return by_name[candidate]
+    installers = installer_candidates(assets, platform)
+    if installers:
+        arch = host_arch()
+        ranked = sorted(
+            installers,
+            key=lambda asset: (
+                -architecture_match_score(str(asset.get("name", "")), arch),
+                str(asset.get("name", "")).lower(),
+            ),
+        )
+        return ranked[0]
     available = ", ".join(sorted(str(asset.get("name", "")) for asset in assets))
     raise E2EError(
         f"published release has no known {platform} installer "
@@ -1235,16 +1477,30 @@ def main(argv: list[str] | None = None) -> int:
         kind = artifact_type(source_name, artifact)
         family = platform_key(source_name, args.platform, content_kind)
         summary["platform"] = family
-        checksum_source = args.checksums or derive_checksum_source(
-            source, source_name, family, args.repo, args.release_tag
-        )
-        checksum_text, checksum_provenance = load_checksum_source(
-            checksum_source, download_dir / f"{family}-SHA256SUMS"
-        )
         published_digest = (release_info or {}).get("digest")
         digest_hex = None
         if isinstance(published_digest, str) and published_digest.startswith("sha256:"):
             digest_hex = published_digest.split(":", 1)[1].lower()
+        if args.checksums:
+            checksum_text, checksum_provenance = load_checksum_source(
+                args.checksums, download_dir / f"{family}-SHA256SUMS"
+            )
+        else:
+            candidates = checksum_source_candidates(
+                source, source_name, family, args.repo, args.release_tag
+            )
+            try:
+                checksum_text, checksum_provenance = load_first_checksum_source(
+                    candidates, download_dir / f"{family}-SHA256SUMS"
+                )
+            except E2EError:
+                if not digest_hex:
+                    raise
+                checksum_text, checksum_provenance = "", "none (no checksum file in the release)"
+                early_findings.append(
+                    "No release checksum file could be downloaded; the sha256 verdict comes "
+                    "only from the asset digest reported by the release API."
+                )
         checksum = verify_checksum(
             artifact, checksum_text, checksum_provenance, args.checksum_asset, digest_hex
         )
@@ -1296,6 +1552,15 @@ def main(argv: list[str] | None = None) -> int:
         cross_platform_artifact = bool(
             host_kind and content_kind in {"elf", "macho", "pe"} and content_kind != host_kind
         )
+        # Any engine already running belongs to a foreign install (for example the
+        # developer's own app). Record it now so the leftover assertion only
+        # blames a sidecar this run actually started.
+        preexisting_engines = engine_processes()
+        if preexisting_engines:
+            early_findings.append(
+                f"{len(preexisting_engines)} xpst-engine process(es) were already running before "
+                "this run (a foreign install); they are excluded from the leftover check."
+            )
         with log_path.open("w", encoding="utf-8") as log_handle:
             start = time.monotonic()
             try:
@@ -1333,7 +1598,9 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
         time.sleep(1)
-        leftovers = engine_processes()
+        still_running = engine_processes()
+        preexisting_pids = {process["pid"] for process in preexisting_engines}
+        leftovers = [process for process in still_running if process["pid"] not in preexisting_pids]
         home_state = home_dir / ".xpst"
         config_files = sorted(str(path.relative_to(config_dir)) for path in config_dir.rglob("*") if path.is_file())
         home_files = sorted(str(path.relative_to(home_dir)) for path in home_dir.rglob("*") if path.is_file())
@@ -1381,7 +1648,9 @@ def main(argv: list[str] | None = None) -> int:
         if stack == "tauri" and not running["engine_sidecar_processes"]:
             failures.append("no xpst-engine sidecar process was observed while the packaged app ran")
         if leftovers:
-            failures.append(f"leftover xpst-engine process(es): {leftovers}")
+            failures.append(
+                f"leftover xpst-engine process(es) started by this run: {leftovers}"
+            )
         if stop["exit_code"] is None:
             failures.append("launched process did not provide an exit code after shutdown")
         if kind == "dmg" and not app:
@@ -1450,6 +1719,7 @@ def main(argv: list[str] | None = None) -> int:
                 "running_process": running,
                 "shutdown": stop,
                 "engine_processes_after_shutdown": leftovers,
+                "preexisting_engine_processes": preexisting_engines,
                 "cleanup": {
                     "ok": cleanup_ok,
                     "work_directory_removed": cleanup_ok,
@@ -1487,6 +1757,7 @@ def main(argv: list[str] | None = None) -> int:
             "app_exit_code_during_poll": health["process_exit_code_during_poll"],
             "shutdown_exit_code": stop["exit_code"],
             "engine_processes_after_shutdown": leftovers,
+            "preexisting_engine_processes": preexisting_engines,
             "cleanup_ok": cleanup_ok,
             "uninstall_ok": uninstall["ok"],
             "gatekeeper": gatekeeper,
