@@ -20,6 +20,7 @@ Edge case handling:
 """
 
 import asyncio
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ from xpst.media.loudness import (
 from xpst.media.pipeline import plan_transform
 from xpst.media.specs import verify_media
 from xpst.platforms.base import PlatformUploader, UploadResult, normalize_upload_result
+from xpst.reconcile import AttemptLedger, uploader_reconciler
 from xpst.utils.circuit_breaker import CircuitBreakerManager, CircuitBreakerOpenError
 from xpst.utils.content_hash import compute_content_hash
 from xpst.utils.disk import DiskSpaceError, check_disk_space
@@ -103,6 +105,9 @@ class UploadService:
         self.anti_bot = anti_bot
         self._crash_recovery: Any = None  # Injected by engine
         self._rate_limit_paused: dict[str, float] = {}
+        # Records unknown-outcome attempts so a retry reconciles the destination
+        # read-back before it can publish a duplicate (see xpst.reconcile).
+        self._attempt_ledger = AttemptLedger()
 
     async def upload_to_platform(
         self,
@@ -350,8 +355,12 @@ class UploadService:
                 "config": STANDARD_RETRY,
                 "platform": platform_name,
                 # X maps duplicate posts to success server-side; IG/YT do
-                # not, so ambiguous errors there must not blind-retry (G07).
+                # not, so an unknown outcome there is reconciled against the
+                # destination before any retry (G07) — never blind-retried.
                 "ambiguous_safe": platform_name == "x",
+                **self._reconcile_gate(
+                    uploader, content_hash=content_hash, caption=caption
+                ),
             }
             # Only pass visibility to uploaders that accept it (YouTube
             # honours it; every other platform ignores it harmlessly).
@@ -473,6 +482,28 @@ class UploadService:
                 error=f"Upload failed: {str(e)[:200]}",
                 platform=platform_name,
             )
+
+    def _reconcile_gate(
+        self,
+        uploader: PlatformUploader,
+        *,
+        content_hash: str,
+        caption: str,
+    ) -> dict[str, Any]:
+        """Extra ``retry_operation`` kwargs that make a retry reconcile first.
+
+        A destination that exposes a read-only ``reconcile_publish`` gets its
+        unknown-outcome attempt recorded and read back before any retry: FOUND
+        publishes from evidence, ABSENT allows the retry, UNKNOWN blocks it.
+        Test doubles and adapters without a real read-back yield no reconciler,
+        which keeps the safe block-without-retry behaviour.
+        """
+        return {
+            "reconciler": uploader_reconciler(uploader),
+            "ledger": self._attempt_ledger,
+            "content_hash": content_hash,
+            "caption": caption,
+        }
 
     @staticmethod
     def _accepts_visibility(uploader: PlatformUploader) -> bool:
@@ -635,6 +666,9 @@ class UploadService:
                 config=STANDARD_RETRY,
                 platform=platform_name,
                 ambiguous_safe=platform_name == "x",
+                **self._reconcile_gate(
+                    uploader, content_hash=content_hash, caption=caption
+                ),
             )
             upload_result = normalize_upload_result(raw_upload_result, platform_name)
 
@@ -757,6 +791,9 @@ class UploadService:
                 config=STANDARD_RETRY,
                 platform=platform_name,
                 ambiguous_safe=False,
+                **self._reconcile_gate(
+                    uploader, content_hash=content_hash, caption=caption
+                ),
             )
             upload_result = normalize_upload_result(raw_upload_result, platform_name)
 
@@ -814,9 +851,10 @@ class UploadService:
         ``video_id`` so text posts show up in the same "what did I post"
         surface as everything else instead of vanishing.
 
-        A text post is NOT retried on an ambiguous failure for destinations
-        without server-side duplicate detection: the result is surfaced for a
-        deliberate retry rather than risking a double-post.
+        A text post is NOT retried on an unknown-outcome failure for destinations
+        without server-side duplicate detection: the destination is reconciled
+        (read back) first and the result surfaced for a deliberate retry only
+        when that proves the post absent — never a blind double-post.
         """
         # ToS warning for unofficial API platforms
         if platform_name in _TOS_UNOFFICIAL_PLATFORMS:
@@ -847,12 +885,18 @@ class UploadService:
             )
 
         try:
+            # Text posts have no media file, so identity is the post body: a
+            # retry reconciles against that content before it can duplicate.
+            text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
             raw_upload_result = await retry_operation(
                 uploader.post_text,
                 text,
                 config=STANDARD_RETRY,
                 platform=platform_name,
                 ambiguous_safe=platform_name == "x",
+                **self._reconcile_gate(
+                    uploader, content_hash=text_hash, caption=text
+                ),
             )
             upload_result = normalize_upload_result(raw_upload_result, platform_name)
 
