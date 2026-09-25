@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Generate the MCP tool index in docs/MCP_TOOLS.md from the live registry.
+"""Generate the MCP tool indexes in docs/MCP_TOOLS.md and README.md.
 
-The published index drifted from the served registry (7 tools were missing), so
-it is now generated between markers and verified in CI:
+The published indexes drifted from the served registry (7 tools were missing from
+docs/MCP_TOOLS.md; the README table sat at "38 Tools" while the registry served
+40), so both are now generated between markers and verified in CI:
 
     python scripts/generate_mcp_docs.py --check   # non-zero when stale
-    python scripts/generate_mcp_docs.py --write   # rewrite the block
+    python scripts/generate_mcp_docs.py --write   # rewrite both blocks
 
 Columns are derived from code, never hand-asserted:
   * *Mutates real accounts* comes from ``xpst.mcp.server._MUTATING_TOOLS``
   * *Consent gate* states the guardrail those tools actually enforce
+    (docs/MCP_TOOLS.md only; the README table keeps the three public columns)
 Purpose text is the tool's own description, collapsed to one line.
 """
 
@@ -23,6 +25,14 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DOC_PATH = REPO_ROOT / "docs" / "MCP_TOOLS.md"
 BEGIN = "<!-- BEGIN GENERATED TOOL INDEX -->"
 END = "<!-- END GENERATED TOOL INDEX -->"
+
+README_PATH = REPO_ROOT / "README.md"
+README_BEGIN = "<!-- BEGIN GENERATED README TOOL INDEX -->"
+README_END = "<!-- END GENERATED README TOOL INDEX -->"
+
+DOCS_README_PATH = REPO_ROOT / "docs" / "README.md"
+DOCS_README_BEGIN = "<!-- BEGIN GENERATED DOCS README TOOL INDEX -->"
+DOCS_README_END = "<!-- END GENERATED DOCS README TOOL INDEX -->"
 
 
 def _purpose(description: str, limit: int = 78) -> str:
@@ -81,38 +91,115 @@ def render_block() -> str:
     return "\n".join(rows)
 
 
+def render_readme_block() -> str:
+    """The README tool index: the same registry, without the consent-gate column.
+
+    The heading number is the live registry size, so the table cannot advertise a
+    count it does not list.
+    """
+    from xpst.mcp.server import _MUTATING_TOOLS
+
+    registry = _registry()
+    rows = [
+        f"### {len(registry)} Tools",
+        "",
+        "Generated from the live registry — full schemas, consent gates, and per-tool "
+        "notes live in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).",
+        "",
+        "| Tool | Purpose | Mutates real accounts |",
+        "|------|---------|-----------------------|",
+    ]
+    for name, description in registry:
+        mutates = name in _MUTATING_TOOLS
+        rows.append(
+            f"| `{name}` | {_purpose(description)} | {'**Yes**' if mutates else 'No'} |"
+        )
+    rows.append("")
+    return "\n".join(rows)
+
+
+def render_docs_readme_block() -> str:
+    """The docs/README.md "Available Tools" table, generated from the registry.
+
+    Keeps the rows complete: the hand-written table had drifted to 28 of the 40
+    served tools while the sentence above it said 40.
+    """
+    registry = _registry()
+    rows = [
+        "### Available Tools",
+        "",
+        f"xPST exposes {len(registry)} MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.",
+        "",
+        "| Tool | Description |",
+        "|------|-------------|",
+    ]
+    for name, description in registry:
+        rows.append(f"| `{name}` | {_purpose(description)} |")
+    rows.append("")
+    return "\n".join(rows)
+
+
+def _replace_between(text: str, begin: str, end: str, block: str) -> str:
+    start = text.index(begin) + len(begin)
+    stop = text.index(end)
+    return text[:start] + "\n\n" + block + "\n" + text[stop:]
+
+
 def _replace_block(text: str, block: str) -> str:
-    start = text.index(BEGIN) + len(BEGIN)
-    end = text.index(END)
-    return text[:start] + "\n\n" + block + "\n" + text[end:]
+    return _replace_between(text, BEGIN, END, block)
+
+
+# (path, begin marker, end marker, renderer, label)
+TARGETS = (
+    (DOC_PATH, BEGIN, END, render_block, "docs/MCP_TOOLS.md tool index"),
+    (README_PATH, README_BEGIN, README_END, render_readme_block, "README tool index"),
+    (
+        DOCS_README_PATH,
+        DOCS_README_BEGIN,
+        DOCS_README_END,
+        render_docs_readme_block,
+        "docs/README.md tool index",
+    ),
+)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--check", action="store_true", help="fail if the committed block is stale")
-    group.add_argument("--write", action="store_true", help="rewrite the committed block")
+    group.add_argument("--check", action="store_true", help="fail if a committed block is stale")
+    group.add_argument("--write", action="store_true", help="rewrite the committed blocks")
     args = parser.parse_args()
 
-    original = DOC_PATH.read_text(encoding="utf-8")
-    if BEGIN not in original or END not in original:
-        print(f"FAIL: marker block not found in {DOC_PATH}", file=sys.stderr)
-        return 2
-
-    updated = _replace_block(original, render_block())
-    if args.check:
-        if updated != original:
-            print(
-                "FAIL: docs/MCP_TOOLS.md tool index is stale; "
-                "run `python scripts/generate_mcp_docs.py --write`",
-                file=sys.stderr,
+    problems: list[str] = []
+    for path, begin, end, render, label in TARGETS:
+        try:
+            original = path.read_text(encoding="utf-8")
+        except OSError as exc:  # pragma: no cover - surfaced as a check failure
+            problems.append(f"{label}: cannot read {path}: {exc}")
+            continue
+        if begin not in original or end not in original:
+            problems.append(f"{label}: marker block not found in {path.relative_to(REPO_ROOT)}")
+            continue
+        updated = _replace_between(original, begin, end, render())
+        if updated == original:
+            continue
+        if args.write:
+            path.write_text(updated, encoding="utf-8")
+            print(f"wrote {path.relative_to(REPO_ROOT)} ({label})")
+        else:
+            problems.append(
+                f"{label} is stale in {path.relative_to(REPO_ROOT)}; "
+                "run `python scripts/generate_mcp_docs.py --write`"
             )
-            return 1
-        print("PASS: MCP tool index matches the live registry")
-        return 0
 
-    DOC_PATH.write_text(updated, encoding="utf-8")
-    print(f"wrote {DOC_PATH.relative_to(REPO_ROOT)}")
+    if problems:
+        for problem in problems:
+            print(f"FAIL: {problem}", file=sys.stderr)
+        return 1
+
+    if args.check:
+        print("PASS: MCP tool indexes match the live registry "
+              "(docs/MCP_TOOLS.md, README.md, docs/README.md)")
     return 0
 
 
