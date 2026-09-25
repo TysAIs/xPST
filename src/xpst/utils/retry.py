@@ -27,6 +27,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
+from xpst.platforms.base import UploadResult
+from xpst.reconcile import (
+    AttemptLedger,
+    PublishAttempt,
+    Reconciler,
+    is_unknown_outcome,
+    reconcile_attempt,
+)
 from xpst.utils.errors import categorize_error, is_fatal
 from xpst.utils.logger import get_logger
 
@@ -226,6 +234,75 @@ def retry_async(
     return decorator
 
 
+async def _gate_unknown_outcome(
+    result: UploadResult,
+    *,
+    platform: str | None,
+    content_hash: str,
+    caption: str,
+    ledger: AttemptLedger | None,
+    reconciler: Reconciler | None,
+) -> UploadResult | None:
+    """Reconcile an unknown-outcome result before any retry is allowed (G07+).
+
+    Returns a final :class:`UploadResult` when the outcome is settled
+    (``FOUND`` -> published from evidence, ``UNKNOWN`` -> blocked with a
+    reason), or ``None`` when the read-back proved the post absent, which lets
+    the caller retry safely.
+    """
+    attempt = PublishAttempt(
+        platform=platform or result.platform or "unknown",
+        content_hash=content_hash,
+        caption=caption,
+        post_id=result.post_id,
+        post_url=result.post_url,
+        error=result.error,
+    )
+    verdict = await reconcile_attempt(
+        attempt, ledger=ledger, reconciler=reconciler
+    )
+
+    metadata = dict(result.metadata)
+
+    if verdict.is_found:
+        # The earlier attempt landed. Report it published with the real
+        # identifier and NEVER re-upload it.
+        metadata["reconciled"] = True
+        metadata["original_error"] = result.error
+        metadata["reconciliation"] = verdict.to_dict()
+        return UploadResult(
+            success=True,
+            post_id=verdict.post_id or attempt.post_id,
+            post_url=verdict.post_url or attempt.post_url,
+            platform=attempt.platform,
+            metadata=metadata,
+        )
+
+    if verdict.is_absent:
+        # Definitively not on the account: the retry cannot duplicate it.
+        metadata["reconciliation"] = verdict.to_dict()
+        result.metadata = metadata
+        return None
+
+    # Still unknown: block instead of blind-retrying. Never a plain failure
+    # for a post that may be live, and never a silent success either.
+    metadata["reconciliation"] = verdict.to_dict()
+    metadata["blocked_retry"] = True
+    reason = (
+        f"UNVERIFIED on {attempt.platform}: the previous attempt's outcome is "
+        f"still unknown after reconcile — refusing to retry and duplicate the "
+        f"post. {verdict.detail}"
+    )
+    if result.error:
+        reason = f"{reason} | original error: {result.error}"
+    return UploadResult(
+        success=False,
+        error=reason,
+        platform=attempt.platform,
+        metadata=metadata,
+    )
+
+
 async def retry_operation(
     operation: Callable[..., Any],
     *args: Any,
@@ -233,20 +310,35 @@ async def retry_operation(
     on_retry: Callable[[int, Exception], Any] | None = None,
     platform: str | None = None,
     ambiguous_safe: bool = True,
+    reconciler: Reconciler | None = None,
+    ledger: AttemptLedger | None = None,
+    content_hash: str = "",
+    caption: str = "",
     **kwargs: Any,
 ) -> Any:
     """
     Retry an async operation with error categorization.
 
     Fatal errors (401, 403, invalid format, etc.) are raised immediately.
-    Retryable errors (429, 503, timeout, etc.) are retried with backoff.
+    Retryable errors (429, timeout, etc.) are retried with backoff.
+
+    An UNKNOWN outcome (timeout, connection drop, 5xx raised after the request
+    was sent) is settled by a read-back before any retry: pass ``reconciler``
+    (a read-only destination read-back) and ``ledger`` (records the attempt)
+    so a retry can never duplicate the post. ``ambiguous_safe=True`` is the
+    exception, for destinations whose server de-duplicates a re-post (X).
 
     Args:
         operation: Async function to retry
         *args: Arguments to pass to operation
         config: Retry configuration
         on_retry: Callback called on each retry
-        platform: Platform name for error categorization
+        platform: Platform name for error categorization and reconciliation
+        ambiguous_safe: Whether an unknown outcome may be retried blindly
+        reconciler: Read-only read-back used to settle an unknown outcome
+        ledger: Records the unknown-outcome attempt and its verdict
+        content_hash: Content identity of the attempted post
+        caption: Caption of the attempted post
         **kwargs: Keyword arguments to pass to operation
 
     Returns:
@@ -273,33 +365,35 @@ async def retry_operation(
                 and result.error
             ):
                 error_msg = str(result.error).lower()
-                # Ambiguous errors (timeout/connection) can mean the request
-                # SUCCEEDED server-side with the response lost. Re-invoking
-                # the operation then double-posts on platforms without
-                # server-side duplicate detection (G07). Callers pass
-                # ambiguous_safe=False for those platforms: the error is
-                # surfaced for deliberate recovery instead of blind retry.
-                ambiguous_keywords = ["timeout", "connection"]
+                # Unknown outcomes (timeout/connection/5xx after submit) can
+                # mean the request SUCCEEDED server-side with the response
+                # lost. Re-invoking the operation then double-posts on
+                # platforms without server-side duplicate detection (G07).
+                # Instead of blind-retrying, reconcile the destination first:
+                # FOUND -> published, ABSENT -> safe to retry, UNKNOWN -> block.
+                if is_unknown_outcome(error_msg):
+                    if ambiguous_safe:
+                        raise Exception(result.error)
+                    gated = await _gate_unknown_outcome(
+                        result,
+                        platform=platform,
+                        content_hash=content_hash,
+                        caption=caption,
+                        ledger=ledger,
+                        reconciler=reconciler,
+                    )
+                    if gated is not None:
+                        return gated
+                    # The read-back proved nothing landed — retry it.
+                    raise Exception(result.error)
                 retryable_keywords = [
-                    "503",
                     "rate_limit",
                     "rate limit",
                     "too many requests",
                     "429",
-                    "502",
-                    "500",
                     "temporarily",
                     "try again",
                 ]
-                if any(kw in error_msg for kw in ambiguous_keywords):
-                    if ambiguous_safe:
-                        raise Exception(result.error)
-                    logger.warning(
-                        "Ambiguous failure (possible server-side success) — "
-                        "not retrying to avoid a double-post: %s",
-                        result.error,
-                    )
-                    return result
                 if any(kw in error_msg for kw in retryable_keywords):
                     raise Exception(result.error)
 
