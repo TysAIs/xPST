@@ -51,8 +51,8 @@ The harness uses an automatically deleted `xpst-stranger-install-*` directory.
 On macOS it is created under the canonical `/private/tmp` rather than `$TMPDIR`
 (`/var/folders/<id>/T`) and the path is resolved, because the published Tauri
 shell cannot resolve its bundle resource directory when the `.app` is launched
-via a non-canonical path — through a symlinked component (`/tmp` →
-`/private/tmp`) or from the per-user temp dir — and dies with
+through a symlinked path component (`/tmp` → `/private/tmp`, `/var` →
+`/private/var`) and dies with
 `FATAL: no resource dir` before starting the engine (see the gap list below). A
 macOS DMG is mounted
 read-only with `hdiutil`, its `.app` is copied into that directory, and the
@@ -316,23 +316,29 @@ Fixed in the harness:
    harness never started. It now records the baseline before launch and only
    reports engines this run started.
 5. **The default work directory was unusable.** The harness installed under
-   `$TMPDIR`/`/tmp`, where the published shell cannot start its engine (see
-   below). It now installs under the canonical `/private/tmp`.
+   `$TMPDIR`/`/tmp` in their un-canonicalized, symlinked form, which the
+   published shell cannot launch from (see below). It now installs under the
+   canonical `/private/tmp` and resolves the path.
 
 Still open (product, not harness):
 
-6. **The shell cannot resolve its bundle resources from a non-canonical path.**
-   Launched via a symlinked component (`/tmp` → `/private/tmp`) or from the
-   per-user temp dir (`/var/folders/<id>/T`), the published shell logs
-   `FATAL: no resource dir: unknown path`, never starts `xpst-engine`, and shows
-   an empty window. Reproduced **5/5** runs that installed under `/var/folders`
-   and **1/1** that used the `/tmp` symlink, versus **3/3** passes from canonical
-   `/private/tmp`. It needs a
-   `src-tauri` fallback (derive `Contents/Resources` from `current_exe()` when
-   `app.path().resource_dir()` errs) and a new release; it is not fixable from
-   the harness. Impact: any CI or harness that installs under `$TMPDIR` is red for
-   the wrong reason, and a stranger who runs the app from a symlinked location
-   gets an empty window instead of an error.
+6. **The shell cannot resolve its bundle resources when launched through a
+   symlinked path component.** macOS symlinks `/tmp` → `/private/tmp` and `/var`
+   → `/private/var`; launching the `.app` via the un-canonicalized form (for
+   example `/tmp/.../install/xPST.app`, or `/var/folders/<id>/T/...` from an
+   un-resolved `$TMPDIR`) makes the published shell log
+   `FATAL: no resource dir: unknown path`, never start `xpst-engine`, and show
+   an empty window. Every run launched through a symlinked component failed
+   (**6/6**: five from the un-resolved `/var/folders` temp path, one via `/tmp`),
+   while every run launched via a canonical path passed — **including the
+   per-user temp dir when canonicalized** (`/private/var/folders/<id>/T/...`,
+   `/health` 200 and the UI served), so the trigger is the symlinked path, not
+   the location. It needs a `src-tauri` fallback (derive and canonicalize
+   `Contents/Resources` from `current_exe()` when `app.path().resource_dir()`
+   errs) and a new release; it is not fixable from the harness. Impact: any CI or
+   harness that launches the bundle via `/tmp` or an un-resolved `$TMPDIR` is red
+   for the wrong reason, and a stranger who runs the app from a symlinked
+   location gets an empty window instead of an error.
 7. **No per-platform download guidance on the release page.** A stranger sees
    `.dmg`, `.exe`, `.msi`, `.AppImage`, `.deb` and a wheel with no signpost for
    which is the installer for their OS/architecture.
