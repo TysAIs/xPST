@@ -1332,7 +1332,13 @@ and `1` for anything else, including a mix of reasons. **"No new videos" and
 which is not a failure — a deliberate difference from `xpst post`, where a run
 with no attemptable destination is a failure. A non-zero batch adds
 `exit_code` to its `--json` payload; everything else in that payload
-(`all_success` / `partial_success` / per-platform fields) is unchanged.
+(`all_success` / `partial_success` / per-platform fields) is unchanged. The MCP
+equivalents (`xpst_run`, `xpst_backfill`) carry the same verdict as data, since
+they have no exit status of their own: `exit_code` (the code the CLI would exit
+with), `batch_status` (`published` / `partial` / `failed` / `nothing_to_do`) and
+`failed_destinations` — one entry per failed destination, with its error and
+family — so an agent reading MCP sees the failure a cron job would exit on,
+including the partial case where the batch still exits `0`.
 
 Use these in shell scripts:
 
