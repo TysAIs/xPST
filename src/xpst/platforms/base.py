@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from xpst.config import XPSTConfig
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
+from xpst.reconcile import PublishAttempt, ReconcileOutcome, ReconcileResult
 from xpst.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -629,6 +630,32 @@ class PlatformUploader(ABC):
             PlatformHealth with authentication status
         """
         pass
+
+    async def reconcile_publish(self, attempt: PublishAttempt) -> ReconcileResult:
+        """Read the destination back for evidence that ``attempt`` landed.
+
+        Called by the retry gate when an attempt ended with an UNKNOWN outcome
+        (timeout, connection drop, 5xx after the request was sent). It MUST use
+        read-only calls — a listing, or a lookup of the recorded id/urn — so
+        reconciling can never publish a duplicate while checking.
+
+        The default has no read-back path, so the gate blocks the retry with a
+        reason instead of guessing. Subclasses that can list their own recent
+        posts (see ``InstagramUploader``) override this and return FOUND only
+        with real evidence.
+
+        Returns:
+            FOUND with the real post id/url when the post is on the account,
+            ABSENT only when the platform definitively shows it missing, and
+            UNKNOWN when the read-back cannot tell.
+        """
+        return ReconcileResult(
+            outcome=ReconcileOutcome.UNKNOWN,
+            detail=(
+                f"{self.platform_name} has no read-back path for an unknown "
+                f"publish outcome"
+            ),
+        )
 
     async def authenticate(self) -> bool:
         """
