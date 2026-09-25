@@ -8,25 +8,37 @@ same perspective as a new user. It accepts a local `.dmg`, `.zip`, `.exe`,
 release tag itself:
 
 ```bash
-# Published release: the platform installer is resolved from the GitHub API
-scripts/e2e_install_from_artifact.sh --release v1.1.0
+# Published release: the platform installer is resolved from the release listing
+scripts/e2e_install_from_artifact.sh --release v1.2.1
 
-# URL: the release directory and macos-SHA256SUMS are inferred
+# URL: the release directory and its checksum file are inferred
 scripts/e2e_install_from_artifact.sh \
-  https://github.com/TysAIs/xPST/releases/download/v1.1.0/xPST.dmg
+  https://github.com/TysAIs/xPST/releases/download/v1.2.1/xPST_1.2.1_aarch64.dmg
 
 # Local file: provide the matching release checksum asset
 scripts/e2e_install_from_artifact.sh \
-  --checksums https://github.com/TysAIs/xPST/releases/download/v1.1.0/macos-SHA256SUMS \
-  /path/to/xPST.dmg
+  --checksums https://github.com/TysAIs/xPST/releases/download/v1.2.1/SHA256SUMS \
+  /path/to/xPST_1.2.1_aarch64.dmg
 ```
 
 `--release <tag>` resolves the installer a stranger is told to download for the
 host platform (override with `--platform macos|windows|linux`, or name the asset
-exactly with `--asset-name`). The resolution uses the release's own asset
-listing, so the run cannot silently test a local build while claiming to test a
-published one. When a release reports an asset size or digest, both are compared
-against the bytes actually downloaded.
+exactly with `--asset-name`). Resolution uses the release's own asset listing, so
+the run cannot silently test a local build while claiming to test a published one.
+It prefers the flat historical names (`xPST.dmg`, `xPST.exe`, …) and otherwise
+recognises the Tauri naming the current lanes publish
+(`xPST_<version>_<arch>.dmg|.exe|.msi|.AppImage|.deb`), preferring the asset for
+the host architecture. The listing comes from the GitHub API when a
+`GH_TOKEN`/`GITHUB_TOKEN` is present or the unauthenticated quota allows, and
+otherwise from the public `/releases/expanded_assets/<tag>` page — a stranger
+with no token must not be blocked by the 60-requests/hour limit. When a release
+reports an asset size or digest, both are compared against the bytes actually
+downloaded; when only the public page is available, no size/digest cross-check is
+possible and the run says so.
+
+Checksum resolution tries `<platform>-SHA256SUMS` first and falls back to the
+aggregate `SHA256SUMS`; a release that publishes only the aggregate (the Tauri
+lane does) therefore still verifies against the release's own checksum file.
 
 For a local asset without a checksum URL, pass both `--release-tag` and (when
 needed) `--platform macos|windows|linux`; the default repository is
@@ -35,8 +47,14 @@ local file can use `--checksum-asset xPST.dmg` (or another release basename).
 The harness uses `curl -L --fail --retry 2` for URL inputs and compares the downloaded
 SHA-256 before it mounts or launches anything.
 
-The harness uses an automatically deleted `xpst-stranger-install-*` directory
-under the operating system temporary directory. A macOS DMG is mounted
+The harness uses an automatically deleted `xpst-stranger-install-*` directory.
+On macOS it is created under the canonical `/private/tmp` rather than `$TMPDIR`
+(`/var/folders/<id>/T`) and the path is resolved, because the published Tauri
+shell cannot resolve its bundle resource directory when the `.app` is launched
+via a non-canonical path — through a symlinked component (`/tmp` →
+`/private/tmp`) or from the per-user temp dir — and dies with
+`FATAL: no resource dir` before starting the engine (see the gap list below). A
+macOS DMG is mounted
 read-only with `hdiutil`, its `.app` is copied into that directory, and the
 mount is detached. Zip files are extracted with path-traversal protection and
 their entry permission bits restored (an `.app` whose executable bit was lost
@@ -242,6 +260,84 @@ window in 0.83 s, a real running process, and a clean uninstall — exit status 
 advertised loopback root (`http://127.0.0.1:62154/`) never answered `/health` with 200. Before the
 executable-bit fix in this change, a zipped `.app` could never launch at all
 (`Permission denied`), so this real published asset is the direct regression proof for that fix.
+
+## Published v1.2.1 record (measured 2026-09-25, macOS arm64)
+
+The Tauri lane's macOS installer is the first published artifact that satisfies
+the packaged-engine contract. Run:
+
+```bash
+scripts/e2e_install_from_artifact.sh --release v1.2.1 \
+  --require-published --evidence-out /private/tmp/v1.2.1-macos-evidence.json
+```
+
+Measured result: **exit status 0** (full clean-profile pass).
+
+```text
+resolved asset : xPST_1.2.1_aarch64.dmg (70879887 bytes)
+checksum       : PASS (aggregate SHA256SUMS; sha256:c4823a489c5f74c357d60da915412ea27c3d27440dec9369600ee446d4b25456)
+installed bundle: com.tysais.xpst 1.2.1, stack=tauri (ui/index.html + xpst-engine present)
+boot-to-visible: PASS (0.70 s <= 15 s, CoreGraphics on-screen window)
+engine /health : PASS (HTTP 200 at http://127.0.0.1:<port>/)
+packaged UI    : PASS (title "xPST Dashboard")
+real process   : PASS (PID alive; xpst-engine sidecar observed)
+xpst-engine after shutdown: 0
+XPST_CONFIG_DIR override  : HONORED (config.yaml, analytics.db, credentials/ created in the isolated config dir)
+uninstall      : PASS (bundle, config dir, HOME profile and work dir removed)
+gatekeeper     : ad-hoc signed (TeamIdentifier not set), spctl rejected; no quarantine (curl download)
+```
+
+The release listing was resolved through the public
+`/releases/expanded_assets/v1.2.1` page (the unauthenticated API quota was
+exhausted), so no asset size/digest cross-check was possible; the checksum still
+came from the release's own `SHA256SUMS`. An earlier run of the same artifact did
+resolve through the API with size and digest compared — both paths pass.
+
+The only findings are the expected macOS trust ones: the build is ad-hoc signed
+and `spctl` rejects it, so a browser-downloaded copy needs Finder's **Open** or
+**Open Anyway**. Signing/notarization remains the stranger-facing release gap.
+
+### Stranger-install flow gap list (from the v1.2.1 run)
+
+Fixed in the harness:
+
+1. **The installer could not be found.** v1.2.1 publishes
+   `xPST_1.2.1_aarch64.dmg`; the resolver only knew flat names (`xPST.dmg`, …)
+   and aborted before downloading anything. Resolution now recognises the Tauri
+   `xPST_<version>_<arch>.<ext>` naming and prefers the host architecture.
+2. **The checksum file did not exist.** v1.2.1 has no `macos-SHA256SUMS`; the
+   harness demanded it and aborted. It now falls back to the aggregate
+   `SHA256SUMS`.
+3. **A stranger with no token was blocked.** The unauthenticated GitHub API limit
+   (60/hour) returned HTTP 403; the harness now falls back to the public release
+   page, and the 403 message names the rate limit.
+4. **A foreign `xpst-engine` was blamed as a leftover.** With the developer's own
+   app running, the "zero engine processes" assertion failed on a process the
+   harness never started. It now records the baseline before launch and only
+   reports engines this run started.
+5. **The default work directory was unusable.** The harness installed under
+   `$TMPDIR`/`/tmp`, where the published shell cannot start its engine (see
+   below). It now installs under the canonical `/private/tmp`.
+
+Still open (product, not harness):
+
+6. **The shell cannot resolve its bundle resources from a non-canonical path.**
+   Launched via a symlinked component (`/tmp` → `/private/tmp`) or from the
+   per-user temp dir (`/var/folders/<id>/T`), the published shell logs
+   `FATAL: no resource dir: unknown path`, never starts `xpst-engine`, and shows
+   an empty window. Reproduced **6/6** runs under `/var/folders` and **1/1** via
+   `/tmp`, versus **2/2** passes from canonical `/private/tmp`. It needs a
+   `src-tauri` fallback (derive `Contents/Resources` from `current_exe()` when
+   `app.path().resource_dir()` errs) and a new release; it is not fixable from
+   the harness. Impact: any CI or harness that installs under `$TMPDIR` is red for
+   the wrong reason, and a stranger who runs the app from a symlinked location
+   gets an empty window instead of an error.
+7. **No per-platform download guidance on the release page.** A stranger sees
+   `.dmg`, `.exe`, `.msi`, `.AppImage`, `.deb` and a wheel with no signpost for
+   which is the installer for their OS/architecture.
+8. **Ad-hoc signing / no notarization.** Unchanged from v1.1.0; Gatekeeper
+   rejection is the remaining trust step before a stranger can double-click the
+   app without the Open/Open Anyway detour.
 
 ## Harness self-tests
 
