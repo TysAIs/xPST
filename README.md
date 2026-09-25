@@ -556,7 +556,7 @@ Generated from the live registry — full schemas, consent gates, and per-tool n
 | `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or acce… | No |
 | `xpst_providers` | List supported content sources and posting destinations with capabilities | No |
 | `xpst_disconnect` | Disconnect a platform: remove its stored account credentials (tokens, cookies… | **Yes** |
-| `xpst_delete` | Delete a post RECORD from local xPST state only (operation=delete_record, sco… | **Yes** |
+| `xpst_delete` | Delete a post for REAL on the platform and remove its local record. Calls the… | **Yes** |
 | `messenger_send` | Send a text message to a Messenger recipient (page-scoped PSID) via the Meta… | **Yes** |
 | `messenger_set_rules` | Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->re… | **Yes** |
 | `xpst_messenger_check_comments` | Fetch recent comments on an Instagram or Facebook post and auto-reply per the… | **Yes** |

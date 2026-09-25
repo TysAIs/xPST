@@ -462,7 +462,7 @@ xPST exposes 40 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 | `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or acce… |
 | `xpst_providers` | List supported content sources and posting destinations with capabilities |
 | `xpst_disconnect` | Disconnect a platform: remove its stored account credentials (tokens, cookies… |
-| `xpst_delete` | Delete a post RECORD from local xPST state only (operation=delete_record, sco… |
+| `xpst_delete` | Delete a post for REAL on the platform and remove its local record. Calls the… |
 | `messenger_send` | Send a text message to a Messenger recipient (page-scoped PSID) via the Meta… |
 | `messenger_set_rules` | Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->re… |
 | `xpst_messenger_check_comments` | Fetch recent comments on an Instagram or Facebook post and auto-reply per the… |
