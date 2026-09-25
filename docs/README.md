@@ -426,40 +426,56 @@ The MCP (Model Context Protocol) server allows AI assistants to control xPST.
 xpst mcp
 ```
 
+<!-- BEGIN GENERATED DOCS README TOOL INDEX -->
+
 ### Available Tools
 
 xPST exposes 40 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 
 | Tool | Description |
 |------|-------------|
-| `xpst_run` | Check and cross-post new videos |
-| `xpst_post` | Manual post local video |
-| `xpst_health` | Platform health check |
-| `xpst_status` | Statistics |
-| `xpst_backfill` | Retry failed posts |
-| `xpst_failures_retry` | Retry one recorded failure (video_id + platform) |
-| `xpst_schedule_cancel` | Cancel a scheduled post (local schedule store only) |
-| `xpst_config_show` | Show configuration |
-| `xpst_auth_status` | Auth status |
-| `xpst_delete` | Remove local post record (does **not** delete the live post) |
-| `xpst_capabilities` | Canonical role-aware capability catalog |
-| `xpst_readiness` | Local readiness checks and blockers |
-| `xpst_auth_start` | Browser-free human authentication action plan |
-| `xpst_providers` | List sources and destinations |
-| `xpst_analytics` | Per-post engagement metrics |
-| `xpst_cross_post_analytics` | Cross-post correlation |
-| `xpst_followers` | Follower counts |
-| `xpst_best_time` | Best posting times |
-| `xpst_security_audit` | Run security audit |
-| `xpst_suggest_caption` | Generate caption suggestions |
-| `xpst_transcript` | Get video transcript |
-| `xpst_search` | Search transcripts and content |
-| `xpst_schedule_list` | List scheduled posts |
-| `xpst_schedule_add` | Add a scheduled post |
-| `kb_add` | Add to knowledge base |
-| `kb_query` | Query knowledge base |
-| `kb_organize` | Organize knowledge base |
-| `kb_areas` | List knowledge areas |
+| `xpst_run` | Check for new videos and cross-post them to configured platforms |
+| `xpst_post` | Post to platforms: one local video/image file, a carousel (carousel_paths), o… |
+| `xpst_analytics` | Per-post and per-platform engagement metrics (views, likes, comments, shares)… |
+| `xpst_cross_post_analytics` | Cross-post correlation analytics (B1): one video posted to multiple platforms… |
+| `xpst_followers` | Follower counts per platform with growth history. Returns total followers acr… |
+| `xpst_best_time` | Best time to post per platform, based on engagement history. Analyzes when yo… |
+| `xpst_security_audit` | Run an automated security check on the xPST installation. Verifies credential… |
+| `xpst_suggest_caption` | Generate AI caption suggestions for a video file. Uses the video's transcript… |
+| `xpst_generate_ideas` | Generate post ideas for a content topic (AI content studio). Uses the KB LLM… |
+| `xpst_transcript` | Get the transcript for a video by its content_hash or video_id. Returns the f… |
+| `xpst_search` | Search the knowledge base for nuggets, clips, and topics. Returns matching kn… |
+| `xpst_activity` | List recorded platform failures with targeted retry or review actions (read-o… |
+| `xpst_schedule_list` | List scheduled posts (pending, completed, failed) with times and targets |
+| `xpst_schedule_add` | Schedule a post for later: local video file + caption + ISO-8601 time, option… |
+| `xpst_schedule_cancel` | Cancel a scheduled post by entry id — the MCP equivalent of `xpst schedule re… |
+| `xpst_failures_retry` | Retry ONE recorded upload failure, identified by video_id + platform — the MC… |
+| `xpst_health` | Test connectivity to all platforms and sources (no uploads) |
+| `xpst_status` | Show cross-posting statistics and health status |
+| `xpst_backfill` | Retry failed or incomplete posts from history |
+| `xpst_config_show` | Display current configuration (with sensitive values masked) |
+| `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… |
+| `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… |
+| `xpst_capabilities` | Return the canonical role-aware provider catalog AND the content contract wit… |
+| `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets… |
+| `xpst_readiness` | Return local setup readiness and actionable blockers without starting the pos… |
+| `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or acce… |
+| `xpst_providers` | List supported content sources and posting destinations with capabilities |
+| `xpst_disconnect` | Disconnect a platform: remove its stored account credentials (tokens, cookies… |
+| `xpst_delete` | Delete a post RECORD from local xPST state only (operation=delete_record, sco… |
+| `messenger_send` | Send a text message to a Messenger recipient (page-scoped PSID) via the Meta… |
+| `messenger_set_rules` | Configure the Messenger ManyChat-lite auto-reply rules. Provide a keyword->re… |
+| `xpst_messenger_check_comments` | Fetch recent comments on an Instagram or Facebook post and auto-reply per the… |
+| `kb_add` | Ingest a local file or URL into the knowledge base |
+| `kb_query` | Return stored knowledge nuggets whose text matches the query |
+| `kb_organize` | Discover areas, tag difficulty, and assign nuggets |
+| `kb_areas` | List discovered knowledge areas in course order (beginner -> advanced) |
+| `xpst_setup_start` | Start or return the shared resumable setup transaction |
+| `xpst_setup_status` | Read the shared setup transaction and pending human actions |
+| `xpst_setup_resume` | Resume setup with safe step state or caller-verified readiness |
+| `xpst_setup_reset` | Reset the shared setup transaction and its recovery copies |
+
+<!-- END GENERATED DOCS README TOOL INDEX -->
 
 ### Example: Using with Claude Desktop
 
@@ -538,14 +554,15 @@ xpst/
 ├── analytics_store.py # Persistent analytics (SQLite)
 ├── anti_bot.py         # Anti-bot pacing and human-like behavior
 ├── connect.py          # Platform connection wizards
-├── platforms/          # Platform uploaders (6 platforms)
+├── platforms/          # Platform uploaders (7 platforms)
 │   ├── base.py         # Abstract base + registry
 │   ├── youtube.py      # YouTube (OAuth2, Data API v3)
 │   ├── instagram.py    # Instagram (Graph API / instagrapi)
 │   ├── x.py            # X/Twitter (twikit cookies / API v2)
-│   ├── tiktok.py       # TikTok (Content Posting API v2)
+│   ├── tiktok.py       # TikTok (source-only; Content Posting API v2 destination blocked pending external review)
 │   ├── threads.py      # Threads (Meta API)
-│   └── messenger.py    # Messenger (static page token, auto-reply)
+│   ├── messenger.py    # Messenger (static page token, auto-reply)
+│   └── facebook.py     # Facebook Pages (Graph API)
 ├── sources/            # Video sources (yt-dlp based)
 │   ├── base.py         # Abstract base + registry
 │   ├── tiktok.py       # TikTok source

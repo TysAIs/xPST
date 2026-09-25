@@ -37,7 +37,7 @@ live availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-t
 │  │  Anti-Bot Pacing │ Quota Manager │ Credential Store  │   │
 │  └──────────────────────────────────────────────────────┘   │
 │                                                              │
-│  Surfaces: CLI (45 cmds) │ Desktop shell (Tauri + engine)  │
+│  Surfaces: CLI (46 cmds) │ Desktop shell (Tauri + engine)  │
 │            Dashboard (FastAPI) │ MCP Server (40 tools)      │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -257,7 +257,7 @@ ffmpeg -i input.mp4 \
 - OAuth2 for YouTube (industry standard)
 - Cookie-based for X/Twitter (via twikit)
 - Graph API for Instagram (recommended), session-based via instagrapi (fallback)
-- Content Posting API v2 for TikTok
+- Content Posting API v2 auth shape for TikTok (the destination code path exists but publishing is blocked pending external TikTok app review — TikTok is source-only today)
 - Meta Threads API for Threads
 - Static Page Access Token for Messenger (with `appsecret_proof` on outbound calls and `X-Hub-Signature-256` verification on inbound webhooks)
 
