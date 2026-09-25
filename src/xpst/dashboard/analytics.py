@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 # AnalyticsStore backs the persisted metric_snapshots read model (used by
 # get_video_lineup). Core xpst module — always present, no optional guard.
 from xpst.analytics_store import AnalyticsStore
+from xpst.state_schema import resolve_platform_post_id
 
 # Platform color scheme for dashboard
 PLATFORM_COLORS = {
@@ -336,7 +337,7 @@ class AnalyticsReadModel:
         for video_id, data in state.get("posted_videos", {}).items():
             for platform, pinfo in (data.get("posted_to", {}) or {}).items():
                 plat = str(platform or "").lower()
-                pid = str(pinfo.get("id") or video_id or "")
+                pid = resolve_platform_post_id(pinfo) or str(video_id or "")
                 if (plat, pid) in seen:
                     continue
                 seen.add((plat, pid))
@@ -379,7 +380,7 @@ class AnalyticsReadModel:
             for plat, pinfo in posted_to.items():
                 if str(plat or "").lower() != platform:
                     continue
-                pid = str(pinfo.get("id") or "")
+                pid = resolve_platform_post_id(pinfo)
                 if pid and pid == post_id:
                     video_path = ""
                     local_raw = data.get("local_path") or data.get("video_path") or ""
@@ -527,7 +528,7 @@ class AnalyticsReadModel:
         for post in self.get_top_posts(limit=5):
             views = likes = 0
             for platform, info in (post.get("platforms") or {}).items():
-                row = metrics_by_post.get((platform, str(info.get("post_id") or info.get("id") or "")))
+                row = metrics_by_post.get((platform, resolve_platform_post_id(info)))
                 if row:
                     views += row.get("views") or 0
                     likes += row.get("likes") or 0

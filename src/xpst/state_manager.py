@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from xpst.config import XPSTConfig
+from xpst.state_schema import CANONICAL_POST_ID_KEY, LEGACY_POST_ID_KEY
 from xpst.state_store import StateStore
 from xpst.utils.logger import get_logger
 
@@ -186,8 +187,12 @@ class StateManager:
 
         if posted_to:
             for platform, info in posted_to.items():
+                # Canonicalise on the way in: the destination record is always
+                # persisted under the canonical key, so a caller handing us the
+                # legacy spelling cannot record an empty id (which every reader
+                # would then treat as "no post").
                 video["posted_to"][platform] = {
-                    "id": info.get("id", ""),
+                    CANONICAL_POST_ID_KEY: info.get(CANONICAL_POST_ID_KEY) or info.get(LEGACY_POST_ID_KEY) or "",
                     "url": info.get("url", ""),
                     "timestamp": info.get("timestamp", now),
                 }
@@ -689,7 +694,7 @@ class StateManager:
         posted_to = {}
         if platform:
             posted_to[platform] = {
-                "id": post_id or "",
+                CANONICAL_POST_ID_KEY: post_id or "",
                 "url": post_url or "",
                 "timestamp": now,
             }
@@ -741,7 +746,7 @@ class StateManager:
     ) -> None:
         """Legacy method - mark video as cross-posted to platform with optional content_hash."""
         now = _utc_now_iso()
-        posted_to = {platform: {"id": post_id or "", "url": post_url or "", "timestamp": now}}
+        posted_to = {platform: {CANONICAL_POST_ID_KEY: post_id or "", "url": post_url or "", "timestamp": now}}
         self.add_posted_video(
             video_id=video_id,
             source_url="",
