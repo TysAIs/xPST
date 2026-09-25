@@ -84,6 +84,7 @@ from xpst.content import (
 )
 from xpst.engine import CrossPostEngine, CrossPostResult
 from xpst.provider_truth import ProviderRole
+from xpst.services.batch_outcome import batch_outcome
 from xpst.setup_transaction import (
     SetupTransactionError,
     SetupTransactionNotFound,
@@ -240,7 +241,13 @@ _SETUP_ROLE_CAPABILITY_SCHEMA = {
 TOOLS: list[Tool] = [
     Tool(
         name="xpst_run",
-        description="Check for new videos and cross-post them to configured platforms",
+        description=(
+            "Check for new videos and cross-post them to configured platforms. "
+            "A batch where nothing was published is never reported as success: "
+            "`batch_status` says `published` / `partial` / `failed` / "
+            "`nothing_to_do`, `exit_code` is the status the CLI would exit with, "
+            "and `failed_destinations` names every destination that failed."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -643,7 +650,13 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="xpst_backfill",
-        description="Retry failed or incomplete posts from history",
+        description=(
+            "Retry failed or incomplete posts from history. `attempted` / "
+            "`successful` are counts, not a verdict: `batch_status`, `exit_code` "
+            "and `failed_destinations` report the same aggregate the CLI "
+            "(`xpst backfill`) exits on, so an all-failed retry is not read as a "
+            "successful one."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -1463,12 +1476,21 @@ async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallTool
     # not success.
     uploads = [upload for result in results for upload in result.results.values()]
     published = [upload for upload in uploads if upload.is_published]
+    # The aggregate verdict, from the same rule the CLI exits with: a run where
+    # nothing was published must not read as success to an agent either. MCP has
+    # no exit status, so the verdict travels as data — `exit_code` names the
+    # shared family, `batch_status` says what happened, and
+    # `failed_destinations` names every destination that failed and why.
+    outcome = batch_outcome(results)
     payload = {
         "ok": bool(uploads) and len(published) == len(uploads),
         "attempted": len(results),
         "uploads": len(uploads),
         "published": len(published),
         "processed": len(results),
+        "exit_code": outcome["exit_code"],
+        "batch_status": outcome["status"],
+        "failed_destinations": outcome["failed_destinations"],
         "results": [_serialize_result(r) for r in results],
     }
     return CallToolResult(
@@ -1724,9 +1746,16 @@ async def _handle_backfill(engine: CrossPostEngine, args: dict[str, Any]) -> Cal
 
     results = await engine.backfill(platforms=platforms, limit=max_count, source=source)
     successful = sum(1 for r in results if r.all_success)
+    # `attempted` / `successful` alone are counts, not a verdict: a backfill
+    # where every destination failed used to look exactly like one where there
+    # was nothing to do. The aggregate the CLI exits with travels here too.
+    outcome = batch_outcome(results)
     payload = {
         "attempted": len(results),
         "successful": successful,
+        "exit_code": outcome["exit_code"],
+        "batch_status": outcome["status"],
+        "failed_destinations": outcome["failed_destinations"],
         "results": [_serialize_result(r) for r in results],
     }
     return CallToolResult(
