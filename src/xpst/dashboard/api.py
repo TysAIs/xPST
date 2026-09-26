@@ -244,6 +244,23 @@ def _auth_checked_at_iso(auth: Mapping[str, Any] | None) -> str | None:
     return iso_timestamp(_auth_checked_at(auth))
 
 
+def _credential_health(canonical: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Forward-looking credential report for the UI (never raises).
+
+    A status read must not fail because the watchdog could not run, so any
+    problem degrades to an empty report — an empty report says nothing rather
+    than claiming everything is fine.
+    """
+    try:
+        from xpst.credential_health import build_credential_health
+
+        providers = canonical.get("providers") if isinstance(canonical, Mapping) else None
+        return build_credential_health(providers if isinstance(providers, Mapping) else {})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("credential health build failed: %s", str(exc)[:200])
+        return {}
+
+
 def _auth_probe_in_flight(config_dir: str) -> bool:
     with _AUTH_STATUS_LOCK:
         return str(config_dir) in _AUTH_STATUS_REFRESHING
@@ -1184,6 +1201,10 @@ def create_api_router(
             # the UI must render `badges[platform]` and `auth_checked_at`,
             # never a green pill derived from credential presence.
             "badges": _badge_summary(auth),
+            # Forward-looking watchdog (xpst.credential_health): what expires
+            # before the user would otherwise notice. Rendered as "N credentials
+            # need attention" rather than discovered via a failed post.
+            "credential_health": _credential_health(canonical),
             "auth_checked_at": _auth_checked_at(auth),
             "auth_checked_at_iso": _auth_checked_at_iso(auth),
             "canonical": canonical,

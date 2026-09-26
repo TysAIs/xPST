@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Credential-health watchdog — warned days ahead instead of at failure time.**
+  The `expiring` badge used a single 24-hour window, which is right for tokens
+  xPST renews by itself but useless for a credential only a human can replace
+  (an Instagram session, a Meta long-lived token with no refresh path): by the
+  time it warned, the next post had already failed. Such credentials now warn
+  **7 days** out, and `xpst auth status` carries a new `credential_health`
+  report — `needs_attention` with a per-platform deadline and the exact
+  `xpst connect <platform>` fix, `unverifiable` for providers that report no
+  expiry (stated, never guessed), and `not_applicable` for disabled,
+  source-only and non-account surfaces. The same report rides the MCP tool and
+  the dashboard health-status payload, so the app, an agent and the CLI all
+  agree. Derived from the existing live badges: no extra probing, no invented
+  deadlines.
+
 ## [1.2.1] — 2026-09-25
 
 ### Fixed
