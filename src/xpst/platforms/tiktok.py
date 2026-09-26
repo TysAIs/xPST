@@ -166,6 +166,92 @@ class TikTokUploader(PlatformUploader):
             self._access_token = token
             return token
 
+    def _draft_mode_requested(self) -> str:
+        """Configured draft mode: 'auto' (default) / 'always' / 'never'."""
+        return str(getattr(self.config.tiktok, "draft_mode", "auto") or "auto").lower()
+
+    def _unaudited_client_refused(self, error_body: str, status_code: int) -> bool:
+        """True when TikTok refused direct post because the client is unaudited."""
+        markers = (
+            "unaudited_client_can_only_post_to_private_accounts",
+            "audience_restricted_by_client_auth",
+            "privacy_level_not_authorized",
+            "scope_not_authorized",
+        )
+        return status_code in (403, 400) and any(m in error_body for m in markers)
+
+    async def _upload_as_draft(self, video_path: Path, caption: str, token: str) -> UploadResult:
+        """Upload the video as an inbox DRAFT (video.upload scope).
+
+        The unaudited-client fallback: no audit needed, but the user must open
+        the TikTok app and finish the post (≤5 pending drafts per 24h). The
+        result is honestly marked PENDING with the draft's publish_id — it is
+        NOT a published post and never reports success.
+        """
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8"}
+        file_size = video_path.stat().st_size
+        async with httpx.AsyncClient(timeout=300) as client:
+            init_resp = await client.post(
+                f"{TIKTOK_API_BASE}/v2/post/publish/video/upload/",
+                headers=headers,
+                params={"draft": "true", "upload_mode": "FILE_UPLOAD"},
+                json={
+                    "source_info": {
+                        "source": "FILE_UPLOAD",
+                        "video_size": file_size,
+                        "chunk_size": file_size,
+                        "total_chunk_count": 1,
+                    },
+                },
+            )
+            if init_resp.status_code >= 400:
+                return UploadResult(
+                    success=False,
+                    error=f"TIKTOK_DRAFT_INIT_ERROR: {init_resp.text[:200]}",
+                    platform="tiktok",
+                )
+            init_data = init_resp.json()
+            publish_id = (init_data.get("data") or {}).get("publish_id")
+            upload_url = (init_data.get("data") or {}).get("upload_url")
+            if not publish_id or not upload_url:
+                return UploadResult(
+                    success=False,
+                    error=f"TIKTOK_DRAFT_INIT_ERROR: no publish_id/upload_url: {init_resp.text[:200]}",
+                    platform="tiktok",
+                )
+            upload_resp = await client.put(
+                upload_url,
+                headers={
+                    "Content-Range": f"bytes 0-{file_size - 1}/{file_size}",
+                    "Content-Length": str(file_size),
+                },
+                content=open(video_path, "rb"),  # noqa: SIM115 — httpx manages the file lifecycle
+            )
+            if upload_resp.status_code >= 400:
+                return UploadResult(
+                    success=False,
+                    error=f"TIKTOK_DRAFT_UPLOAD_ERROR: {upload_resp.text[:200]}",
+                    platform="tiktok",
+                )
+        logger.info("TikTok: draft uploaded (publish_id=%s) — user finishes in the TikTok app", publish_id)
+        return UploadResult(
+            success=False,
+            outcome=UploadOutcome.PENDING,
+            error=(
+                "TIKTOK_DRAFT_PENDING: video uploaded as an inbox draft — "
+                "finish the post in the TikTok app to publish it"
+            ),
+            platform="tiktok",
+            metadata={
+                "publish_id": publish_id,
+                "status": "DRAFT_UPLOADED",
+                "draft_mode": True,
+                "caption_length": len(caption),
+                "sandbox": self._is_sandbox(),
+            },
+            retryable=False,
+        )
+
     async def upload(self, video_path: Path, caption: str) -> UploadResult:
         """Upload a video to TikTok via the Content Posting API (Direct Post).
 
@@ -173,6 +259,11 @@ class TikTokUploader(PlatformUploader):
         1. POST /v2/post/publish/video/init/ — initialize upload, get upload URL
         2. PUT to the upload URL — upload the video bytes
         3. POST /v2/post/publish/status/fetch/ — poll until publish completes
+
+        Draft fallback (``tiktok.draft_mode``): 'always' uses the inbox-draft
+        path without attempting direct post; 'auto' retries the upload as a
+        draft when TikTok refuses direct post for an unaudited client; 'never'
+        keeps direct post only.
 
         Args:
             video_path: Path to video file
@@ -183,7 +274,11 @@ class TikTokUploader(PlatformUploader):
         """
         self._validate_video(video_path)
 
-        # Truncate caption if needed
+        # 'always' skips direct post entirely
+        if self._draft_mode_requested() == "always":
+            token = await self._get_access_token()
+            return await self._upload_as_draft(video_path, caption, token)
+
         if len(caption) > self.MAX_CAPTION_LENGTH:
             caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
 
@@ -365,6 +460,23 @@ class TikTokUploader(PlatformUploader):
                     except Exception as refresh_err:
                         logger.error(f"TikTok: token refresh failed: {refresh_err}")
                 logger.error(f"TikTok HTTP error: {e}")
+                # 'auto': unaudited clients cannot direct-post publicly — fall
+                # back to the inbox-draft upload so the user finishes in-app.
+                if (
+                    self._draft_mode_requested() == "auto"
+                    and self._unaudited_client_refused(error_body, status_code)
+                ):
+                    logger.warning(
+                        "TikTok refused direct post for an unaudited client (%s) — "
+                        "falling back to inbox-draft upload",
+                        error_body[:120],
+                    )
+                    try:
+                        token = await self._get_access_token()
+                    except Exception:
+                        token = self._access_token or ""
+                    if token:
+                        return await self._upload_as_draft(video_path, caption, token)
                 return self._handle_http_error(e, error_body)
             except httpx.HTTPError as e:
                 logger.error(f"TikTok network error: {e}")
