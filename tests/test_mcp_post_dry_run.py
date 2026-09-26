@@ -126,18 +126,20 @@ async def test_dry_run_refusal_error_tracks_the_first_hard_blocker(tmp_path, mon
 
 @pytest.mark.asyncio
 async def test_dry_run_error_is_null_when_nothing_blocks(tmp_path, monkeypatch) -> None:
-    """A plan that is merely auth-degraded still has hard blockers; the shape
-    rule is simply: top-level error == plan.error, whatever it is."""
+    """The shape rule is simply: top-level error == plan.error, whatever it is.
+
+    The synthetic clip lives under tmp_path (not /tmp/) so the test also passes
+    on Windows runners, where /tmp does not exist.
+    """
     monkeypatch.setenv("XPST_MCP_ALLOW_MUTATIONS", "1")
     engine = _engine(tmp_path)
-    import os
 
-    with open("/tmp/clip-ok.mp4", "wb") as fh:
-        fh.write(b"\x00" * 64)
+    clip = tmp_path / "clip-ok.mp4"
+    clip.write_bytes(b"\x00" * 64)
 
     result = await _handle_post(
         engine,
-        {"video_path": "/tmp/clip-ok.mp4", "caption": "hello", "platforms": ["youtube"], "dry_run": True},
+        {"video_path": str(clip), "caption": "hello", "platforms": ["youtube"], "dry_run": True},
     )
     payload = json.loads(result.content[0].text)
     assert payload["error"] == payload["plan"]["error"]
@@ -145,4 +147,3 @@ async def test_dry_run_error_is_null_when_nothing_blocks(tmp_path, monkeypatch) 
         assert payload["ready"] is True
     else:
         assert payload["ready"] is False
-    os.unlink("/tmp/clip-ok.mp4")
