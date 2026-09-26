@@ -22,6 +22,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agree. Derived from the existing live badges: no extra probing, no invented
   deadlines.
 
+### Fixed
+- **The Messenger webhook intake accepted unsigned payloads.** With no
+  `X-Hub-Signature-256` header and no `app_secret` configured (the default
+  install), `POST /webhook/messenger` returned `200` — the dispatch was a no-op
+  only for as long as Messenger stayed disabled, so an unauthenticated local
+  caller (or anyone reaching a non-loopback bind) could drive the intake path.
+  Meta always signs its deliveries, so an unsigned request is now refused with
+  `403`, and a signature xPST cannot verify (no `app_secret`) is refused too.
+  The `GET` subscription handshake also fails closed when no `verify_token` is
+  configured, instead of completing the handshake for anybody who asks.
+  Docs (`docs/DASHBOARD.md`, `docs/setup-messenger.md`) updated with the two new
+  refusal reasons.
+
 ## [1.2.1] — 2026-09-25
 
 ### Fixed

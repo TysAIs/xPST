@@ -738,47 +738,77 @@ def _setup_messenger_webhook(app: FastAPI, config_dir: str) -> None:
 
     @app.get(path, name="messenger_webhook_verify", include_in_schema=False, response_model=None)
     async def _messenger_verify(request: Request) -> PlainTextResponse | JSONResponse:
-        """Handle Meta's webhook subscription verification (GET)."""
+        """Handle Meta's webhook subscription verification (GET).
+
+        Fails closed when no ``verify_token`` is configured: without one there is
+        nothing to verify a subscription against, and the previous behaviour
+        (accept any token when unconfigured) let a stray caller complete the
+        handshake on an install that never opted in.
+        """
         params = request.query_params
         if params.get("hub.mode") != "subscribe":
             return JSONResponse({"detail": "hub.mode must be 'subscribe'"}, status_code=403)
         expected = _verify_token()
+        if not expected:
+            logger.warning("Messenger webhook verification refused: no verify_token configured")
+            return JSONResponse(
+                {
+                    "detail": (
+                        "Messenger webhook is not configured: set "
+                        "accounts.messenger.verify_token (and app_secret) to enable it"
+                    )
+                },
+                status_code=403,
+            )
         token = params.get("hub.verify_token", "")
-        if expected and (not token or not hmac.compare_digest(token, expected)):
+        if not token or not hmac.compare_digest(token, expected):
             return JSONResponse({"detail": "Invalid hub.verify_token"}, status_code=403)
         return PlainTextResponse(params.get("hub.challenge", ""))
 
     @app.post(path, name="messenger_webhook", include_in_schema=False, response_model=None)
     async def _messenger_webhook(request: Request) -> JSONResponse:
-        """Handle a verified Messenger webhook event (POST)."""
+        """Handle a Messenger webhook event (POST).
+
+        Every payload must carry a verifiable ``X-Hub-Signature-256``: Meta always
+        signs its deliveries, so an unsigned request is not a Meta delivery, and
+        accepting one let an unauthenticated caller reach the adapter (a no-op
+        only for as long as messenger stayed disabled and secret-less).
+        """
         raw = await request.body()
         signature = request.headers.get("X-Hub-Signature-256", "")
         secrets = _app_secrets()
-        if signature:
-            matched = False
-            for secret in secrets:
-                expected = "sha256=" + hmac.new(secret.encode("utf-8"), raw or b"", hashlib.sha256).hexdigest()
-                if hmac.compare_digest(expected, signature):
-                    matched = True
-                    break
-            if not matched:
-                if secrets:
-                    logger.warning("Messenger webhook signature mismatch")
-                    return JSONResponse({"detail": "Invalid signature"}, status_code=403)
-                # FAIL CLOSED. A signed payload with no configured app secret
-                # cannot be verified, and the previous behaviour ("body accepted
-                # unverified") let an unauthenticated caller drive the adapter.
-                logger.error(
-                    "Messenger webhook carries X-Hub-Signature-256 but no app secret is "
-                    "configured; rejecting the payload (cannot verify it)."
-                )
-                return JSONResponse(
-                    {"detail": "Signature present but no app secret is configured to verify it"},
-                    status_code=403,
-                )
-        elif secrets:
+        if not signature:
             logger.warning("Messenger webhook missing X-Hub-Signature-256 header")
-            return JSONResponse({"detail": "Missing X-Hub-Signature-256"}, status_code=403)
+            return JSONResponse(
+                {
+                    "detail": (
+                        "Missing X-Hub-Signature-256: every Messenger delivery is signed, "
+                        "so this request cannot be verified"
+                    )
+                },
+                status_code=403,
+            )
+        matched = False
+        for secret in secrets:
+            expected = "sha256=" + hmac.new(secret.encode("utf-8"), raw or b"", hashlib.sha256).hexdigest()
+            if hmac.compare_digest(expected, signature):
+                matched = True
+                break
+        if not matched:
+            if secrets:
+                logger.warning("Messenger webhook signature mismatch")
+                return JSONResponse({"detail": "Invalid signature"}, status_code=403)
+            # FAIL CLOSED. A signed payload with no configured app secret
+            # cannot be verified, and accepting it unverified would let an
+            # unauthenticated caller drive the adapter.
+            logger.error(
+                "Messenger webhook carries X-Hub-Signature-256 but no app secret is "
+                "configured; rejecting the payload (cannot verify it)."
+            )
+            return JSONResponse(
+                {"detail": "Signature present but no app secret is configured to verify it"},
+                status_code=403,
+            )
         try:
             payload = json.loads(raw) if raw else {}
         except json.JSONDecodeError:
