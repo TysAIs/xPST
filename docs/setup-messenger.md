@@ -137,7 +137,7 @@ xpst config validate
 xPST exposes two webhook endpoints on the dashboard (default path `/webhook/messenger`, configurable via `webhook_path`):
 
 - **`GET`** — Meta's subscription handshake. xPST verifies `hub.verify_token` and echoes `hub.challenge`.
-- **`POST`** — inbound message events. xPST verifies `X-Hub-Signature-256` (HMAC-SHA256 with your App Secret) before dispatching, then replies per your rules.
+- **`POST`** — inbound message events. xPST requires `X-Hub-Signature-256` (HMAC-SHA256 with your App Secret) on every request and refuses (403) anything it cannot verify — including an unsigned body on a disabled/unconfigured install — before dispatching, then replies per your rules.
 
 1. Start the dashboard: `xpst dashboard` (binds `127.0.0.1:8080` by default).
 2. Expose it to the internet (reverse proxy / ngrok / Cloudflare Tunnel) so Meta can reach `https://your-host/webhook/messenger`.
@@ -198,7 +198,9 @@ xpst messenger send <PSID> "Hello from xPST!"
 |---------|-----|
 | `MESSENGER_NOT_CONFIGURED` | Set `accounts.messenger.enabled: true` and a Page Access Token (Step 4), or run `xpst auth messenger`. |
 | `MESSENGER_AUTH_EXPIRED` / `190` | The page token is invalid or the page was removed from the app. Re-generate it (Step 2). |
-| Webhook GET returns 403 | `hub.verify_token` doesn't match `accounts.messenger.verify_token`. |
+| Webhook GET returns 403 | `hub.verify_token` doesn't match `accounts.messenger.verify_token` — or no `verify_token` is configured at all (an unconfigured install refuses the handshake outright). |
+| Webhook POST returns 403 "Missing X-Hub-Signature-256" | The request was not signed. Meta always signs its deliveries, so this did not come from Meta: an unsigned caller is refused even while Messenger is disabled. |
+| Webhook POST returns 403 "no app secret is configured" | A signature arrived but xPST has no `app_secret` to verify it against — set one (`accounts.messenger.app_secret`) instead of leaving the intake unverifiable. |
 | Webhook POST returns 403 "Invalid signature" | `app_secret` mismatch — make sure the App Secret in xPST matches the app that owns the page token. |
 | `MESSENGER_RATE_LIMITED` | You hit the Messenger API rate limit; back off and retry. |
 | `MESSENGER_NO_RECIPIENT` | Direct `upload()` needs `accounts.messenger.page_id`; webhook auto-reply always has a sender PSID. |
