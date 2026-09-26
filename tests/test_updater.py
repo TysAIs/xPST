@@ -48,9 +48,11 @@ class TestVersionChecking:
             import xpst as _xpst_module
 
             pytest.skip(
-                "xpst dist metadata (%r) is stale vs the running module %r "
-                "(module: %s). Refresh the editable install: `pip install -e .` "
-                "from the repo root." % (expected, ver, getattr(_xpst_module, "__file__", "?")),
+                "xpst dist metadata ({!r}) is stale vs the running module {!r} "
+                "(module: {}). Refresh the editable install: `pip install -e .` "
+                "from the repo root.".format(
+                    expected, ver, getattr(_xpst_module, "__file__", "?")
+                ),
             )
 
     def test_get_installed_version_known_package(self):
