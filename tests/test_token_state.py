@@ -711,3 +711,53 @@ def test_refresh_tokens_endpoint_passes_force_through(tmp_path, monkeypatch):
     assert seen["force"] is True
     assert body["count"] == 1
     assert body["failed"] == []
+
+
+def test_no_refresh_path_warns_a_week_out_not_a_day():
+    """The watchdog horizon: replacing this needs a browser, so warn early.
+
+    24h is right for a token xPST refreshes itself; a human-only renewal must
+    warn while there is still time to act (Tyler's "why do I only find out when
+    the post fails").
+    """
+    meta = TokenMetadata(
+        platform="threads",
+        auth_mode="oauth",
+        configured=True,
+        has_refresh_token=False,
+        expires_at=NOW + 5 * 24 * HOUR,
+    )
+    info = derive_token_state("threads", _live(auth_mode="oauth"), meta, now=NOW)
+    assert info["token_state"] == TOKEN_STATE_EXPIRING
+    assert info["badge"] == BADGE_EXPIRING
+    assert info["expiry_horizon"] == "reauth"
+    assert info["reauth_window_seconds"] == 7 * 24 * 3600
+    assert info["badge_action"] == "xpst connect threads"
+
+
+def test_no_refresh_path_beyond_the_horizon_is_connected():
+    meta = TokenMetadata(
+        platform="threads",
+        auth_mode="oauth",
+        configured=True,
+        has_refresh_token=False,
+        expires_at=NOW + 10 * 24 * HOUR,
+    )
+    info = derive_token_state("threads", _live(auth_mode="oauth"), meta, now=NOW)
+    assert info["token_state"] == TOKEN_STATE_VALID
+    assert info["badge"] == BADGE_CONNECTED
+    assert info["expiry_horizon"] is None
+
+
+def test_auto_refresh_window_is_unchanged_by_the_reauth_horizon():
+    """A refreshable token 5 days out stays green: xPST renews it in the background."""
+    info = derive_token_state(
+        "youtube",
+        _live(),
+        _meta(has_refresh_token=True, expires_at=NOW + 5 * 24 * HOUR),
+        now=NOW,
+    )
+    assert info["token_state"] == TOKEN_STATE_VALID
+    assert info["badge"] == BADGE_CONNECTED
+    assert info["reauth_window_seconds"] == 7 * 24 * 3600
+    assert info["expiry_horizon"] is None
