@@ -1,6 +1,10 @@
 # TikTok Setup
 
-> **Role in xPST:** TikTok is currently a **source-only** integration. xPST can download videos *from* TikTok to cross-post elsewhere. Destination publishing is pending external TikTok developer review and approved app credentials; the destination section below records that pending path and is not a readiness claim.
+> **Role in xPST:** TikTok is a **source** integration (download videos to
+> cross-post elsewhere) and a **draft-mode destination**: with OAuth
+> credentials, xPST can upload videos to your TikTok inbox as drafts you finish
+> in the app — no developer-app audit required (see the destination section).
+> Public auto-publish (Direct Post) still awaits TikTok's app audit.
 > **Auth:** None required for basic downloads. Optional **browser cookies** can enable HD quality without watermarks.
 
 TikTok source mode watches a username and downloads new videos using `yt-dlp`
@@ -153,36 +157,52 @@ xpst run --dry-run --json
 
 ---
 
-## TikTok as a destination (pending external review)
+## TikTok as a destination (unaudited draft mode now; Direct Post after review)
 
-TikTok destination publishing is **not available in the current live state**.
-The code path below is retained as preparation for the official Content Posting
-API (Direct Post), but external TikTok developer review and approved app
-credentials are still required. Do not enable this destination or present it as
-ready until that review is complete.
+TikTok destination publishing works **today** in **inbox-draft mode** without a
+developer app audit: with OAuth credentials (`video.upload` scope), xPST
+uploads the video as a **draft to your TikTok inbox** and you finish the post
+in the TikTok app (≤5 pending drafts per 24h). A draft is *not* auto-published
+— xPST reports it as PENDING, never as a posted success. Full public Direct
+Post requires TikTok's app audit (public website + privacy/terms + demo video;
+approval is discretionary, 2–8 weeks).
 
-### Pending requirements
-
-1. Create a TikTok developer app and request access to the Content Posting API.
-2. After approval, complete the per-user OAuth 2.0 flow and obtain an
-   `access_token` and `refresh_token`.
-3. Configure the approved credentials only when the integration is enabled for
-   your account:
+### Draft-mode configuration (unaudited clients)
 
 ```yaml
 accounts:
   tiktok:
     enabled: true
     client_key: "your_tiktok_client_key"
-    client_secret: "your_tiktok_client_secret"
+    client_secret: "your_tiktok_client_secret"   # never commit this
     access_token: "your_oauth_access_token"
     refresh_token: "your_oauth_refresh_token"
+    # auto (default): try Direct Post, fall back to a draft when TikTok
+    #   refuses public post for an unaudited client;
+    # always: upload drafts only (recommended before the audit);
+    # never: Direct Post only (after a successful audit).
+    draft_mode: "auto"
 ```
 
-Do not use `xpst connect tiktok` as evidence that destination publishing is
-available; its current supported path is TikTok source setup. See TikTok's
+Behaviour by mode:
+
+- `auto` — Direct Post is attempted first; the unaudited-client refusal
+  (`unaudited_client_can_only_post_to_private_accounts`) triggers the same
+  video's draft upload, and the outcome is PENDING with `draft_mode: true` in
+  the result metadata.
+- `always` — skips Direct Post entirely; every destination post is a draft.
+- `never` — Direct Post only; after TikTok's audit this is the normal mode.
+
+A draft upload is reported as pending work for the user (finish it in the
+TikTok app); it is never reported as a successful public post.
+
+### Direct Post (after the developer-app audit)
+
+Once the app passes TikTok's review and the account's OAuth consent grants
+`video.publish`, `draft_mode: never` posts publicly through the container
+model. See TikTok's
 [Direct Post docs](https://developers.tiktok.com/doc/content-posting-api-direct-post)
-for the external review and API requirements.
+for the review and API requirements.
 
 ---
 

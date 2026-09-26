@@ -44,7 +44,7 @@
 
 **xPST** (Cross-Posting Suite) is a local-first, open-source automation tool that takes a creator's short-form video from one source platform and republishes it to connected destinations. It tracks per-post performance across configured platforms in one place, and feeds the creator's published content into a personal knowledge base that any connected AI agent can semantically query.
 
-xPST includes integrations for **seven platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, Facebook Pages, and (opt-in) Facebook Messenger — but their current availability is not uniform. YouTube, X, and Instagram are live-verified; TikTok is currently source-only; Threads, Facebook Pages, and Messenger are not authenticated in the current live environment. See the [capability truth table](docs/INSTALL.md#capability-truth-table) before treating an integration as ready.
+xPST includes integrations for **seven platforms** — YouTube, Instagram, X/Twitter, TikTok, Threads, Facebook Pages, and (opt-in) Facebook Messenger — but their current availability is not uniform. YouTube, X, and Instagram are live-verified; TikTok works as a source and a draft-mode destination (drafts finished in-app; public Direct Post pending TikTok's audit); Threads, Facebook Pages, and Messenger are not authenticated in the current live environment. See the [capability truth table](docs/INSTALL.md#capability-truth-table) before treating an integration as ready.
 
 It runs three ways:
 - **Desktop shell** — one Tauri 2 app (a native window over the local dashboard)
@@ -602,7 +602,7 @@ xPST includes six platform integrations, but the live status is not uniform. The
 | YouTube | Live-verified (account-dependent) | OAuth 2.0 (official Data API v3) | [docs/setup-youtube.md](docs/setup-youtube.md) |
 | Instagram | Live-verified (account-dependent) | Meta Graph API (official, default) | [docs/setup-instagram.md](docs/setup-instagram.md) |
 | X / Twitter | Live-verified (account-dependent) | Cookies (twikit) or API v2 | [docs/setup-x-twitter.md](docs/setup-x-twitter.md) |
-| TikTok | Source-only; destination pending external review | yt-dlp (source) / Content Posting API (not currently available) | [docs/setup-tiktok.md](docs/setup-tiktok.md) |
+| TikTok | Source + inbox-draft destination (drafts finished in-app); public Direct Post pending audit | yt-dlp (source) / Content Posting API video.upload (drafts) | [docs/setup-tiktok.md](docs/setup-tiktok.md) |
 | Threads | Disabled / unauthenticated; opt-in destination | Meta Threads API (official) | [docs/setup-threads.md](docs/setup-threads.md) |
 | Facebook Page | Unauthenticated; opt-in destination (BYO Meta app) | Facebook Login for Business → Graph API (official) | [docs/setup-facebook.md](docs/setup-facebook.md) |
 | Messenger | Disabled / unauthenticated; opt-in messaging/auto-reply | Facebook Page Access Token + app secret | [docs/setup-messenger.md](docs/setup-messenger.md) |
@@ -663,9 +663,9 @@ Then run `xpst auth x`. An official **API v2** mode (`auth_mode: api_v2`) is als
 
 `xpst connect x` now supports the official OAuth flow (ban-safe).
 
-### TikTok (source-only today)
+### TikTok (source + draft-mode destination)
 
-TikTok is currently supported as a **source** for downloading content to
+TikTok is supported as a **source** for downloading content to
 cross-post elsewhere. Source fetching uses `yt-dlp`, with browser cookies
 available for HD downloads when configured:
 
@@ -676,12 +676,17 @@ xpst connect tiktok   # asks for the username to watch + optional browser cookie
 Enabling browser cookies (`cookies_from_browser: true`) can unlock HD,
 watermark-free downloads via `yt-dlp`.
 
-TikTok **destination publishing is not available yet**. It awaits external
-TikTok developer review and approved app credentials. Do not enable or document
-it as a ready publishing destination until that review is complete.
+TikTok as a **destination** works today in **inbox-draft mode**: with OAuth
+credentials (`video.upload` scope), xPST uploads the video to your TikTok
+inbox as a draft and you finish the post in the TikTok app — no developer-app
+audit required. Set `accounts.tiktok.draft_mode: always` (or the default
+`auto`, which falls back to drafts when TikTok refuses unaudited public
+posting). A draft is reported as PENDING, never as a published post. Full
+public Direct Post still awaits TikTok's developer-app audit
+(2–8 weeks, discretionary).
 
 See [docs/setup-tiktok.md](docs/setup-tiktok.md) for the source configuration
-and the pending destination requirements.
+and the draft-mode destination setup.
 
 ### Threads (Meta Threads API — opt-in, currently disabled)
 
