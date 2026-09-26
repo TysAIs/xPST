@@ -7,7 +7,8 @@ surfaces and compare them with the registry actually served by
 ``xpst.mcp.server``.
 
 Deliberately excluded: dated point-in-time documents (``CHANGELOG.md``,
-``GAP_ANALYSIS.md``) whose numbers record history rather than current state,
+``docs/history/gap-analysis-v1.0.0.md``) whose numbers record history rather
+than current state,
 and per-category sub-counts such as ``### Core Operations (6 tools)`` which are
 subsets, not totals.
 """
