@@ -208,7 +208,7 @@ the live check that was just run, plus the timestamp of that check:
 | Badge | Meaning |
 |-------|---------|
 | `connected` | a passing live check proved it works right now |
-| `expiring` | still usable, but the access token expires soon (or has expired and xPST is refreshing it) |
+| `expiring` | still usable, but the credential's deadline is close (or has expired and xPST is refreshing it). A token xPST renews itself warns inside 24 hours; a credential **only you can renew** warns 7 days out, so there is time to act before a post fails |
 | `needs_reauth` | user action required — run `xpst connect <platform>` |
 | `source_only` | usable as a source only (TikTok download), never as an upload target |
 | `disabled` | switched off in config |
@@ -218,6 +218,15 @@ An automatic refresh path keeps the badge green for tokens xPST renews itself
 (YouTube refresh tokens, Threads/Meta long-lived tokens); a failed refresh is
 recorded and downgrades the badge to `needs_reauth` instead of promising a
 retry that is not happening.
+
+**Credential-health watchdog.** `xpst auth status` (and the same payload over
+MCP and the dashboard) also carries `credential_health`: a forward-looking
+report naming the credentials that will die before anyone notices, how long is
+left, and the exact command that fixes each one — `needs_attention` (act now),
+`unverifiable` (the provider reports no expiry, so xPST says it cannot predict
+it instead of guessing), and `not_applicable` (disabled, source-only, or not an
+account surface). It is derived from the badges above — no extra probing, and it
+never invents a deadline.
 
 **Instagram auth modes.** The recommended/primary mode is the official Meta Graph
 API (`auth_mode: "graph_api"`, using a `graph_access_token` and `graph_ig_user_id`).
