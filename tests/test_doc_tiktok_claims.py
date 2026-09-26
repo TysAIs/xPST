@@ -32,7 +32,7 @@ EXCLUDED_BASENAMES = {
     "CHANGELOG.md",
     "ROADMAP.md",
     "QUALITY_REVIEW.md",
-    "GAP_ANALYSIS.md",
+    "gap-analysis-v1.0.0.md",
 }
 
 # P1: "post/upload ... to TikTok" with no disclaimer fragment later in the
@@ -66,6 +66,9 @@ AFFIRMATIVE_TIKTOK_PUBLISH_PATTERNS = [
 def _iter_repo_docs() -> list[Path]:
     paths = [REPO_ROOT / "AGENTS.md"]
     paths.extend(sorted((REPO_ROOT / "docs").glob("*.md")))
+    # Archived point-in-time audits under docs/history/ record history, not
+    # current state — same rationale as CHANGELOG.md in EXCLUDED_BASENAMES.
+    paths.extend(sorted((REPO_ROOT / "docs" / "history").glob("*.md")))
     return paths
 
 
