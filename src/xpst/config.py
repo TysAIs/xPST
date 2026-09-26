@@ -128,6 +128,26 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
     write_text_atomic(path, text, mode=0o600)
 
+
+#: Credential-file fields whose shipped defaults point at ``~/.xpst``.
+#:
+#: Why this table exists: with ``XPST_CONFIG_DIR`` set to a throwaway directory,
+#: ``config.config_dir`` and ``CredentialStore(config.config_dir)`` correctly
+#: move, but these per-platform paths stayed absolute defaults pointing at the
+#: real home — so a "sandboxed" run still read AND rewrote the user's live
+#: credentials (observed: `xpst auth status` with a temp XPST_CONFIG_DIR
+#: refreshed ``~/.xpst/credentials/x_cookies.json``). Any agent, CI job or test
+#: that sandboxes itself with XPST_CONFIG_DIR was silently touching real
+#: accounts.
+_REBASABLE_CREDENTIAL_FIELDS: tuple[tuple[str, str], ...] = (
+    ("youtube", "client_secrets"),
+    ("youtube", "token_file"),
+    ("x", "cookies_file"),
+    ("instagram", "session_file"),
+    ("tiktok", "cookies_file"),
+)
+
+
 # Default configuration values
 DEFAULT_CONFIG = {
     "accounts": {
@@ -781,6 +801,10 @@ class XPSTConfig:
         # Override with environment variables
         config = cls._apply_env_vars(config)
 
+        # An explicit XPST_CONFIG_DIR profile owns its credential files: rebase
+        # any path still pointing at the default ~/.xpst before expanding.
+        config = cls._rebase_credential_paths(config)
+
         # Expand paths
         config = cls._expand_paths(config)
 
@@ -1006,6 +1030,42 @@ class XPSTConfig:
         if "provider_mode" in file_config:
             config.provider_mode = str(file_config["provider_mode"])
 
+        return config
+
+    @classmethod
+    def _rebase_credential_paths(cls, config: "XPSTConfig") -> "XPSTConfig":
+        """Re-point default credential paths at an explicit config-dir profile.
+
+        ``XPST_CONFIG_DIR`` selects the config directory, and
+        ``config.config_dir`` + ``CredentialStore`` honor it — but the shipped
+        per-platform defaults are absolute ``~/.xpst/credentials/...`` paths that
+        stayed put, so a sandboxed run read and rewrote the real user's
+        credentials.
+
+        Only paths that still sit under the DEFAULT config dir are rebased: a
+        value the user set deliberately (config file or env var) is never moved,
+        and without an override this is a no-op.
+        """
+        if not _config_dir_override():
+            return config
+        default_root = Path(os.path.expanduser("~/.xpst"))
+        active_root = Path(os.path.expanduser(config.config_dir))
+        if active_root == default_root:
+            return config
+        for section, field_name in _REBASABLE_CREDENTIAL_FIELDS:
+            holder = getattr(config, section, None)
+            if holder is None:
+                continue
+            raw = getattr(holder, field_name, None)
+            if not raw or not isinstance(raw, str):
+                continue
+            candidate = Path(os.path.expanduser(raw))
+            try:
+                rel = candidate.relative_to(default_root)
+            except ValueError:
+                # Not under the default home — an explicit choice. Leave it.
+                continue
+            setattr(holder, field_name, str(active_root / rel))
         return config
 
     @classmethod
