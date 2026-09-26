@@ -1627,6 +1627,12 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                     "ready": not blockers and bool(plan_payload and plan_payload["ready"]),
                     "blockers": blockers,
                     "plan": plan_payload,
+                    # Refusal shape parity with the non-dry path and the other
+                    # surfaces: the first hard blocker as the top-level
+                    # ``{code, message}`` error object (the plan also carries it
+                    # under plan.error; this makes the dry-run envelope match
+                    # refusal_envelope instead of burying the code one level in).
+                    "error": (plan_payload or {}).get("error") if blockers else None,
                     "network_calls": False,
                 }, indent=2),
             )],
