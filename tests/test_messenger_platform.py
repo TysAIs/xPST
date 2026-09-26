@@ -560,7 +560,14 @@ def test_webhook_post_signed_but_no_secret_configured_is_rejected(tmp_path: Path
     assert "no app secret" in resp.json()["detail"].lower()
 
 
-def test_webhook_post_when_disabled_returns_ok(tmp_path: Path) -> None:
+def test_webhook_post_when_disabled_is_refused_unless_signed(tmp_path: Path) -> None:
+    """Fail closed even when messenger is disabled.
+
+    Meta always signs its deliveries, so an unsigned POST is not a Meta
+    delivery. The old behaviour returned 200 for it (a no-op only while the
+    adapter stayed disabled), which let an unauthenticated caller drive the
+    intake path on a default install.
+    """
     from fastapi.testclient import TestClient
 
     from xpst.dashboard.server import _create_app
@@ -569,8 +576,37 @@ def test_webhook_post_when_disabled_returns_ok(tmp_path: Path) -> None:
     cfg_file.write_text(yaml.dump({"accounts": {"messenger": {"enabled": False}}}))
     client = TestClient(_create_app(str(tmp_path)))
     resp = client.post("/webhook/messenger", content=b"{}", headers={"Content-Type": "application/json"})
-    assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    assert resp.status_code == 403
+    assert "signature" in resp.json()["detail"].lower()
+
+
+def test_webhook_get_is_refused_when_no_verify_token_is_configured(tmp_path: Path) -> None:
+    """No verify_token means nothing to verify against: the handshake fails closed."""
+    from fastapi.testclient import TestClient
+
+    from xpst.dashboard.server import _create_app
+
+    cfg_file = tmp_path / "config.yaml"
+    cfg_file.write_text(yaml.dump({"accounts": {"messenger": {"enabled": False}}}))
+    client = TestClient(_create_app(str(tmp_path)))
+    resp = client.get(
+        "/webhook/messenger",
+        params={"hub.mode": "subscribe", "hub.verify_token": "anything", "hub.challenge": "c"},
+    )
+    assert resp.status_code == 403
+    assert "not configured" in resp.json()["detail"]
+
+
+def test_webhook_post_unsigned_is_refused_even_with_a_secret_and_disabled(tmp_path: Path) -> None:
+    """The rule is unconditional: no signature, no acceptance."""
+    from fastapi.testclient import TestClient
+
+    from xpst.dashboard.server import _create_app
+
+    client = TestClient(_create_app(str(tmp_path)))  # fully configured, enabled
+    resp = client.post("/webhook/messenger", content=b"{}", headers={"Content-Type": "application/json"})
+    assert resp.status_code == 403
+    assert "X-Hub-Signature-256" in resp.json()["detail"]
 
 
 def test_webhook_custom_path(tmp_path: Path) -> None:
