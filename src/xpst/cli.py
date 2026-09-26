@@ -2813,6 +2813,12 @@ def _show_auth_status(ctx: click.Context, as_json: bool, refresh: bool = False):
                 data["badges"][plat] = entry["badge"]
         data["providers"] = data["platforms"]
         data["roles"] = ["source", "video_destination", "messaging", "analytics"]
+        # Forward-looking watchdog (xpst.credential_health): which credentials
+        # will die before the user notices. Derived from the same live badges —
+        # no extra probing, no invented deadlines.
+        from xpst.credential_health import build_credential_health
+
+        data["credential_health"] = build_credential_health(data["platforms"])
         abs_checked = [
             float(entry["checked_at"])
             for entry in data["platforms"].values()
@@ -2965,6 +2971,27 @@ def _show_auth_status(ctx: click.Context, as_json: bool, refresh: bool = False):
     )
 
     console.print(table)
+
+    # Forward-looking watchdog: what will break before the user notices.
+    from xpst.credential_health import build_credential_health
+
+    health = build_credential_health(live)
+    needs = health.get("needs_attention") or []
+    horizon = health.get("reauth_horizon_days")
+    if needs:
+        console.print(f"\n[bold yellow]Needs attention (within {horizon} days):[/bold yellow]")
+        for item in needs:
+            action = item.get("action") or f"xpst connect {item['platform']}"
+            console.print(f"  • [bold]{item['platform']}[/bold] — {item.get('attention')}")
+            console.print(f"    [dim]{action}[/dim]")
+    else:
+        console.print(f"\n[green]No credential needs attention within {horizon} days.[/green]")
+    unpredictable = health.get("unverifiable") or []
+    if unpredictable:
+        names = ", ".join(str(i.get("platform")) for i in unpredictable)
+        console.print(
+            f"[dim]Cannot warn ahead of time (provider reports no expiry): {names}[/dim]"
+        )
 
     checked = [
         float(e["checked_at"])

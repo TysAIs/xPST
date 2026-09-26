@@ -2283,6 +2283,13 @@ async def _handle_auth_status(config: XPSTConfig) -> CallToolResult:
 
         result["checked_at_iso"] = iso_timestamp(checked_at)
 
+    # Forward-looking watchdog (xpst.credential_health): which credentials die
+    # before anyone notices, and by when. Derived from the badges above, so an
+    # agent gets the same horizon a human sees in the app.
+    from xpst.credential_health import build_credential_health
+
+    result["credential_health"] = build_credential_health(platforms)
+
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(result, indent=2, default=str))],
     )
