@@ -320,6 +320,11 @@ class TikTokAccountConfig(AccountConfig):
     refresh_token: str = ""
     # Sandbox apps can only post to a test environment (no public posts)
     sandbox: bool = False
+    # Unaudited-client fallback: upload as an inbox DRAFT the user finishes in
+    # the TikTok app (video.upload scope; no audit; 5 pending shares/24h).
+    # "auto" uses draft mode only when direct post is refused for an unaudited
+    # client; "always" skips direct post entirely; "never" keeps direct post.
+    draft_mode: str = "auto"
 
 
 @dataclass
