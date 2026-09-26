@@ -216,8 +216,8 @@ the Messenger webhook:
 
 | Method & Path | Description |
 |---------------|-------------|
-| `GET /webhook/messenger` | Meta handshake: verifies `hub.verify_token`, echoes `hub.challenge`. |
-| `POST /webhook/messenger` | Incoming message events. Verified with `X-Hub-Signature-256` (HMAC-SHA256 of the raw body using your App Secret + App Secret as key). |
+| `GET /webhook/messenger` | Meta handshake: verifies `hub.verify_token`, echoes `hub.challenge`. Fails closed (403) when no `verify_token` is configured — an unconfigured install cannot be subscribed by anyone. |
+| `POST /webhook/messenger` | Incoming message events. **Every** request must carry `X-Hub-Signature-256` (HMAC-SHA256 of the raw body using your App Secret): Meta always signs its deliveries, so an unsigned or unverifiable request is refused with `403` rather than accepted unverified. |
 
 Point your Facebook Page's webhook URL at
 `https://<your-host>:<port>/webhook/messenger`. See
@@ -226,7 +226,7 @@ Point your Facebook Page's webhook URL at
 ## Analytics Payload
 
 The dashboard's analytics layer (`src/xpst/dashboard/analytics.py`) collects
-per-post engagement from YouTube, Instagram, X, and TikTok (TikTok via the source-side downloader metadata path; TikTok publishing itself is not available yet) and caches
+per-post engagement from YouTube, Instagram, X, and TikTok (TikTok via the source-side downloader metadata path) and caches
 snapshots in `~/.xpst/analytics.db`. The desktop app (`xpst app`) and the MCP
 server (`xpst_analytics`, `xpst_cross_post_analytics`) share this data.
 
