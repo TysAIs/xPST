@@ -114,6 +114,16 @@ PLATFORM_ORDER: tuple[str, ...] = (
 #: How long before expiry a token without a refresh path starts warning.
 DEFAULT_EXPIRING_WINDOW_SECONDS = 24 * 3600
 
+#: Lead time for a credential ONLY the human can renew.
+#:
+#: 24 hours is the right warning for a token xPST refreshes by itself — the
+#: background refresh handles it and the badge should not nag. It is useless for
+#: a credential whose replacement needs a browser sign-in (an Instagram session,
+#: a Meta long-lived token with no refresh path): by the time the badge flips,
+#: the user's next post fails. Those warn a week out instead, so a surface can
+#: say "renew this before Tuesday" rather than "this is dead".
+DEFAULT_REAUTH_WINDOW_SECONDS = 7 * 86400
+
 #: A live check older than this may not claim green any more.
 DEFAULT_MAX_CHECK_AGE_SECONDS = 15 * 60
 
@@ -407,6 +417,7 @@ def derive_token_state(
     refresh: Mapping[str, Any] | None = None,
     now: float | None = None,
     expiring_window_seconds: float = DEFAULT_EXPIRING_WINDOW_SECONDS,
+    reauth_window_seconds: float = DEFAULT_REAUTH_WINDOW_SECONDS,
     max_check_age_seconds: float = DEFAULT_MAX_CHECK_AGE_SECONDS,
     refresh_failure_ttl_seconds: float = DEFAULT_REFRESH_FAILURE_TTL_SECONDS,
 ) -> dict[str, Any]:
@@ -447,6 +458,10 @@ def derive_token_state(
 
     reason: str
     action: str | None = None
+    #: Which window decided an ``expiring`` badge: ``reauth`` (human must renew)
+    #: or ``expiry`` (24h, and xPST refreshes it by itself).
+    expiry_horizon: str | None = None
+
     refresh_failed = bool(
         isinstance(refresh, Mapping)
         and refresh.get("ok") is False
@@ -482,8 +497,11 @@ def derive_token_state(
                 )
         elif expires_at is None:
             reason = "live check passed; token expiry not reported by this provider"
-        elif expires_in is not None and expires_in <= expiring_window_seconds:
+        elif expires_in is not None and expires_in <= max(
+            expiring_window_seconds, reauth_window_seconds
+        ):
             state = TOKEN_STATE_EXPIRING
+            expiry_horizon = "reauth" if reauth_window_seconds > expiring_window_seconds else "expiry"
             reason = (
                 f"live check passed but the token expires in {humanize_seconds(expires_in)} "
                 "and there is no automatic refresh"
@@ -547,6 +565,8 @@ def derive_token_state(
         "expires_at": expires_at,
         "expires_at_iso": _iso(expires_at),
         "expires_in_seconds": expires_in,
+        "expiry_horizon": expiry_horizon,
+        "reauth_window_seconds": reauth_window_seconds,
         "auto_refresh": has_refresh,
         "badge_enabled": enabled,
     }
@@ -613,6 +633,7 @@ __all__ = [
     "BADGE_UNKNOWN",
     "DEFAULT_EXPIRING_WINDOW_SECONDS",
     "DEFAULT_MAX_CHECK_AGE_SECONDS",
+    "DEFAULT_REAUTH_WINDOW_SECONDS",
     "GREEN_BADGES",
     "PLATFORM_ORDER",
     "STATE_TO_BADGE",
