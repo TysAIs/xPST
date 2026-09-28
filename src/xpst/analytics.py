@@ -228,6 +228,46 @@ class AnalyticsCollector:
         self._warned_foreign: set[str] = set()
         self._warned_youtube_unverified = False
         self._warned_ownership_unverified: set[str] = set()
+        # Silent-zero defense (QA-2026-09-28 D1): per-platform collection
+        # errors from the most recent collect_all(). A platform that FAILED
+        # must never render as a defensible zero — every consumer (CLI/MCP/
+        # HTTP/UI) reads this map and labels the row "collection failed".
+        # {platform: {"attempts": int, "failures": int, "error": str}}
+        self._collect_errors: dict[str, dict[str, Any]] = {}
+
+    def _record_collect_failure(self, platform: str, exc: BaseException | str) -> None:
+        """Record one per-post collection failure for the active run.
+
+        The FIRST error (redacted, bounded) is kept as the representative
+        message; every failure increments the count so a partial collection
+        cannot masquerade as a full one.
+        """
+        from xpst.utils.redaction import redact_text
+
+        entry = self._collect_errors.setdefault(
+            platform, {"attempts": 0, "failures": 0, "error": None}
+        )
+        entry["failures"] += 1
+        if entry["error"] is None:
+            message = str(exc) or exc.__class__.__name__
+            entry["error"] = redact_text(message)[:240]
+
+    def _count_collect_attempt(self, platform: str) -> None:
+        """Mark that this platform's collector ran at least once this run."""
+        entry = self._collect_errors.setdefault(
+            platform, {"attempts": 0, "failures": 0, "error": None}
+        )
+        entry["attempts"] += 1
+
+    @property
+    def last_collect_errors(self) -> dict[str, dict[str, Any]]:
+        """Per-platform collection errors from the most recent collect_all.
+
+        Empty when the last run collected everything it attempted. A
+        non-empty entry means that platform's row of zeros is NOT a real
+        zero — it is a failure that must be surfaced.
+        """
+        return {p: dict(v) for p, v in self._collect_errors.items() if v.get("failures")}
 
     def _load_config(self) -> None:
         """Load xPST config.yaml."""
@@ -532,10 +572,16 @@ class AnalyticsCollector:
         (no token, API failure) — are listed as missing and never surface as
         fabricated real zeros.
 
+        Each platform also carries a ``collection`` block describing the
+        live-collection outcome of the most recent run (QA-2026-09-28 D1):
+        ``posts: 0`` with ``collection.status == "failed"`` is a FAILED
+        collection, not a defensible zero — consumers must render the error,
+        never the number.
+
         Returns:
             ``{"generated_at", "platforms": {platform: {
             "as_of", "posts", "metrics_available", "metrics_missing",
-            "totals", "post_metrics"}}}``
+            "totals", "post_metrics", "collection", "error"}}}``
         """
         now_dt = datetime.now(timezone.utc)
         now = now_dt.isoformat()
@@ -576,6 +622,7 @@ class AnalyticsCollector:
                 "metrics_available": available,
                 "metrics_missing": sorted(universe - set(available)),
                 "totals": {key: totals[key] for key in available},
+                "collection": self._collection_status(platform),
                 "post_metrics": {
                     post_id: {
                         key: value
@@ -585,8 +632,41 @@ class AnalyticsCollector:
                     for post_id, metrics in posts_data.items()
                 },
             }
+            # error mirrors the collection failure so a consumer that only
+            # reads `error` (the field QA round 1 found to be null) gets a
+            # truthful value instead of a silent zero.
+            platforms[platform]["error"] = platforms[platform]["collection"].get("error")
 
         return {"generated_at": now, "platforms": platforms}
+
+    def _collection_status(self, platform: str) -> dict[str, Any]:
+        """Per-platform collection health for the most recent collect_all.
+
+        One rule, enforced everywhere: a platform whose fetch failed reports
+        ``status="failed"`` (or ``"partial"``) with the representative
+        error — a zero produced by failure must never render as data.
+        """
+        entry = self._collect_errors.get(platform) or {}
+        failures = int(entry.get("failures") or 0)
+        attempted = int(entry.get("attempts") or 0)
+        requested = int(entry.get("requested") or 0)
+        collected = int(entry.get("collected") or 0)
+        if not failures:
+            return {
+                "attempted": attempted,
+                "failures": 0,
+                "status": "ok" if attempted else "not_collected",
+                "error": None,
+            }
+        status = "partial" if (requested and collected) else "failed"
+        return {
+            "attempted": attempted,
+            "failures": failures,
+            "requested": requested or None,
+            "collected": collected if requested else None,
+            "status": status,
+            "error": entry.get("error"),
+        }
 
     # ── Outcome report (D5: analytics that mean something) ───────────────
 
@@ -676,6 +756,11 @@ class AnalyticsCollector:
             owned_ids=ownership,
             live_rows=live_rows,
             platforms=PLATFORM_ORDER,
+            # QA-2026-09-28 D1: a platform whose live collection FAILED this
+            # run must say so, not "no metrics captured yet". A recorded
+            # snapshot is still shown, labelled recorded, but the note names
+            # the failure. Zero-with-error is never rendered as a plain zero.
+            collection_errors=dict(self._collect_errors),
         )
 
     async def collect_outcome_report(self, post_ids: dict[str, list[str]] | None = None) -> dict[str, Any]:
@@ -704,6 +789,11 @@ class AnalyticsCollector:
         if post_ids is None:
             post_ids = self._discover_post_ids()
 
+        # Fresh error surface per run: a failure from the previous collection
+        # must not haunt a later successful one, and a zero with no error
+        # this run is a genuine zero.
+        self._collect_errors = {}
+
         # Build tasks for each platform that has post IDs
         tasks: dict[str, asyncio.Task] = {}
         for platform, ids in post_ids.items():
@@ -723,6 +813,7 @@ class AnalyticsCollector:
         for platform_name, result in zip(tasks.keys(), results, strict=False):
             if isinstance(result, Exception):
                 logger.warning(f"Analytics failed for {platform_name}: {result}")
+                self._record_collect_failure(platform_name, result)
                 data[platform_name] = {}
             else:
                 data[platform_name] = result
@@ -764,6 +855,7 @@ class AnalyticsCollector:
             {post_id: {views, likes, comments, shares, ...}}
         """
         metrics_list: list[dict] = []
+        self._count_collect_attempt(platform)
 
         try:
             if platform == "youtube":
@@ -778,6 +870,18 @@ class AnalyticsCollector:
                 metrics_list = await self._collect_threads(post_ids)
         except Exception as e:
             logger.warning(f"Platform {platform} analytics collection failed: {e}")
+            self._record_collect_failure(platform, e)
+
+        # Partial-collection detection (silent-zero class, QA-2026-09-28 D1):
+        # the per-post loops swallow individual errors by design, so a
+        # platform whose every fetch failed returns [] here while the run
+        # looks like a real zero. Compare attempted posts vs rows returned:
+        # anything requested but not returned with at least one recorded
+        # failure marks the platform's output as NOT a defensible zero.
+        entry = self._collect_errors.get(platform)
+        if entry is not None and entry["failures"] and len(metrics_list) < len(post_ids):
+            entry["requested"] = len(post_ids)
+            entry["collected"] = len(metrics_list)
 
         # Convert list to dict keyed by post_id
         return {m["post_id"]: m for m in metrics_list}
@@ -950,11 +1054,13 @@ class AnalyticsCollector:
                     results.append(row)
                 except Exception as exc:
                     logger.warning(f"Instagram insights failed for {media_id}: {exc}")
+                    self._record_collect_failure("instagram", exc)
 
             return results
 
         except Exception as e:
             logger.warning(f"Instagram analytics failed: {e}")
+            self._record_collect_failure("instagram", e)
             return []
 
     async def _collect_x(self, tweet_ids: list[str]) -> list[dict]:
@@ -982,7 +1088,16 @@ class AnalyticsCollector:
         ``view_count, favorite_count, reply_count, retweet_count,
         quote_count, bookmark_count`` come from the twikit Tweet object
         (public metrics — no paid API). Failures skip the individual tweet
-        and never break collection."""
+        and never break collection.
+
+        The Sep-2026 compatibility patches (twikit_compat) MUST be applied
+        before constructing a client on this path too: they used to live in
+        the uploader module only, so analytics ran the broken stock library
+        and every post failed with 'ClientTransaction' has no attribute
+        'key' (QA-2026-09-28 D1)."""
+        from xpst.platforms.twikit_compat import apply_twikit_patches
+
+        apply_twikit_patches()
         try:
             import twikit
 
@@ -1026,11 +1141,13 @@ class AnalyticsCollector:
                     results.append(row)
                 except Exception as exc:
                     logger.warning(f"X metrics failed for {tweet_id}: {exc}")
+                    self._record_collect_failure("x", exc)
 
             return results
 
         except Exception as e:
             logger.warning(f"X analytics failed: {e}")
+            self._record_collect_failure("x", e)
             return []
 
     async def _collect_x_api_v2(self, tweet_ids: list[str]) -> list[dict]:
