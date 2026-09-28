@@ -229,6 +229,87 @@ def get_xpst_version() -> str:
     return __version__
 
 
+def detect_install_kind() -> dict[str, object]:
+    """How xPST itself was installed — the answer "how do I update?" needs.
+
+    Deployment-freshness (QA-2026-09-28 round 2): the live CLI was an editable
+    checkout days behind main, and nothing in the product could tell the
+    operator that or name the fix. This classifies the running install:
+
+    * ``frozen``   — packaged bundle (PyInstaller/Tauri sidecar): self-update
+      is by installing a new release, never by pip.
+    * ``editable`` — ``pip install -e <checkout>``: updates happen by updating
+      THAT checkout (git pull), so the path is reported.
+    * ``wheel``    — a normal (PyPI or local) install: ``pip install --upgrade``.
+    * ``source``   — imported from a source tree with no install metadata.
+    """
+    info: dict[str, object] = {
+        "kind": "source",
+        "path": None,
+        "checkout": None,
+        "updatable_by_self": False,
+    }
+    if getattr(sys, "frozen", False):
+        info["kind"] = "frozen"
+        info["path"] = sys.executable
+        return info
+
+    import xpst
+
+    module_path = str(getattr(xpst, "__file__", "") or "")
+    info["path"] = module_path or None
+
+    try:
+        from importlib.metadata import distribution
+
+        dist = distribution("xpst")
+        dist_path = getattr(dist, "_path", None)
+        direct_url = dist_path.joinpath("direct_url.json") if dist_path is not None else None
+        raw: dict = {}
+        if direct_url is not None and direct_url.exists():
+            import json as _json
+
+            raw = _json.loads(direct_url.read_text())
+        editable = bool(raw.get("dir_info", {}).get("editable"))
+        if editable:
+            info["kind"] = "editable"
+            info["checkout"] = raw.get("url", "").removeprefix("file://").rstrip("/") or None
+            return info
+        # Metadata present and not editable -> wheel install.
+        info["kind"] = "wheel"
+        info["updatable_by_self"] = True
+        return info
+    except Exception as exc:  # no install metadata -> raw source tree
+        logger.debug("install-kind metadata unavailable: %s", exc)
+        info["kind"] = "source"
+        return info
+
+
+def self_update_report(latest: str | None = None) -> dict[str, object]:
+    """What it would take to get this install to ``latest`` (never acts)."""
+    kind = detect_install_kind()
+    current = get_xpst_version()
+    report: dict[str, object] = {
+        "installed_version": current,
+        "latest_version": latest,
+        "install_kind": kind["kind"],
+        "up_to_date": None,
+        "action": None,
+    }
+    if latest:
+        report["up_to_date"] = not _version_is_newer(current, latest)
+        if report["up_to_date"]:
+            report["action"] = "none"
+            return report
+        report["action"] = {
+            "wheel": f"pip install --upgrade xpst=={latest} (or 'xpst update' once self-update lands for this install)",
+            "editable": f"update the checkout at {kind.get('checkout') or kind.get('path')} (git pull + re-run), which is what the editable install points at",
+            "frozen": "install the new release bundle — packaged builds cannot pip-update",
+            "source": "update the source tree (git pull) that xPST is running from",
+        }.get(str(kind["kind"]), "update the running install manually")
+    return report
+
+
 def check_updates() -> list[PackageInfo]:
     """Check for available updates without installing."""
     packages = []
@@ -240,6 +321,13 @@ def check_updates() -> list[PackageInfo]:
     if latest:
         info.latest_version = latest
         info.updatable = _version_is_newer(current, latest)
+        if info.updatable:
+            # Name the concrete fix instead of a bare updatable flag —
+            # deployment-freshness defect (QA-2026-09-28 round 2).
+            info.error = str(
+                self_update_report(latest).get("action")
+                or "update the running install manually"
+            )
     packages.append(info)
 
     # Tracked dependencies
@@ -444,7 +532,21 @@ def update_all(check_only: bool = False) -> list[PackageInfo]:
                 pkg.error = "self-update unavailable in packaged build"
         return packages
 
-    # Install updates
+    # Install updates.
+    # Deployment freshness (QA-2026-09-28): xpst itself used to be dropped
+    # from this list SILENTLY (`p.name != "xpst"`), so `xpst update` printed
+    # "All packages are up to date!" while the app itself lagged releases —
+    # the exact way the deployed CLI ended up 47 commits behind main. The
+    # app row now reports its install kind and the concrete action.
+    app_info = next((p for p in packages if p.name == "xpst"), None)
+    if app_info is not None and app_info.updatable:
+        action = self_update_report(app_info.latest_version).get("action")
+        app_info.error = str(action or "self-update requires the install path")
+        console.print(
+            f"[yellow]xPST itself ({app_info.current_version} → "
+            f"{app_info.latest_version}) updates outside the dependency "
+            f"updater: {action}[/yellow]"
+        )
     to_update = [p for p in packages if p.updatable and p.name != "xpst"]
 
     if not to_update:
