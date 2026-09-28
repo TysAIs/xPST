@@ -22,6 +22,7 @@ import importlib.metadata
 import json as _json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Iterator
@@ -405,10 +406,66 @@ def setup(
 @main.command()
 @click.option("--check", "check_only", is_flag=True, help="Check for updates without installing")
 @click.option("--components", is_flag=True, help="Show app, helper, and provider metadata update status")
+@click.option("--self", "self_update", is_flag=True, help="Update xPST ITSELF to the latest release (wheel installs do it in place; editable/frozen installs get the exact command for their install kind)")
 @json_option
-def update(check_only: bool, components: bool, as_json: bool):
-    """Update xPST dependencies to latest versions"""
-    from xpst.updater import check_update_components, check_updates, display_update_status, update_all
+def update(check_only: bool, components: bool, self_update: bool, as_json: bool):
+    """Update xPST dependencies (and, with --self, xPST itself)"""
+    from xpst.updater import (
+        check_update_components,
+        check_updates,
+        detect_install_kind,
+        display_update_status,
+        get_latest_version,
+        self_update_report,
+        update_all,
+    )
+
+    if self_update:
+        latest = get_latest_version("xpst")
+        report = self_update_report(latest)
+        kind = detect_install_kind()
+        did_update = False
+        if latest is None:
+            report["action"] = (
+                "Could not check PyPI for xpst (package may not be published yet, "
+                "or the network is unavailable); update via your install method "
+                f"({kind['kind']} install)."
+            )
+        if report.get("up_to_date"):
+            if as_json:
+                json_output({**report, "updated": False, "reason": "already current"}, True)
+                return
+            console.print(f"[green]xPST {report['installed_version']} is the latest release.[/green]")
+            return
+        if kind["kind"] == "wheel" and latest and not check_only:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--upgrade", f"xpst=={latest}"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+            did_update = result.returncode == 0
+            report["error"] = None if did_update else result.stderr.strip()[:240]
+        report["updated"] = did_update
+        if as_json:
+            json_output(report, True)
+            if not did_update and not report.get("up_to_date"):
+                sys.exit(EXIT_GENERAL)
+            return
+        if did_update:
+            console.print(
+                f"[green]xPST updated to {latest}. Re-run xpst to use the new version.[/green]"
+            )
+        else:
+            console.print(
+                f"[yellow]Installed xPST is {report['installed_version']} ({kind['kind']} "
+                f"install); latest is {latest or 'unknown'}.[/yellow]"
+            )
+            console.print(f"[bold]→[/bold] {report.get('action')}")
+            if report.get("error"):
+                console.print(f"[red]{report['error']}[/red]")
+            sys.exit(EXIT_GENERAL if not report.get("up_to_date") else EXIT_SUCCESS)
+        return
 
     if components:
         status = check_update_components(include_network=check_only)
@@ -440,7 +497,7 @@ def update(check_only: bool, components: bool, as_json: bool):
     if check_only:
         if as_json:
             packages = check_updates()
-            json_output([{"name": p.name, "installed": p.current_version, "latest": p.latest_version, "updatable": p.updatable} for p in packages], True)
+            json_output([{"name": p.name, "installed": p.current_version, "latest": p.latest_version, "updatable": p.updatable, "action": p.error} for p in packages], True)
             return
         console.print("[bold blue]Checking for updates...[/bold blue]\n")
         packages = check_updates()
@@ -450,7 +507,7 @@ def update(check_only: bool, components: bool, as_json: bool):
             # machine-readable channel (stderr instead).
             with keep_stdout_json(True):
                 packages = update_all(check_only=False)
-            json_output([{"name": p.name, "installed": p.current_version, "latest": p.latest_version, "updatable": p.updatable} for p in packages], True)
+            json_output([{"name": p.name, "installed": p.current_version, "latest": p.latest_version, "updatable": p.updatable, "action": p.error} for p in packages], True)
             return
         console.print("[bold blue]Updating dependencies...[/bold blue]\n")
         packages = update_all(check_only=False)
@@ -3031,11 +3088,24 @@ def _render_outcome_table(report: dict) -> None:
 
     totals: dict[str, int] = {}
     counted_posts = 0
+    failed_platforms: list[str] = []
     for platform, entry in report.get("platforms", {}).items():
         totals_row = entry.get("totals")
+        collection_error = entry.get("collection_error")
+        if collection_error:
+            failed_platforms.append(platform)
         if not entry.get("has_data") or not totals_row:
-            table.add_row(platform.title(), "—", "—", "—", "—", "—", "No data")
+            label = (
+                f"[red]Collection failed[/red] ({collection_error.get('failures')} post(s))"
+                if collection_error
+                else "No data"
+            )
+            table.add_row(platform.title(), "—", "—", "—", "—", "—", label)
             continue
+        source_label = str(entry.get("data_source_label") or "No data")
+        if collection_error:
+            # Numbers exist but this run could not refresh them — say so.
+            source_label = f"{source_label} (+ collection failed)"
         counted_posts += int(entry.get("posts_with_metrics") or 0)
         for key, value in totals_row.items():
             totals[key] = totals.get(key, 0) + int(value)
@@ -3053,7 +3123,7 @@ def _render_outcome_table(report: dict) -> None:
             cell("likes"),
             cell("comments"),
             cell("shares"),
-            str(entry.get("data_source_label") or "No data"),
+            source_label,
         )
 
     if totals:
@@ -3075,6 +3145,26 @@ def _render_outcome_table(report: dict) -> None:
         console.print(
             f"[dim]Excluded {len(excluded)} id(s) not verified as owned by this account.[/dim]"
         )
+
+    # Silent-zero defense (QA-2026-09-28 D1): never print an empty platform
+    # as a quiet zero when the collector actually failed — name the failure.
+    for platform, entry in report.get("platforms", {}).items():
+        collection_error = entry.get("collection_error")
+        if collection_error and entry.get("note"):
+            console.print(f"[red]⚠ {platform}: {entry['note']}[/red]")
+
+
+def _exit_for_collection_failures(outcome_report: dict) -> None:
+    """Exit non-zero when a live analytics collection produced failures.
+
+    Silent-zero defense (QA-2026-09-28 D1): a run where the platform fetch
+    failed must be detectable by scripts without parsing the payload —
+    ``posts: 0`` with a failed collection is NOT the same as a real zero,
+    and exit 0 previously claimed success for a broken round-trip.
+    """
+    failed = (outcome_report.get("diagnostics") or {}).get("collection_failed_platforms") or []
+    if failed:
+        sys.exit(EXIT_PLATFORM_UNAVAILABLE)
 
 
 @main.command("refresh-tokens")
@@ -3221,6 +3311,7 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
         report = collector.build_report(data, requested=post_ids)
         report["outcome_report"] = outcome_report
         click.echo(_json.dumps(report, indent=2, default=str))
+        _exit_for_collection_failures(outcome_report)
         return
 
     _render_outcome_table(outcome_report)
@@ -3258,6 +3349,11 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
             )
 
         console.print(detail_table)
+
+    # A live-refreshed run whose collection failed is not a success — exit
+    # non-zero so scripts/cron see the failure (silent-zero defense, D1).
+    if refresh:
+        _exit_for_collection_failures(outcome_report)
 
 
 @main.command()
