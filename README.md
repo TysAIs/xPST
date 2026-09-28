@@ -67,7 +67,9 @@ platform API calls you configure. See
 
 ### Core Cross-Posting
 - **Live-verified integrations** — YouTube, Instagram, and X/Twitter are authenticated and live-checked; publishing still depends on your accounts and API/session state
-- **TikTok source support** — TikTok can currently be used as a source; destination publishing is pending external developer review
+- **TikTok source support** — TikTok can currently be used as a source; destination publishing runs in
+  draft mode (uploads land as drafts you finish in the app) and public Direct Post awaits TikTok's
+  developer-app audit — see the capability truth table
 - **Explicitly disabled integrations** — Threads, Facebook Pages, and Messenger remain opt-in and currently unauthenticated/disabled
 - **Connected-provider fan-out** — One source video can be sent to destinations that are actually configured and available; see the [capability truth table](docs/INSTALL.md#capability-truth-table)
 - **Smart passthrough** — A probe checks whether the source already satisfies the platform profile and skips the re-encode entirely, saving a generation loss
