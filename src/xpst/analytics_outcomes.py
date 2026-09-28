@@ -121,8 +121,24 @@ def _source_label(data_source: str | None, staleness: str) -> str:
     return "Recorded"
 
 
-def _platform_note(has_data: bool, checked: bool, verified: bool, outcome_count: int) -> str | None:
-    """One honest sentence for a platform row that has nothing to show."""
+def _platform_note(
+    has_data: bool,
+    checked: bool,
+    verified: bool,
+    outcome_count: int,
+    collection_error: Mapping[str, Any] | None = None,
+) -> str | None:
+    """One honest sentence for a platform row that has nothing to show.
+
+    QA-2026-09-28 D1: when the live collection FAILED this run, say so —
+    "no metrics have been captured yet" reads like a young account when the
+    collector actually broke, which is the silent-zero defect class.
+    """
+    if collection_error and collection_error.get("failures"):
+        err = str(collection_error.get("error") or "collection error")
+        failed = collection_error.get("requested") or collection_error.get("failures")
+        kept = " Keeping previously recorded numbers." if has_data else ""
+        return f"Collection failed for {failed} post(s): {err}.{kept}"
     if has_data:
         return None
     if checked and not verified:
@@ -140,6 +156,7 @@ def build_outcome_report(
     live_rows: Sequence[Mapping[str, Any]] | None = None,
     platforms: Sequence[str] = PLATFORM_ORDER,
     now: datetime | None = None,
+    collection_errors: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the per-post/per-platform outcome report.
 
@@ -168,6 +185,7 @@ def build_outcome_report(
     """
     current = now or datetime.now(timezone.utc)
     ownership = owned_ids or {}
+    collect_errors = collection_errors or {}
     recorded = _recipient_index(snapshots)
     live = _recipient_index(live_rows)
 
@@ -177,6 +195,7 @@ def build_outcome_report(
     platforms_out: dict[str, Any] = {}
     foreign_dropped: list[str] = []
     unverified: list[str] = []
+    collection_failed: list[str] = []
     any_live = False
     any_data = False
 
@@ -296,6 +315,9 @@ def build_outcome_report(
         data_source = None
         if has_data:
             data_source = SOURCE_LIVE if any(o["metric_source"] == SOURCE_LIVE for o in outcomes) else SOURCE_RECORDED
+        collection_error = collect_errors.get(platform) or None
+        if collection_error and collection_error.get("failures"):
+            collection_failed.append(platform)
 
         platforms_out[platform] = {
             "platform": platform,
@@ -306,7 +328,16 @@ def build_outcome_report(
             # The label the UI renders. Always present so a surface that only
             # reads strings cannot invent a value for an empty platform.
             "data_source_label": _source_label(data_source, str(freshness["staleness"])),
-            "note": _platform_note(has_data, checked, verified, len(outcomes)),
+            "note": _platform_note(has_data, checked, verified, len(outcomes), collection_error),
+            # Structured mirror of the note for machine consumers: None when
+            # collection succeeded (or was not attempted); a {failures,
+            # error, ...} mapping when posts could not be fetched. A row with
+            # totals==null AND collection_error set is a FAILURE, not a zero.
+            "collection_error": (
+                {k: v for k, v in collection_error.items() if v is not None}
+                if collection_error and collection_error.get("failures")
+                else None
+            ),
             "posts_recorded": len(outcomes),
             "posts_with_metrics": sum(1 for o in outcomes if o["metrics"]),
             "metrics_available": sorted(set(capability)),
@@ -329,5 +360,8 @@ def build_outcome_report(
             # account's posts that no longer exists (deleted upstream).
             "unowned_ids_excluded": foreign_dropped,
             "ownership_unverified_platforms": unverified,
+            # Platforms whose live collection raised this run — their rows
+            # are failures, not zeros (QA-2026-09-28 D1 silent-zero class).
+            "collection_failed_platforms": collection_failed,
         },
     }
