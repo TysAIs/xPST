@@ -39,7 +39,7 @@ is the whole application; the shell is a wrapper.
 | **Platforms** | `src/xpst/platforms/` | Destination uploaders (YouTube, X, Instagram) + TikTok/Threads destination code pending external review; Messenger for messaging; auth through `SessionManager`. |
 | **Sources** | `src/xpst/sources/` | TikTok, Instagram Reels, YouTube, local files. |
 | **State** | `src/xpst/state_store.py`, `state_manager.py` | Atomic write-then-rename persistence, thread-safe business logic, crash recovery. |
-| **Config** | `src/xpst/config.py`, `config_migration.py` | Pydantic settings, schema auto-migration on load. |
+| **Config** | `src/xpst/config.py`, `config_migration.py` | Dataclass settings with own validation, schema auto-migration on load. |
 | **Credentials** | `src/xpst/utils/credentials.py` | Encrypted-at-rest store (Fernet file store by default; OS keyring is opt-in). |
 | **MCP** | `src/xpst/mcp/server.py` | 40 tools (stdio, typed schemas from `tools/list`, typed errors, fail-closed mutation guards; post, health, config, state, platforms, scheduling incl. cancel, targeted failure retry, analytics, KB, captions, ideas, bio, transcripts, search, Messenger DM + comment auto-reply). **Primary agent surface.** |
 | **CLI** | `src/xpst/cli.py` | **Scriptable fallback.** `--json` (automatic on non-TTY), `--dry-run`, structured exit codes. |
@@ -136,9 +136,12 @@ file does quote (MCP tools, CLI commands) are machine-checked: the MCP registry 
 - **MCP mutation guards are fail-closed** and read from the environment:
   `XPST_MCP_READONLY`, `XPST_MCP_REQUIRE_CONFIRM`, `XPST_MCP_ALLOW_MUTATIONS`. An
   unwatched agent gets a refusal, not a surprise post. Do not weaken these defaults.
-- **`xpst_delete` (MCP) and `xpst delete` (CLI) are not the same operation.** The MCP tool
-  removes the local record; the CLI command also deletes on the platform. If an agent asks
-  to "delete a post", use the CLI path deliberately and say what it does.
+- **`xpst_delete` (MCP) attempts a platform-side delete too.** The MCP tool calls the
+  engine's delete for each recorded destination (a PENDING outcome means the platform
+  delete is unconfirmed) and then removes the local record regardless, reporting both
+  effects separately. The CLI `xpst delete` covers the same engine path with per-platform
+  human output. If an agent asks to "delete a post", say which surface you used and that
+  an unconfirmed platform delete leaves the item live.
 - **No OpenAI-compatible endpoint, and none should be added.** Agents speak MCP; the HTTP
   API exists for the UI. `/openapi.json` is there if you need to read schemas.
 - **MCP now covers schedule-cancel and targeted retry** (`xpst_schedule_cancel`,
