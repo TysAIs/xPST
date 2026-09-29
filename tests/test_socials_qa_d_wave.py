@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -216,6 +217,7 @@ def test_d6_engine_reports_sent_caption():
 # ── D4: the launchd PATH carries user install dirs ──────────────────
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="launchd is macOS-only")
 def test_d4_launchd_agent_path_covers_user_dirs():
     from xpst.cli import _launchd_agent_path
 
