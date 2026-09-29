@@ -97,6 +97,17 @@ class SessionManager:
             except Exception as e:
                 logger.warning(f"Failed to load token from file: {e}")
 
+        # Distinguish "never configured" from "expired" so a fresh install is
+        # not told its credentials expired when none ever existed (stranger-
+        # install audit 2026-09-28: every clean probe showed a misleading
+        # "credentials expired or invalid" on a machine with no YouTube auth).
+        had_token = bool(stored_token) or token_file.exists()
+        if not creds and not had_token:
+            raise ValueError(
+                "YouTube is not configured yet (no stored OAuth token). "
+                "Run: xpst auth youtube"
+            )
+
         # Refresh if expired
         if creds and creds.expired and creds.refresh_token:
             logger.info("Refreshing YouTube credentials...")
