@@ -38,6 +38,11 @@ async def test_live_browser_publish_and_delete():
     config = XPSTConfig.load()
     config.tiktok.enabled = True
     config.tiktok.publish_mode = "browser_only"
+    # The live lane must use the REAL config dir (cookie jar + persistent
+    # browser profile). tests/conftest.py isolates XPST_CONFIG_DIR to a tmp
+    # dir for every test, which would hide the jar; pin it back explicitly.
+    real_dir = os.environ.get("XPST_LIVE_TIKTOK_CONFIG_DIR") or os.path.expanduser("~/.xpst")
+    config.config_dir = real_dir
     uploader = TikTokUploader(config)
 
     caption = f"xPST live-lane browser publish {int(time.time())} #xpst"

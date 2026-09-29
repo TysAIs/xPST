@@ -160,6 +160,52 @@ def test_find_new_item_composes_share_url_from_sibling_owner():
     )
 
 
+def test_find_new_item_uses_owner_hint_when_no_row_has_share_url():
+    # Live finding 2026-09-29 (second shape): the manage item_list response
+    # can omit share_url on EVERY row (keys: item_id/post_time/visibility/
+    # status/desc...). The page-observed handle must still compose the
+    # canonical URL so the receipt carries a verifiable link.
+    now = int(time.time())
+    payloads = [
+        {
+            "data": {
+                "item_list": [
+                    {
+                        "item_id": "7000000000000000003",
+                        "post_time": now - 10,
+                        "visibility": 1,
+                        "status": 102,
+                        "desc": "xPST owner hint smoke",
+                    }
+                ]
+            }
+        }
+    ]
+    receipt = find_new_item(
+        payloads,
+        started_at=time.time() - 600,
+        caption="owner hint smoke",
+        owner_hint="tysn.dev",
+    )
+    assert receipt is not None
+    assert receipt.item_id == "7000000000000000003"
+    assert receipt.share_url == (
+        "https://www.tiktok.com/@tysn.dev/video/7000000000000000003"
+    )
+    # An explicit row share_url always wins over the hint.
+    payloads[0]["data"]["item_list"][0]["share_url"] = (
+        "https://www.tiktok.com/@real/video/7000000000000000003"
+    )
+    receipt2 = find_new_item(
+        payloads,
+        started_at=time.time() - 600,
+        caption="owner hint smoke",
+        owner_hint="wrong-handle",
+    )
+    assert receipt2 is not None
+    assert receipt2.share_url == "https://www.tiktok.com/@real/video/7000000000000000003"
+
+
 def test_browser_publish_error_carries_code():
     err = BrowserPublishError("BROWSER_COMPOSER_TIMEOUT", "composer never appeared")
     assert err.code == "BROWSER_COMPOSER_TIMEOUT"
