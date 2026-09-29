@@ -29,7 +29,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from xpst.schedule_manager import ScheduleManager
+from xpst.schedule_manager import ScheduleManager, stored_per_platform_captions
 from xpst.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -193,9 +193,17 @@ class SchedulingEngine:
 
                 caption = entry.get("caption") or ""
                 platforms = entry.get("platforms") or None
+                # Per-destination copy persisted at add time (same semantics
+                # as `xpst post --caption-for`); {} = shared caption everywhere.
+                per_platform_captions = stored_per_platform_captions(entry)
                 try:
                     result = asyncio.run(
-                        self.engine.post_manual(video_path, caption, platforms)
+                        self.engine.post_manual(
+                            video_path,
+                            caption,
+                            platforms,
+                            per_platform_captions=per_platform_captions or None,
+                        )
                     )
                     success = bool(getattr(result, "all_success", False))
                     error_msg = None
