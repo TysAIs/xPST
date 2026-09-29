@@ -1076,6 +1076,12 @@ _MUTATING_TOOLS = {
     # destination. Gating them keeps the consent story uniform (and matches the
     # CLI, which demands an explicit --yes / confirmation for the same act).
     "xpst_schedule_cancel", "xpst_failures_retry",
+    # Deliberate carve-out: the xpst_setup_* transaction tools mutate a local
+    # onboarding transaction file only (SetupTransactionService under the
+    # config dir) — they never touch a platform account, a scheduled post, or
+    # the post ledger. Gating onboarding behind the posting consent env would
+    # make first-run impossible (you set up BEFORE you opt into mutations),
+    # so they stay outside this set on purpose.
 }
 
 
@@ -1184,9 +1190,12 @@ def _argument_shape_block(name: str, arguments: dict[str, Any]) -> CallToolResul
     from xpst.utils.path_guard import PathConfinementError, confine_media_path
 
     # Explicit, documented opt-out for users whose media genuinely lives outside
-    # the default roots (or who already pass XPST_MEDIA_ROOTS).
-    if os.environ.get("XPST_MCP_ALLOW_ANY_PATH", "").lower() in {"1", "true", "yes"}:
-        return None
+    # the default roots (or who already pass XPST_MEDIA_ROOTS). It is named
+    # ALLOW_ANY_PATH and scopes to PATHS only: SSRF protection on URL arguments
+    # (validate_public_url below) is a different defense — a localhost/metadata
+    # fetch leaks state no matter where media lives — so loosening the media
+    # root must not silently disarm it.
+    allow_any_path = os.environ.get("XPST_MCP_ALLOW_ANY_PATH", "").lower() in {"1", "true", "yes"}
 
     def _reject(argument: str, reason: str) -> CallToolResult:
         logger.warning("MCP argument refused: tool=%s argument=%s reason=%s", name, argument, reason)
@@ -1201,13 +1210,14 @@ def _argument_shape_block(name: str, arguments: dict[str, Any]) -> CallToolResul
         )
 
     try:
-        for argument, value in _iter_arg_values(arguments, _PATH_ARG_NAMES):
-            try:
-                confine_media_path(value, must_exist=False)
-            except PathConfinementError as exc:
-                return _reject(argument, str(exc))
-            except Exception as exc:  # noqa: BLE001 - never crash the tool call
-                return _reject(argument, f"unusable path ({type(exc).__name__})")
+        if not allow_any_path:
+            for argument, value in _iter_arg_values(arguments, _PATH_ARG_NAMES):
+                try:
+                    confine_media_path(value, must_exist=False)
+                except PathConfinementError as exc:
+                    return _reject(argument, str(exc))
+                except Exception as exc:  # noqa: BLE001 - never crash the tool call
+                    return _reject(argument, f"unusable path ({type(exc).__name__})")
 
         for argument, value in _iter_arg_values(arguments, _URL_ARG_NAMES):
             # Only look at URL-shaped values: some tools pass a bare platform
