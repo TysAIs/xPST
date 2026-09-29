@@ -8,7 +8,7 @@ Authentication:
 - Token obtained via the Meta OAuth flow (Instagram/Facebook login)
 
 Upload specs:
-- Container model: create media container → (upload) → publish
+- Container model: create media container → poll status to FINISHED → publish
 - Rate limit: 250 posts / 24 hours
 - Media: MP4 up to 1 GB, max 300 seconds
 - Text: 500-character limit
@@ -22,6 +22,7 @@ Upload specs:
 Docs: https://developers.facebook.com/docs/threads
 """
 
+import asyncio
 from pathlib import Path
 
 import httpx
@@ -45,6 +46,22 @@ logger = get_logger(__name__)
 THREADS_API_BASE = "https://graph.threads.net"
 # API version pin
 THREADS_API_VERSION = "v1.0"
+
+# Container status polling, per Meta's publishing/troubleshooting docs: the
+# create call only says the container was *accepted*; a video container is
+# fetched and processed asynchronously, and the result — FINISHED, or ERROR
+# with an `error_message` like FAILED_DOWNLOADING_VIDEO — is only visible on
+# `GET /{container-id}?fields=status,error_message`. Meta recommends polling
+# no more than ~5 minutes; the cadence is a backoff ladder (faster at first to
+# publish as soon as processing finishes, settling at the 60s Meta suggests)
+# so one publish costs a handful of status calls, not a minute-hammer.
+_CONTAINER_POLL_FIRST_DELAY_SECONDS = 2.0
+_CONTAINER_POLL_MAX_INTERVAL_SECONDS = 60.0
+_CONTAINER_POLL_MAX_SECONDS = 300.0
+
+# Statuses a container can report (docs/threads/troubleshooting).
+_CONTAINER_READY_STATUSES = frozenset({"FINISHED", "PUBLISHED"})
+_CONTAINER_DEAD_STATUSES = frozenset({"ERROR", "EXPIRED"})
 
 
 class ThreadsUploader(PlatformUploader):
@@ -180,7 +197,15 @@ class ThreadsUploader(PlatformUploader):
 
         Flow:
         1. POST /v1.0/{threads_user_id}/threads — create media container
-        2. POST /v1.0/{threads_user_id}/threads_publish — publish container
+        2. GET /v1.0/{container_id}?fields=status,error_message — poll until
+           Meta has fetched and processed the video (``FINISHED``)
+        3. POST /v1.0/{threads_user_id}/threads_publish — publish container
+
+        Step 2 is not optional for video: the create call only acknowledges the
+        container, and publishing an unprocessed container is what produces
+        Meta's opaque ``400 media not found``. The status call is also the only
+        place Meta reports *why* processing failed (``error_message``, e.g.
+        ``FAILED_DOWNLOADING_VIDEO``) — skipping it swallowed the real cause.
 
         Args:
             video_path: Path to video file OR a public http(s) URL
@@ -258,7 +283,15 @@ class ThreadsUploader(PlatformUploader):
                         platform="threads",
                     )
 
-                # Step 2: Publish the media container
+                # Step 2: Wait for Meta to fetch and process the video before
+                # publishing. The create call only acknowledges the container;
+                # the processing verdict (FINISHED / ERROR+error_message /
+                # EXPIRED) exists only on the status endpoint.
+                ready = await self._wait_for_container_ready(client, container_id, token)
+                if isinstance(ready, UploadResult):
+                    return ready
+
+                # Step 3: Publish the media container
                 logger.info(f"Threads: publishing container {container_id}")
                 publish_resp = await client.post(
                     f"{THREADS_API_BASE}/{THREADS_API_VERSION}/{user_id}/threads_publish",
@@ -440,6 +473,73 @@ class ThreadsUploader(PlatformUploader):
                 error=f"THREADS_POST_TEXT_ERROR: {str(e)[:200]}",
                 platform="threads",
             )
+
+    async def _wait_for_container_ready(
+        self,
+        client: httpx.AsyncClient,
+        container_id: str,
+        token: str,
+    ) -> UploadResult | None:
+        """Poll a container's status until Meta finished processing it.
+
+        Returns ``None`` when the container reached ``FINISHED``/``PUBLISHED``
+        (publish may proceed), or an ``UploadResult`` failure that names the
+        real cause. Meta's ``error_message`` (e.g. ``FAILED_DOWNLOADING_VIDEO``)
+        is carried into the error verbatim — it is the only place the platform
+        says *why* processing failed, and swallowing it turns a bad media URL
+        into a retriable mystery.
+
+        Bounded per Meta's guidance (no more than ~5 minutes). A failed status
+        *query* is treated as transient — the container may still publish —
+        until the budget runs out.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _CONTAINER_POLL_MAX_SECONDS
+        delay = _CONTAINER_POLL_FIRST_DELAY_SECONDS
+        last_query_error = ""
+        while True:
+            try:
+                resp = await client.get(
+                    f"{THREADS_API_BASE}/{THREADS_API_VERSION}/{container_id}",
+                    params={"fields": "status,error_message", "access_token": token},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                status = str(data.get("status", "")).upper()
+                if status in _CONTAINER_READY_STATUSES:
+                    logger.info("Threads: container %s ready (%s)", container_id, status)
+                    return None
+                if status in _CONTAINER_DEAD_STATUSES:
+                    reason = str(data.get("error_message") or "no error_message reported")
+                    return UploadResult(
+                        success=False,
+                        error=(
+                            f"THREADS_CONTAINER_{status}: Meta reported the container as "
+                            f"{status}: {reason} (container {container_id})"
+                        ),
+                        platform="threads",
+                        # A failed download/processing of the user's URL only
+                        # succeeds on retry if the URL itself changes.
+                        retryable=False,
+                    )
+                last_query_error = ""
+            except Exception as e:  # noqa: BLE001 - transient status-query failure
+                last_query_error = str(e)[:200]
+
+            if loop.time() + delay > deadline:
+                detail = f" Last status query failed: {last_query_error}" if last_query_error else ""
+                return UploadResult(
+                    success=False,
+                    error=(
+                        f"THREADS_CONTAINER_TIMEOUT: container {container_id} did not reach "
+                        f"FINISHED within {int(_CONTAINER_POLL_MAX_SECONDS)} seconds.{detail}"
+                    ),
+                    platform="threads",
+                    # The container stays publishable for 24h; retrying can succeed.
+                    retryable=True,
+                )
+            await asyncio.sleep(delay)
+            delay = min(delay * 2.0, _CONTAINER_POLL_MAX_INTERVAL_SECONDS)
 
     async def _fetch_permalink(self, client: httpx.AsyncClient, media_id: str, token: str, user_id: str) -> str:
         """Return the public permalink for a published container.
