@@ -12,7 +12,7 @@
   <a href="https://github.com/TysAIs/xPST/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/TysAIs/xPST/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-8-blue"></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/os-Linux%20|%20macOS%20|%20Windows-lightgrey"></a>
-  <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-40%20tools-orange"></a>
+  <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-41%20tools-orange"></a>
   <a href="#"><img alt="Desktop" src="https://img.shields.io/badge/desktop-Tauri%202-blueviolet"></a>
 </p>
 
@@ -48,8 +48,8 @@ xPST includes integrations for **seven platforms** — YouTube, Instagram, X/Twi
 
 It runs three ways:
 - **Desktop shell** — one Tauri 2 app (a native window over the local dashboard)
-- **CLI** — 46 top-level commands (71 including subcommands) covering the entire workflow
-- **MCP server** — 40 tools so AI agents can drive the entire product
+- **CLI** — 47 top-level commands (74 including subcommands) covering the entire workflow
+- **MCP server** — 41 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
 
@@ -94,8 +94,8 @@ platform API calls you configure. See
 
 ### Three Drivable Surfaces
 - **Desktop shell** — Tauri 2 wrapper around the local dashboard: one native app, built from `src-tauri/` plus the Python engine sidecar. Platform installers (`.dmg`, NSIS `.exe`/`.msi`, `.deb`/`.AppImage`) come from `.github/workflows/tauri-release.yml`
-- **CLI** — 46 Click-based commands (71 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
-- **MCP server** — 40 tools (34 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
+- **CLI** — 47 Click-based commands (74 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
+- **MCP server** — 41 tools (35 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 #### Surface counts
 
@@ -104,10 +104,10 @@ These numbers are generated from the shipped code, not maintained by hand. `pyth
 <!-- BEGIN GENERATED SURFACE COUNTS -->
 | Surface | Count | Measured from |
 |---------|-------|---------------|
-| MCP tools | **40** | `tools/list` over a real stdio handshake with `xpst mcp start` |
-| CLI top-level commands | **46** | `xpst.cli.main.commands` |
-| CLI commands including subcommands | **71** | recursive walk of the Click command tree |
-| HTTP routes (dashboard app) | **46** | FastAPI route table (42 xPST routes + 4 framework docs routes) |
+| MCP tools | **41** | `tools/list` over a real stdio handshake with `xpst mcp start` |
+| CLI top-level commands | **47** | `xpst.cli.main.commands` |
+| CLI commands including subcommands | **74** | recursive walk of the Click command tree |
+| HTTP routes (dashboard app) | **48** | FastAPI route table (44 xPST routes + 4 framework docs routes) |
 | Supported providers | **8** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
 
 Regenerate and verify with `python scripts/generate_counts.py --write` / `--check`; the check runs in CI, so these numbers cannot drift silently.
@@ -277,7 +277,7 @@ See `Dockerfile` and `docker-compose.yml` for details.
 
 ## CLI Reference
 
-xPST provides 46 top-level commands (71 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 47 top-level commands (74 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 
 ### Setup & Accounts
 
@@ -537,7 +537,7 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 
 <!-- BEGIN GENERATED README TOOL INDEX -->
 
-### 40 Tools
+### 41 Tools
 
 Generated from the live registry — full schemas, consent gates, and per-tool notes live in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
 
@@ -564,6 +564,7 @@ Generated from the live registry — full schemas, consent gates, and per-tool n
 | `xpst_backfill` | Retry failed or incomplete posts from history. `attempted` / `successful` are… | **Yes** |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No |
 | `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No |
+| `xpst_byo_app` | Bring-your-own developer app setup: report (masked) which platforms have a lo… | No |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No |
 | `xpst_capabilities` | Return the canonical role-aware provider catalog AND the content contract wit… | No |
 | `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets… | No |

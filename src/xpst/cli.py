@@ -2901,6 +2901,144 @@ def auth(ctx: click.Context, platform: str | None, refresh: bool, rotate: bool, 
         _auth_messenger(config)
 
 
+# ──────────────────────────────────────────────
+# BYO (bring-your-own developer app) commands
+# ──────────────────────────────────────────────
+
+@main.group()
+@click.pass_context
+def byo(ctx: click.Context):
+    """Bring-your-own developer app: per-platform app id/secret, stored locally.
+
+    The credential is what flips Instagram/Threads/TikTok into the official
+    API path with NO App Review (Meta Standard Access: you use your own app).
+    It is stored only in the encrypted store under the xPST config dir and is
+    never echoed back — every output shows at most a masked id tail.
+
+    Usage:
+        xpst byo status                    # what has an app, what is missing
+        xpst byo set instagram             # prompts, secret input hidden
+        xpst byo set tiktok --app-id ...   # agent/CI form (secret via env)
+        xpst byo clear threads             # remove the stored pair
+    """
+    ctx.ensure_object(dict)
+
+
+@byo.command("status")
+@json_option
+@click.pass_context
+def byo_status_cmd(ctx: click.Context, as_json: bool):
+    """Show per-platform BYO app setup truth (masked, never a secret)."""
+    from xpst.byo import byo_status
+
+    config = load_config(ctx.obj.get("config_path"))
+    payload = byo_status(config)
+    if as_json:
+        json_output(payload, True)
+        return
+    console.print("[bold blue]Bring-your-own app setup[/bold blue]")
+    for status in payload["platforms"].values():
+        if status["configured"]:
+            mark = f"[green]configured[/green] ({status['app_id_masked']}, from {status['source']})"
+        elif status["half_configured"]:
+            mark = "[yellow]app id stored, secret missing[/yellow]"
+        elif not status["configurable"]:
+            mark = "[dim]tracked via its own connect flow[/dim]"
+        else:
+            mark = "[dim]no app yet[/dim]"
+        console.print(f"  {status['display_name']}: {mark}")
+    console.print(f"[dim]{payload['note']}[/dim]")
+
+
+@byo.command("set")
+@click.argument("platform")
+@click.option("--app-id", default="", help="App id / client key (Meta numeric id, TikTok aw… key)")
+@click.option("--app-secret", default="", help="App secret (prefer the platform env var; never echoed)")
+@json_option
+@click.pass_context
+def byo_set_cmd(ctx: click.Context, platform: str, app_id: str, app_secret: str, as_json: bool):
+    """Store one platform's app credential (validated, encrypted, masked back).
+
+    Missing values are prompted (the secret with hidden input). For
+    non-interactive runs pass --app-id and set the platform's secret env var
+    (see `xpst byo status` env_vars) — the secret is never taken as a CLI
+    argument on the command line, where process listings would expose it.
+    """
+    import os
+
+    from xpst.byo import BYO_PLATFORMS, ByoAppError, store_byo_app, validate_byo_app
+
+    config = load_config(ctx.obj.get("config_path"))
+    key = platform.strip().lower()
+    if key not in BYO_PLATFORMS:
+        console.print(f"[red]Unknown platform: {platform}[/red] (options: {', '.join(sorted(BYO_PLATFORMS))})")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+    spec = BYO_PLATFORMS[key]
+    if not spec.configurable:
+        console.print(
+            f"[yellow]{spec.display_name} keeps its app credential in its own connect flow.[/yellow]"
+        )
+        console.print(f"[dim]{spec.docs_url}[/dim]")
+        return
+    if not app_id:
+        app_id = os.environ.get(spec.env_id_var, "").strip()
+    if not app_secret:
+        app_secret = os.environ.get(spec.env_secret_var, "").strip()
+    if not app_id:
+        app_id = console.input(f"[cyan]{spec.id_label}: [/cyan]").strip()
+    if not app_secret:
+        try:
+            import getpass
+
+            app_secret = getpass.getpass(f"{spec.secret_label} (hidden): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            app_secret = ""
+    try:
+        app_id, app_secret = validate_byo_app(key, app_id, app_secret)
+        status = store_byo_app(config, key, app_id, app_secret)
+    except ByoAppError as exc:
+        if as_json:
+            json_output({"ok": False, "error": str(exc), "errors": exc.errors}, True)
+        else:
+            console.print(f"[red]{exc}[/red]")
+            for field, message in exc.errors.items():
+                console.print(f"  {field}: {message}")
+            console.print(f"[dim]How to create one: {spec.create_url}[/dim]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+    if as_json:
+        json_output({"ok": True, **status}, True)
+        return
+    console.print(
+        f"[green]✅ {spec.display_name}: app {status['app_id_masked']} stored encrypted.[/green] "
+        f"{spec.enables}"
+    )
+    console.print(f"[dim]Register this redirect on the app: {status['redirect_uri']}[/dim]")
+
+
+@byo.command("clear")
+@click.argument("platform")
+@json_option
+@click.pass_context
+def byo_clear_cmd(ctx: click.Context, platform: str, as_json: bool):
+    """Remove a platform's stored app credential (sign-in control turns off)."""
+    from xpst.byo import BYO_PLATFORMS, ByoAppError, clear_byo_app
+
+    config = load_config(ctx.obj.get("config_path"))
+    key = platform.strip().lower()
+    try:
+        payload = clear_byo_app(config, key)
+    except ByoAppError as exc:
+        console.print(f"[red]{exc}[/red] (options: {', '.join(sorted(BYO_PLATFORMS))})")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+    if as_json:
+        json_output({"ok": True, **payload}, True)
+        return
+    console.print(f"[green]✅ {payload['note']}[/green]")
+
+
 def _show_api_token(ctx: click.Context, as_json: bool, *, rotate: bool = False) -> None:
     """Print (or replace) the local dashboard API token.
 

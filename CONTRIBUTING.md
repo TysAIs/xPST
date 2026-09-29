@@ -78,7 +78,7 @@ Contributors should place new code in the matching layer:
 | Knowledge base | `src/xpst/knowledge/` | Transcription, cited nuggets, embeddings, vector search (Phase 3) |
 | Desktop | `src-tauri/` + `ui/` | Tauri 2 shell (Rust) over the Svelte dashboard UI; `scripts/build-engine.sh` builds the Python engine sidecar it spawns |
 | Dashboard | `src/xpst/dashboard/server.py` | FastAPI + WebSocket, bcrypt auth |
-| MCP | `src/xpst/mcp/server.py` | 40 tools (post, health, config, state, platforms, scheduling incl. cancel, targeted failure retry, analytics, KB, captions, transcripts, search) |
+| MCP | `src/xpst/mcp/server.py` | 41 tools (post, health, config, state, platforms, scheduling incl. cancel, targeted failure retry, analytics, KB, captions, transcripts, search) |
 
 ### Phase 1–5 feature map
 

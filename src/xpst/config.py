@@ -176,11 +176,13 @@ DEFAULT_CONFIG = {
             "session_file": "~/.xpst/credentials/instagram_session.json",
             "username": "",
             "auth_mode": "graph_api",
+            "app_id": "",
         },
         "threads": {
             "enabled": False,
             "graph_access_token": "",
             "threads_user_id": "",
+            "app_id": "",
         },
         "messenger": {
             "enabled": False,
@@ -385,6 +387,11 @@ class InstagramAccountConfig(AccountConfig):
     # Meta Graph API credentials (only used when auth_mode == "graph_api")
     graph_access_token: str = ""
     graph_ig_user_id: str = ""
+    # Bring-your-own Meta app (BYO path, Standard Access). The id is mirrored
+    # to config for display; the SECRET lives only in the encrypted store and
+    # is deliberately never serialized into config.yaml from the BYO path.
+    app_id: str = ""
+    app_secret: str = ""
 
 
 @dataclass
@@ -394,6 +401,10 @@ class ThreadsAccountConfig(AccountConfig):
     graph_access_token: str = ""
     # Threads user ID (numeric)
     threads_user_id: str = ""
+    # Bring-your-own Meta app (same app may serve Instagram). Secret lives
+    # only in the encrypted store; see InstagramAccountConfig.app_id.
+    app_id: str = ""
+    app_secret: str = ""
 
 
 @dataclass
@@ -883,6 +894,12 @@ class XPSTConfig:
                 config.instagram.device_id = ig.get("device_id", config.instagram.device_id)
                 config.instagram.graph_access_token = ig.get("graph_access_token", config.instagram.graph_access_token)
                 config.instagram.graph_ig_user_id = ig.get("graph_ig_user_id", config.instagram.graph_ig_user_id)
+                # app_id only for write-back: the BYO secret lives in the
+                # encrypted store, and a config.yaml that *persisted* it would
+                # leak it in plaintext. A hand-written secret in the user's own
+                # file is honoured for this process but never rewritten.
+                config.instagram.app_id = ig.get("app_id", config.instagram.app_id)
+                config.instagram.app_secret = ig.get("app_secret", config.instagram.app_secret)
 
         # Threads
         if "accounts" in file_config and "threads" in file_config["accounts"]:
@@ -892,6 +909,8 @@ class XPSTConfig:
                 config.threads.graph_access_token = th.get("graph_access_token", config.threads.graph_access_token)
                 config.threads.threads_user_id = th.get("threads_user_id", config.threads.threads_user_id)
                 config.threads.proxy = th.get("proxy", config.threads.proxy)
+                config.threads.app_id = th.get("app_id", config.threads.app_id)
+                config.threads.app_secret = th.get("app_secret", config.threads.app_secret)
 
         # Messenger
         if "accounts" in file_config and "messenger" in file_config["accounts"]:
@@ -1159,6 +1178,10 @@ class XPSTConfig:
             config.instagram.graph_access_token = v
         if v := os.getenv("XPST_INSTAGRAM_GRAPH_IG_USER_ID"):
             config.instagram.graph_ig_user_id = v
+        if v := os.getenv("XPST_INSTAGRAM_APP_ID"):
+            config.instagram.app_id = v
+        if v := os.getenv("XPST_INSTAGRAM_APP_SECRET"):
+            config.instagram.app_secret = v
 
         # TikTok Content Posting API (destination mode)
         if v := os.getenv("XPST_TIKTOK_CLIENT_KEY"):
@@ -1179,6 +1202,10 @@ class XPSTConfig:
             config.threads.graph_access_token = v
         if v := os.getenv("XPST_THREADS_USER_ID"):
             config.threads.threads_user_id = v
+        if v := os.getenv("XPST_THREADS_APP_ID"):
+            config.threads.app_id = v
+        if v := os.getenv("XPST_THREADS_APP_SECRET"):
+            config.threads.app_secret = v
         if v := os.getenv("XPST_THREADS_PROXY"):
             config.threads.proxy = v
 
@@ -1409,12 +1436,21 @@ class XPSTConfig:
                     "proxy": self.instagram.proxy,
                     "auth_mode": self.instagram.auth_mode,
                     "device_id": self.instagram.device_id,
+                    # BYO app id is not a secret; its secret lives only in the
+                    # encrypted store, so it is deliberately NOT serialized.
+                    # The graph token/user id ride the same 0600 config file
+                    # the Threads section already uses (store stays canonical;
+                    # this is the write-through convenience the uploader reads).
+                    "graph_access_token": self.instagram.graph_access_token,
+                    "graph_ig_user_id": self.instagram.graph_ig_user_id,
+                    "app_id": self.instagram.app_id,
                 },
                 "threads": {
                     "enabled": self.threads.enabled,
                     "graph_access_token": self.threads.graph_access_token,
                     "threads_user_id": self.threads.threads_user_id,
                     "proxy": self.threads.proxy,
+                    "app_id": self.threads.app_id,
                 },
                 "messenger": {
                     "enabled": self.messenger.enabled,

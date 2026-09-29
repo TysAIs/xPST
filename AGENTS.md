@@ -41,7 +41,7 @@ is the whole application; the shell is a wrapper.
 | **State** | `src/xpst/state_store.py`, `state_manager.py` | Atomic write-then-rename persistence, thread-safe business logic, crash recovery. |
 | **Config** | `src/xpst/config.py`, `config_migration.py` | Pydantic settings, schema auto-migration on load. |
 | **Credentials** | `src/xpst/utils/credentials.py` | Encrypted-at-rest store (Fernet file store by default; OS keyring is opt-in). |
-| **MCP** | `src/xpst/mcp/server.py` | 40 tools (stdio, typed schemas from `tools/list`, typed errors, fail-closed mutation guards; post, health, config, state, platforms, scheduling incl. cancel, targeted failure retry, analytics, KB, captions, ideas, bio, transcripts, search, Messenger DM + comment auto-reply). **Primary agent surface.** |
+| **MCP** | `src/xpst/mcp/server.py` | 41 tools (stdio, typed schemas from `tools/list`, typed errors, fail-closed mutation guards; post, health, config, state, platforms, scheduling incl. cancel, targeted failure retry, analytics, KB, captions, ideas, bio, transcripts, search, Messenger DM + comment auto-reply). **Primary agent surface.** |
 | **CLI** | `src/xpst/cli.py` | **Scriptable fallback.** `--json` (automatic on non-TTY), `--dry-run`, structured exit codes. |
 | **HTTP API + web UI** | `src/xpst/dashboard/server.py`, `ui/` | FastAPI + WebSocket serving the Svelte/Vite UI. **Internal to the app** — not a supported third-party API surface. |
 | **Desktop shell** | `src-tauri/src/` | Rust/Tauri shell (~850 LOC). Picks a free port, spawns the engine sidecar, waits for health, navigates the webview to it, forwards `xpst://` deep links to the engine's OAuth callback, kills the sidecar on exit, bounded crash-respawn. Everything product-facing lives in the engine, not here. |
@@ -102,7 +102,7 @@ python -m venv .venv && source .venv/bin/activate   # .venv\Scripts\activate on 
 pip install -e ".[dev,mcp]"
 ```
 
-The Click group in `src/xpst/cli.py` exposes 46 top-level commands (71 counting
+The Click group in `src/xpst/cli.py` exposes 47 top-level commands (74 counting
 subcommands); these are the ones an agent needs:
 
 ```bash

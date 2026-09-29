@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Bring-your-own developer app path — no App Review anywhere.** Every
+  platform whose official API needs a developer app (Instagram, Threads,
+  TikTok; Messenger/Facebook Page status) can now run on an app **you own**:
+  a per-platform setup screen (Connect page, `xpst byo set`, MCP
+  `xpst_byo_app`, `POST /api/byo/{platform}`) validates and stores your App
+  ID + Secret **only** in the encrypted local store, answers everything
+  masked (at most a four-char id tail — never the secret), and the stored
+  pair is what lights up the in-app **Sign in** control: the consent dialog,
+  code exchange and token extension all run through your app
+  (`xpst.byo.finalize_meta_oauth_code`). Meta Standard Access means the app
+  owner publishing to their own accounts needs no App Review and no Business
+  Verification; the canonical catalog now exposes a per-platform `byo_app`
+  block so the UI, CLI and agents see the same truth. TikTok sign-in now
+  resolves client key/secret through the same store-first path. Details in
+  `docs/setup-byo-app.md`.
 - **Credential-health watchdog — warned days ahead instead of at failure time.**
   The `expiring` badge used a single 24-hour window, which is right for tokens
   xPST renews by itself but useless for a credential only a human can replace
