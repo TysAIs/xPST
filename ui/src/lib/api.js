@@ -203,6 +203,13 @@ export const api = {
   cancelSignIn: (sessionId) => postJSON(`/api/auth/signin/${encodeURIComponent(sessionId)}/cancel`, {}),
   /** Every live (non-terminal) sign-in session. */
   signIns: () => getJSON("/api/auth/signin"),
+
+  // ── Bring-your-own developer app (BYO) ─────────────────────────
+  /** Masked per-platform BYO app setup truth (never a secret). */
+  byoApp: () => getJSON("/api/byo"),
+  /** Store or clear one platform's app credential; the reply is masked. */
+  setByoApp: (platform, payload = {}) =>
+    postJSON(`/api/byo/${encodeURIComponent(platform)}`, payload),
   /** Plan (dry_run: true) or run a post through the real engine path. */
   post: (payload) => postJSON("/api/post", payload),
 

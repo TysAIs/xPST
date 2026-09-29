@@ -696,11 +696,30 @@ def _manifest_for(name: str, config: Any) -> ProviderManifest | None:
 
 def canonical_provider_catalog(config: Any) -> dict[str, Any]:
     """Return static role-aware provider metadata without network calls."""
+    from xpst.byo import BYO_PLATFORMS, byo_status_for_platform
+
     statuses = build_canonical_status(config)
     providers: list[dict[str, Any]] = []
     for definition in SUPPORTED_PROVIDERS:
         manifest = _manifest_for(definition.name, config)
         item = dict(statuses[definition.name])
+        # BYO path: the user's own developer app IS the official path's
+        # credential. Instagram's shipped default (session) is the unofficial
+        # fallback, so the official flag flips only when the app credential
+        # and the graph auth mode are both present; platforms that are
+        # official by construction keep their static True.
+        byo_app = (
+            byo_status_for_platform(config, definition.name)
+            if definition.name in BYO_PLATFORMS
+            else None
+        )
+        official = definition.official_api
+        if definition.name == "instagram" and byo_app is not None:
+            official = bool(
+                byo_app["configured"]
+                and str(getattr(getattr(config, "instagram", None), "auth_mode", "") or "")
+                == "graph_api"
+            )
         item.update(
             {
                 "roles": [role.value for role in definition.roles],
@@ -710,8 +729,11 @@ def canonical_provider_catalog(config: Any) -> dict[str, Any]:
                     if manifest is not None
                     else []
                 ),
-                "is_official_api": definition.official_api,
+                "is_official_api": official,
                 "docs_url": definition.docs_url,
+                # BYO setup truth (masked): which platforms have an app on
+                # this machine, and what the app unlocks. Never a secret.
+                "byo_app": byo_app,
                 # Legacy manifest roles/capabilities remain discoverable but do
                 # not change canonical role truth (notably Messenger).
                 "legacy_roles": list(manifest.to_dict().get("roles", [])) if manifest else [],

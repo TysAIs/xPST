@@ -165,6 +165,16 @@ def _connectable_enum() -> list[str]:
 _CONNECTABLE_ENUM = _connectable_enum()
 
 
+def _byo_platform_enum() -> list[str]:
+    """Platforms the bring-your-own-app setup acts on, from the BYO registry."""
+    from xpst.byo import BYO_PLATFORMS
+
+    return sorted(BYO_PLATFORMS)
+
+
+_BYO_PLATFORM_ENUM = _byo_platform_enum()
+
+
 _MCP_INSTALL_HINT = "The MCP server requires the optional 'mcp' extra. Install it with: pip install 'xpst[mcp]'"
 
 
@@ -728,6 +738,42 @@ TOOLS: list[Tool] = [
         inputSchema={
             "type": "object",
             "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
+        name="xpst_byo_app",
+        description=(
+            "Bring-your-own developer app setup: report (masked) which platforms "
+            "have a locally-stored app credential, or store/clear one. A stored "
+            "app id/secret is what flips a platform into its official OAuth path "
+            "with NO App Review needed (Meta Standard Access: the owner uses "
+            "their own app). The secret is stored only in the encrypted local "
+            "store and is never echoed back — responses carry at most a 4-char "
+            "id tail. Omit app_id/app_secret for a status read."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "platform": {
+                    "type": "string",
+                    "description": "Platform to act on (required for a store/clear call)",
+                    "enum": _BYO_PLATFORM_ENUM,
+                },
+                "app_id": {
+                    "type": "string",
+                    "description": "Provider app id / client key to store (never echoed back)",
+                },
+                "app_secret": {
+                    "type": "string",
+                    "description": "Provider app secret / client secret to store (never echoed back)",
+                },
+                "clear": {
+                    "type": "boolean",
+                    "description": "Remove the stored app credential for this platform",
+                    "default": False,
+                },
+            },
             "additionalProperties": False,
         },
     ),
@@ -1372,6 +1418,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
             result = await _handle_config_show(server.config)
         elif name == "xpst_auth_status":
             result = await _handle_auth_status(server.config)
+        elif name == "xpst_byo_app":
+            result = await _handle_byo_app(server.config, arguments)
         elif name == "xpst_providers":
             result = await _handle_providers(server.config)
         elif name == "xpst_capabilities":
@@ -2250,6 +2298,82 @@ async def _handle_config_show(config: XPSTConfig) -> CallToolResult:
 
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(masked, indent=2, default=str))],
+    )
+
+
+async def _handle_byo_app(config: XPSTConfig, args: dict[str, Any]) -> CallToolResult:
+    """Handle xpst_byo_app tool.
+
+    Status reads are always safe; a store/clear call writes only to the
+    encrypted local CredentialStore. Responses are secret-free by construction
+    (masked id tail + booleans), so the payload can be logged or shown to an
+    agent without leaking the app secret.
+    """
+    from xpst.byo import (
+        BYO_PLATFORMS,
+        ByoAppError,
+        byo_status,
+        byo_status_for_platform,
+        clear_byo_app,
+        store_byo_app,
+    )
+
+    platform = str(args.get("platform") or "").strip().lower()
+    if not platform:
+        payload: dict[str, Any] = {"ok": True, "action": "status", **byo_status(config)}
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
+        )
+    if platform not in BYO_PLATFORMS:
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(type="text", text=f"Unknown platform for BYO setup: {platform}")],
+        )
+    spec = BYO_PLATFORMS[platform]
+    if not spec.configurable and (args.get("app_id") or args.get("clear")):
+        return CallToolResult(
+            isError=True,
+            content=[
+                TextContent(
+                    type="text",
+                    text=(
+                        f"{spec.display_name} keeps its app credential in its own connect "
+                        "flow; its BYO status is read-only here."
+                    ),
+                )
+            ],
+        )
+    try:
+        if args.get("clear"):
+            payload = {"ok": True, "action": "clear", **clear_byo_app(config, platform)}
+        elif args.get("app_id") or args.get("app_secret"):
+            payload = {
+                "ok": True,
+                "action": "stored",
+                **store_byo_app(
+                    config, platform, str(args.get("app_id", "")), str(args.get("app_secret", ""))
+                ),
+            }
+        else:
+            payload = {
+                "ok": True,
+                "action": "status",
+                "platform_status": byo_status_for_platform(config, platform),
+            }
+    except ByoAppError as exc:
+        return CallToolResult(
+            isError=True,
+            content=[
+                TextContent(
+                    type="text",
+                    text=json.dumps(
+                        {"ok": False, "error": str(exc), "errors": exc.errors}, indent=2
+                    ),
+                )
+            ],
+        )
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
     )
 
 
