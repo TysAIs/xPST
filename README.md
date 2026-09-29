@@ -241,6 +241,21 @@ returns HTTP 404. Use the GitHub release desktop assets described in
 source-install steps above. Do not treat the wheel attached to a GitHub Release
 as proof that the package is published on PyPI.
 
+Until PyPI publication, the shortest CLI install from a published release is
+the wheel itself (verified end-to-end on a clean Python 3.12 container):
+
+```bash
+# from the release page, download xpst-<version>-py3-none-any.whl and
+# python-SHA256SUMS, verify the hash, then:
+python -m venv .venv && source .venv/bin/activate
+pip install ./xpst-<version>-py3-none-any.whl
+xpst --version
+```
+
+`pip install ./xpst-<version>.tar.gz` works the same way for the sdist; verify
+it against `python-SHA512SUMS` (the v1.2.1 `python-SHA256SUMS` omits the
+sdist line).
+
 ### Docker
 
 xPST ships with a `Dockerfile` and `docker-compose.yml` for containerized CLI and MCP server usage:
