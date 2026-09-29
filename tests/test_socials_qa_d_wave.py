@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -118,13 +118,18 @@ def test_d2_requeue_returns_entry_to_pending(tmp_path):
     )
     entry_id = entry["id"]
     manager.claim(entry_id)
+    # Pin the "now" that drives due-ness to just before the resume time —
+    # wall-clock-independent: an unfrozen check would go due whenever CI runs
+    # between the window opening (08:00) and the test's resume time.
     later = datetime(2026, 9, 29, 8, 1)
     assert manager.requeue(entry_id, next_time=later, error="deferred") is True
     stored = manager.list()[0]
     assert stored["status"] == "pending"
     assert "deferred" in (stored["error"] or "")
-    # Not due again before the resume time.
-    assert manager.get_due() == []
+    # Not due again before the resume time...
+    assert manager.get_due(now=later - timedelta(minutes=30)) == []
+    # ...and due once past it.
+    assert [e["id"] for e in manager.get_due(now=later + timedelta(minutes=1))] == [entry_id]
 
 
 # ── D3: the queue surface must reveal pause snapshots, and tests never ──
