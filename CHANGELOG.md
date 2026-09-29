@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deadlines.
 
 ### Fixed
+- **A first TikTok publish from an unaudited dev app no longer dies with a
+  403.** Direct Post hardcoded `privacy_level: PUBLIC_TO_EVERYONE`, but TikTok
+  forces an unaudited Content Posting API client to private privacy — the
+  first publish returned
+  `403 unaudited_client_can_only_post_to_private_accounts`. The uploader now
+  asks `creator_info/query` which levels the client may actually post with and
+  uses the best permitted one (SELF_ONLY for unaudited apps), cached per
+  process to respect the 6 req/min limit; the level is reported in result
+  metadata. The pre-check is fail-open, so the reactive inbox-draft fallback
+  still covers refusals.
 - **The Messenger webhook intake accepted unsigned payloads.** With no
   `X-Hub-Signature-256` header and no `app_secret` configured (the default
   install), `POST /webhook/messenger` returned `200` — the dispatch was a no-op
