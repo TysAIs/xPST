@@ -18,7 +18,7 @@ import pytest
 
 
 def test_d7_md5_fallback_shim_shape():
-    """The anti-bot hash site wraps usedforsecurity in a TypeError guard."""
+    """The anti-bot hash site tolerates Python < 3.9 embedders."""
     import inspect
 
     from xpst import anti_bot
