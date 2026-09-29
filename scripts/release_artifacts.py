@@ -68,7 +68,17 @@ def extract_changelog(version: str) -> str:
 
 
 def generate_checksum_files(dist_dir: Path, sha256_output: Path, sha512_output: Path) -> None:
-    """Generate SHA256SUMS and SHA512SUMS for all distribution files."""
+    """Generate SHA256SUMS and SHA512SUMS for all distribution files.
+
+    Both manifests are written from one file list, and a pre-existing manifest
+    in the output directory that names a different artifact set is a hard
+    error. v1.2.1 shipped a python-SHA256SUMS listing only the wheel while
+    python-SHA512SUMS listed wheel + sdist (a metadata refresh after the
+    rebuild re-uploaded one manifest from a different dist state), leaving a
+    stranger unable to checksum-verify the sdist. Reusing an output directory
+    across dist states is exactly that failure, so it now fails loudly instead
+    of shipping a half-truth manifest.
+    """
     files = find_dist_files(dist_dir)
     sha256_lines = []
     sha512_lines = []
@@ -77,6 +87,21 @@ def generate_checksum_files(dist_dir: Path, sha256_output: Path, sha512_output: 
         checksums = compute_checksums(path)
         sha256_lines.append(f"{checksums['sha256']}  {path.name}")
         sha512_lines.append(f"{checksums['sha512']}  {path.name}")
+
+    def _manifest_names(text: str) -> set[str]:
+        return {line.split()[-1] for line in text.strip().splitlines() if line.strip()}
+
+    expected_names = {path.name for path in files["all"]}
+    for existing in (sha256_output, sha512_output):
+        if existing.exists():
+            stale = _manifest_names(existing.read_text(encoding="utf-8"))
+            if stale and stale != expected_names:
+                raise RuntimeError(
+                    f"{existing.name} already exists naming a different artifact set "
+                    f"than the current dist directory: existing={sorted(stale)} vs "
+                    f"dist={sorted(expected_names)}. Clear the output directory or "
+                    "regenerate every metadata file from the same dist state."
+                )
 
     sha256_output.write_text("\n".join(sha256_lines) + "\n", encoding="utf-8")
     sha512_output.write_text("\n".join(sha512_lines) + "\n", encoding="utf-8")
