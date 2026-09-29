@@ -6460,100 +6460,24 @@ def security_audit(ctx: click.Context, as_json: bool):
     - Provider mode is set
     """
     import json as _json
-    import os
-    import stat
+
+    from xpst.security_audit import run_security_checks
 
     config = load_config(ctx.obj.get("config_path"))
-    checks = []
-    all_pass = True
-
-    # Check 1: Credential file permissions
-    cred_paths = [
-        config.youtube.client_secrets,
-        config.youtube.token_file,
-        config.x.cookies_file,
-        config.instagram.session_file,
-    ]
-    for cred_path in cred_paths:
-        if cred_path and os.path.exists(cred_path):
-            mode = stat.S_IMODE(os.stat(cred_path).st_mode)
-            ok = mode == 0o600
-            checks.append({
-                "check": "file_permissions",
-                "path": cred_path,
-                "mode": oct(mode),
-                "passed": ok,
-                "detail": "0600" if ok else f"Expected 0600, got {oct(mode)}",
-            })
-            if not ok:
-                all_pass = False
-
-    # Check 2: Dashboard binds to localhost
-    checks.append({
-        "check": "dashboard_localhost",
-        "passed": True,
-        "detail": "Dashboard defaults to 127.0.0.1 (localhost-only)",
-    })
-
-    # Check 3: MCP readonly mode available
-    checks.append({
-        "check": "mcp_readonly",
-        "passed": True,
-        "detail": f"XPST_MCP_READONLY env var supported (currently: {os.environ.get('XPST_MCP_READONLY', 'unset')})",
-    })
-
-    # Check 4: Provider mode
-    checks.append({
-        "check": "provider_mode",
-        "passed": True,
-        "detail": f"Provider mode: {config.provider_mode} (official APIs are default)",
-    })
-
-    # Check 5: FFmpeg available
-    try:
-        from xpst.utils.platform import resolve_ffmpeg_path
-        ffmpeg_ok = resolve_ffmpeg_path() is not None
-    except Exception:
-        ffmpeg_ok = False
-    checks.append({
-        "check": "ffmpeg_available",
-        "passed": ffmpeg_ok,
-        "detail": "FFmpeg found" if ffmpeg_ok else "FFmpeg not found — video processing will fail",
-    })
-    if not ffmpeg_ok:
-        all_pass = False
-
-    # Check 6: Encrypted credential storage
-    try:
-        checks.append({
-            "check": "encrypted_storage",
-            "passed": True,
-            "detail": "Fernet encryption with scrypt key derivation (no plaintext fallback)",
-        })
-    except Exception:
-        checks.append({
-            "check": "encrypted_storage",
-            "passed": False,
-            "detail": "Could not verify credential store",
-        })
-        all_pass = False
-
-    output = {
-        "overall_status": "pass" if all_pass else "fail",
-        "checks": checks,
-        "check_count": len(checks),
-        "passed_count": sum(1 for c in checks if c["passed"]),
-        "failed_count": sum(1 for c in checks if not c["passed"]),
-    }
+    output = run_security_checks(config)
+    output["check_count"] = len(output["checks"])
 
     if as_json:
         click.echo(_json.dumps(output, indent=2, default=str))
     else:
+        all_pass = output["overall_status"] == "pass"
         status_color = "green" if all_pass else "red"
         console.print(f"\n[bold]Security Audit:[/bold] [{status_color}]{'PASS' if all_pass else 'FAIL'}[/{status_color}]\n")
-        for check in checks:
+        for check in output["checks"]:
             icon = "✅" if check["passed"] else "❌"
-            console.print(f"  {icon} {check['check']}: {check['detail']}")
+            detail = check.get("detail") or check.get("mode") or ""
+            suffix = " (advisory)" if check.get("advisory") and not check["passed"] else ""
+            console.print(f"  {icon} {check['check']}{suffix}: {detail}")
         console.print()
 
 
