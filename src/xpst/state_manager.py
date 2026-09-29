@@ -33,6 +33,26 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
+def _age_hours(timestamp: Any) -> float | None:
+    """Hours elapsed since a persisted naive/aware ISO timestamp.
+
+    Returns ``None`` when the value is missing or unparseable — a DLQ entry
+    with an unreadable timestamp should show an unknown age, not a fabricated
+    zero (the silent-zero failure mode this queue already fought once).
+    """
+    if not timestamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(timestamp))
+    except (TypeError, ValueError):
+        return None
+    now = datetime.now(timezone.utc)
+    if parsed.tzinfo is None:
+        # Persisted timestamps are naive-UTC (see _utc_now_iso).
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return max(0.0, round((now - parsed).total_seconds() / 3600.0, 2))
+
+
 class StateManager:
     """The single owner of xPST's persisted state.
 
@@ -419,30 +439,58 @@ class StateManager:
     # ── Dead Letter Queue ──
 
     def get_dead_letter_queue(self) -> list[dict[str, Any]]:
-        """Get videos that have failed on any platform."""
+        """Get videos that have failed on any platform.
+
+        Every entry carries the fields a human or an agent needs to triage it:
+        the last error, when it last failed, how many attempts it took, and the
+        lifecycle verdict — ``status`` is ``open`` while the platform has no
+        recorded success, ``resolved`` once a later attempt posted
+        successfully (the error record stays as history, but it is no longer a
+        dead letter), plus ``age_hours`` so staleness is visible without
+        parsing timestamps. Entries whose status is ``resolved`` are reported,
+        not hidden: a resolved-but-uncleared entry is exactly what a human
+        wants to see in ``xpst failures list`` until someone clears it.
+        """
         dlq = []
         for video_id, video in self._state["posted_videos"].items():
             errors = video.get("errors", {})
             if errors:
                 for platform, err in errors.items():
-                    dlq.append(
-                        {
-                            "video_id": video_id,
-                            "platform": platform,
-                            "error": err.get("error", "Unknown"),
-                            "timestamp": err.get("timestamp"),
-                            "count": err.get("count", 1),
-                            "source_url": video.get("source_url"),
-                        }
-                    )
+                    timestamp = err.get("timestamp")
+                    entry = {
+                        "video_id": video_id,
+                        "platform": platform,
+                        "error": err.get("error", "Unknown"),
+                        "timestamp": timestamp,
+                        "count": err.get("count", 1),
+                        "source_url": video.get("source_url"),
+                    }
+                    entry["status"] = self._dlq_status(video, platform)
+                    entry["resolved"] = entry["status"] == "resolved"
+                    entry["age_hours"] = _age_hours(timestamp)
+                    dlq.append(entry)
         return dlq
+
+    @staticmethod
+    def _dlq_status(video: dict[str, Any], platform: str) -> str:
+        """Lifecycle verdict for one recorded failure.
+
+        ``resolved`` means the same video later posted successfully on that
+        platform (a non-empty post id in ``posted_to``). Anything else — no
+        success, or a success that was later hard-deleted — stays ``open``.
+        """
+        entry = (video.get("posted_to") or {}).get(platform) or {}
+        if entry.get("deleted", False):
+            return "open"
+        post_id = entry.get(CANONICAL_POST_ID_KEY) or entry.get(LEGACY_POST_ID_KEY)
+        return "resolved" if post_id else "open"
 
     def clear_dead_letter_queue(self, video_id: str | None = None) -> int:
         """Clear dead letter queue entries.
 
         Args:
-            video_id: When given, clear only that video's errors (legacy
-                per-video API used by ``xpst dlq clear <video>``). Otherwise
+            video_id: When given, clear only that video's errors (per-video
+                API used by ``xpst failures clear <video>``). Otherwise
                 clear every entry.
         """
         if video_id is not None:

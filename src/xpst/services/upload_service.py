@@ -37,6 +37,7 @@ from xpst.reconcile import AttemptLedger, uploader_reconciler
 from xpst.utils.circuit_breaker import CircuitBreakerManager, CircuitBreakerOpenError
 from xpst.utils.content_hash import compute_content_hash
 from xpst.utils.disk import DiskSpaceError, check_disk_space
+from xpst.utils.errors import truncate_error
 from xpst.utils.logger import get_logger
 from xpst.utils.notifications import WebhookNotifier
 from xpst.utils.progress import create_upload_tracker
@@ -289,7 +290,7 @@ class UploadService:
                     pass
             return UploadResult(
                 success=False,
-                error=f"Encoding failed: {str(e)[:200]}",
+                error=f"Encoding failed: {truncate_error(str(e))}",
                 platform=platform_name,
             )
 
@@ -338,7 +339,7 @@ class UploadService:
             logger.error("Blocking upload to %s — pre-flight failed: %s", platform_name, errors)
             return UploadResult(
                 success=False,
-                error=f"Media pre-flight verification failed: {errors[:200]}",
+                error=f"Media pre-flight verification failed: {truncate_error(errors)}",
                 platform=platform_name,
                 metadata={"preflight": preflight.to_dict()},
             )
@@ -479,7 +480,7 @@ class UploadService:
                 logger.debug("Could not record failure state for %s", video_id)
             return UploadResult(
                 success=False,
-                error=f"Upload failed: {str(e)[:200]}",
+                error=f"Upload failed: {truncate_error(str(e))}",
                 platform=platform_name,
             )
 
@@ -708,7 +709,7 @@ class UploadService:
             logger.error("Carousel upload failed for %s: %s", platform_name, e)
             return UploadResult(
                 success=False,
-                error=f"Upload failed: {str(e)[:200]}",
+                error=f"Upload failed: {truncate_error(str(e))}",
                 platform=platform_name,
             )
 
@@ -830,7 +831,7 @@ class UploadService:
             logger.error("Image upload failed for %s: %s", platform_name, e)
             return UploadResult(
                 success=False,
-                error=f"Upload failed: {str(e)[:200]}",
+                error=f"Upload failed: {truncate_error(str(e))}",
                 platform=platform_name,
             )
 
@@ -933,7 +934,7 @@ class UploadService:
             logger.error("Text post failed for %s: %s", platform_name, e)
             return UploadResult(
                 success=False,
-                error=f"Text post failed: {str(e)[:200]}",
+                error=f"Text post failed: {truncate_error(str(e))}",
                 platform=platform_name,
             )
 
