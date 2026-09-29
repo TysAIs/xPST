@@ -93,26 +93,22 @@ class TikTokSource(VideoSource):
     def _find_yt_dlp(self) -> str:
         """Find the yt-dlp binary on the system.
 
-        Checks: PATH via ``shutil.which()``, user-local installation
-        fallback path, then defaults to ``yt-dlp`` (will fail at runtime
-        if not installed).
+        Delegates to :func:`xpst.utils.platform.resolve_ytdlp_path`, which
+        checks ``XPST_YTDLP_PATH``, PATH via ``shutil.which()``, the
+        installer locations, and the running interpreter's ``bin/`` — so
+        daemon/launchd contexts with a minimal PATH still resolve the
+        venv-shipped binary instead of failing at exec time (kanban
+        t_bb310d6a). Falls back to the bare name ``yt-dlp`` (fails at
+        runtime with a clear error if genuinely absent).
 
         Returns:
             Path to yt-dlp binary.
         """
+        from xpst.utils.platform import resolve_ytdlp_path
 
-        # Check common locations
-        import shutil
-
-        yt_dlp = shutil.which("yt-dlp")
-        if yt_dlp:
-            return yt_dlp
-
-        # Check user-local installation
-        from xpst.utils.platform import get_ytdlp_fallback_path
-        user_bin = get_ytdlp_fallback_path()
-        if user_bin.exists():
-            return str(user_bin)
+        resolved = resolve_ytdlp_path()
+        if resolved:
+            return str(resolved)
 
         # Default to PATH
         return "yt-dlp"
@@ -137,7 +133,15 @@ class TikTokSource(VideoSource):
         )
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            return proc.returncode or 1, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+            # `proc.returncode or 1` collapsed a SUCCESSFUL rc 0 into 1, so
+            # check_health() never saw a version, the cookie probe never
+            # accepted a working browser, and downloads were reported failed
+            # even when yt-dlp exited clean (kanban t_bb310d6a).
+            return (
+                proc.returncode if proc.returncode is not None else 1,
+                stdout.decode(errors="replace"),
+                stderr.decode(errors="replace"),
+            )
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
@@ -569,6 +573,7 @@ class TikTokSource(VideoSource):
             "source": "tiktok",
             "yt_dlp_installed": yt_dlp_exists,
             "yt_dlp_version": version,
+            "yt_dlp_path": self._yt_dlp_path,
             "username_configured": username_configured,
             "username": self.config.tiktok.username,
             "cookies_available": cookies_available,
