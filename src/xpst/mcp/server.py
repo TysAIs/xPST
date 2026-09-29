@@ -2059,67 +2059,14 @@ async def _handle_best_time(arguments: dict[str, Any]) -> CallToolResult:
 async def _handle_security_audit(config: XPSTConfig) -> CallToolResult:
     """Handle xpst_security_audit (E5/F2).
 
-    Runs automated security checks on the xPST installation.
+    Runs automated security checks on the xPST installation. Every check is
+    computed from live evidence by the shared audit core (``xpst.security_audit``)
+    — the dashboard bind host, the readonly env state, and the credential
+    store's real backend — never asserted as a constant.
     """
-    import os
-    import stat
+    from xpst.security_audit import run_security_checks
 
-    checks = []
-    all_pass = True
-
-    # Check credential file permissions
-    cred_paths = [
-        config.youtube.client_secrets,
-        config.youtube.token_file,
-        config.x.cookies_file,
-        config.instagram.session_file,
-    ]
-    for cred_path in cred_paths:
-        if cred_path and os.path.exists(cred_path):
-            mode = stat.S_IMODE(os.stat(cred_path).st_mode)
-            ok = mode == 0o600
-            checks.append({
-                "check": "file_permissions",
-                "path": cred_path,
-                "mode": oct(mode),
-                "passed": ok,
-            })
-            if not ok:
-                all_pass = False
-
-    # Dashboard localhost
-    checks.append({"check": "dashboard_localhost", "passed": True})
-
-    # MCP readonly
-    checks.append({"check": "mcp_readonly", "passed": True})
-
-    # Provider mode
-    checks.append({
-        "check": "provider_mode",
-        "passed": True,
-        "detail": config.provider_mode,
-    })
-
-    # FFmpeg
-    try:
-        from xpst.utils.platform import resolve_ffmpeg_path
-
-        ffmpeg_ok = resolve_ffmpeg_path() is not None
-    except Exception:
-        ffmpeg_ok = False
-    checks.append({"check": "ffmpeg_available", "passed": ffmpeg_ok})
-    if not ffmpeg_ok:
-        all_pass = False
-
-    # Encrypted storage
-    checks.append({"check": "encrypted_storage", "passed": True})
-
-    payload = {
-        "overall_status": "pass" if all_pass else "fail",
-        "checks": checks,
-        "passed_count": sum(1 for c in checks if c["passed"]),
-        "failed_count": sum(1 for c in checks if not c["passed"]),
-    }
+    payload = run_security_checks(config)
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
     )
