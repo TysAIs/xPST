@@ -129,6 +129,21 @@ class TestOptOut:
         monkeypatch.setenv("XPST_MCP_ALLOW_ANY_PATH", "1")
         assert not _is_blocked("xpst_post", {"video_path": "/etc/passwd", "caption": "x"})
 
+    def test_opt_out_still_validates_urls(self, monkeypatch):
+        """XPST_MCP_ALLOW_ANY_PATH is path-scoped by name and by intent.
+
+        SSRF protection is a separate defense: a loopback/metadata URL leaks
+        dashboard state no matter where media files live, so loosening the
+        media root must not silently disarm the URL guard.
+        """
+        monkeypatch.setenv("XPST_MCP_ALLOW_ANY_PATH", "1")
+        # paths: opted out
+        assert not _is_blocked("xpst_post", {"video_path": "/etc/passwd", "caption": "x"})
+        # urls: still enforced
+        assert _is_blocked("kb_add", {"source": "http://127.0.0.1:8080/state"})
+        assert _is_blocked("kb_add", {"source": "http://169.254.169.254/latest/meta-data/"})
+        assert _is_blocked("messenger_send", {"webhook_url": "http://localhost:8080/x"})
+
     def test_media_roots_env_var_widens_allowed_roots(self, monkeypatch, tmp_path):
         monkeypatch.setenv("TMPDIR", str(tmp_path / "elsewhere"))
         external = tmp_path / "external-drive"
