@@ -262,6 +262,39 @@ class TestInstagramProfileUnchanged:
         assert cmd[cmd.index("-b:a") + 1] == "256k"  # NOT TikTok's 128k
 
 
+class TestFacebookEncodeDispatch:
+    """Facebook declares VIDEO_DESTINATION and has PLATFORM_SPECS coverage;
+    the encoder dispatch must not raise ValueError at encode time (it used to
+    have no facebook branch in VideoProcessor.encode_for_platform)."""
+
+    def test_facebook_dispatches_to_the_meta_family_cmd(self, processor, monkeypatch, tmp_path):
+        captured: dict = {}
+        config = VideoConfig().encoding_instagram
+
+        def fake_build(input_path, output_path, cfg):
+            captured["config"] = cfg
+            return [processor.ffmpeg_path, "-fake"]
+
+        monkeypatch.setattr(processor, "_build_instagram_cmd", fake_build)
+        monkeypatch.setattr("xpst.utils.video._has_real_video_stream", lambda p: True)
+        src = tmp_path / "in.mp4"
+        src.write_bytes(b"x")
+        out = tmp_path / "out.mp4"
+        try:
+            processor.encode_for_platform(src, out, "facebook", config)
+        except ValueError as exc:  # the dispatch gap this test exists for
+            pytest.fail(f"facebook encode dispatch raised ValueError: {exc}")
+        except Exception:
+            pass  # the fake command cannot actually run; dispatch is the assertion
+        assert captured.get("config") is config
+
+    def test_facebook_loudness_target_is_declared(self):
+        from xpst.media.loudness import LOUDNESS_TARGETS_LUFS, loudness_target
+
+        assert "facebook" in LOUDNESS_TARGETS_LUFS
+        assert loudness_target("facebook") == -14.0
+
+
 def _bare_upload_service(config: XPSTConfig, video_processor) -> UploadService:
     """UploadService with dummy collaborators (only config/processor used)."""
     return UploadService(
@@ -284,6 +317,7 @@ class TestProfileSelectionPerPlatform:
             ("x", "encoding_x"),
             ("tiktok", "encoding_tiktok"),
             ("threads", "encoding_instagram"),
+            ("facebook", "encoding_instagram"),
         ],
     )
     def test_encode_uses_platform_profile(self, platform, expected_profile):

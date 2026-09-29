@@ -44,6 +44,9 @@ LOUDNESS_TARGETS_LUFS: dict[str, float] = {
     "tiktok": -14.0,
     "instagram": -14.0,
     "threads": -14.0,
+    # Facebook Page video: matches PLATFORM_SPECS["facebook"].lufs. Declared
+    # explicitly rather than relying on the unknown-platform fallback.
+    "facebook": -14.0,
     "x": -16.0,
 }
 
