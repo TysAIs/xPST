@@ -76,6 +76,8 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
 from xpst.config import XPSTConfig
 from xpst.content import (
     CONTENT_TYPES,
+    PUBLISH_ROUTE_CAROUSEL,
+    PUBLISH_ROUTE_IMAGE,
     PUBLISH_ROUTE_TEXT,
     PUBLISH_ROUTE_UNIMPLEMENTED,
     ContentRequest,
@@ -345,6 +347,16 @@ TOOLS: list[Tool] = [
                 "dry_run": {
                     "type": "boolean",
                     "description": "Show what would happen without uploading",
+                    "default": False,
+                },
+                "force": {
+                    "type": "boolean",
+                    "description": (
+                        "Post immediately even outside the anti-bot posting "
+                        "window (8am-11pm). Without it, a media post fired "
+                        "outside the window is queued to the schedule store "
+                        "and reported as deferred (not failed)."
+                    ),
                     "default": False,
                 },
             },
@@ -1686,6 +1698,29 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
     if not _engine_can_publish(engine, targets):
         return _no_destinations_result()
 
+    # G11 at the manual surface (D2), same rule as the CLI: an agent's media
+    # post fired outside the anti-bot window is QUEUED (durable, visible,
+    # cancellable via xpst_schedule_cancel) and reported as deferred — not a
+    # failure, and never a silent drop. "force": true bypasses the window;
+    # dry_run reports the verdict without mutating the store.
+    if not args.get("force", False) and not args.get("dry_run", False):
+        from xpst.services.manual_defer import defer_manual_post_to_schedule
+
+        deferral = defer_manual_post_to_schedule(engine.config, request, verdict["route"])
+        if deferral is not None:
+            return CallToolResult(content=[TextContent(
+                type="text",
+                text=json.dumps({
+                    "deferred": True,
+                    "reason": deferral["reason"],
+                    "resume_after": deferral["resume_after"],
+                    "scheduled": deferral["scheduled"],
+                    "message": deferral["message"],
+                    "content_type": verdict["effective_content_type"],
+                    "network_calls": False,
+                }, indent=2, default=str),
+            )])
+
     if verdict["route"] == PUBLISH_ROUTE_TEXT:
         # The text route carries one text per destination, so the
         # per-destination copy is honoured (and validated) here too.
@@ -1699,7 +1734,14 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
             args.get("platforms"),
             per_destination=per_destination or None,
         )
-    elif len(media_paths) > 1:
+    elif verdict["route"] == PUBLISH_ROUTE_IMAGE:
+        # D1 parity: an image request takes the IMAGE route on every surface.
+        # This handler used to branch on media count and post every single
+        # file through the VIDEO path, the same misroute as the CLI.
+        result = await engine.post_manual_image(
+            Path(media_paths[0]), caption, args.get("platforms"),
+        )
+    elif verdict["route"] == PUBLISH_ROUTE_CAROUSEL:
         result = await engine.post_manual_carousel(
             media_paths=[Path(p) for p in media_paths],
             caption=caption,
@@ -1831,10 +1873,20 @@ async def _handle_schedule_list(config: XPSTConfig) -> CallToolResult:
     from xpst.schedule_manager import ScheduleManager
 
     manager = ScheduleManager(config.config_dir)
+    # D3 honesty: an empty schedule with a paused-* snapshot present is NOT
+    # "no queue" — report the snapshot so an agent cannot conclude the user's
+    # posts are gone (or, worse, rebuild a duplicate queue over a paused one).
+    payload: dict[str, Any] = {"schedules": manager.list()}
+    snapshots = manager.paused_snapshots()
+    if snapshots:
+        payload["paused_snapshots"] = snapshots
+        payload["note"] = (
+            "A schedule.json.paused-* snapshot exists in the store dir: the "
+            "queue may have been PAUSED (renamed), not emptied. Verify before "
+            "concluding entries were cancelled."
+        )
     return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps(
-            {"schedules": manager.list()}, default=str,
-        ))],
+        content=[TextContent(type="text", text=json.dumps(payload, default=str))],
     )
 
 

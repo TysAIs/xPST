@@ -70,7 +70,7 @@ def config_file(tmp_path):
 def xpst_dir(tmp_path, monkeypatch):
     """Redirect ~/.xpst to a temp directory for schedule tests."""
     xpst = tmp_path / ".xpst"
-    xpst.mkdir()
+    xpst.mkdir(exist_ok=True)  # conftest isolation fixture pre-creates it
     monkeypatch.setattr(Path, "expanduser", lambda self: xpst if str(self) == "~/.xpst" else Path(str(self).replace("~", str(tmp_path))))
     return str(xpst)
 

@@ -170,6 +170,9 @@ def test_legacy_cli_aliases_share_one_transaction(tmp_path: Path, monkeypatch: p
 
 def test_non_tty_json_never_prompts_or_opens_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    # This test asserts the DEFAULT layout (patched HOME → ~/.xpst); an
+    # isolation XPST_CONFIG_DIR from conftest would outrank HOME.
+    monkeypatch.delenv("XPST_CONFIG_DIR", raising=False)
     # Windows production appends ``xPST`` below APPDATA; keep the native
     # contract isolated and assert the canonical path below.
     monkeypatch.setenv("APPDATA", str(tmp_path))

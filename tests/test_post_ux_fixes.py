@@ -240,14 +240,31 @@ async def test_delete_accepts_full_post_url(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_unknown_ref_stays_truthful_unsupported(tmp_path: Path) -> None:
-    """An unresolvable id/URL must keep a truthful not-found outcome, not fake success."""
+async def test_delete_unknown_ref_delegates_to_platform_and_stays_truthful(
+    tmp_path: Path,
+) -> None:
+    """D5: an id with no local record is passed THROUGH to the platform adapter.
+
+    The platform is the only truthful oracle for "does this post exist":
+    the engine must not fabricate success, and must no longer refuse with
+    UNSUPPORTED just because its local state never saw the post. The outcome
+    mirrors the adapter's answer — a 404-capable adapter's failure surfaces
+    as a failure, its success as success.
+    """
     engine, mock = _seeded_engine(tmp_path)
+    # The platform answers "no such post" itself (the enum's honest member
+    # for that answer is UNSUPPORTED) — the engine reports THAT, having
+    # actually asked, instead of refusing from missing local state.
+    mock.delete.return_value = DeleteResult(
+        DeleteOutcome.UNSUPPORTED, "youtube", "nonexistent-id",
+        message="youtube: no such post",
+    )
 
     result = await engine.delete_post("nonexistent-id", "youtube", soft=True)
 
     assert result.outcome == DeleteOutcome.UNSUPPORTED
-    mock.delete.assert_not_awaited()
+    assert "youtube" in (result.message or "").lower()
+    mock.delete.assert_awaited_once_with("nonexistent-id", soft=True, visibility=None)
 
 
 # ---------------------------------------------------------------------------

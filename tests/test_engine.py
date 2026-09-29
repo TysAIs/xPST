@@ -610,15 +610,33 @@ class TestDeletePost:
         assert engine.state.is_posted("test-video-abc", "x") is False
 
     @pytest.mark.asyncio
-    async def test_delete_post_missing_id_returns_unsupported(self, tmp_path):
-        """delete_post fails cleanly (explicit unsupported) when no post was recorded."""
+    async def test_delete_post_missing_id_falls_back_to_direct_adapter_delete(self, tmp_path):
+        """D5: no local record, but a real platform id still deletes via the adapter."""
         from xpst.platforms.base import DeleteOutcome
 
         config = _make_config(tmp_path)
         (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
 
         engine = CrossPostEngine(config)
-        engine._platforms["x"] = _make_mock_uploader("x", success=True)
+        uploader = _make_mock_uploader("x", success=True)
+        engine._platforms["x"] = uploader
+
+        result = await engine.delete_post("nonexistent", "x")
+        # The mock's legacy ``delete`` returns True -> normalize = DELETED.
+        assert result.outcome == DeleteOutcome.DELETED
+        assert result.ok is True
+        assert result.post_id == "nonexistent"
+        uploader.delete.assert_called_once_with("nonexistent", soft=False, visibility=None)
+
+    @pytest.mark.asyncio
+    async def test_delete_post_missing_id_without_uploader_returns_unsupported(self, tmp_path):
+        """Without a local record AND without an uploader, the refusal stands."""
+        from xpst.platforms.base import DeleteOutcome
+
+        config = _make_config(tmp_path)
+        (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
+
+        engine = CrossPostEngine(config)
 
         result = await engine.delete_post("nonexistent", "x")
         assert result.outcome == DeleteOutcome.UNSUPPORTED

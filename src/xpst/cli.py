@@ -38,7 +38,10 @@ from rich.table import Table
 from xpst.config import XPSTConfig
 from xpst.content import (
     CONTENT_TYPES,
+    PUBLISH_ROUTE_CAROUSEL,
+    PUBLISH_ROUTE_IMAGE,
     PUBLISH_ROUTE_TEXT,
+    PUBLISH_ROUTE_VIDEO,
     ContentIssue,
     ContentRequest,
     blocking_issues,
@@ -910,6 +913,16 @@ def _pre_upload_refusal_blockers(request: ContentRequest) -> list[ContentIssue]:
     help="Post visibility (YouTube honours it; other platforms ignore it)",
 )
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
+@click.option(
+    "--now",
+    "now",
+    is_flag=True,
+    help=(
+        "Post immediately even outside the anti-bot window (8am-11pm). "
+        "Without it, a media post fired outside the window is queued to the "
+        "schedule store and reported as deferred, not failed."
+    ),
+)
 @json_option
 @click.pass_context
 def post(
@@ -922,6 +935,7 @@ def post(
     platforms: str | None,
     visibility: str,
     dry_run: bool,
+    now: bool,
     as_json: bool,
 ):
     """Manually post a video, image, carousel, or text post.
@@ -1087,6 +1101,59 @@ def post(
     if not _engine_can_publish(engine, targets):
         _refuse_no_destinations(ctx, as_json, quiet)
 
+    # G11 at the manual surface (D2): a media post fired outside the anti-bot
+    # window is QUEUED to the schedule store and reported as deferred, not
+    # failed — the user's intent survives in a real, visible entry with the
+    # time it will fire. `--now` overrides for a deliberate midnight post;
+    # `--dry-run` must not mutate the store, so it only reports the verdict.
+    if not now:
+        from xpst.services.manual_defer import defer_manual_post_to_schedule
+
+        if dry_run:
+            from xpst.anti_bot import AntiBotProtection
+            from xpst.services.manual_defer import _DEFERRABLE_ROUTES
+
+            window_open = AntiBotProtection().should_post_now()
+            if verdict["route"] in _DEFERRABLE_ROUTES and not window_open:
+                if as_json:
+                    json_output(
+                        {
+                            "dry_run": True,
+                            "deferred_would_apply": True,
+                            "reason": "outside_anti_bot_window",
+                            "message": (
+                                "Dry run: outside the posting window (8am-11pm); "
+                                "a real run would queue this post to the schedule "
+                                "store instead of posting now (use --now to force)."
+                            ),
+                        },
+                        True,
+                    )
+                else:
+                    console.print(
+                        "[yellow]Dry run:[/yellow] outside the posting window; a "
+                        "real run would defer this to the schedule (use --now to force)."
+                    )
+                return
+        else:
+            deferral = defer_manual_post_to_schedule(config, request, verdict["route"])
+            if deferral is not None:
+                if as_json:
+                    json_output(
+                        {
+                            "deferred": True,
+                            "reason": deferral["reason"],
+                            "resume_after": deferral["resume_after"],
+                            "scheduled": deferral["scheduled"],
+                            "message": deferral["message"],
+                            "content_type": verdict["effective_content_type"],
+                        },
+                        True,
+                    )
+                else:
+                    console.print(f"[yellow]Deferred:[/yellow] {deferral['message']}")
+                return
+
     # Route through the shared pidfile helper: a manual post may run even
     # while a daemon/watch instance holds the pidfile (advisory semantics —
     # warn, never block a deliberate user action).
@@ -1111,11 +1178,22 @@ def post(
         result = asyncio.run(
             engine.post_text(body, platform_list, per_destination=per_destination or None)
         )
-    elif len(media_paths) > 1:
+    elif verdict["route"] == PUBLISH_ROUTE_IMAGE:
+        # D1 fix: an image post takes the IMAGE route. The CLI used to branch
+        # on media count and send every single-file post — image included —
+        # through post_manual, the VIDEO path, so `xpst post -v photo.jpg`
+        # crashed inside the X video uploader ('NoneType' has no attribute
+        # 'mime') while the engine's own publish_request routed the same
+        # request correctly. The route decision is taken once, by the shared
+        # content contract, and the CLI follows it like every other surface.
+        result = asyncio.run(
+            engine.post_manual_image(media_paths[0], body, platform_list)
+        )
+    elif verdict["route"] == PUBLISH_ROUTE_CAROUSEL:
         result = asyncio.run(
             engine.post_manual_carousel(media_paths, body, platform_list, per_platform_captions)
         )
-    else:
+    elif verdict["route"] == PUBLISH_ROUTE_VIDEO:
         result = asyncio.run(
             engine.post_manual(
                 media_paths[0],
@@ -1125,6 +1203,12 @@ def post(
                 visibility=visibility,
             )
         )
+    else:
+        # No publishing path for this content type (a plugin destination, or a
+        # type no uploader implements). Refuse with one row per destination,
+        # exactly like the engine's own contract entry point and the MCP
+        # surface — never upload a file "as a video just in case".
+        result = asyncio.run(engine.post_request(request))
 
     quota_blocked = [
         p for p, ur in result.results.items()
@@ -5280,11 +5364,27 @@ def schedule_list(ctx: click.Context, as_json: bool):
     entries = manager.list()
 
     if as_json:
-        json_output(entries, True)
+        # A store file with zero entries is NOT the same fact as "the queue
+        # was paused by renaming it" (D3: an empty list hid a 10-entry
+        # paused-* backup). Report any pause snapshots alongside the entries.
+        snapshots = manager.paused_snapshots()
+        json_output(
+            {"entries": entries, "paused_snapshots": snapshots}
+            if snapshots
+            else entries,
+            True,
+        )
         return
 
     if not entries:
         console.print("[dim]No scheduled posts.[/dim]")
+        for snap in manager.paused_snapshots():
+            count = snap["entries"]
+            console.print(
+                f"[yellow]Note:[/yellow] pause snapshot found at [bold]{snap['file']}[/bold]"
+                + (f" ({count} entries)" if count is not None else "")
+                + " — the queue may have been paused, not emptied."
+            )
         return
 
     table = Table(title="Scheduled Posts", show_lines=True)
@@ -5451,12 +5551,30 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
             continue
 
         try:
-            result = asyncio.run(
-                engine.post_manual(
-                    video_path, caption, platforms,
-                    per_platform_captions=per_platform_captions or None,
+            # Route by the modality stored at add time (D1's schedule twin):
+            # an image entry fires through the image route, a carousel entry
+            # through the carousel route. Entries without the field keep the
+            # video path — legacy stores are unchanged.
+            entry_route = str(entry.get("content_type") or "").strip().lower()
+            entry_media = [Path(p) for p in (entry.get("media_paths") or []) if str(p).strip()]
+            if entry_route == "image":
+                result = asyncio.run(
+                    engine.post_manual_image(video_path, caption, platforms)
                 )
-            )
+            elif entry_route == "carousel" and len(entry_media) >= 2:
+                result = asyncio.run(
+                    engine.post_manual_carousel(
+                        entry_media, caption, platforms,
+                        per_platform_captions or None,
+                    )
+                )
+            else:
+                result = asyncio.run(
+                    engine.post_manual(
+                        video_path, caption, platforms,
+                        per_platform_captions=per_platform_captions or None,
+                    )
+                )
             success = result.all_success
             error_msg = None
             if not success:
@@ -5464,6 +5582,37 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
                 error_msg = "; ".join(failed)
 
             post_results = {platform: upload_result.to_dict() for platform, upload_result in result.results.items()}
+            # G11 on the fire path (D2): all-deferred is a requeue, not a failure.
+            _rows = result.results
+            _deferred_rows = [
+                ur for ur in _rows.values()
+                if not ur.success and (ur.metadata or {}).get("deferred")
+            ]
+            if not success and _rows and len(_deferred_rows) == len(_rows):
+                _resume_iso = next(
+                    (
+                        (ur.metadata or {}).get("resume_after")
+                        for ur in _deferred_rows
+                        if (ur.metadata or {}).get("resume_after")
+                    ),
+                    None,
+                )
+                _resume_at = None
+                if _resume_iso:
+                    try:
+                        from datetime import datetime as _dt
+
+                        _resume_at = _dt.fromisoformat(str(_resume_iso))
+                    except ValueError:
+                        _resume_at = None
+                manager.requeue(
+                    entry_id, next_time=_resume_at,
+                    error="deferred: outside posting window",
+                )
+                if not as_json:
+                    console.print(f"  [yellow]⏸[/yellow] {entry_id}: deferred (window), requeued")
+                continue
+
             manager.mark_complete(
                 entry_id,
                 success=success,
@@ -5547,6 +5696,29 @@ def schedule_install(ctx: click.Context, interval: int, uninstall: bool, as_json
         sys.exit(EXIT_GENERAL)
 
 
+def _launchd_agent_path() -> str:
+    """PATH for the LaunchAgent environment.
+
+    launchd services start from ``/usr/bin:/bin:/usr/sbin:/sbin`` only, so a
+    user-installed helper (yt-dlp in ~/.local/bin, ffmpeg in /opt/homebrew/bin)
+    is invisible to the daemon even when ``xpst doctor`` reports it — the
+    divergence defect D4. Give the agent the standard system dirs plus the
+    user's own install dirs so daemon, CLI, and doctor agree.
+    """
+    home = Path.home()
+    parts = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        str(home / ".local" / "bin"),
+        str(home / "bin"),
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+    ]
+    return ":".join(parts)
+
+
 def _write_launchd_plist(plist_dir: Path, xpst_bin: str) -> Path:
     """Write the com.xpst.schedule LaunchAgent plist. Returns its path."""
     plist_dir = Path(plist_dir)
@@ -5564,6 +5736,11 @@ def _write_launchd_plist(plist_dir: Path, xpst_bin: str) -> Path:
         <string>{xpst_bin}</string>
         <string>serve</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{_launchd_agent_path()}</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

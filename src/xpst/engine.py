@@ -22,6 +22,7 @@ Features:
 Refactored to delegate to UploadService and SourceService.
 """
 
+import inspect
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -708,6 +709,12 @@ class CrossPostEngine:
             )
 
             result.results[platform_name] = upload_result
+            # Caption fidelity (D6): if the upload path varied the caption
+            # (anti-bot suffixing), the truth of what went live is on the
+            # result metadata — report THAT, not the requested copy.
+            sent = (upload_result.metadata or {}).get("caption_sent")
+            if isinstance(sent, str) and sent:
+                result.captions[platform_name] = sent
 
             # Send per-result notification (manual mode)
             if upload_result.is_published:
@@ -930,6 +937,13 @@ class CrossPostEngine:
             )
 
             result.results[platform_name] = upload_result
+            # Caption fidelity (D6): the image route carries one shared caption;
+            # record it (and the exact sent copy, when the service reports one)
+            # so --json/MCP captions cover image posts too.
+            sent = (upload_result.metadata or {}).get("caption_sent")
+            result.captions[platform_name] = (
+                sent if isinstance(sent, str) and sent else caption
+            )
 
             # Notifications, circuit breaking, quota and state are owned by
             # ``upload_service.upload_image_to_platform`` (it reports the outcome
@@ -1275,12 +1289,68 @@ class CrossPostEngine:
                 post_data = self.state.get_post_data(video_id, platform)
 
         if not post_data:
+            # D5 fallback: no local record, but the caller may still name a
+            # REAL platform post id (e.g. a post made outside this install,
+            # or one whose state row predates the current store). The
+            # adapter can delete by id without any local context, so try it
+            # before refusing. The outcome is whatever the platform reports —
+            # never a fabricated success, and a failed takedown stays
+            # `pending`/`unsupported` rather than pretending to have deleted.
+            from xpst.utils.post_refs import extract_post_id
+
+            uploader = self._platforms.get(platform)
+            direct_id = extract_post_id(video_id)
+            if uploader is not None and direct_id:
+                logger.info(
+                    "delete_post(%s, %s): no local record — attempting direct "
+                    "adapter delete by id",
+                    video_id,
+                    platform,
+                )
+                try:
+                    raw = uploader.delete(direct_id, soft=soft, visibility=visibility)
+                    if inspect.isawaitable(raw):
+                        raw = await raw
+                    direct_result = normalize_delete_result(raw, platform, direct_id)
+                except Exception as e:
+                    logger.error(
+                        "Direct adapter delete failed for %s on %s: %s",
+                        direct_id,
+                        platform,
+                        e,
+                    )
+                    direct_result = DeleteResult(
+                        outcome=DeleteOutcome.PENDING,
+                        platform=platform,
+                        post_id=direct_id,
+                        detail=str(e)[:200],
+                    )
+                if direct_result.ok:
+                    # Record the tombstone WITHOUT a state row: a deleted
+                    # platform post with no local video row still deserves a
+                    # tombstone record for the audit trail, but there is no
+                    # video_id to hang it on — log the truth instead.
+                    logger.info(
+                        "Direct adapter delete confirmed on %s (id %s); no "
+                        "local state row existed for it",
+                        platform,
+                        direct_id,
+                    )
+                    direct_result.detail = (
+                        (direct_result.detail + "; " if direct_result.detail else "")
+                        + "deleted by id (no local record)"
+                    )
+                return direct_result
+
             logger.error(f"No post data found for {video_id} on {platform}")
             return DeleteResult(
                 outcome=DeleteOutcome.UNSUPPORTED,
                 platform=platform,
                 post_id="",
-                message=f"No post data found for {video_id} on {platform}",
+                message=(
+                    f"No post data found for {video_id} on {platform}, and a "
+                    "direct delete by id did not confirm a takedown."
+                ),
             )
 
         # Idempotency (QA wave): if state already carries a delete tombstone
