@@ -82,7 +82,9 @@ def test_a_wrong_command_count_is_rejected(counts) -> None:
 
 
 def test_a_wrong_tool_badge_is_rejected(counts) -> None:
-    tampered = _readme().replace("MCP-40%20tools", "MCP-28%20tools", 1)
+    claim = f"MCP-{counts.mcp_tools}%20tools"
+    assert claim in _readme(), "the README badge no longer claims a tool count"
+    tampered = _readme().replace(claim, "MCP-28%20tools", 1)
 
     problems = check_claims(counts, tampered)
 

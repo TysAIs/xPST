@@ -116,6 +116,45 @@
   const connected = $derived(report ? report.connected === true : false);
   const sourceOnly = $derived(report ? report.source_only === true : false);
   const signInSupport = $derived(report?.sign_in ?? null);
+  // Bring-your-own app truth for the selected platform (masked; from the
+  // canonical catalog). Non-null only for platforms the BYO path covers.
+  const byoInfo = $derived(catalog?.by_name?.[activePlatform]?.byo_app ?? null);
+  let byoForm = $state({ appId: "", appSecret: "", saving: false, error: "", errors: {} });
+
+  async function saveByoApp(platform) {
+    byoForm = { ...byoForm, saving: true, error: "", errors: {} };
+    try {
+      const result = await api.setByoApp(platform, {
+        app_id: byoForm.appId,
+        app_secret: byoForm.appSecret,
+      });
+      if (result?.ok === false) {
+        byoForm = { ...byoForm, saving: false, error: result.error || "Not accepted", errors: result.errors || {} };
+        return;
+      }
+      byoForm = { appId: "", appSecret: "", saving: false, error: "", errors: {} };
+      // Never trust the echo: re-read the catalog, then re-run the engine's
+      // own probe so the Sign in control's availability is the engine's truth.
+      catalog = await api.providers();
+      await preload(platform);
+      await verify(platform);
+    } catch (cause) {
+      byoForm = { ...byoForm, saving: false, error: errorMessage(cause) };
+    }
+  }
+
+  async function clearByoApp(platform) {
+    byoForm = { ...byoForm, saving: true, error: "" };
+    try {
+      await api.setByoApp(platform, { clear: true });
+      catalog = await api.providers();
+      await preload(platform);
+      await verify(platform);
+      byoForm = { ...byoForm, saving: false };
+    } catch (cause) {
+      byoForm = { ...byoForm, saving: false, error: errorMessage(cause) };
+    }
+  }
   // Sign-in is offered whenever the destination is not verified ready — an
   // authenticated source session (e.g. TikTok cookies) is not a posting
   // credential, so the control must not hide behind it.
@@ -357,6 +396,56 @@
           <p class="xpst-card__description">
             In-app sign-in is not available for this platform yet. {signInSupport.reason}
           </p>
+        {/if}
+
+        {#if byoInfo}
+          <div class="xpst-signin" data-phase={byoInfo.configured ? "succeeded" : "idle"}>
+            <div class="xpst-section__heading">
+              <strong>Bring your own developer app</strong>
+              {#if byoInfo.configured}
+                <StatusBadge status="success" label="App {byoInfo.app_id_masked} stored" />
+              {:else}
+                <StatusBadge status="disabled" label="No app yet" />
+              {/if}
+            </div>
+            <p class="xpst-card__description">{byoInfo.enables}</p>
+            {#if byoInfo.configured}
+              <p class="xpst-signin__hint">
+                Stored encrypted on this machine only ({byoInfo.source}) — never synced, never shown in full.
+                {#if byoInfo.redirect_uri}Redirect registered on the app: <code>{byoInfo.redirect_uri}</code>{/if}
+              </p>
+              <div class="xpst-inline-actions">
+                <button class="xpst-button" data-variant="secondary" type="button" onclick={() => clearByoApp(byoInfo.platform)} disabled={byoForm.saving}>
+                  Remove app credential
+                </button>
+              </div>
+            {:else if byoInfo.configurable}
+              <p class="xpst-card__description">
+                Create your own app at <a href={byoInfo.create_url} target="_blank" rel="noreferrer noopener">{byoInfo.create_url}</a>,
+                add this product, and register the redirect <code>{byoInfo.redirect_uri}</code>.
+                As the app owner you need no App Review and no Business Verification.
+              </p>
+              <label>
+                {byoInfo.id_label}
+                <input type="text" bind:value={byoForm.appId} autocomplete="off" spellcheck="false" />
+                {#if byoForm.errors.app_id}<small class="xpst-signin__error">{byoForm.errors.app_id}</small>{/if}
+              </label>
+              <label>
+                {byoInfo.secret_label}
+                <input type="password" bind:value={byoForm.appSecret} autocomplete="off" />
+                {#if byoForm.errors.app_secret}<small class="xpst-signin__error">{byoForm.errors.app_secret}</small>{/if}
+              </label>
+              {#if byoForm.error}<p class="xpst-signin__error">{byoForm.error}</p>{/if}
+              <div class="xpst-inline-actions">
+                <button class="xpst-button" type="button" onclick={() => saveByoApp(byoInfo.platform)} disabled={byoForm.saving || !byoForm.appId || !byoForm.appSecret} aria-busy={byoForm.saving ? "true" : undefined}>
+                  {byoForm.saving ? "Saving…" : "Save app credential"}
+                </button>
+              </div>
+              <p class="xpst-signin__hint">
+                Saved to the encrypted local store under ~/.xpst — the secret is never echoed back or logged.
+              </p>
+            {/if}
+          </div>
         {/if}
       {:else}
         <EmptyState title="No platform checked yet" description="Choose a destination on the left to run a live verification." />
