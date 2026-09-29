@@ -432,6 +432,11 @@ A content type the chosen destination cannot publish is refused **before anythin
 uploaded**, with the reason in `blockers` and exit code 1 — never reported as a success. Run
 `xpst capabilities` to see what each destination can actually publish.
 
+`--dry-run` answers the same question the live run would face, not just the request shape:
+`ready`/`blockers` come from the canonical preflight, so a destination that live would
+refuse (disabled in configuration, credentials missing, quota exhausted) already blocks
+the dry run with a message naming it.
+
 ```bash
 # Single video to all platforms
 xpst post -v ./my-video.mp4 -c "My awesome video!"
@@ -726,6 +731,8 @@ Show cross-platform engagement metrics (views, likes, comments, shares) for all 
 xpst analytics                    # show summary for all platforms
 xpst analytics -p youtube,x        # specific platforms only
 xpst analytics --refresh           # force refresh (ignore cache)
+xpst analytics --live              # force a live provider round-trip now (MCP live=true)
+xpst analytics --recorded          # recorded snapshots only; zero network calls (MCP live=false)
 xpst analytics --json
 ```
 

@@ -30,6 +30,7 @@ from xpst.platforms.base import (
     UploadResult,
 )
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
+from xpst.utils.errors import truncate_error
 from xpst.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -247,7 +248,7 @@ class XUploader(PlatformUploader):
                 if not media_id:
                     return UploadResult(
                         success=False,
-                        error=f"X_API_V2_ERROR: No media_id in INIT response: {resp.text[:200]}",
+                        error=f"X_API_V2_ERROR: No media_id in INIT response: {truncate_error(resp.text)}",
                         platform="x",
                     )
 
@@ -300,7 +301,7 @@ class XUploader(PlatformUploader):
                 if not tweet_id:
                     return UploadResult(
                         success=False,
-                        error=f"X_API_V2_ERROR: No tweet ID in response: {resp.text[:200]}",
+                        error=f"X_API_V2_ERROR: No tweet ID in response: {truncate_error(resp.text)}",
                         platform="x",
                     )
 
@@ -339,7 +340,7 @@ class XUploader(PlatformUploader):
 
             return UploadResult(
                 success=False,
-                error=f"X_API_V2_ERROR: {str(e)[:200]}",
+                error=f"X_API_V2_ERROR: {truncate_error(str(e))}",
                 platform="x",
             )
 
@@ -415,7 +416,7 @@ class XUploader(PlatformUploader):
 
             return UploadResult(
                 success=False,
-                error=f"X_UPLOAD_ERROR: {str(e)[:200]}",
+                error=f"X_UPLOAD_ERROR: {truncate_error(str(e))}",
                 platform="x",
             )
 
@@ -516,7 +517,7 @@ class XUploader(PlatformUploader):
                 if not tweet_id:
                     return UploadResult(
                         success=False,
-                        error=f"X_API_V2_ERROR: No tweet ID in response: {resp.text[:200]}",
+                        error=f"X_API_V2_ERROR: No tweet ID in response: {truncate_error(resp.text)}",
                         platform="x",
                         retryable=False,
                     )
@@ -568,7 +569,7 @@ class XUploader(PlatformUploader):
             )
         return UploadResult(
             success=False,
-            error=f"X_POST_TEXT_ERROR: {str(exc)[:200]}",
+            error=f"X_POST_TEXT_ERROR: {truncate_error(str(exc))}",
             platform="x",
         )
 
@@ -636,7 +637,7 @@ class XUploader(PlatformUploader):
                 platform="x",
                 authenticated=False,
                 session_valid=False,
-                error=f"X API v2 health check failed: {str(exc)[:200]}",
+                error=f"X API v2 health check failed: {truncate_error(str(exc))}",
                 details={"auth_mode": "api_v2", "probe": "api_v2"},
             )
 
@@ -687,7 +688,7 @@ class XUploader(PlatformUploader):
                 platform="x",
                 authenticated=False,
                 session_valid=False,
-                error=f"Health check failed: {str(e)[:200]}",
+                error=f"Health check failed: {truncate_error(str(e))}",
             )
 
     async def delete(
@@ -713,7 +714,7 @@ class XUploader(PlatformUploader):
                 outcome=DeleteOutcome.PENDING,
                 platform=self.platform_name,
                 post_id=post_id,
-                detail=str(e)[:200],
+                detail=truncate_error(str(e)),
             )
 
     async def upload_image(self, image_path: Path, caption: str) -> UploadResult:
@@ -805,7 +806,7 @@ class XUploader(PlatformUploader):
                 if not media_id:
                     return UploadResult(
                         success=False,
-                        error=f"X_API_V2_ERROR: No media_id in INIT response: {resp.text[:200]}",
+                        error=f"X_API_V2_ERROR: No media_id in INIT response: {truncate_error(resp.text)}",
                         platform="x",
                     )
 
@@ -842,7 +843,7 @@ class XUploader(PlatformUploader):
                 if not tweet_id:
                     return UploadResult(
                         success=False,
-                        error=f"X_API_V2_ERROR: No tweet ID in response: {resp.text[:200]}",
+                        error=f"X_API_V2_ERROR: No tweet ID in response: {truncate_error(resp.text)}",
                         platform="x",
                     )
 
@@ -872,7 +873,7 @@ class XUploader(PlatformUploader):
             logger.error(f"X API v2 image upload failed: {e}")
             return UploadResult(
                 success=False,
-                error=f"X_API_V2_ERROR: {str(e)[:200]}",
+                error=f"X_API_V2_ERROR: {truncate_error(str(e))}",
                 platform="x",
             )
 
@@ -935,7 +936,7 @@ class XUploader(PlatformUploader):
 
             return UploadResult(
                 success=False,
-                error=f"X_IMAGE_ERROR: {str(e)[:200]}",
+                error=f"X_IMAGE_ERROR: {truncate_error(str(e))}",
                 platform="x",
             )
 
@@ -1079,7 +1080,7 @@ class XUploader(PlatformUploader):
 
             return UploadResult(
                 success=False,
-                error=f"X_THREAD_ERROR: {str(e)[:200]}",
+                error=f"X_THREAD_ERROR: {truncate_error(str(e))}",
                 platform="x",
             )
 
