@@ -737,7 +737,17 @@ class StateManager:
         tiktok_url: str | None = None,
         source_platform: str = "",
     ) -> None:
-        """Legacy method for marking a video as posted."""
+        """Legacy method for marking a video as posted.
+
+        Goes through the transactional ``_store.update`` seam — the same
+        write path as every other state mutation — so the post record lands
+        in the freshest on-disk state and is persisted atomically. The old
+        path mutated the in-memory dict under a private lock with a
+        2-second-throttled, exception-swallowed ``_store.save()``: a crash
+        (or a save error) inside the throttle window lost the record while
+        the process kept believing the video was posted, and the next run
+        could post it a second time.
+        """
         now = _utc_now_iso()
         posted_to = {}
         if platform:
@@ -746,9 +756,9 @@ class StateManager:
                 "url": post_url or "",
                 "timestamp": now,
             }
-        with self._save_lock:
-            self._add_posted_video_inner(
-                self._state,
+        self._store.update(
+            lambda state: self._add_posted_video_inner(
+                state,
                 video_id=video_id,
                 source_url=tiktok_url or "",
                 source_platform=source_platform,
@@ -756,16 +766,7 @@ class StateManager:
                 caption=caption,
                 content_hash=content_hash,
             )
-            # Persist to disk — throttled to avoid I/O bottleneck in bulk operations
-            import time as _time
-
-            now_ts = _time.monotonic()
-            if not hasattr(self, "_last_save_ts") or (now_ts - self._last_save_ts) > 2.0:
-                self._last_save_ts = now_ts
-                try:
-                    self._store.save()
-                except Exception:
-                    pass  # Non-fatal — state will be saved on next cycle
+        )
 
     def mark_video_failed(self, video_id: str, platform: str, error: str) -> None:
         """Legacy method - mark a video as failed on a platform."""
