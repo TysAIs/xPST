@@ -365,6 +365,8 @@ class TikTokSignIn:
 
     Requires the user's own TikTok developer app (client key + secret): xPST
     ships no shared app, so the app-id presence is what turns the control on.
+    Credentials resolve through the BYO path (encrypted store first, then the
+    config file) so a key stored from the setup screen works immediately.
     """
 
     platform = "tiktok"
@@ -375,6 +377,11 @@ class TikTokSignIn:
         self.public_host = public_host
 
     def _creds(self, config: Any) -> tuple[str, str]:
+        from xpst.byo import resolve_byo_app
+
+        resolved = resolve_byo_app(config, "tiktok")
+        if resolved is not None and resolved[1]:
+            return resolved[0], resolved[1]
         account = getattr(config, "tiktok", None)
         return (
             str(getattr(account, "client_key", "") or ""),
@@ -439,6 +446,92 @@ class TikTokSignIn:
         return {"credential": "tiktok_access_token", "refresh_token": bool(refresh_token)}
 
 
+class MetaSignIn:
+    """In-app OAuth for a Meta product backed by the user's own app (BYO).
+
+    Instagram Reels and Threads are the two configurable BYO platforms: one
+    Meta app covers both, so both read the shared ``byo_meta_*`` store keys
+    and the control lights up as soon as a setup screen has stored them. The
+    consent dialog is the standard Facebook Login dialog (loopback redirect —
+    Meta accepts ``http://localhost:<port>`` for apps in Development mode),
+    and the code exchange + token extension + account proof run through
+    :func:`xpst.byo.finalize_meta_oauth_code` with the user's app id/secret.
+    As the app owner the user stays in Standard Access: no App Review, no
+    Business Verification.
+    """
+
+    def __init__(self, platform: str) -> None:
+        from xpst.byo import META_REDIRECT_PATH, META_REDIRECT_PORT
+
+        self.platform = platform
+        self.port = META_REDIRECT_PORT
+        self.path = META_REDIRECT_PATH
+        self.public_host = "localhost"
+
+    def _creds(self, config: Any) -> tuple[str, str]:
+        from xpst.byo import resolve_byo_app
+
+        resolved = resolve_byo_app(config, self.platform)
+        if resolved is not None and resolved[1]:
+            return resolved[0], resolved[1]
+        return "", ""
+
+    def support(self, config: Any) -> SignInSupport:
+        from xpst.byo import BYO_PLATFORMS, byo_status_for_platform
+
+        app_id, app_secret = self._creds(config)
+        if not app_id or not app_secret:
+            status = byo_status_for_platform(config, self.platform)
+            return SignInSupport(
+                available=False,
+                transport="unavailable",
+                reason=(
+                    f"{status['display_name']} needs your own Meta app (App ID + App "
+                    "Secret). Add them once in the BYO app setup — as the app owner "
+                    "you need no App Review and no Business Verification."
+                ),
+                docs_url=BYO_PLATFORMS[self.platform].create_url,
+            )
+        return SignInSupport(available=True, transport="loopback")
+
+    def authorize(self, config: Any, redirect_uri: str, state: str) -> tuple[str, dict[str, Any]]:
+        from urllib.parse import urlencode
+
+        from xpst.byo import BYO_PLATFORMS
+
+        app_id, app_secret = self._creds(config)
+        spec = BYO_PLATFORMS[self.platform]
+        params = {
+            "client_id": app_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": ",".join(spec.scopes),
+            "state": state,
+        }
+        url = f"https://www.facebook.com/v21.0/dialog/oauth?{urlencode(params, safe=',')}"
+        # The secret rides the private session state (never serialized) so the
+        # exchange step does not re-read the store.
+        return url, {"app_id": app_id, "app_secret": app_secret}
+
+    def exchange(
+        self, config: Any, code: str, redirect_uri: str, secret_state: dict[str, Any]
+    ) -> dict[str, Any]:
+        from xpst.byo import ByoAppError, finalize_meta_oauth_code
+
+        if not secret_state.get("app_id") or not secret_state.get("app_secret"):
+            raise SignInNotAvailableError("The Meta app credential vanished mid-flow; start again.")
+        try:
+            result = finalize_meta_oauth_code(
+                config, self.platform, code=code, redirect_uri=redirect_uri
+            )
+        except ByoAppError as exc:
+            raise RuntimeError(str(exc)) from None
+        account = dict(result.get("account") or {})
+        account["steps"] = result.get("steps", [])
+        account["app_id_masked"] = result.get("app_id_masked", "")
+        return account
+
+
 def default_providers() -> dict[str, SignInProvider]:
     """Platform → adapter. Order matches the destination catalog."""
     providers: list[SignInProvider] = [
@@ -450,22 +543,12 @@ def default_providers() -> dict[str, SignInProvider]:
             "redirect, so there is nothing for xPST to open. Add the credential in Settings.",
             "https://developer.x.com/",
         ),
-        UnavailableSignIn(
-            "instagram",
-            "Instagram needs a Meta developer app with this account added to it (Standard "
-            "Access). xPST cannot start that consent until your app id/secret is stored — "
-            "that is the bring-your-own-app setup, which lands next.",
-            "https://developers.facebook.com/docs/instagram-platform",
-        ),
-        UnavailableSignIn(
-            "threads",
-            "Threads needs a Meta developer app plus a publicly reachable redirect URL; "
-            "xPST has no hosted endpoint, so this cannot run in-app yet.",
-            "https://developers.facebook.com/docs/threads",
-        ),
+        MetaSignIn("instagram"),
+        MetaSignIn("threads"),
         UnavailableSignIn(
             "messenger",
-            "Messenger is opt-in and disabled; enable it in config first.",
+            "Messenger is opt-in and disabled; enable it in config first. It uses the "
+            "same BYO Meta app as Instagram and Threads.",
             "https://developers.facebook.com/docs/messenger-platform",
         ),
     ]

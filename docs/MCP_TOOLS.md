@@ -2,7 +2,7 @@
 
 The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, run posting workflows, and query the personal content knowledge base without scraping CLI text.
 
-This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). The current registry contains **40 tools: 34 `xpst_*` + 2 `messenger_*` + 4 `kb_*`**, including the canonical capability, readiness, browser-free auth plan, resumable setup tools, the failure/activity recovery tools (list + targeted retry), scheduling incl. cancel, and the canonical post preflight.
+This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). The current registry contains **41 tools: 35 `xpst_*` + 2 `messenger_*` + 4 `kb_*`**, including the canonical capability, readiness, browser-free auth plan, resumable setup tools, the failure/activity recovery tools (list + targeted retry), scheduling incl. cancel, and the canonical post preflight.
 
 xPST posts to the destinations enabled by your configuration — YouTube, Instagram, and X/Twitter are the live-verified destinations (TikTok publishing is not available yet and awaits external TikTok developer review; Threads and Messenger are opt-in integrations, currently disabled/unauthenticated — see the [INSTALL.md capability truth table](INSTALL.md#capability-truth-table)) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
 
@@ -61,6 +61,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_backfill` | Retry failed or incomplete posts from history. `attempted` / `successful` are… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No | — |
 | `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No | — |
+| `xpst_byo_app` | Bring-your-own developer app setup: report (masked) which platforms have a lo… | No | — |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No | — |
 | `xpst_capabilities` | Return the canonical role-aware provider catalog AND the content contract wit… | No | — |
 | `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets… | No | — |
@@ -81,7 +82,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_setup_resume` | Resume setup with safe step state or caller-verified readiness | No | — |
 | `xpst_setup_reset` | Reset the shared setup transaction and its recovery copies | No | — |
 
-Registry size: **40 tools**.
+Registry size: **41 tools**.
 <!-- END GENERATED TOOL INDEX -->
 
 ---

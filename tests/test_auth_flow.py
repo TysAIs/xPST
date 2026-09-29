@@ -364,13 +364,18 @@ def test_youtube_and_tiktok_are_available_only_with_their_local_credentials(tmp_
 
     # ...and available once the local credential exists / is configured.
     creds = tmp_path / "credentials"
-    creds.mkdir()
+    creds.mkdir(exist_ok=True)
     (creds / "youtube_client_secrets.json").write_text("{}", encoding="utf-8")
     assert providers["youtube"].support(config).available is True
 
     config.tiktok.client_key = "key"
     config.tiktok.client_secret = "secret"
     assert providers["tiktok"].support(config).available is True
+    # And a BYO Meta app on the config section lights Instagram up.
+    config.instagram = _Account(
+        app_id="1234567890", app_secret="meta-fake-secret-9", auth_mode="graph_api"
+    )
+    assert providers["instagram"].support(config).available is True
 
 
 def test_tiktok_uses_the_registered_loopback_redirect_by_default():
@@ -571,7 +576,11 @@ def test_api_signin_mutations_need_the_dashboard_token(tmp_path, monkeypatch):
 
 
 def test_api_reports_unavailable_platforms_with_the_reason(tmp_path, monkeypatch):
-    """Instagram/Threads/X must refuse in-app with the honest blocker, not a fake consent page."""
+    """Instagram/Threads/X must refuse in-app with the honest blocker, not a fake consent page.
+
+    Instagram/Threads refuse because no BYO Meta app is stored on this config
+    dir yet — the blocker names the BYO setup, which is the fix.
+    """
     manager = AuthFlowManager(providers=default_providers(), opener=lambda url: (True, "Brave Browser"))
     client = _api_client(tmp_path, manager, monkeypatch)
 
@@ -584,7 +593,8 @@ def test_api_reports_unavailable_platforms_with_the_reason(tmp_path, monkeypatch
     # /api/connect only knows real destination providers; instagram is one.
     assert support.status_code == 200
     assert support.json()["sign_in"]["available"] is False
-    assert "Meta developer app" in support.json()["sign_in"]["reason"]
+    assert "Meta app" in support.json()["sign_in"]["reason"]
+    assert "no App Review" in support.json()["sign_in"]["reason"]
 
 
 def test_deep_link_callback_route_reaches_the_waiting_session(tmp_path, monkeypatch):
