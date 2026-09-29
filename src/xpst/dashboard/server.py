@@ -848,6 +848,21 @@ async def _dispatch_messenger_payload(payload: dict, config_dir: str) -> None:
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
+#: The host the dashboard LAST bound in this process (either entry point), or
+#: None when no dashboard has bound yet. The security audit reports this as
+#: OBSERVED evidence instead of asserting the default.
+_LAST_BOUND_HOST: str | None = None
+
+
+def last_bound_host() -> str | None:
+    """Host of the most recent dashboard bind in this process (None = never)."""
+    return _LAST_BOUND_HOST
+
+
+def _record_bind(host: str) -> None:
+    global _LAST_BOUND_HOST
+    _LAST_BOUND_HOST = host
+
 
 def start_dashboard(
     port: int = 8080,
@@ -891,6 +906,7 @@ def start_dashboard(
             )
 
     app = _create_app(config_dir, ui_token=ui_token)
+    _record_bind(host)
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 
@@ -986,4 +1002,5 @@ def serve_ui(
         uvicorn.Config(app, host=host, port=port, log_level="info"),
         started=on_started,
     )
+    _record_bind(host)
     server.run()
