@@ -192,6 +192,65 @@ class TestTikTokSource:
         content_type = source._detect_content_type(data)
         assert content_type == ContentType.CAROUSEL_IMAGE
 
+    def test_run_yt_dlp_preserves_zero_returncode(self):
+        """rc 0 must survive _run_yt_dlp (kanban t_bb310d6a).
+
+        `proc.returncode or 1` collapsed a clean exit into rc 1, which made
+        check_health() report yt_dlp_version null and marked successful
+        downloads as failures on the TikTok source only.
+        """
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import patch as um_patch
+
+        from xpst.sources.tiktok import TikTokSource
+
+        config = XPSTConfig()
+        source = TikTokSource(config)
+
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"2026.08.19\n", b""))
+        with um_patch(
+            "asyncio.create_subprocess_exec", AsyncMock(return_value=proc)
+        ):
+            rc, stdout, stderr = asyncio.run(source._run_yt_dlp(["yt-dlp", "--version"]))
+        assert rc == 0
+        assert stdout.strip() == "2026.08.19"
+
+    def test_health_reports_version_and_path(self):
+        """A working yt-dlp must surface version AND resolved path in health."""
+        import asyncio
+        from unittest.mock import AsyncMock
+        from unittest.mock import patch as um_patch
+
+        from xpst.sources.tiktok import TikTokSource
+
+        config = XPSTConfig()
+        source = TikTokSource(config)
+
+        async def fake_run(cmd, timeout=60):
+            return 0, "2026.08.19\n", ""
+
+        with um_patch.object(source, "_run_yt_dlp", AsyncMock(side_effect=fake_run)):
+            health = asyncio.run(source.check_health())
+
+        assert health["yt_dlp_installed"] is True
+        assert health["yt_dlp_version"] == "2026.08.19"
+        assert health["yt_dlp_path"] == source._yt_dlp_path
+
+    def test_find_yt_dlp_prefers_resolver_result(self, monkeypatch):
+        """_find_yt_dlp delegates to resolve_ytdlp_path (daemon PATH fix)."""
+        from xpst.sources.tiktok import TikTokSource
+
+        monkeypatch.setattr(
+            "xpst.utils.platform.resolve_ytdlp_path",
+            lambda: Path("/opt/fake/yt-dlp"),
+        )
+        config = XPSTConfig()
+        source = TikTokSource(config)
+        assert source._yt_dlp_path == "/opt/fake/yt-dlp"
+
 
 class TestLocalSource:
     """Test LocalSource"""

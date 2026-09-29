@@ -1729,6 +1729,8 @@ def health(ctx: click.Context, as_json: bool):
 
         if source_health.get("yt_dlp_version"):
             console.print(f"     yt-dlp version: {source_health['yt_dlp_version']}")
+        if source_health.get("yt_dlp_path"):
+            console.print(f"     yt-dlp path: {source_health['yt_dlp_path']}")
         if source_health.get("username"):
             console.print(f"     Username: @{source_health['username']}")
         if source_health.get("cookies_available"):

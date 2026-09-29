@@ -214,9 +214,13 @@ def resolve_ytdlp_path() -> Path | None:
     """
     Resolve the yt-dlp CLI binary path.
 
-    Order: ``XPST_YTDLP_PATH`` override (set by the Tauri shell to the
-    bundled resource zipapp), then ``shutil.which``, then the
-    platform-specific fallback probed by :func:`get_ytdlp_fallback_path`.
+    Order (first executable hit wins): ``XPST_YTDLP_PATH`` override (set by
+    the Tauri shell to the bundled resource zipapp), ``shutil.which`` on the
+    ambient PATH, then every candidate from :func:`get_ytdlp_fallback_paths`
+    — installer locations, the running interpreter's ``bin/`` (a pip/venv
+    install of xPST always carries the yt-dlp console script beside its
+    python, which is what makes daemon mode work when launchd's PATH is
+    ``/usr/bin:/bin``), and the fetched-copy media dir.
     Returns None when no yt-dlp binary can be found.
     """
     env_path = os.environ.get("XPST_YTDLP_PATH")
@@ -225,29 +229,61 @@ def resolve_ytdlp_path() -> Path | None:
     found = shutil.which("yt-dlp")
     if found:
         return Path(found)
-    fallback = get_ytdlp_fallback_path()
+    for candidate in get_ytdlp_fallback_paths():
+        if _executable_file(candidate):
+            return candidate
+    return None
+
+
+def get_ytdlp_fallback_paths() -> list[Path]:
+    """
+    Every platform-specific location that can hold the yt-dlp CLI.
+
+    Probe order:
+      1. ``~/.local/bin`` — where pip ``--user`` installs and xPST's own
+         standalone installer (:func:`xpst.setup.install_yt_dlp`) put it on
+         POSIX. This was previously probed on Linux only, so a macOS box
+         where the wizard installed yt-dlp to ``~/.local/bin`` looked broken
+         to the daemon (serve-loop ``[Errno 2] 'yt-dlp'``, kanban t_bb310d6a).
+      2. macOS framework-user install (``~/Library/Python/<ver>/bin``).
+      3. Windows user-Scripts dir.
+      4. The running interpreter's own ``bin/`` — yt-dlp is a core
+         dependency, so a wheel/venv deployment of xPST (LaunchAgent,
+         pipx, desktop sidecar) always ships the CLI script next to the
+         python that executes xPST, no PATH required.
+      5. The fetched-copy media dir (same convention as ffmpeg/ffprobe).
+    """
+    cands: list[Path] = []
+    if sys.platform == "win32":
+        cands.append(Path.home() / "AppData" / "Local" / "Programs" / "Python" / "Scripts" / "yt-dlp.exe")
+    else:
+        cands.append(Path.home() / ".local" / "bin" / "yt-dlp")
+        if sys.platform == "darwin":
+            ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+            cands.append(Path.home() / "Library" / "Python" / ver / "bin" / "yt-dlp")
     try:
-        if fallback.is_file():
-            return fallback
+        if sys.executable:
+            exe = Path(sys.executable).parent / "yt-dlp"
+            if sys.platform == "win32":
+                exe = Path(sys.executable).parent / "yt-dlp.exe"
+            cands.append(exe)
     except OSError:
         pass
-    return None
+    cands.append(get_media_bin_dir() / "yt-dlp")
+    return cands
 
 
 def get_ytdlp_fallback_path() -> Path:
     """
-    Get platform-specific yt-dlp fallback path (when not on PATH).
+    Get the primary platform-specific yt-dlp fallback path (when not on PATH).
+
+    The full probe set is :func:`get_ytdlp_fallback_paths`; this returns its
+    first entry for callers that only track one location.
 
     Returns:
         Path to likely yt-dlp binary location
     """
-    if sys.platform == "win32":
-        return Path.home() / "AppData" / "Local" / "Programs" / "Python" / "Scripts" / "yt-dlp.exe"
-    elif sys.platform == "darwin":
-        ver = f"{sys.version_info.major}.{sys.version_info.minor}"
-        return Path.home() / "Library" / "Python" / ver / "bin" / "yt-dlp"
-    else:
-        return Path.home() / ".local" / "bin" / "yt-dlp"
+    return get_ytdlp_fallback_paths()[0]
 
 
 def get_browser_list() -> list[str]:
