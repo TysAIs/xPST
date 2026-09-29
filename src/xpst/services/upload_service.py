@@ -1116,9 +1116,14 @@ class UploadService:
 
     @staticmethod
     def _duration_limit(uploader: PlatformUploader) -> int | None:
-        """Platform max video duration from the provider manifest (G08)."""
+        """Platform max video duration from the provider manifest (G08).
+
+        ``manifest`` is a PROPERTY, not a callable — the old ``manifest()``
+        raised TypeError that the swallow below hid, so no platform duration
+        limit was ever applied. Read the attribute directly.
+        """
         try:
-            extra = uploader.manifest().extra or {}
+            extra = getattr(uploader.manifest, "extra", None) or {}
         except Exception:
             return None
         for key in ("max_duration_seconds", "max_video_duration_seconds"):
