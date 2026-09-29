@@ -78,10 +78,12 @@ def check_yt_dlp() -> str | None:
         candidates.append(str(Path(venv_bin) / "bin" / "yt-dlp"))
         if sys.platform == "win32":
             candidates.append(str(Path(venv_bin) / "Scripts" / "yt-dlp.exe"))
-    from .utils.platform import get_ytdlp_fallback_path
+    from .utils.platform import get_ytdlp_fallback_paths
 
-    fallback = get_ytdlp_fallback_path()
-    candidates.append(str(fallback))
+    # Full probe set: ~/.local/bin (installer location), framework-user dir,
+    # the running interpreter's bin (daemon/launchd have no VIRTUAL_ENV and a
+    # bare PATH — kanban t_bb310d6a), and the fetched-copy media dir.
+    candidates.extend(str(p) for p in get_ytdlp_fallback_paths())
     for binary in dict.fromkeys(candidates):  # dedupe, keep order
         try:
             result = subprocess.run(

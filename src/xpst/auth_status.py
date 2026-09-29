@@ -166,6 +166,7 @@ def _tiktok_source_check(config: XPSTConfig) -> tuple[bool, str | None, dict[str
         error = "No TikTok cookies available (cookie jar missing / cookies_from_browser unset)"
     details = {
         "yt_dlp_installed": bool(yt_dlp_path),
+        "yt_dlp_path": yt_dlp_path or None,
         "cookies_available": cookies_available,
         "username_configured": bool(config.tiktok.username),
     }
