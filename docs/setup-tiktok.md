@@ -186,10 +186,12 @@ accounts:
 
 Behaviour by mode:
 
-- `auto` — Direct Post is attempted first; the unaudited-client refusal
-  (`unaudited_client_can_only_post_to_private_accounts`) triggers the same
-  video's draft upload, and the outcome is PENDING with `draft_mode: true` in
-  the result metadata.
+- `auto` — the client's permitted privacy levels are fetched from
+  `creator_info/query` first; an unaudited client (which TikTok only lets post
+  privately) Direct Posts at the best permitted level instead of taking a 403.
+  If Direct Post is still refused (`unaudited_client_can_only_post_to_private_accounts`),
+  the same video is uploaded as a draft, and the outcome is PENDING with
+  `draft_mode: true` in the result metadata.
 - `always` — skips Direct Post entirely; every destination post is a draft.
 - `never` — Direct Post only; after TikTok's audit this is the normal mode.
 
