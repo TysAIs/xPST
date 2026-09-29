@@ -2729,7 +2729,13 @@ async def _handle_kb_tool(name: str, args: dict[str, Any]) -> CallToolResult:
 
 # ── MCP Server Setup ──
 
-app = Server("xpst-mcp")
+# serverInfo must identify xPST, not the mcp library that happens to serve it.
+# A bare Server("xpst-mcp") lets the SDK report its own package version
+# (1.30.0 was what clients saw), which reads as xPST's version and drifts on
+# every library bump — the defect the 2026-09-28 socials QA logged as D5.
+from xpst import __version__ as _xpst_version  # noqa: E402
+
+app = Server("xpst-mcp", version=_xpst_version)
 
 
 @app.list_tools()

@@ -434,3 +434,29 @@ def describe_remediation(platform: str | None, message: str) -> str | None:
         return _REAUTH_HINT.format(platform="<platform>")
 
     return None
+
+
+def truncate_error(message: str, limit: int = 600) -> str:
+    """Bound a stored/logged error string without cutting it mid-word.
+
+    Persisted upload errors were kept to the first 200 raw characters, which
+    sliced provider payloads mid-word — ``'message': 'Authori`` told a human
+    nothing and looked like a broken record. This keeps the head of the
+    message, breaks at the last whitespace before the limit, and says so with
+    a ``… [+N chars]`` marker, so a reader knows detail exists and how much.
+
+    The larger default (600) exists because GraphQL-style error payloads carry
+    the actionable part after a long preamble; 200 was chosen for line width,
+    not information value.
+    """
+    text = str(message)
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    boundary = cut.rfind(" ")
+    if boundary > limit // 2:
+        cut = cut[:boundary]
+    else:
+        boundary = limit
+    kept = cut.rstrip(" ,;:")
+    return kept + f"… [+{len(text) - boundary} chars]"
