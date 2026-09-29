@@ -21,6 +21,7 @@ Each entry:
         "id": "<uuid>",
         "video_path": "/path/to/video.mp4",
         "caption": "Post caption",
+        "per_platform_captions": {"x": "short copy"},  # optional per-destination overrides
         "platforms": ["youtube", "instagram"],
         "scheduled_time": "2026-06-08T16:00:00+00:00",   # UTC instant
         "timezone": "America/Denver",                     # zone used to enter it
@@ -68,6 +69,69 @@ logger = get_logger(__name__)
 MAX_CAPTION_LENGTH = 100_000
 
 _UTC = timezone.utc
+
+
+def normalize_per_platform_captions(raw: Any) -> dict[str, str]:
+    """Validate a ``{platform: caption}`` override mapping for storage.
+
+    The whitelist discipline mirrors drafts and the post contract: only a
+    mapping of platform name → text is persisted. Keys are lower-cased and
+    stripped (the same vocabulary ``caption_for_destination`` matches against);
+    values must be strings and are stored verbatim (never trimmed). Each
+    override is bounded by :data:`MAX_CAPTION_LENGTH` for the same reason the
+    shared caption is: every scheduler tick re-reads the store into memory.
+
+    Raises:
+        ValueError: When ``raw`` is not a mapping, a key is blank, a value is
+            not a string, or a caption exceeds the size cap.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "per_platform_captions must be a mapping of platform name to "
+            f"caption text, got {type(raw).__name__}"
+        )
+    cleaned: dict[str, str] = {}
+    for name, value in raw.items():
+        key = str(name).strip().lower()
+        if not key:
+            raise ValueError("per_platform_captions contains an empty platform name")
+        if not isinstance(value, str):
+            raise ValueError(
+                f"per_platform_captions[{name!r}] must be a string, "
+                f"got {type(value).__name__}"
+            )
+        if len(value) > MAX_CAPTION_LENGTH:
+            raise ValueError(
+                f"Caption override for {name!r} is {len(value):,} characters; "
+                f"the maximum is {MAX_CAPTION_LENGTH:,}."
+            )
+        cleaned[key] = value
+    return cleaned
+
+
+def stored_per_platform_captions(entry: Any) -> dict[str, str]:
+    """The entry's stored overrides, safe for the fire path.
+
+    Reads ``per_platform_captions`` from a loaded entry without ever raising:
+    a legacy entry has no key, and a hand-edited store can have anything under
+    it. A malformed value is treated as "no overrides" (plus a warning) rather
+    than crashing a scheduler tick after the media already became due.
+    """
+    raw = entry.get("per_platform_captions") if isinstance(entry, dict) else None
+    if raw is None:
+        return {}
+    try:
+        return normalize_per_platform_captions(raw)
+    except ValueError as exc:
+        logger.warning(
+            "Schedule entry %s has an unusable per_platform_captions value (%s); "
+            "the shared caption will be sent to every destination.",
+            entry.get("id") if isinstance(entry, dict) else "?", exc,
+        )
+        return {}
+
 
 # Sentinel for edit(): distinguishes "leave this field alone" from "set it to
 # None" (which is meaningful for repeat_rule).
@@ -433,6 +497,7 @@ class ScheduleManager:
         repeat_rule: str | None = None,
         *,
         tz: tzinfo | None = None,
+        per_platform_captions: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Add a new scheduled post.
 
@@ -445,13 +510,17 @@ class ScheduleManager:
             platforms: Target platforms (None = all enabled).
             repeat_rule: Repeat rule - 'daily', 'weekly', 'monthly', or None.
             tz: Zone that naive ``scheduled_time`` values are entered in.
+            per_platform_captions: ``{platform: caption}`` per-destination
+                overrides persisted with the entry and passed to the engine at
+                fire time (same semantics as ``xpst post --caption-for``).
 
         Returns:
             The created schedule entry (with its local rendering).
 
         Raises:
             ValueError: If repeat_rule is invalid, caption exceeds
-                MAX_CAPTION_LENGTH, or scheduled_time is not a datetime.
+                MAX_CAPTION_LENGTH, scheduled_time is not a datetime, or
+                per_platform_captions is not a clean platform→text mapping.
         """
         valid_rules = (None, "daily", "weekly", "monthly")
         if repeat_rule not in valid_rules:
@@ -482,6 +551,7 @@ class ScheduleManager:
             "idempotency_key": operation_id,
             "video_path": str(video_path),
             "caption": caption,
+            "per_platform_captions": normalize_per_platform_captions(per_platform_captions),
             "platforms": clean_platforms,
             "scheduled_time": scheduled_utc.isoformat(),
             "timezone": zone_name(zone) or zone_name(self._tz),
@@ -517,6 +587,7 @@ class ScheduleManager:
         platforms: list[str] | None = None,
         repeat_rule: Any = _UNSET,
         tz: tzinfo | None = None,
+        per_platform_captions: Any = _UNSET,
     ) -> dict[str, Any] | None:
         """Edit a pending scheduled post in place.
 
@@ -536,13 +607,17 @@ class ScheduleManager:
             repeat_rule: 'daily' | 'weekly' | 'monthly' | None. Omitted =
                 unchanged.
             tz: Zone that a naive ``scheduled_time`` is entered in.
+            per_platform_captions: New ``{platform: caption}`` overrides
+                (validated like :meth:`add`). Omitted = unchanged; ``None``
+                clears them.
 
         Returns:
             The updated entry, or None when no entry has that id.
 
         Raises:
-            ValueError: On an invalid repeat_rule, oversized caption, or a
-                non-datetime scheduled_time.
+            ValueError: On an invalid repeat_rule, oversized caption, a
+                non-datetime scheduled_time, or a bad per_platform_captions
+                mapping.
         """
         if repeat_rule is not _UNSET and repeat_rule not in (None, "daily", "weekly", "monthly"):
             raise ValueError(
@@ -560,6 +635,12 @@ class ScheduleManager:
                     f"Caption is {len(caption):,} characters; the maximum is "
                     f"{MAX_CAPTION_LENGTH:,}. Shorten the caption before scheduling."
                 )
+        # Validate before mutating anything, so a bad mapping cannot leave a
+        # half-applied edit (same rule as repeat_rule / scheduled_time above).
+        clean_captions = (
+            _UNSET if per_platform_captions is _UNSET
+            else normalize_per_platform_captions(per_platform_captions)
+        )
         clean_platforms = (
             [p.strip() for p in (platforms or []) if p and p.strip()]
             if platforms is not None
@@ -580,6 +661,8 @@ class ScheduleManager:
                     entry["video_path"] = str(video_path)
                 if caption is not None:
                     entry["caption"] = caption
+                if clean_captions is not _UNSET:
+                    entry["per_platform_captions"] = clean_captions
                 if clean_platforms is not None:
                     entry["platforms"] = clean_platforms
                 if repeat_rule is not _UNSET:
@@ -836,6 +919,12 @@ class ScheduleManager:
             "idempotency_key": operation_id,
             "video_path": entry["video_path"],
             "caption": entry["caption"],
+            # The copy plan carries to every occurrence: a recurring job that
+            # had per-destination overrides must not degrade to shared copy on
+            # its second fire. A corrupt stored value is dropped (this runs
+            # inside mark_complete — bookkeeping must not fail a published
+            # post) rather than raised.
+            "per_platform_captions": stored_per_platform_captions(entry),
             "platforms": entry.get("platforms", []),
             "scheduled_time": next_time.astimezone(_UTC).isoformat(),
             "timezone": zone_name(zone) or entry.get("timezone"),
@@ -857,6 +946,8 @@ __all__ = [
     "MAX_CAPTION_LENGTH",
     "ScheduleManager",
     "local_zone",
+    "normalize_per_platform_captions",
+    "stored_per_platform_captions",
     "to_local",
     "to_utc",
     "zone_name",

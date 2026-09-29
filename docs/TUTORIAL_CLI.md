@@ -606,11 +606,16 @@ Schedule a post for later publishing.
 xpst schedule add video.mp4 --caption 'My video' --at '2026-06-20 10:00'
 xpst schedule add video.mp4 -c 'My video' --at '2026-06-20T10:00:00' -p youtube,instagram
 xpst schedule add video.mp4 -c 'Daily update' --at '2026-06-20 10:00' --repeat daily
+xpst schedule add video.mp4 -c 'Long copy' --caption-for x='short copy' --at '2026-06-20 10:00'
 ```
 
 **Time formats accepted:** `YYYY-MM-DD HH:MM`, `YYYY-MM-DDTHH:MM:SS`, `YYYY-MM-DD HH:MM:SS`
 
 **Repeat rules:** `none`, `daily`, `weekly`, `monthly`
+
+**Per-destination copy:** `--caption-for PLATFORM=TEXT` (repeatable, same as
+`xpst post`) is stored with the entry and honoured when the schedule fires —
+each destination gets its own copy instead of the shared caption everywhere.
 
 **Example:**
 
