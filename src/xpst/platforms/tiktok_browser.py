@@ -156,19 +156,25 @@ def find_new_item(
     *,
     started_at: float,
     caption: str = "",
+    owner_hint: str = "",
 ) -> BrowserReceipt | None:
     """Find the just-published item among captured item_list responses.
 
     An item qualifies when it is newer than ``started_at`` and either its id
     was explicitly announced by the publish response or its caption matches.
     Returns None (-> FAILED) when nothing matches — never a guess.
+
+    ``owner_hint`` is the account handle learned from the Studio page itself;
+    it composes the canonical share URL when the item rows carry none.
     """
     best: BrowserReceipt | None = None
     caption_head = (caption or "").strip()[:40].lower()
     # Owner handle learned from ANY item's share_url in the same listings —
     # a just-published row can lag on its own share_url while still in
-    # review, but sibling rows carry the canonical @handle.
-    owner: str = ""
+    # review, but sibling rows carry the canonical @handle. Live finding
+    # (2026-09-29): some manage responses omit share_url on EVERY row, so a
+    # page-observed owner_hint is accepted as the fallback.
+    owner: str = (owner_hint or "").lstrip("@").strip()
     for payload in payloads:
         for it in extract_item_list_items(payload):
             m = re.match(r"https://www\.tiktok\.com/@([^/]+)/", str(it.get("share_url") or ""))
@@ -397,7 +403,10 @@ class TikTokBrowserPublisher:
                     )
                 # Give the manage API a beat to list the new item.
                 page.wait_for_timeout(6000)
-                receipt = find_new_item(captured, started_at=started_at, caption=caption)
+                owner_hint = self._page_owner(page)
+                receipt = find_new_item(
+                    captured, started_at=started_at, caption=caption, owner_hint=owner_hint
+                )
                 if receipt is None:
                     # One fresh listing chance: reload the content manager.
                     try:
@@ -405,7 +414,12 @@ class TikTokBrowserPublisher:
                         page.wait_for_timeout(9000)
                     except Exception:
                         pass
-                    receipt = find_new_item(captured, started_at=started_at, caption=caption)
+                    receipt = find_new_item(
+                        captured,
+                        started_at=started_at,
+                        caption=caption,
+                        owner_hint=owner_hint or self._page_owner(page),
+                    )
                 if receipt is None:
                     raise BrowserPublishError(
                         "BROWSER_PUBLISH_UNVERIFIED",
@@ -655,6 +669,28 @@ class TikTokBrowserPublisher:
                 ctx.close()
 
     # ── internal flow helpers ─────────────────────────────────────────────
+
+    @staticmethod
+    def _page_owner(page) -> str:
+        """Best-effort account handle observed on the current Studio page.
+
+        TikTok Studio links the signed-in creator (avatar menu, "View post"
+        row links) as ``/@<handle>`` anchors. Used only to compose a canonical
+        share URL for a receipt the manage API already confirmed — a wrong
+        hint degrades to a generic URL, never to a wrong item_id.
+        """
+        try:
+            hrefs: list[str] = page.evaluate(
+                "() => Array.from(document.querySelectorAll('a[href^=\"/@\"]'))"
+                ".map(a => a.getAttribute('href'))"
+            )
+        except Exception:
+            return ""
+        for href in hrefs or []:
+            m = re.match(r"^/@([A-Za-z0-9._\-]{2,24})(?:[/?]|$)", str(href))
+            if m:
+                return m.group(1)
+        return ""
 
     @staticmethod
     def _dismiss_chrome(page) -> None:
