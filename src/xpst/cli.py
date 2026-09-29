@@ -148,6 +148,20 @@ def _error_payload(code: str, message: str, **extra: object) -> dict:
     return payload
 
 
+def _mask_token(token: str | None) -> str | None:
+    """Short, unguessable preview of a credential (``tonu_K2xQ…9FEic``).
+
+    Enough to identify WHICH token a URL carries without printing the one
+    secret that authorises dashboard writes. ``None`` passes through so a
+    caller can build a token-less URL from the same expression.
+    """
+    if not token:
+        return None
+    if len(token) <= 12:
+        return f"{token[:4]}…"
+    return f"{token[:8]}…{token[-5:]}"
+
+
 # Canonical zero-destination refusal shared by `run`, `watch`, `serve` and
 # `post`. The code and message come from the preflight service so the CLI, the
 # MCP server and the HTTP API refuse with the *same* error instead of three
@@ -961,6 +975,46 @@ def post(
     if dry_run:
         if not targets:
             _refuse_no_destinations(ctx, as_json, quiet)
+        # D2: the dry run answers the same question the live run would face —
+        # "could this actually publish?" — not just "is the request shaped
+        # right?". The canonical planner adds the destination-level blockers
+        # (disabled destination, auth not configured, quota exhausted) that the
+        # content verdict alone cannot see. MCP's dry-run already merged these
+        # (same service, same fields); the CLI answering only the content
+        # verdict made a doomed dry run read as ready (TIKTOK_NOT_CONFIGURED
+        # on live vs `ready: true` in the plan was the defect). Transform plans
+        # are skipped here: this surface never prints them and the probe cost
+        # is not free.
+        from xpst.services.post_preflight import (
+            PostPlanRequest,
+            PostPreflightService,
+            plan_content_type,
+        )
+
+        plan_blockers: list[str] = []
+        try:
+            plan_payload = PostPreflightService(config).plan(
+                PostPlanRequest(
+                    media_paths=media_paths,
+                    target_platforms=targets,
+                    base_caption=body,
+                    per_platform_captions=per_platform_captions,
+                    content_type=plan_content_type(request),
+                    include_transform=False,
+                )
+            ).to_dict()
+            seen_blockers = set(verdict["blockers"])
+            plan_blockers = [
+                issue["message"]
+                for issue in plan_payload["hard_blockers"]
+                if issue["message"] not in seen_blockers
+            ]
+        except Exception as exc:  # noqa: BLE001 - report truthfully, never fake readiness
+            plan_payload = None
+            plan_blockers = [f"Preflight could not run: {str(exc)[:200]}"]
+
+        merged_blockers = list(verdict["blockers"]) + plan_blockers
+        ready = bool(plan_payload and plan_payload["ready"]) and not plan_blockers
         info = {
             "dry_run": True,
             "video": str(media_paths[0]) if media_paths else None,
@@ -977,8 +1031,8 @@ def post(
             "effective_content_type": verdict["effective_content_type"],
             "route": verdict["route"],
             "content": verdict,
-            "ready": verdict["ok"],
-            "blockers": verdict["blockers"],
+            "ready": ready,
+            "blockers": merged_blockers,
         }
         if as_json:
             json_output(info, True)
@@ -996,7 +1050,7 @@ def post(
                     console.print(f"  Caption for {target}: {override_text[:80]}")
             console.print(f"  Targets: {', '.join(targets)}")
             console.print(f"  Visibility: {visibility}")
-            for blocker in verdict["blockers"]:
+            for blocker in merged_blockers:
                 console.print(f"  [red]Blocked:[/red] {blocker}")
         if refusal_blockers:
             sys.exit(EXIT_GENERAL)
@@ -1153,12 +1207,30 @@ def verify_media_cmd(
     )
 
     media_path = Path(file)
-    platforms = ["youtube", "tiktok", "instagram", "x", "threads"] if platform == "all" else [platform]
+    # D4: the config decides what "all" means, the same rule every post path
+    # uses (`resolve_destinations(None)` → enabled destinations only). A
+    # destination switched off in configuration cannot reject the upload, so it
+    # must not fail the exit code: `-p all` used to exit 1 solely on a disabled
+    # Threads' THREADS_NEEDS_URL. An explicit `-p threads` still verifies
+    # against Threads (the user named it) — but says the destination is
+    # disabled so the verdict is not misread as an upload blocker.
+    from xpst.services.post_preflight import enabled_destinations
+
+    config_all = load_config(ctx.obj.get("config_path"))
+    # `-p all` resolves to the enabled destinations (below, via
+    # enabled_destinations) — with no fallback to a hardcoded five: when
+    # nothing is enabled, the plan carries NO_DESTINATIONS, which is the
+    # truth the post path would give.
+    platforms = enabled_destinations(config_all) if platform == "all" else [platform]
+    disabled = [
+        name for name in platforms
+        if not bool(getattr(getattr(config_all, name, None), "enabled", False))
+    ]
 
     # This is deliberately the same side-effect-free service used by future
     # desktop and MCP clients. Readiness is omitted here for compatibility:
     # verify-media historically reported only local media checks.
-    config = load_config(ctx.obj.get("config_path")) if show_plan else None
+    config = config_all if show_plan else None
     request = PostPlanRequest(
         media_paths=(media_path,),
         target_platforms=tuple(platforms),
@@ -1206,6 +1278,9 @@ def verify_media_cmd(
                 "file": str(media_path),
                 "ok": ok,
                 "reports": [r.to_dict() for r in reports],
+                **(
+                    {"disabled_platforms": disabled} if platform != "all" and disabled else {}
+                ),
                 **({"post_plan": post_plan.to_dict()} if show_plan else {}),
                 **({"plans": [p.to_dict() for p in plans]} if show_plan else {}),
             },
@@ -1215,6 +1290,12 @@ def verify_media_cmd(
         console.print(f"[bold blue]Verifying {media_path}[/bold blue]")
         for report in reports:
             console.print(format_report(report))
+        if platform != "all" and disabled:
+            console.print(
+                f"[dim]Note: {', '.join(disabled)} {'is' if len(disabled) == 1 else 'are'} "
+                "disabled in local configuration — this check is informational; "
+                "a disabled destination would not be posted to at all.[/dim]"
+            )
         if show_plan:
             console.print("[bold blue]Transformation plan (dry run):[/bold blue]")
             for p in plans:
@@ -3227,11 +3308,22 @@ def refresh_tokens(
 @main.group(invoke_without_command=True)
 @click.option("--platforms", "-p", default=None, help="Comma-separated platforms (default: all)")
 @click.option("--refresh", "-r", is_flag=True, help="Force refresh (ignore cache)")
+@click.option("--live", is_flag=True,
+              help="Force a live collection now, bypassing the cache (the MCP "
+                   "xpst_analytics live=true equivalent)")
+@click.option("--recorded", is_flag=True,
+              help="Never touch the network: report the recorded snapshots only "
+                   "(the MCP xpst_analytics live=false equivalent)")
 @click.option("--cross-post", "cross_post", is_flag=True, help="Show cross-post group correlation analytics (one video across platforms)")
 @json_option
 @click.pass_context
-def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_post: bool, as_json: bool = False):
-    """Show cross-platform analytics summary"""
+def analytics(ctx: click.Context, platforms: str | None, refresh: bool, live: bool, recorded: bool, cross_post: bool, as_json: bool = False):
+    """Show cross-platform analytics summary
+
+    By default this refreshes through the collector's cache (15 minutes).
+    ``--live`` forces a fresh provider round-trip now; ``--recorded`` reads the
+    local snapshot store only and makes zero network calls.
+    """
     # Bound up front: used by the cross-post branch AND the JSON report
     # below (a nested import inside `if cross_post` previously made `_json`
     # a function-local name that was unbound on every other code path).
@@ -3239,6 +3331,8 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
 
     if ctx.invoked_subcommand is not None:
         return
+    if live and recorded:
+        raise click.UsageError("--live and --recorded are opposites; choose one.")
 
     # Cross-post correlation analytics (B1): one video → multiple platforms
     # aggregated as a single entry with totals and per-platform breakdown.
@@ -3264,8 +3358,22 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
 
     collector = AnalyticsCollector(config.config_dir)
 
-    if refresh:
+    if refresh or live:
         collector._cache_ttl = 0  # Force cache miss
+
+    # --recorded is the MCP xpst_analytics live=false equivalent: report the
+    # snapshot store only, zero network calls (no live collection, and no
+    # channel-video discovery either — that walk is a YouTube API call).
+    if recorded:
+        empty_requested: dict[str, list[str]] = {}
+        if as_json:
+            report = collector.build_report({}, requested=empty_requested)
+            report["outcome_report"] = collector.outcome_report()
+            report["live"] = False
+            click.echo(_json.dumps(report, indent=2, default=str))
+        else:
+            _render_outcome_table(collector.outcome_report())
+        return
 
     # Discover post IDs from state
     post_ids = collector._discover_post_ids()
@@ -3352,7 +3460,8 @@ def analytics(ctx: click.Context, platforms: str | None, refresh: bool, cross_po
 
     # A live-refreshed run whose collection failed is not a success — exit
     # non-zero so scripts/cron see the failure (silent-zero defense, D1).
-    if refresh:
+    # --live is the same round-trip and carries the same obligation.
+    if refresh or live:
         _exit_for_collection_failures(outcome_report)
 
 
@@ -3592,31 +3701,47 @@ def dashboard(ctx: click.Context, port: int, host: str, api_only: bool):
 @click.option("--port", "-p", default=8080, type=int, help="Dashboard HTTP port")
 @click.option("--host", default="127.0.0.1",
               help="Dashboard bind host (default: 127.0.0.1)")
+@click.option("--reveal", is_flag=True,
+              help="Print the admin URL with the dashboard API token in full "
+                   "(it is masked by default so the output can be pasted, "
+                   "screenshotted, or logged without leaking the credential)")
 @json_option
 @click.pass_context
-def bio(ctx: click.Context, port: int, host: str, as_json: bool):
+def bio(ctx: click.Context, port: int, host: str, reveal: bool, as_json: bool):
     """Print your Link-in-Bio page URL (start the dashboard with `xpst dashboard` first)
 
-    Also prints the admin editor URL with the dashboard API token attached: the
-    editor is a plain HTML form, so that token is what authorises its writes
-    when no dashboard username/password is configured.
+    Also prints the admin editor URL. The editor is a plain HTML form, so the
+    dashboard API token attached to it is what authorises its writes when no
+    dashboard username/password is configured. Because a URL with a live
+    credential pastes into chat, tickets and screenshots as easily as a
+    password, the token is MASKED by default; ``--reveal`` prints it whole and
+    ready to open.
     """
     from xpst.dashboard.auth import ensure_api_token
     from xpst.dashboard.server import bio_edit_url, bio_url
 
     config = load_config(ctx.obj.get("config_path"))
     url = bio_url(host=host, port=port)
+    token: str | None = None
     try:
-        edit_url = bio_edit_url(host=host, port=port, token=ensure_api_token(config.config_dir))
+        token = ensure_api_token(config.config_dir)
     except Exception as exc:  # noqa: BLE001 - the public URL is still useful
         logger.debug("Could not read the dashboard API token: %s", exc)
-        edit_url = bio_edit_url(host=host, port=port)
+    edit_url = bio_edit_url(host=host, port=port, token=token if reveal else None)
+    masked_url = bio_edit_url(host=host, port=port, token=_mask_token(token))
 
     if as_json:
-        json_output({"url": url, "edit_url": edit_url}, True)
+        payload: dict = {"url": url, "edit_url": edit_url if reveal else masked_url}
+        if not reveal:
+            payload["edit_url_reveal_flag"] = "--reveal"
+        if reveal and token:
+            payload["edit_url_masked"] = masked_url
+        json_output(payload, True)
         return
     console.print(f"[bold blue]Link-in-Bio:[/bold blue] {url}")
-    console.print(f"[bold blue]Edit page:[/bold blue] {edit_url}")
+    console.print(f"[bold blue]Edit page:[/bold blue] {edit_url if reveal else masked_url}")
+    if not reveal:
+        console.print("[dim]Token masked — rerun with --reveal for a ready-to-open URL.[/dim]")
     console.print("[dim]Start the dashboard with `xpst dashboard`, then share the public URL.[/dim]")
 
 
@@ -3798,6 +3923,61 @@ def mcp_list(as_json: bool):
 def messenger(ctx: click.Context):
     """Messenger — IG + Facebook comment auto-reply (Content360-lite)."""
     pass
+
+
+@messenger.command("status")
+@json_option
+@click.pass_context
+def messenger_status(ctx: click.Context, as_json: bool) -> None:
+    """Report Messenger readiness: token, switches, webhook, quota.
+
+    The auth-status table shows one Messenger row; this is the per-detail
+    answer (the same fields `xpst auth status` summarises), so an operator can
+    see WHICH prerequisite is missing instead of a bare \"Not configured\".
+    """
+    from xpst.utils.credentials import CredentialStore
+
+    config = load_config(ctx.obj.get("config_path"))
+    store = CredentialStore(config.config_dir)
+    token = None
+    try:
+        token = store.retrieve("messenger_page_token") or config.messenger.page_access_token
+    except Exception as exc:  # noqa: BLE001 - a credential read must stay reportable
+        logger.debug("Could not read the Messenger page token: %s", exc)
+
+    payload = {
+        "enabled": bool(config.messenger.enabled),
+        "page_configured": bool(config.messenger.page_id),
+        "page_id": config.messenger.page_id or None,
+        "token_configured": bool(token),
+        "token_preview": _mask_token(token),
+        "auto_reply": bool(config.messenger.auto_reply),
+        "comment_reply_enabled": bool(config.messenger.comment_reply_enabled),
+        "comment_platforms": list(config.messenger.comment_platforms),
+        "reply_rules": len(config.messenger.reply_rules),
+        "webhook_path": config.messenger.webhook_path,
+    }
+    if as_json:
+        json_output(payload, True)
+        return
+
+    def _yesno(flag: bool) -> str:
+        return "[green]yes[/green]" if flag else "[red]no[/red]"
+
+    console.print("[bold blue]Messenger status[/bold blue]")
+    console.print(f"  Enabled:        {_yesno(payload['enabled'])}")
+    console.print(f"  Page ID:        {payload['page_id'] or '[red]missing[/red]'}")
+    console.print(
+        f"  Page token:     {('configured (' + str(payload['token_preview']) + ')') if payload['token_configured'] else '[red]missing[/red]'}"
+    )
+    console.print(f"  DM auto-reply:  {_yesno(payload['auto_reply'])} ({payload['reply_rules']} rule(s))")
+    console.print(
+        f"  Comment reply:  {_yesno(payload['comment_reply_enabled'])} "
+        f"(platforms: {', '.join(payload['comment_platforms']) or 'none'})"
+    )
+    console.print(f"  Webhook path:   {payload['webhook_path']}")
+    if not payload["token_configured"] or not payload["page_configured"]:
+        console.print("[dim]Connect with: xpst auth messenger[/dim]")
 
 
 @messenger.command("check-comments")
@@ -4324,15 +4504,51 @@ def failures_list(ctx: click.Context, as_json: bool) -> None:
     table = Table(title="Failed Uploads (dead-letter queue)")
     table.add_column("Video", style="cyan")
     table.add_column("Platform", style="white")
+    table.add_column("Status", style="yellow")
+    table.add_column("Age", style="dim")
     table.add_column("Error", style="red", max_width=50)
     table.add_column("Count", style="yellow")
     for entry in dlq:
+        age = entry.get("age_hours")
         table.add_row(
             entry["video_id"], entry["platform"],
+            "resolved" if entry.get("resolved") else "OPEN",
+            (f"{age:.0f}h" if age is not None else "?"),
             (entry.get("error") or "")[:80], str(entry.get("count", 1)),
         )
     console.print(table)
     console.print("[dim]Retry one with: xpst failures retry <video_id> --platform <name>[/dim]")
+    console.print("[dim]Clear the queue with: xpst failures clear[/dim]")
+
+
+@failures.command("clear")
+@click.argument("video_id", required=False, default=None)
+@json_option
+@click.pass_context
+def failures_clear(ctx: click.Context, video_id: str | None, as_json: bool) -> None:
+    """Clear recorded failures from the dead-letter queue.
+
+    Without a VIDEO_ID, every entry is cleared; with one, only that video's
+    errors. Successful-post history is never removed — a retry that later
+    succeeds leaves the post record intact, and a resolved failure stays
+    visible in ``failures list`` until it is cleared here.
+    """
+    from xpst.state import StateManager
+
+    config = load_config(ctx.obj.get("config_path"))
+    sm = StateManager(config.config_dir)
+    cleared = sm.clear_dead_letter_queue(video_id)
+    if as_json:
+        json_output(
+            {"ok": True, "cleared": cleared, "scope": video_id or "all"},
+            True,
+        )
+        return
+    if cleared == 0:
+        console.print("[dim]Nothing to clear.[/dim]")
+        return
+    where = f" for {video_id}" if video_id else ""
+    console.print(f"[green]Cleared {cleared} failure record(s){where}.[/green]")
 
 
 @failures.command("retry")
