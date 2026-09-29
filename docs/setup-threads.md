@@ -173,5 +173,7 @@ xpst health
 | `THREADS_NEEDS_URL: … a local file cannot be published to Threads` | Working as designed. Meta's API fetches `video_url` from a server you host and xPST is local, so a local file is refused **before any request** — by `xpst preflight`, by `xpst post`, and by the uploader. xPST cannot deliver a media URL to Threads either yet (its publish pipeline prepares a local file first, and no CLI/MCP surface accepts a URL), so Threads media publishing is not offered today: post this content from the Threads app. |
 | `Rate limit` / 250 posts exceeded | You've hit the 24-hour cap. It resets server-side; wait or reduce post frequency. |
 | `400` invalid container | Caption > 500 chars, or video > 300s / > 1GB. Trim or re-encode. |
+| `THREADS_CONTAINER_ERROR: … FAILED_DOWNLOADING_VIDEO` (or another `error_message`) | Meta fetched the container but could not process the media. The reason is Meta's own verdict — usually the `video_url` was unreachable, expired, or the file violated a format limit. Re-host the media at a publicly fetchable URL and post again. |
+| `THREADS_CONTAINER_TIMEOUT` | Meta did not finish processing within 5 minutes. The container stays valid for 24h, so `xpst failures retry` can still publish it without re-uploading. |
 
 See [troubleshooting.md](troubleshooting.md) for the credential-reset procedure and cross-platform token issues.
