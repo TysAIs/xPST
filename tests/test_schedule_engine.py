@@ -87,11 +87,15 @@ class _FakeEngine:
         self.raise_exc = raise_exc
         self.block_captions = block_captions or set()
         self.posts: list[tuple[str, str, list[str] | None]] = []
+        #: Per-destination overrides each post actually received (the entry's
+        #: stored copy plan, unchanged through the fire path).
+        self.per_platform_captions: list[dict[str, str] | None] = []
         self.in_flight = threading.Event()
         self.release = threading.Event()
 
     async def post_manual(self, video_path, caption, platforms=None, per_platform_captions=None):  # type: ignore[no-untyped-def]
         self.posts.append((str(video_path), caption, platforms))
+        self.per_platform_captions.append(per_platform_captions)
         if caption in self.block_captions:
             self.in_flight.set()
             self.release.wait(10)

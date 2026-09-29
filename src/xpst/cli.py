@@ -5097,6 +5097,17 @@ def schedule(ctx: click.Context):
 @schedule.command("add")
 @click.argument("file", type=click.Path())
 @click.option("--caption", "-c", required=True, help="Post caption text")
+@click.option(
+    "--caption-for",
+    "caption_for",
+    multiple=True,
+    metavar="PLATFORM=TEXT",
+    help=(
+        "Different caption for one destination (repeatable), e.g. "
+        "--caption-for x='short copy'. Destinations without one use --caption. "
+        "Stored with the entry and honoured when the schedule fires."
+    ),
+)
 @click.option("--at", "scheduled_time", required=True, help="Scheduled time (ISO or 'YYYY-MM-DD HH:MM')")
 @click.option("--platforms", "-p", default=None, help="Comma-separated target platforms")
 @click.option("--repeat", "repeat_rule", default=None, type=click.Choice(["none", "daily", "weekly", "monthly"]), help="Repeat schedule")
@@ -5104,13 +5115,14 @@ def schedule(ctx: click.Context):
               help="Validate the entry and show it without writing to the schedule store")
 @json_option
 @click.pass_context
-def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: str, platforms: str | None, repeat_rule: str | None, dry_run: bool, as_json: bool):
+def schedule_add(ctx: click.Context, file: str, caption: str, caption_for: tuple[str, ...], scheduled_time: str, platforms: str | None, repeat_rule: str | None, dry_run: bool, as_json: bool):
     """Schedule a post for later publishing.
 
     Examples:
         xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00'
         xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08T10:00:00' -p youtube,instagram
         xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00' --repeat daily
+        xpst schedule add video.mp4 --caption 'Long copy' --caption-for x='short copy' --at '2026-06-08 10:00'
     """
     from datetime import datetime
 
@@ -5141,6 +5153,34 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
         else:
             console.print(f"[red]Caption too long:[/red] {message}")
         sys.exit(EXIT_GENERAL)
+
+    # Per-destination copy, parsed by the same helper `xpst post` uses, so a
+    # malformed PLATFORM=TEXT is a usage error on both surfaces. Each override
+    # gets the same size guard as the shared caption: the whole store is
+    # re-read by every scheduler tick.
+    try:
+        per_platform_captions = _parse_caption_for(caption_for)
+    except click.BadParameter as exc:
+        if as_json:
+            json_output(_error_payload("INVALID_CAPTION_FOR", str(exc)), True)
+        else:
+            console.print(f"[red]Invalid --caption-for:[/red] {exc}")
+        sys.exit(EXIT_CONFIG_ERROR)
+    for override_platform, override_text in per_platform_captions.items():
+        if len(override_text) > MAX_CAPTION_LENGTH:
+            message = (
+                f"Caption override for {override_platform!r} is "
+                f"{len(override_text):,} characters; the limit is "
+                f"{MAX_CAPTION_LENGTH:,}. Shorten it before scheduling."
+            )
+            if as_json:
+                json_output(_error_payload(
+                    "CAPTION_TOO_LONG", message, platform=override_platform,
+                    caption_length=len(override_text),
+                    max_caption_length=MAX_CAPTION_LENGTH), True)
+            else:
+                console.print(f"[red]Caption too long:[/red] {message}")
+            sys.exit(EXIT_GENERAL)
 
     # Parse scheduled time
     dt = None
@@ -5176,6 +5216,7 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
             "dry_run": True,
             "video_path": str(video_path.resolve()),
             "caption": caption,
+            "per_platform_captions": per_platform_captions,
             "scheduled_time": dt.isoformat(),
             "platforms": platform_list,
             "repeat_rule": effective_repeat,
@@ -5187,6 +5228,11 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
                 console.print("[bold blue]Dry run — would schedule:[/bold blue]")
             console.print(f"  File:     {video_path}")
             console.print(f"  Caption:  {caption[:60]}{'...' if len(caption) > 60 else ''}")
+            for override_platform, override_text in per_platform_captions.items():
+                console.print(
+                    f"  Caption for {override_platform}: "
+                    f"{override_text[:60]}{'...' if len(override_text) > 60 else ''}"
+                )
             console.print(f"  Time:     {dt.strftime('%Y-%m-%d %H:%M')}")
             console.print(f"  Platforms: {', '.join(platform_list) if platform_list else 'all enabled'}")
             if effective_repeat:
@@ -5200,6 +5246,7 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
         scheduled_time=dt,
         platforms=platform_list,
         repeat_rule=effective_repeat,
+        per_platform_captions=per_platform_captions,
     )
 
     if as_json:
@@ -5209,6 +5256,11 @@ def schedule_add(ctx: click.Context, file: str, caption: str, scheduled_time: st
         console.print(f"  ID:       [bold]{entry['id']}[/bold]")
         console.print(f"  File:     {video_path}")
         console.print(f"  Caption:  {caption[:60]}{'...' if len(caption) > 60 else ''}")
+        for override_platform, override_text in per_platform_captions.items():
+            console.print(
+                f"  Caption for {override_platform}: "
+                f"{override_text[:60]}{'...' if len(override_text) > 60 else ''}"
+            )
         console.print(f"  Time:     {dt.strftime('%Y-%m-%d %H:%M')}")
         console.print(f"  Platforms: {', '.join(platform_list) if platform_list else 'all enabled'}")
         if effective_repeat:
@@ -5327,7 +5379,7 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
     Fetches posts where scheduled_time <= now and status is pending,
     then posts each one. Typically called by cron or manually.
     """
-    from xpst.schedule_manager import ScheduleManager
+    from xpst.schedule_manager import ScheduleManager, stored_per_platform_captions
 
     config_obj = load_config(ctx.obj.get("config_path"))
     setup_logging(
@@ -5385,6 +5437,9 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
         video_path = Path(entry["video_path"])
         caption = entry["caption"]
         platforms = entry.get("platforms") or None
+        # Per-destination copy persisted at add time (same semantics as
+        # `xpst post --caption-for`); {} = shared caption everywhere.
+        per_platform_captions = stored_per_platform_captions(entry)
 
         if not video_path.exists():
             if not as_json:
@@ -5394,7 +5449,12 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
             continue
 
         try:
-            result = asyncio.run(engine.post_manual(video_path, caption, platforms))
+            result = asyncio.run(
+                engine.post_manual(
+                    video_path, caption, platforms,
+                    per_platform_captions=per_platform_captions or None,
+                )
+            )
             success = result.all_success
             error_msg = None
             if not success:
