@@ -369,6 +369,8 @@ class TestThreadsUploader:
         responses = [
             # create container
             _FakeResponse(200, {"id": "container1"}),
+            # container status poll (FINISHED — publish may proceed)
+            _FakeResponse(200, {"id": "container1", "status": "FINISHED"}),
             # publish
             _FakeResponse(200, {"id": "media1"}),
             # permalink fetch (optional)
