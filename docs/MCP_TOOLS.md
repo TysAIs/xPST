@@ -584,12 +584,13 @@ Response shape: a list of scheduled posts with their status, target platforms, a
 
 ## xpst_schedule_add
 
-Schedules a post for a future time: video + caption + ISO-8601 time, with an optional repeat rule. Creates a pending scheduled post.
+Schedules a post for a future time: video + caption + ISO-8601 time, with an optional repeat rule and per-destination caption overrides. Creates a pending scheduled post; when it fires, each destination receives its own copy (destinations without an override keep `caption`).
 
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
 | `video_path` | string | yes | — | Path to the video to schedule. |
 | `caption` | string | yes | — | Caption/title for the post. |
+| `overrides` | object | no | — | Per-destination caption overrides: `{"x": "short copy"}` or `{"x": {"text": "short copy"}}`. Same shape as `xpst_post`'s `overrides`. |
 | `scheduled_time` | string | yes | — | ISO-8601 timestamp for publishing. |
 | `platforms` | string[] | no | all configured | Subset of `youtube`, `instagram`, `x`, `tiktok`, `threads`. |
 | `repeat_rule` | string | no | none | `daily`, `weekly`, or `monthly`. |
@@ -602,6 +603,7 @@ Example call:
   "arguments": {
     "video_path": "/tmp/xpst/clips/demo.mp4",
     "caption": "Scheduled demo!",
+    "overrides": {"x": "Short demo — full write-up on YouTube"},
     "scheduled_time": "2026-07-01T14:00:00Z",
     "platforms": ["youtube", "instagram", "threads"]
   }
