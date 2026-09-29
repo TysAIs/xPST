@@ -1035,6 +1035,12 @@ class UploadService:
         if platform == "threads":
             # Threads: high-quality profile shared with Instagram
             return self.config.video.encoding_instagram
+        if platform == "facebook":
+            # Facebook Page video: the Meta-family profile shared with
+            # Instagram/Threads. FacebookUploader declares VIDEO_DESTINATION
+            # (its manifest is test-enforced), so a missing branch here made
+            # every declared-Facebook encode raise ValueError.
+            return self.config.video.encoding_instagram
         raise ValueError(f"Unknown platform: {platform}")
 
     def _loudness_filter_for(self, video_path: Path, platform: str) -> str | None:
