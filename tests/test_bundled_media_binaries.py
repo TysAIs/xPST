@@ -109,19 +109,21 @@ def test_ytdlp_fallback_paths_probe_installer_and_interpreter_dirs() -> None:
     assert any(p.parent == Path(sys.executable).parent for p in paths if str(p.parent))
 
 
-def test_ytdlp_resolves_without_any_path_entry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Daemon simulation: empty PATH lookup still resolves via interpreter bin.
+def test_ytdlp_resolves_without_any_path_entry(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Daemon simulation: empty PATH lookup still resolves via fallback probes.
 
     launchd/daemon environments expose PATH=/usr/bin:/bin only, so the ambient
-    lookup fails; the interpreter's own bin dir must carry the resolution
-    (yt-dlp is a core dependency, so the console script sits beside
-    sys.executable in any real xPST install).
+    lookup fails; a resolver must still honor the fallback probe set (in real
+    deployments the interpreter's own bin dir carries the console script —
+    yt-dlp is a core dependency, so it sits beside sys.executable).
     """
     monkeypatch.delenv("XPST_YTDLP_PATH", raising=False)
     monkeypatch.setattr("xpst.utils.platform.shutil.which", lambda name: None)
-    interp_bin = Path(sys.executable).parent / "yt-dlp"
-    monkeypatch.setattr("xpst.utils.platform.get_ytdlp_fallback_paths", lambda: [interp_bin])
-    assert resolve_ytdlp_path() == interp_bin
+    fake_bin = tmp_path / "yt-dlp"
+    fake_bin.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_bin.chmod(0o755)
+    monkeypatch.setattr("xpst.utils.platform.get_ytdlp_fallback_paths", lambda: [fake_bin])
+    assert resolve_ytdlp_path() == fake_bin
 
 
 def test_get_ytdlp_fallback_path_platform_shapes() -> None:
