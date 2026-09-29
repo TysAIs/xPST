@@ -7,39 +7,90 @@ filename shown there.
 
 ## Read this before downloading
 
-The latest published release currently visible is **v1.1.0**. Its desktop
-artifacts were built from an older tag than the current `main` branch, and they
-are the retired PySide6/QML app (a 1.1.0-era build), not the Tauri shell that
-`main` builds today. Newer releases publish the Tauri installers (`.dmg`,
-NSIS `.exe`/`.msi`, `.deb`/`.AppImage`) instead. Treat the
-release as a published build, not as proof that the current branch is packaged.
-The macOS signing and notarization status is **not proven**. Verify the checksum
-before opening any downloaded artifact.
+The latest published release is **v1.2.1**. Its desktop artifacts are the
+current Tauri shell installers (`.dmg`, NSIS `.exe`/`.msi`, `.deb`/`.AppImage`).
+Older v1.1.x releases carried the retired PySide6/QML app; prefer the newest
+release. The macOS build is ad-hoc signed and not notarized, so a browser
+download will trigger a Gatekeeper approval on first launch — see
+[Gatekeeper and an unsigned build](#gatekeeper-and-an-unsigned-build). Verify
+the checksum before opening any downloaded artifact.
 
-There is no proven automatic-update channel today. Use the Releases page to
-install a newer build manually; do not rely on an in-app update check.
+Automatic updates through the Tauri updater manifest (`latest.json`) are wired
+for the `.app.tar.gz` channel; when in doubt, use the Releases page to install
+a newer build manually.
 
 ## Choose the release asset
 
-These are the v1.1.0 asset names verified on the Releases page:
+These are the v1.2.1 asset names verified on the Releases page:
 
-| Operating system | Download this asset | Download this checksum manifest | Notes |
+| Operating system | Download this asset | Verify against | Notes |
 |---|---|---|---|
-| macOS | `xPST.dmg` | `macos-SHA256SUMS` | Apple Silicon/arm64 desktop build. An Intel x86_64 build is not published here. |
-| Windows | `xPST.exe` | `windows-SHA256SUMS` | Standalone Windows desktop executable produced by the repository's PyInstaller spec; it is not an MSI or NSIS installer. |
-| Linux | `xPST` | `linux-SHA256SUMS` | Standalone Linux desktop executable. v1.1.0 does **not** publish an AppImage or `.deb`. |
+| macOS (Apple Silicon) | `xPST_1.2.1_aarch64.dmg` | `SHA256SUMS` (aggregate) | Tauri desktop build. An Intel x86_64 macOS build is not published. |
+| Windows (x64) | `xPST_1.2.1_x64-setup.exe` or `xPST_1.2.1_x64_en-US.msi` | `SHA256SUMS` (aggregate) | NSIS installer and Windows Installer package. |
+| Linux (x64) | `xPST_1.2.1_amd64.deb` or `xPST_1.2.1_amd64.AppImage` | `SHA256SUMS` (aggregate) | Debian package or portable AppImage. |
 
-The release also contains an aggregate `SHA256SUMS`. The platform-specific
-manifest is more convenient when you have downloaded only one platform asset.
-The manifest is the source of truth; never substitute a hash copied from a
-third-party page.
+Checksum manifests on the release page are named per lane, not per operating
+system: the aggregate `SHA256SUMS`/`SHA512SUMS` cover the desktop installers,
+and `python-SHA256SUMS`/`python-SHA512SUMS` cover the Python wheel and sdist
+(`xpst-1.2.1-py3-none-any.whl`, `xpst-1.2.1.tar.gz`). The manifest is the
+source of truth; never substitute a hash copied from a third-party page.
 
-The commands use the platform-specific manifest to avoid false failures from
-missing assets. If you downloaded the aggregate release file named
-`SHA256SUMS` instead, substitute `SHA256SUMS` for the platform manifest in the
-macOS or Windows target-only command. On Linux, `sha256sum -c SHA256SUMS`
-is appropriate only when every file named by that aggregate manifest is present
-locally; otherwise select the exact asset line as above.
+If you downloaded a Python artifact instead, verify it against
+`python-SHA256SUMS` the same way as below, substituting the wheel or sdist
+filename.
+
+## Verify SHA256
+
+From the directory containing the downloaded artifact, download the
+aggregate `SHA256SUMS` from the same release. The commands below select the
+named asset from that manifest, so they do not fail because other release
+assets are not present locally.
+
+### macOS
+
+```bash
+cd ~/Downloads
+DMG_FILE='xPST_1.2.1_aarch64.dmg'   # the exact filename you downloaded
+expected="$(awk -v f="$DMG_FILE" '$2 == f { print $1 }' SHA256SUMS)"
+actual="$(shasum -a 256 "$DMG_FILE" | awk '{ print $1 }')"
+if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+  printf '%s\n' "SHA256 mismatch — do not open $DMG_FILE." >&2
+  exit 1
+fi
+printf 'SHA256 OK: %s\n' "$actual"
+```
+
+### Windows PowerShell
+
+```powershell
+$installerFile = "xPST_1.2.1_x64-setup.exe"   # the exact filename you downloaded
+$line = Get-Content .\SHA256SUMS | Where-Object { $_ -match "(?s)\s$([regex]::Escape($installerFile))$" }
+$expected = ($line -split '\s+')[0].ToLowerInvariant()
+$actual = (Get-FileHash ".\$installerFile" -Algorithm SHA256).Hash.ToLowerInvariant()
+if ([string]::IsNullOrEmpty($expected) -or $actual -ne $expected) {
+    throw "SHA256 mismatch — do not run $installerFile."
+}
+"SHA256 OK: $actual"
+```
+
+### Linux
+
+Use the same target-only selection so a partial download set does not fail the
+check:
+
+```bash
+FILE='xPST_1.2.1_amd64.deb'   # or xPST_1.2.1_amd64.AppImage
+expected="$(awk -v f="$FILE" '$2 == f { print $1 }' SHA256SUMS)"
+actual="$(sha256sum "$FILE" | awk '{ print $1 }')"
+if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+  printf '%s\n' "SHA256 mismatch — do not run $FILE." >&2
+  exit 1
+fi
+printf 'SHA256 OK: %s\n' "$actual"
+```
+
+`sha256sum -c SHA256SUMS` works only when every file named by the manifest was
+downloaded; the target-only commands above are safer.
 
 ## FFmpeg prerequisite
 
@@ -67,57 +118,11 @@ want to control the build:
 
 If your distribution uses another package manager, use its FFmpeg package.
 
-## Verify SHA256
-
-From the directory containing the downloaded artifact, download the matching
-platform manifest from the same release. The commands below select the named
-asset from that manifest, so they do not fail because other release assets are
-not present locally.
-
-### macOS
-
-```bash
-cd ~/Downloads
-expected="$(awk '$2 == "xPST.dmg" { print $1 }' macos-SHA256SUMS)"
-actual="$(shasum -a 256 xPST.dmg | awk '{ print $1 }')"
-if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
-  printf '%s\n' 'SHA256 mismatch — do not open xPST.dmg.' >&2
-  exit 1
-fi
-printf 'SHA256 OK: %s\n' "$actual"
-```
-
-### Windows PowerShell
-
-```powershell
-$line = Get-Content .\windows-SHA256SUMS | Where-Object { $_ -match '\s+xPST\.exe$' }
-$expected = ($line -split '\s+')[0].ToLowerInvariant()
-$actual = (Get-FileHash .\xPST.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-if ([string]::IsNullOrEmpty($expected) -or $actual -ne $expected) {
-    throw "SHA256 mismatch — do not run xPST.exe."
-}
-"SHA256 OK: $actual"
-```
-
-### Linux
-
-For the v1.1.0 Linux asset, the platform manifest contains the one executable,
-so the normal checksum-file check is sufficient:
-
-```bash
-sha256sum -c linux-SHA256SUMS
-```
-
-If a later release's Linux manifest contains several assets and you downloaded
-only one, use the same target-only pattern as the macOS command: extract the
-line for the exact filename shown on that release page, hash that local file
-with `sha256sum`, and compare the two values.
-
 ## Install on macOS
 
-1. Download `xPST.dmg` and `macos-SHA256SUMS` from the same release.
+1. Download `xPST_1.2.1_aarch64.dmg` and `SHA256SUMS` from the same release.
 2. Verify the DMG using the macOS command above.
-3. Double-click `xPST.dmg` in Finder.
+3. Double-click the DMG in Finder.
 4. Drag `xPST.app` into the **Applications** folder.
 5. Eject the mounted DMG.
 
@@ -151,80 +156,53 @@ local history.
 
 ## Install on Windows
 
-1. Download `xPST.exe` and `windows-SHA256SUMS` from the same release.
-2. Verify the executable with the PowerShell command above.
-3. Double-click `xPST.exe` to run it, or start it from PowerShell in its download
-   directory:
-
-   ```powershell
-   .\xPST.exe
-   ```
-
-The v1.1.0 asset is a standalone executable, not a conventional installer.
-It does not create an MSI/NSIS installation entry or a separate uninstaller.
-If a future release publishes a real installer, use the exact installer asset
-listed on that release and its own uninstall entry.
+1. Download `xPST_1.2.1_x64-setup.exe` (NSIS installer) or
+   `xPST_1.2.1_x64_en-US.msi` (Windows Installer) and `SHA256SUMS` from the
+   same release.
+2. Verify the file with the PowerShell command above.
+3. Run the installer and follow its prompts. The `.exe` registers an
+   uninstall entry; the `.msi` is managed by Windows Installer.
 
 ### Uninstall on Windows
 
 1. Quit xPST.
-2. Delete the downloaded `xPST.exe` (and any shortcut you created).
-3. If a later release was installed through a Windows installer, remove that
-   version from **Settings → Apps → Installed apps** instead.
+2. Remove it from **Settings → Apps → Installed apps** (both the NSIS and MSI
+   packages register there).
 
-Removing the executable does not remove `%USERPROFILE%\.xpst`. See
+Uninstalling does not remove `%USERPROFILE%\.xpst`. See
 [Configuration and state](#configuration-and-state) before deleting that data.
 
 ## Install on Linux
 
-### The currently published v1.1.0 binary
+### Debian package (`xPST_1.2.1_amd64.deb`)
 
-The verified v1.1.0 Linux desktop asset is the standalone file `xPST`. No
-`.AppImage` or `.deb` is attached to that release, so there is no package
-filename to guess and no package-manager install to perform:
+Verify the file against `SHA256SUMS`, then install it with `apt`:
 
 ```bash
-chmod +x ./xPST
-./xPST
+sudo apt install ./xPST_1.2.1_amd64.deb
 ```
 
-Keep the executable wherever you want to launch it from, or create your own
-desktop shortcut after confirming it works.
-
-### AppImage releases
-
-When a future Releases page lists an AppImage, download the exact filename
-shown there and its Linux SHA256 manifest. Replace the variable value below
-with that exact filename; do not invent a filename or URL:
+To uninstall without guessing the package name, read it from the same file:
 
 ```bash
-APPIMAGE_FILE='paste-the-exact-AppImage-filename-from-the-release-page'
-chmod +x "./$APPIMAGE_FILE"
-"./$APPIMAGE_FILE"
-```
-
-An AppImage is portable. Uninstalling it normally means quitting xPST and
-deleting that AppImage file (plus any shortcut you created).
-
-### Debian package releases
-
-When a future Releases page lists a `.deb`, download the exact filename shown
-there and its Linux SHA256 manifest. Verify it, then install it with `apt`:
-
-```bash
-DEB_FILE='paste-the-exact-.deb-filename-from-the-release-page'
-sudo apt install "./$DEB_FILE"
-```
-
-To uninstall without guessing the Debian package name, read the package name
-from the same file and pass that value to `apt`:
-
-```bash
-PACKAGE_NAME="$(dpkg-deb -f "./$DEB_FILE" Package)"
+PACKAGE_NAME="$(dpkg-deb -f ./xPST_1.2.1_amd64.deb Package)"
 sudo apt remove "$PACKAGE_NAME"
 ```
 
-Removing a Debian package does not remove `~/.xpst`.
+### AppImage (`xPST_1.2.1_amd64.AppImage`)
+
+Verify the file against `SHA256SUMS`, then:
+
+```bash
+chmod +x ./xPST_1.2.1_amd64.AppImage
+./xPST_1.2.1_amd64.AppImage
+```
+
+On some distros an AppImage needs FUSE 2; if it refuses to start, extract it
+with `--appimage-extract` and run the inner binary instead.
+
+An AppImage is portable. Uninstalling it normally means quitting xPST and
+deleting that AppImage file (plus any shortcut you created).
 
 ## Configuration and state
 
