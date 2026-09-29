@@ -543,6 +543,12 @@ class SetupTransactionStore:
         for index, candidate in enumerate(candidates):
             try:
                 raw = candidate.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                # A missing file is not a corrupt one. On a fresh install the
+                # first setup run must not claim a previous state was
+                # "unreadable and recovered" — there never was one.
+                continue
+            try:
                 state = _validate_transaction(json.loads(raw))
                 recovered = index != 0
                 if recovered:

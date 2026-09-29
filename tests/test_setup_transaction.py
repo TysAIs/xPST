@@ -36,6 +36,36 @@ def test_transaction_resumes_after_process_restart(tmp_path: Path) -> None:
     assert resumed["completion"]["resumable"] is True
 
 
+def test_first_ever_setup_reports_no_state_recovery(tmp_path: Path) -> None:
+    """A brand-new install has no prior state, so it must not claim recovery.
+
+    Regression (stranger-install audit 2026-09-28): the first `xpst setup` run
+    on a machine with no prior setup transaction reported a STATE_RECOVERED
+    error ("The previous setup state was unreadable and was recovered safely")
+    even though no state had ever existed. A missing file is not a corrupt one.
+    """
+    service = SetupTransactionService(tmp_path)
+    assert not (tmp_path / "setup_transaction.json").exists()
+
+    first = service.start(_selected())
+
+    assert first["errors"] == [], (
+        f"a first-ever setup run must not report a recovery, got: {first['errors']}"
+    )
+
+
+def test_missing_primary_with_intact_backup_still_recovers(tmp_path: Path) -> None:
+    """If only the primary file is gone but a backup exists, recovery IS correct."""
+    first = SetupTransactionService(tmp_path).start(_selected())
+    (tmp_path / "setup_transaction.json").unlink()
+
+    restarted = SetupTransactionService(tmp_path).status()
+
+    assert restarted is not None
+    assert restarted["transaction_id"] == first["transaction_id"]
+    assert restarted["errors"][-1]["code"] == "STATE_RECOVERED"
+
+
 def test_atomic_corrupt_state_recovers_last_valid_transaction(tmp_path: Path) -> None:
     first = SetupTransactionService(tmp_path).start(_selected())
     state_path = tmp_path / "setup_transaction.json"

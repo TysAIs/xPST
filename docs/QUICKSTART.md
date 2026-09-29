@@ -33,8 +33,10 @@ pip install -e .
 git clone https://github.com/TysAIs/xPST.git
 cd xPST
 
-# Install with uv
-uv pip install -e .
+# uv needs a virtual environment (or --system); it does not manage one implicitly
+uv venv
+uv pip install -e ".[full]"
+source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 ```
 
 ### Option 3: Docker

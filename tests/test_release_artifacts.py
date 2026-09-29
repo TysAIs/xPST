@@ -8,6 +8,8 @@ from pathlib import Path
 from unittest.mock import patch
 from uuid import UUID
 
+import pytest
+
 from scripts.build_package import ROOT as BUILD_ROOT
 from scripts.build_package import build_package
 from scripts.public_release_check import collect_public_release_evidence
@@ -67,6 +69,41 @@ def test_generate_checksums_for_all_artifacts(tmp_path):
     assert "xPST.exe" in sha256_text
     assert "xpst-0.1.0-py3-none-any.whl" in sha512_text
     assert "xPST.exe" in sha512_text
+
+
+def test_checksum_manifests_share_one_artifact_set(tmp_path):
+    """Both manifests must always name the same files.
+
+    Regression (v1.2.1): the published python-SHA256SUMS listed only the wheel
+    while python-SHA512SUMS listed wheel + sdist, so a stranger following
+    docs/INSTALL.md could not checksum-verify the sdist. Generation now refuses
+    to emit manifests whose file sets differ (the divergence arises when a
+    manifest is re-uploaded from a stale dist directory during a rebuild).
+    """
+    wheel = tmp_path / "xpst-0.1.0-py3-none-any.whl"
+    sdist = tmp_path / "xpst-0.1.0.tar.gz"
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    _make_wheel(wheel)
+    _make_sdist(sdist, scratch)
+    out_dir = tmp_path / "release-meta"
+    out_dir.mkdir()
+    sha256_output = out_dir / "SHA256SUMS"
+    sha512_output = out_dir / "SHA512SUMS"
+
+    generate_checksum_files(tmp_path, sha256_output, sha512_output)
+
+    def names(path: Path) -> set[str]:
+        return {line.split()[-1] for line in path.read_text(encoding="utf-8").strip().splitlines()}
+
+    assert names(sha256_output) == names(sha512_output) == {wheel.name, sdist.name}
+
+    # After the dist state changes, re-running into the SAME output manifest
+    # must fail loudly (stale manifest naming a file the dist no longer has)
+    # rather than silently re-upload a half-truth pair.
+    sdist.unlink()
+    with pytest.raises(RuntimeError, match="different artifact set"):
+        generate_checksum_files(tmp_path, sha256_output, sha512_output)
 
 
 def test_generate_pypi_json_skips_desktop_only_dist(tmp_path):

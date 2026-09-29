@@ -296,6 +296,35 @@ class TestSessionManagerTokenWrite:
             assert _mode(token_path) == 0o600
 
 
+class TestSessionManagerYouTubeUnconfigured:
+    """A machine with no YouTube auth must be told 'not configured', not 'expired'."""
+
+    @pytest.mark.asyncio
+    async def test_no_token_anywhere_reports_not_configured(self, tmp_path):
+        """Regression (stranger-install audit 2026-09-28).
+
+        On a fresh install, the YouTube health probe raised
+        "YouTube credentials expired or invalid" even though no credentials
+        ever existed — telling a brand-new user their credentials had expired.
+        With no stored token and no token file, the error must name the real
+        state (not configured) and the real next command.
+        """
+        from xpst.utils.sessions import SessionManager
+
+        mgr = SessionManager(config_dir=str(tmp_path))
+        secrets_path = tmp_path / "client_secrets.json"
+        secrets_path.write_text("{}")
+        token_path = tmp_path / "youtube_token.json"
+
+        with pytest.raises(ValueError) as excinfo:
+            await mgr.get_youtube_service(str(secrets_path), str(token_path))
+
+        message = str(excinfo.value)
+        assert "not configured" in message.lower()
+        assert "expired" not in message.lower()
+        assert "xpst auth youtube" in message
+
+
 class TestSessionManagerInstagramSession:
     """Instagram session-loading edge cases in SessionManager.get_instagram_client."""
 
