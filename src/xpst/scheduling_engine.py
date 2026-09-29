@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -45,7 +46,7 @@ DEFAULT_DUE_INTERVAL_SECONDS = 900.0
 # misconfigured interval turning the daemon into a busy loop.
 MIN_DUE_INTERVAL_SECONDS = 0.01
 
-_COUNT_KEYS: tuple[str, ...] = ("due", "posted", "failed", "aborted")
+_COUNT_KEYS: tuple[str, ...] = ("due", "posted", "failed", "aborted", "deferred")
 
 
 def _config_interval(config: XPSTConfig | None) -> float:
@@ -196,15 +197,42 @@ class SchedulingEngine:
                 # Per-destination copy persisted at add time (same semantics
                 # as `xpst post --caption-for`); {} = shared caption everywhere.
                 per_platform_captions = stored_per_platform_captions(entry)
+                # Route by the modality stored at add time (D1's schedule
+                # twin: an entry added for an IMAGE must fire through the
+                # image route, not the video encoder). Entries predating the
+                # field — and entries naming a file that is actually an image
+                # — stay on the video path only if the contract agrees.
+                entry_route = str(entry.get("content_type") or "").strip().lower()
+                entry_media = [
+                    Path(p) for p in (entry.get("media_paths") or []) if str(p).strip()
+                ]
                 try:
-                    result = asyncio.run(
-                        self.engine.post_manual(
-                            video_path,
-                            caption,
-                            platforms,
-                            per_platform_captions=per_platform_captions or None,
+                    if entry_route == "carousel" and len(entry_media) >= 2:
+                        result = asyncio.run(
+                            self.engine.post_manual_carousel(
+                                entry_media,
+                                caption,
+                                platforms,
+                                per_platform_captions or None,
+                            )
                         )
-                    )
+                    elif entry_route == "image":
+                        result = asyncio.run(
+                            self.engine.post_manual_image(
+                                video_path,
+                                caption,
+                                platforms,
+                            )
+                        )
+                    else:
+                        result = asyncio.run(
+                            self.engine.post_manual(
+                                video_path,
+                                caption,
+                                platforms,
+                                per_platform_captions=per_platform_captions or None,
+                            )
+                        )
                     success = bool(getattr(result, "all_success", False))
                     error_msg = None
                     if not success:
@@ -217,6 +245,47 @@ class SchedulingEngine:
                         platform: upload.to_dict()
                         for platform, upload in getattr(result, "results", {}).items()
                     }
+                    # G11 on the fire path (D2): when EVERY destination came
+                    # back deferred (anti-bot window), the entry is not a
+                    # failure — it goes back to pending until the window
+                    # opens. Marking it failed buried a healthy queue entry in
+                    # the DLQ and told the user their post had failed.
+                    rows = getattr(result, "results", {})
+                    deferred_rows = [
+                        upload for upload in rows.values()
+                        if not upload.success
+                        and getattr(upload, "metadata", None)
+                        and (upload.metadata or {}).get("deferred")
+                    ]
+                    if not success and rows and len(deferred_rows) == len(rows):
+                        resume_iso = next(
+                            (
+                                (upload.metadata or {}).get("resume_after")
+                                for upload in deferred_rows
+                                if (upload.metadata or {}).get("resume_after")
+                            ),
+                            None,
+                        )
+                        resume_at = None
+                        if resume_iso:
+                            try:
+                                resume_at = datetime.fromisoformat(str(resume_iso))
+                            except ValueError:
+                                resume_at = None
+                        counts["deferred"] = counts.get("deferred", 0) + 1
+                        try:
+                            self.manager.requeue(
+                                entry_id,
+                                next_time=resume_at,
+                                error="deferred: outside posting window",
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.error("scheduling: requeue of %s failed: %s", entry_id, exc)
+                        logger.info(
+                            "scheduling: %s deferred (outside posting window), requeued",
+                            entry_id,
+                        )
+                        continue
                 except Exception as exc:  # noqa: BLE001 - keep the loop alive
                     counts["failed"] += 1
                     self._record(entry_id, success=False, error=str(exc))

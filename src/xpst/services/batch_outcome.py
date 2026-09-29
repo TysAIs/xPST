@@ -122,12 +122,16 @@ def attempted(rows: dict[str, Any]) -> dict[str, Any]:
 
     A row carrying ``already_posted`` was an idempotent no-op, not an attempt:
     it neither published nor failed, so it must not decide the verdict.
+    A row carrying ``deferred`` is G11 scheduling, not failure (D2): the
+    anti-bot window will post it later, and counting it as a failure made a
+    deferred run exit 1 with a bare error string.
     """
 
     return {
         platform: upload
         for platform, upload in rows.items()
         if "already_posted" not in (upload.metadata or {})
+        and not (upload.metadata or {}).get("deferred")
     }
 
 

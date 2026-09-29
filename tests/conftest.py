@@ -79,11 +79,48 @@ def _no_real_connectivity_probe(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _isolate_config_dir_env(monkeypatch):
-    """Keep the real ``XPST_CONFIG_DIR`` of the invoking shell out of tests.
+def _isolate_config_dir_env(monkeypatch, tmp_path):
+    """Keep the real ``~/.xpst`` out of every test.
 
-    Several modules resolve their default directory from this variable; an
-    ambient value (an installer/e2e lane exporting it) would silently redirect
-    a test's writes away from its ``tmp_path``.
+    Two failure modes this closes:
+
+    * an ambient ``XPST_CONFIG_DIR`` (an installer/e2e lane exporting it)
+      would silently redirect a test's writes away from its ``tmp_path``;
+    * and the inverse, the D3 defect class: code that resolves its own
+      default directory (``ScheduleManager()``, the MCP audit logger) used to
+      land in the invoking user's REAL ``~/.xpst`` — a test-suite
+      ``xpst_schedule_cancel`` silently emptied the live queue of the machine
+      running pytest (2026-09-28, 10 user entries).
+
+    Pointing the variable at a per-test temp dir closes both: any writer that
+    honours the config-dir contract (the documented sandbox hook) now lands in
+    throwaway space. Tests that want the shipped default HOME layout (they
+    assert ``~/.xpst`` paths) delenv or setenv explicitly, and tests that
+    inject their own temp HOME keep working because the temp dir sits under
+    their own tmp_path.
     """
     monkeypatch.delenv("XPST_CONFIG_DIR", raising=False)
+    # Sibling of tmp_path, not inside it: fixtures that assert "no leftover
+    # files in tmp_path" must not see the isolation dir as leakage.
+    isolated = tmp_path.parent / f"{tmp_path.name}.xpstcfg"
+    isolated.mkdir(parents=True, exist_ok=True)
+    # Seed the default config so first-run code paths do not emit the
+    # "Created default config" INFO line through the rich handler onto
+    # stdout, which corrupts CliRunner JSON-output assertions. Mirrors the
+    # writer in xpst/config.py.
+    try:
+        import yaml
+
+        from xpst.config import DEFAULT_CONFIG
+        from xpst.config_migration import ConfigMigration
+
+        (isolated / "config.yaml").write_text(
+            yaml.safe_dump(
+                {"version": ConfigMigration.CURRENT_VERSION, **DEFAULT_CONFIG},
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
+    except Exception:  # pragma: no cover - seeding is best-effort
+        pass
+    monkeypatch.setenv("XPST_CONFIG_DIR", str(isolated))
