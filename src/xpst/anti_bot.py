@@ -298,13 +298,15 @@ class AntiBotProtection:
 
         # Use hash for deterministic variation selection.
         # ``usedforsecurity=False`` documents that this is a non-cryptographic
-        # pick, but the kwarg only exists on CPython >= 3.9 — fall back to
-        # plain md5 on older embedded runtimes instead of crashing (D7).
+        # pick, but the kwarg only exists on CPython >= 3.9 while the desktop
+        # bundle embeds an older runtime — fall back on TypeError instead of
+        # crashing (D7). The nosec names why the plain call is safe: identical
+        # digest, and this hash selects a caption suffix, never guards a secret.
         hash_input = f"{caption}:{platform}".encode()
         try:
             digest = hashlib.md5(hash_input, usedforsecurity=False).hexdigest()
-        except TypeError:
-            digest = hashlib.md5(hash_input).hexdigest()
+        except TypeError:  # pragma: no cover - embedded CPython < 3.9
+            digest = hashlib.md5(hash_input).hexdigest()  # nosec B324
         hash_val = int(digest, 16)
 
         # Select suffix
