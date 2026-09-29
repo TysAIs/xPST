@@ -180,6 +180,13 @@ def _auth_mode(config: Any, name: str, raw: Mapping[str, Any]) -> str:
             getattr(account, "access_token", "") or getattr(account, "refresh_token", "")
         ):
             return "content_posting_api"
+        if str(getattr(account, "publish_mode", "auto") or "auto").lower() in (
+            "browser",
+            "browser_only",
+        ):
+            # Browser-native publish mode: the logged-in web session is the
+            # credential (same vocabulary Instagram uses for instagrapi).
+            return "session"
         return "source_only"
     return _DEFINITIONS[name].auth_mode
 
@@ -211,13 +218,25 @@ def _configured(config: Any, name: str, role: ProviderRole, raw: Mapping[str, An
                 or _path_exists(getattr(account, "cookies_file", ""))
             )
         if role in (ProviderRole.VIDEO_DESTINATION, ProviderRole.ANALYTICS):
-            return bool(
+            if bool(
                 getattr(account, "client_key", "")
                 and (
                     getattr(account, "access_token", "")
                     or getattr(account, "refresh_token", "")
                 )
-            )
+            ):
+                return True
+            # Browser-native publish mode: the credential is the exported web
+            # cookie jar / persisted profile, not an OAuth token — a jar on
+            # disk is the configured state for this route.
+            mode = str(getattr(account, "publish_mode", "auto") or "auto").lower()
+            if mode in ("browser", "browser_only"):
+                jar = getattr(account, "cookies_file", "") or str(
+                    Path(str(getattr(config, "config_dir", "~/.xpst"))).expanduser()
+                    / "credentials"
+                    / "tiktok_cookies.txt"
+                )
+                return _path_exists(jar)
     if name == "x":
         if getattr(account, "auth_mode", "cookies") == "api_v2":
             return bool(
