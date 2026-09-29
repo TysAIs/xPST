@@ -101,7 +101,12 @@ knowledge = [
     "lancedb>=0.5,<1.0",  # Legacy backend, still available
 ]
 full = [
-    "xpst[mcp,dashboard,windows,knowledge,browser]",
+    # NOTE: 'browser' is deliberately NOT included — the engine sidecar size
+    # budget (95 MB) can't absorb playwright (~128 MB), and the browser
+    # route additionally needs a `playwright install chromium` browser
+    # download anyway, so it is an explicit opt-in: pip install
+    # "xpst[browser]".
+    "xpst[mcp,dashboard,windows,knowledge]",
 ]
 dev = [
     "pytest>=7.0.0",
