@@ -15,8 +15,10 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +26,18 @@ _AUDIT_LOG_PATH: Path | None = None
 
 
 def _get_audit_log_path() -> Path:
-    """Get or create the audit log path."""
+    """Get or create the audit log path.
+
+    Resolved through :func:`xpst.utils.platform.get_config_dir` so a run
+    sandboxed with ``XPST_CONFIG_DIR`` writes its audit lines into its own
+    profile — never appended to the real user's audit log (defect D3 family:
+    test-suite writes landing in live ``~/.xpst`` state).
+    """
     global _AUDIT_LOG_PATH
     if _AUDIT_LOG_PATH is None:
-        log_dir = Path.home() / ".xpst" / "logs"
+        from xpst.utils.platform import get_config_dir
+
+        log_dir = get_config_dir() / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         _AUDIT_LOG_PATH = log_dir / "mcp_audit.jsonl"
     return _AUDIT_LOG_PATH

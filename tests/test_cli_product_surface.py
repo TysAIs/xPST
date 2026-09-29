@@ -77,6 +77,11 @@ def home(tmp_path, monkeypatch):
         monkeypatch.setenv("HOMEPATH", str(home)[2:])
     else:
         monkeypatch.setattr("xpst.utils.platform.get_config_dir", lambda: home / ".xpst")
+        # Anything that resolves its profile through the environment (wizard
+        # store, schedule manager default) must land in this fixture's HOME
+        # too — a conftest-level isolation dir would shadow the patched
+        # resolver for those paths.
+        monkeypatch.setenv("XPST_CONFIG_DIR", str(home / ".xpst"))
     return home
 
 
@@ -453,7 +458,8 @@ def test_parallel_cli_schedule_add(tmp_path):
     home_dir.mkdir()
     vid = tmp_path / "v.mp4"
     vid.write_bytes(b"\x00" * 64)
-    env = {**os.environ, "HOME": str(home_dir), "NO_COLOR": "1"}
+    env = {**os.environ, "HOME": str(home_dir), "NO_COLOR": "1",
+           "XPST_CONFIG_DIR": str(home_dir / ".xpst")}
     repo_src = str(Path(__file__).resolve().parents[1] / "src")
     env["PYTHONPATH"] = repo_src + os.pathsep + env.get("PYTHONPATH", "")
 

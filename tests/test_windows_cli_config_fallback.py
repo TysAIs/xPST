@@ -13,6 +13,9 @@ def test_windows_config_dir_uses_userprofile_when_appdata_missing(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.delenv("APPDATA", raising=False)
+    # Default-layout assertion: a conftest isolation XPST_CONFIG_DIR would
+    # outrank the USERPROFILE fallback this test exercises.
+    monkeypatch.delenv("XPST_CONFIG_DIR", raising=False)
     monkeypatch.setenv("USERPROFILE", str(tmp_path / "profile"))
     monkeypatch.setattr(platform.sys, "platform", "win32")
 

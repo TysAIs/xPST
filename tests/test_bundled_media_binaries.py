@@ -69,6 +69,7 @@ def test_ytdlp_env_override_ignores_missing(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_ytdlp_fallback_used_when_no_env_and_no_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("xpst.utils.platform.shutil.which", lambda name: None)
+    monkeypatch.setattr("xpst.utils.platform.system_media_dirs", lambda: [])
     fallback = tmp_path / "yt-dlp"
     fallback.write_text("#!/bin/sh\n", encoding="utf-8")
     fallback.chmod(0o755)
@@ -80,6 +81,7 @@ def test_ytdlp_fallback_used_when_no_env_and_no_path(monkeypatch: pytest.MonkeyP
 
 def test_ytdlp_returns_none_when_nothing_found(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr("xpst.utils.platform.shutil.which", lambda name: None)
+    monkeypatch.setattr("xpst.utils.platform.system_media_dirs", lambda: [])
     monkeypatch.setattr(
         "xpst.utils.platform.get_ytdlp_fallback_paths",
         lambda: [tmp_path / "does-not-exist"],
