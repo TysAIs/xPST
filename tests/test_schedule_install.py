@@ -22,6 +22,9 @@ from xpst import cli
 
 @pytest.fixture
 def fake_home(monkeypatch, tmp_path):
+    # Tests in this module assert the DEFAULT layout (patched HOME → ~/.xpst);
+    # a conftest isolation XPST_CONFIG_DIR would outrank HOME.
+    monkeypatch.delenv("XPST_CONFIG_DIR", raising=False)
     monkeypatch.setattr(Path, "home", classmethod(lambda klass: tmp_path))
     return tmp_path
 

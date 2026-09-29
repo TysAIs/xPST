@@ -110,6 +110,32 @@ class UploadService:
         # read-back before it can publish a duplicate (see xpst.reconcile).
         self._attempt_ledger = AttemptLedger()
 
+    def _deferred(self, platform_name: str) -> UploadResult | None:
+        """The shared anti-bot time-of-day gate (G11: deferral != failure).
+
+        Returns a deferred result when the anti-bot window says "not now" on
+        ANY upload path — the video path used to be the only one gated, so an
+        image/text post fired at midnight uploaded while a video deferred.
+        One gate, every route.
+        """
+        if self.anti_bot and not self.anti_bot.should_post_now():
+            logger.info(
+                "Anti-bot: outside posting hours, deferring %s upload",
+                platform_name,
+            )
+            resume = ""
+            try:
+                resume = self.anti_bot.next_posting_time().isoformat()
+            except Exception:  # noqa: BLE001 - resume time is a courtesy, not a gate
+                pass
+            return UploadResult(
+                success=False,
+                error="Outside posting hours (8am-11pm), deferred",
+                platform=platform_name,
+                metadata={"deferred": True, "resume_after": resume},
+            )
+        return None
+
     async def upload_to_platform(
         self,
         uploader: PlatformUploader,
@@ -129,18 +155,10 @@ class UploadService:
         Returns:
             UploadResult with success/failure and metadata.
         """
-        # ── Anti-bot: Time-of-day check ──
-        if self.anti_bot and not self.anti_bot.should_post_now():
-            logger.info(
-                "Anti-bot: outside posting hours, deferring %s upload",
-                platform_name,
-            )
-            return UploadResult(
-                success=False,
-                error="Outside posting hours (8am-11pm), deferred",
-                platform=platform_name,
-                metadata={"deferred": True},
-            )
+        # ── Anti-bot: Time-of-day check (shared gate, G11) ──
+        deferred = self._deferred(platform_name)
+        if deferred is not None:
+            return deferred
 
         # ── Anti-bot: Conservative daily limit check ──
         if self.anti_bot and not self.anti_bot.can_upload(platform_name):
@@ -377,6 +395,11 @@ class UploadService:
             # Provider acknowledgments are not publication proof. Normalize at
             # this single chokepoint before any state, quota, or success path.
             upload_result = normalize_upload_result(raw_upload_result, platform_name)
+            # Caption fidelity (D6): the anti-bot path may have appended a
+            # variation suffix. Record the EXACT copy handed to this
+            # destination so the engine's result.captions reports what went
+            # live, not what the caller requested.
+            upload_result.metadata["caption_sent"] = caption
 
             if upload_result.is_published:
                 tracker.complete()
@@ -603,6 +626,11 @@ class UploadService:
 
         Same pipeline as upload_to_platform but uses upload_carousel.
         """
+        # Anti-bot time-of-day gate (shared with every other upload path, D2).
+        deferred = self._deferred(platform_name)
+        if deferred is not None:
+            return deferred
+
         # ToS warning for unofficial API platforms
         if platform_name in _TOS_UNOFFICIAL_PLATFORMS:
             logger.warning(
@@ -729,6 +757,13 @@ class UploadService:
         an image is never handed to ffmpeg, and the destination's own image
         limits are enforced inside the adapter before any upload call.
         """
+        # Anti-bot time-of-day gate: identical to the video route (D2 — one
+        # gate on every upload path, so a deferred post behaves the same no
+        # matter which modality it carries).
+        deferred = self._deferred(platform_name)
+        if deferred is not None:
+            return deferred
+
         if platform_name in _TOS_UNOFFICIAL_PLATFORMS:
             logger.warning(
                 "Using unofficial API for %s - may violate platform ToS",
@@ -857,6 +892,11 @@ class UploadService:
         (read back) first and the result surfaced for a deliberate retry only
         when that proves the post absent — never a blind double-post.
         """
+        # Anti-bot time-of-day gate (shared with every other upload path, D2).
+        deferred = self._deferred(platform_name)
+        if deferred is not None:
+            return deferred
+
         # ToS warning for unofficial API platforms
         if platform_name in _TOS_UNOFFICIAL_PLATFORMS:
             logger.warning(

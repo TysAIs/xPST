@@ -52,7 +52,7 @@ def runner():
 @pytest.fixture
 def store_dir(tmp_path):
     path = tmp_path / ".xpst"
-    path.mkdir()
+    path.mkdir(exist_ok=True)  # conftest isolation fixture pre-creates it
     return str(path)
 
 
