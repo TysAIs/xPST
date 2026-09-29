@@ -225,15 +225,26 @@ class ScheduleManager:
     methods to add, edit, list, cancel (remove), and process due posts.
     """
 
-    def __init__(self, config_dir: str = "~/.xpst", *, tz: tzinfo | None = None):
+    def __init__(self, config_dir: str | None = None, *, tz: tzinfo | None = None):
         """Initialize the schedule manager.
 
         Args:
-            config_dir: Path to the xPST config directory.
+            config_dir: Path to the xPST config directory. ``None`` resolves
+                through :func:`xpst.utils.platform.get_config_dir`, which
+                honors ``XPST_CONFIG_DIR`` — a sandboxed run (installer,
+                smoke test, pytest with a temp profile) must never open the
+                real ``~/.xpst/schedule.json`` (defect D3: a test-suite cancel
+                silently emptied the user's live queue).
             tz: Local zone used to interpret naive times and to render local
                 displays. Defaults to the machine's local zone.
         """
-        self.config_dir = Path(config_dir).expanduser()
+        if config_dir is None:
+            from xpst.utils.platform import get_config_dir
+
+            resolved_dir: Path = get_config_dir()
+        else:
+            resolved_dir = Path(config_dir).expanduser()
+        self.config_dir = resolved_dir
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.schedule_file = self.config_dir / "schedule.json"
         # Cross-process lock (cron + daemon may run concurrently) and
@@ -498,6 +509,8 @@ class ScheduleManager:
         *,
         tz: tzinfo | None = None,
         per_platform_captions: dict[str, str] | None = None,
+        content_type: str | None = None,
+        media_paths: list[str] | None = None,
     ) -> dict[str, Any]:
         """Add a new scheduled post.
 
@@ -513,6 +526,13 @@ class ScheduleManager:
             per_platform_captions: ``{platform: caption}`` per-destination
                 overrides persisted with the entry and passed to the engine at
                 fire time (same semantics as ``xpst post --caption-for``).
+            content_type: Modality of the media (``video``/``image``/
+                ``carousel``). Persisted so the fire path publishes on the
+                SAME route the poster requested — a queued image must not
+                fire through the video encoder (defect D1's schedule twin).
+                Absent = legacy entry = video (unchanged behaviour).
+            media_paths: Ordered media files for a carousel entry (single
+                entries keep using ``video_path``).
 
         Returns:
             The created schedule entry (with its local rendering).
@@ -562,6 +582,14 @@ class ScheduleManager:
             "post_results": {},
             "repeat_rule": repeat_rule,
         }
+        # Modality + full media set, persisted so the fire path publishes on
+        # the route the poster asked for (a queued image must never fire
+        # through the video encoder). Legacy entries without these keys are
+        # read as video at fire time — unchanged behaviour for old stores.
+        if content_type:
+            entry["content_type"] = str(content_type)
+        if media_paths:
+            entry["media_paths"] = [str(p) for p in media_paths]
         with self._process_lock():
             with self._lock:
                 # Reload under the process lock: other instances (threads
@@ -836,6 +864,71 @@ class ScheduleManager:
                     self._save()
                     return True
                 return False
+
+    def requeue(
+        self,
+        entry_id: str,
+        *,
+        next_time: datetime | None = None,
+        error: str | None = None,
+    ) -> bool:
+        """Return a claimed/processing entry to ``pending`` for a later attempt.
+
+        G11 says an anti-bot deferral is scheduling, not failure. A due entry
+        whose upload the window refused must go back to pending (optionally
+        with a new ``next_time`` so it is not due again until the window
+        opens), never be marked ``failed`` — a failed entry is dead, retried
+        by hand, and pollutes failure reporting with a scheduling event.
+        """
+        zone = self._tz
+        scheduled_utc = to_utc(next_time, zone) if next_time is not None else None
+        with self._process_lock():
+            with self._lock:
+                self._reload_locked()
+                for entry in self._entries:
+                    if entry.get("id") == entry_id:
+                        entry["status"] = "pending"
+                        entry.pop("claimed_at", None)
+                        if scheduled_utc is not None:
+                            entry["scheduled_time"] = scheduled_utc.isoformat()
+                        entry["error"] = error
+                        self._save()
+                        return True
+                return False
+
+    def paused_snapshots(self) -> list[dict[str, Any]]:
+        """Discover ``schedule.json.paused-*`` sibling files in the store dir.
+
+        A queue can leave the store file empty because an operator (or tool)
+        renamed it to a pause snapshot — a store file with no entries is then
+        indistinguishable from a store that never had a queue (defect D3:
+        10 user entries 'vanished' with no surface mentioning the backup that
+        held them). Every surface that lists the queue reports these so a
+        silent rename can never read as an empty schedule.
+        """
+        snapshots: list[dict[str, Any]] = []
+        try:
+            siblings = sorted(self.config_dir.glob("schedule.json.paused-*"))
+        except OSError:
+            return snapshots
+        for path in siblings:
+            entries: Any = None
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, list):
+                    entries = len(raw)
+            except (OSError, ValueError):
+                pass
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = 0
+            snapshots.append({
+                "file": str(path),
+                "entries": entries,
+                "modified_at": datetime.fromtimestamp(mtime).isoformat() if mtime else None,
+            })
+        return snapshots
 
     def mark_complete(
         self,

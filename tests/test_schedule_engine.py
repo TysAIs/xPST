@@ -342,7 +342,7 @@ def test_run_due_reports_counts_and_failures(config_dir, tmp_path):
     manager.add(str(video), "will fail", _now_local_naive() - timedelta(minutes=1))
 
     counts = SchedulingEngine(_FakeEngine(ok=False), manager=manager).run_due()
-    assert counts == {"due": 1, "posted": 0, "failed": 1, "aborted": 0}
+    assert counts == {"due": 1, "posted": 0, "failed": 1, "aborted": 0, "deferred": 0}
     stored = ScheduleManager(config_dir, tz=DENVER).list()[0]
     assert stored["status"] == "failed"
     assert stored["error"]
@@ -356,7 +356,7 @@ def test_run_due_survives_a_raising_engine(config_dir, tmp_path):
     counts = SchedulingEngine(
         _FakeEngine(raise_exc=RuntimeError("provider down")), manager=manager
     ).run_due()
-    assert counts == {"due": 1, "posted": 0, "failed": 1, "aborted": 0}
+    assert counts == {"due": 1, "posted": 0, "failed": 1, "aborted": 0, "deferred": 0}
     assert ScheduleManager(config_dir, tz=DENVER).list()[0]["status"] == "failed"
 
 
@@ -367,7 +367,7 @@ def test_run_due_ignores_future_entries(config_dir, tmp_path):
 
     engine = _FakeEngine()
     counts = SchedulingEngine(engine, manager=manager).run_due()
-    assert counts == {"due": 0, "posted": 0, "failed": 0, "aborted": 0}
+    assert counts == {"due": 0, "posted": 0, "failed": 0, "aborted": 0, "deferred": 0}
     assert engine.posts == []
 
 

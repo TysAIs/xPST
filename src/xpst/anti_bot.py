@@ -21,7 +21,7 @@ Usage:
 import hashlib
 import random
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from xpst.utils.logger import get_logger
 
@@ -176,6 +176,25 @@ class AntiBotProtection:
 
         return is_within_hours
 
+    def next_posting_time(self) -> datetime:
+        """The next instant when posting is allowed again (G11 deferral support).
+
+        Inside the window this is "now"; outside it, the next window opening
+        (8:00 local today if before 8, else tomorrow). A deferred manual post
+        is requeued with this timestamp so a caller can tell the user WHEN the
+        post will fire, instead of reporting a bare failure.
+        """
+        now = self._get_local_time()
+        if self.should_post_now():
+            return now
+        if now.hour < 8:
+            opening = now.replace(hour=8, minute=0, second=0, microsecond=0)
+        else:
+            opening = (now + timedelta(days=1)).replace(
+                hour=8, minute=0, second=0, microsecond=0
+            )
+        return opening
+
     def _get_local_time(self) -> datetime:
         """Get current local time.
 
@@ -277,9 +296,16 @@ class AntiBotProtection:
         if not caption:
             return caption
 
-        # Use hash for deterministic variation selection
+        # Use hash for deterministic variation selection.
+        # ``usedforsecurity=False`` documents that this is a non-cryptographic
+        # pick, but the kwarg only exists on CPython >= 3.9 — fall back to
+        # plain md5 on older embedded runtimes instead of crashing (D7).
         hash_input = f"{caption}:{platform}".encode()
-        hash_val = int(hashlib.md5(hash_input, usedforsecurity=False).hexdigest(), 16)
+        try:
+            digest = hashlib.md5(hash_input, usedforsecurity=False).hexdigest()
+        except TypeError:
+            digest = hashlib.md5(hash_input).hexdigest()
+        hash_val = int(digest, 16)
 
         # Select suffix
         suffixes = CAPTION_SUFFIXES.get(platform, [""])
