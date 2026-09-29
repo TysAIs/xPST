@@ -75,18 +75,17 @@ class XSource(VideoSource):
         )
 
     def _find_yt_dlp(self) -> str:
-        """Find yt-dlp binary"""
-        import shutil
+        """Find yt-dlp binary.
 
-        yt_dlp = shutil.which("yt-dlp")
-        if yt_dlp:
-            return yt_dlp
+        Delegates to :func:`xpst.utils.platform.resolve_ytdlp_path` so daemon
+        contexts with a minimal PATH (launchd) still resolve the venv-shipped
+        binary (kanban t_bb310d6a); bare ``yt-dlp`` only if truly unresolvable.
+        """
+        from xpst.utils.platform import resolve_ytdlp_path
 
-        from xpst.utils.platform import get_ytdlp_fallback_path
-        user_bin = get_ytdlp_fallback_path()
-        if user_bin.exists():
-            return str(user_bin)
-
+        resolved = resolve_ytdlp_path()
+        if resolved:
+            return str(resolved)
         return "yt-dlp"
 
     def _build_base_command(self) -> list[str]:
@@ -502,6 +501,7 @@ class XSource(VideoSource):
             "source": "x",
             "yt_dlp_installed": yt_dlp_exists,
             "yt_dlp_version": version,
+            "yt_dlp_path": self._yt_dlp_path,
             "twikit_installed": twikit_installed,
             "cookies_available": cookies_available,
             "username_configured": username_configured,
