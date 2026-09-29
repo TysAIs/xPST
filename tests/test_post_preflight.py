@@ -179,7 +179,13 @@ def test_all_requested_platforms_are_present_and_threads_is_blocked(tmp_path: Pa
 
 
 def test_verify_media_json_keeps_threads_in_reports_and_plans(tmp_path: Path) -> None:
-    """The compatibility CLI must expose every requested platform."""
+    """The compatibility CLI must expose every requested platform.
+
+    Threads is enabled in the config here: since the 2026-09-28 defect wave,
+    ``--platform all`` resolves to the *enabled* destinations (the same rule
+    every post path uses), so a disabled destination must set ``enabled: true``
+    to appear — see :func:`test_verify_media_all_skips_disabled_destination`.
+    """
     from click.testing import CliRunner
 
     from xpst.cli import main
@@ -187,7 +193,9 @@ def test_verify_media_json_keeps_threads_in_reports_and_plans(tmp_path: Path) ->
     media = tmp_path / "canary.mp4"
     media.write_bytes(b"not a real video")
     config_path = tmp_path / "config.yaml"
-    XPSTConfig(config_dir=str(tmp_path / "state")).save(str(config_path))
+    cfg = XPSTConfig(config_dir=str(tmp_path / "state"))
+    cfg.threads.enabled = True
+    cfg.save(str(config_path))
 
     result = CliRunner().invoke(
         main,
@@ -206,11 +214,71 @@ def test_verify_media_json_keeps_threads_in_reports_and_plans(tmp_path: Path) ->
 
     assert result.exit_code == 1
     payload = json.loads(result.output)
-    requested = ["youtube", "tiktok", "instagram", "x", "threads"]
+    # Canonical destination order (xpst.services.post_preflight.DESTINATION_ORDER).
+    requested = ["youtube", "x", "instagram", "tiktok", "threads"]
     assert [report["platform"] for report in payload["reports"]] == requested
     assert [plan["platform"] for plan in payload["plans"]] == requested
     assert payload["ok"] is False
     assert "THREADS_NEEDS_URL" in result.output
+
+
+def test_verify_media_all_skips_disabled_destination(tmp_path: Path) -> None:
+    """D4: a destination switched off in config must not fail the exit code.
+
+    The shipped defect: with the shipped default (``threads.enabled: false``),
+    ``verify-media -p all`` exited 1 solely on Threads' THREADS_NEEDS_URL —
+    an error the disabled destination would never have produced, because no
+    upload to it was ever going to happen. `-p all` now verifies the enabled
+    destinations only, and a healthy file exits 0.
+    """
+    from click.testing import CliRunner
+
+    from xpst.cli import main
+
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"not a real video")
+    config_path = tmp_path / "config.yaml"
+    cfg = XPSTConfig(config_dir=str(tmp_path / "state"))
+    # The shipped DEFAULT_CONFIG writes `threads: enabled: false`; mirror it.
+    cfg.threads.enabled = False
+    cfg.save(str(config_path))
+
+    result = CliRunner().invoke(
+        main,
+        ["--config", str(config_path), "verify-media", str(media), "--platform", "all", "--json"],
+        obj={},
+    )
+
+    payload = json.loads(result.output)
+    reported = [report["platform"] for report in payload["reports"]]
+    assert "threads" not in reported
+    assert "THREADS_NEEDS_URL" not in result.output
+    # The unusable-but-plausibly-named file now only WARNs on the enabled
+    # platforms: with a real Threads blocker removed, the honest verdict is a
+    # clean pass, exit 0 — the exact inversion of the shipped defect.
+    assert result.exit_code == 0
+    assert payload["ok"] is True
+
+    # A file the enabled platforms really do reject still fails.
+    bad = tmp_path / "bad.avi"
+    bad.write_bytes(b"x" * 64)
+    failed = CliRunner().invoke(
+        main,
+        ["--config", str(config_path), "verify-media", str(bad), "--platform", "all", "--json"],
+        obj={},
+    )
+    assert failed.exit_code == 1
+    assert json.loads(failed.output)["ok"] is False
+
+    # Explicitly naming a disabled destination still verifies it — and says so.
+    named = CliRunner().invoke(
+        main,
+        ["--config", str(config_path), "verify-media", str(media), "--platform", "threads", "--json"],
+        obj={},
+    )
+    named_payload = json.loads(named.output)
+    assert [report["platform"] for report in named_payload["reports"]] == ["threads"]
+    assert named_payload["disabled_platforms"] == ["threads"]
 
 
 def test_post_preflight_json_is_deterministic(tmp_path: Path) -> None:

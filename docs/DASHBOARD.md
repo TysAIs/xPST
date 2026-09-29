@@ -86,7 +86,7 @@ Two further tokens are accepted but never written to disk:
 | `xpst ui` (local browser UI) | Same fragment hand-off, with a token minted for that run and opened in your default browser. Nothing is ever embedded in the served HTML. |
 | CLI / scripts / agents | `xpst auth api-token` (or `XPST_API_TOKEN`), sent as `Authorization: Bearer` or `X-API-Token`. |
 | MCP server | Not affected: MCP tools call the engine in-process and never traverse HTTP. |
-| Link-in-bio editor | Basic auth when configured; otherwise `?token=<api-token>` on `/bio/edit` (a plain HTML form cannot send a header). `xpst bio` prints that editor URL for you. |
+| Link-in-bio editor | Basic auth when configured; otherwise `?token=<api-token>` on `/bio/edit` (a plain HTML form cannot send a header). `xpst bio` prints that editor URL with the token MASKED (`tonu_ab12…yz9Fe`) so it survives pasting into chat or tickets; `xpst bio --reveal` prints the ready-to-open URL. |
 
 Read-only calls need no token in any of these clients.
 

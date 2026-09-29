@@ -102,7 +102,7 @@ python -m venv .venv && source .venv/bin/activate   # .venv\Scripts\activate on 
 pip install -e ".[dev,mcp]"
 ```
 
-The Click group in `src/xpst/cli.py` exposes 46 top-level commands (69 counting
+The Click group in `src/xpst/cli.py` exposes 46 top-level commands (71 counting
 subcommands); these are the ones an agent needs:
 
 ```bash

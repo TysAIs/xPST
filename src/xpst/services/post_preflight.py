@@ -86,6 +86,30 @@ def enabled_destinations(config: XPSTConfig) -> list[str]:
     ]
 
 
+#: Human-readable reason a destination that is *requested* is switched off in
+#: configuration. A disabled destination cannot publish anything, so it is a
+#: hard blocker for any run (live or planned) that names it — see
+#: :meth:`PostPreflightService._plan_platform`.
+_DISABLED_DESTINATION_HINT = (
+    "Enable it with `xpst connect {platform}` or remove it from --platforms."
+)
+
+
+def platform_disabled_blocker(platform: str) -> PreflightIssue:
+    """The canonical blocker for a destination the config has switched off.
+
+    One place owns the code, the sentence, and the hint, so the planner, the
+    CLI dry-run, and any future surface refuse a disabled destination with
+    identical words (the same reason ``NO_DESTINATIONS`` is shared).
+    """
+    return PreflightIssue(
+        "PLATFORM_DISABLED",
+        f"{platform} is disabled in local configuration — nothing would be "
+        f"published there. {_DISABLED_DESTINATION_HINT.format(platform=platform)}",
+        "blocker",
+    )
+
+
 def resolve_destinations(
     config: XPSTConfig, requested: Sequence[str] | None = None
 ) -> list[str]:
