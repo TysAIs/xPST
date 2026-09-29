@@ -556,7 +556,8 @@ TOOLS: list[Tool] = [
         name="xpst_schedule_add",
         description=(
             "Schedule a post for later: local video file + caption + ISO-8601 "
-            "time, optional platform list and repeat rule (daily/weekly/monthly)."
+            "time, optional platform list, repeat rule (daily/weekly/monthly), "
+            "and per-destination caption overrides (honoured when it fires)."
         ),
         inputSchema={
             "type": "object",
@@ -564,6 +565,16 @@ TOOLS: list[Tool] = [
                 "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
                 "video_path": {"type": "string", "description": "Local video file path"},
                 "caption": {"type": "string", "description": "Post caption"},
+                "overrides": {
+                    "type": "object",
+                    "description": (
+                        "Per-destination caption overrides, stored with the entry and "
+                        "sent when the schedule fires: {\"x\": \"short copy\"} or "
+                        "{\"x\": {\"text\": \"short copy\"}}. A destination not listed "
+                        "keeps caption."
+                    ),
+                    "additionalProperties": {"type": ["string", "object"]},
+                },
                 "scheduled_time": {"type": "string", "description": "ISO-8601 local datetime, e.g. 2026-06-12T09:30:00"},
                 "platforms": {"type": "array", "items": {"type": "string", "enum": _PLATFORM_ENUM}, "description": "Targets (default: all enabled)"},
                 "repeat_rule": {"type": "string", "enum": ["daily", "weekly", "monthly"], "description": "Optional repeat"},
@@ -1837,14 +1848,37 @@ async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) ->
             isError=True,
             content=[TextContent(type="text", text=f"Bad scheduled_time (need ISO-8601): {exc}")],
         )
+    # Per-destination copy, parsed by the shared contract parser so the
+    # schedule accepts exactly the shape xpst_post accepts for `overrides`.
+    from xpst.content import ContentContractError, parse_destination_texts
+
+    try:
+        overrides = parse_destination_texts(arguments.get("overrides"))
+    except ContentContractError as exc:
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "error": f"Invalid overrides payload: {exc}",
+                "overrides_accepted": "{\"x\": \"caption\"} or {\"x\": {\"text\": \"caption\"}}",
+            }))],
+        )
     manager = ScheduleManager(config.config_dir)
-    entry = manager.add(
-        video_path=str(video_path),
-        caption=arguments["caption"],
-        scheduled_time=when,
-        platforms=arguments.get("platforms"),
-        repeat_rule=arguments.get("repeat_rule"),
-    )
+    try:
+        entry = manager.add(
+            video_path=str(video_path),
+            caption=arguments["caption"],
+            scheduled_time=when,
+            platforms=arguments.get("platforms"),
+            repeat_rule=arguments.get("repeat_rule"),
+            per_platform_captions=overrides,
+        )
+    except ValueError as exc:
+        # Oversized/unusable caption payloads: a typed error, not a traceback.
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(type="text", text=json.dumps({"ok": False, "error": str(exc)}))],
+        )
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps({"scheduled": entry}, default=str))],
     )
