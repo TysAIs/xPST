@@ -48,7 +48,7 @@ xPST includes integrations for **seven platforms** — YouTube, Instagram, X/Twi
 
 It runs three ways:
 - **Desktop shell** — one Tauri 2 app (a native window over the local dashboard)
-- **CLI** — 46 top-level commands (69 including subcommands) covering the entire workflow
+- **CLI** — 46 top-level commands (71 including subcommands) covering the entire workflow
 - **MCP server** — 40 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
@@ -94,7 +94,7 @@ platform API calls you configure. See
 
 ### Three Drivable Surfaces
 - **Desktop shell** — Tauri 2 wrapper around the local dashboard: one native app, built from `src-tauri/` plus the Python engine sidecar. Platform installers (`.dmg`, NSIS `.exe`/`.msi`, `.deb`/`.AppImage`) come from `.github/workflows/tauri-release.yml`
-- **CLI** — 46 Click-based commands (69 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
+- **CLI** — 46 Click-based commands (71 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
 - **MCP server** — 40 tools (34 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 #### Surface counts
@@ -106,7 +106,7 @@ These numbers are generated from the shipped code, not maintained by hand. `pyth
 |---------|-------|---------------|
 | MCP tools | **40** | `tools/list` over a real stdio handshake with `xpst mcp start` |
 | CLI top-level commands | **46** | `xpst.cli.main.commands` |
-| CLI commands including subcommands | **69** | recursive walk of the Click command tree |
+| CLI commands including subcommands | **71** | recursive walk of the Click command tree |
 | HTTP routes (dashboard app) | **46** | FastAPI route table (42 xPST routes + 4 framework docs routes) |
 | Supported providers | **8** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
 
@@ -262,7 +262,7 @@ See `Dockerfile` and `docker-compose.yml` for details.
 
 ## CLI Reference
 
-xPST provides 46 top-level commands (69 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 46 top-level commands (71 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 
 ### Setup & Accounts
 
