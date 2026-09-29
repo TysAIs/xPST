@@ -243,13 +243,14 @@ class TestTikTokSource:
         """_find_yt_dlp delegates to resolve_ytdlp_path (daemon PATH fix)."""
         from xpst.sources.tiktok import TikTokSource
 
+        fake = Path("/opt/fake/yt-dlp")
         monkeypatch.setattr(
             "xpst.utils.platform.resolve_ytdlp_path",
-            lambda: Path("/opt/fake/yt-dlp"),
+            lambda: fake,
         )
         config = XPSTConfig()
         source = TikTokSource(config)
-        assert source._yt_dlp_path == "/opt/fake/yt-dlp"
+        assert source._yt_dlp_path == str(fake)
 
 
 class TestLocalSource:
