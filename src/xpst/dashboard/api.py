@@ -1724,6 +1724,65 @@ def create_api_router(
             return _auth_flow().cancel(session_id)
         except SignInError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
+
+    # ── Bring-your-own developer app (BYO) ─────────────────────────
+
+    @router.get("/byo")
+    def api_byo_status() -> dict[str, Any]:
+        """Per-platform BYO app setup truth. Masked by construction: the
+        response carries booleans and at most a 4-char id tail — never a
+        secret — so a GET stays safe without a dashboard token."""
+        from xpst.byo import byo_status
+
+        return byo_status(_load_ui_config())
+
+    @router.post("/byo/{platform}", dependencies=[Depends(require_api_token)])
+    def api_byo_set(platform: str, payload: dict[str, Any] | None = None) -> Any:
+        """Store (or clear) one platform's bring-your-own app credentials.
+
+        The secret is validated, written to the encrypted store, and answered
+        ONLY masked. A bad pair returns 400 with per-field ``errors`` so the
+        setup screen can label exactly what is wrong. ``clear: true`` removes
+        the stored pair instead of storing a new one.
+        """
+        from xpst.byo import (
+            BYO_PLATFORMS,
+            ByoAppError,
+            byo_status_for_platform,
+            clear_byo_app,
+            store_byo_app,
+        )
+
+        key = str(platform).strip().lower()
+        if key not in BYO_PLATFORMS:
+            raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
+        spec = BYO_PLATFORMS[key]
+        if not spec.configurable:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{spec.display_name} keeps its app credential in its own connect flow.",
+            )
+
+        config = _load_ui_config()
+        data = payload or {}
+        try:
+            if data.get("clear"):
+                return clear_byo_app(config, key)
+            return store_byo_app(
+                config, key, str(data.get("app_id", "")), str(data.get("app_secret", ""))
+            )
+        except ByoAppError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "platform": key,
+                    "error": str(exc),
+                    "errors": exc.errors,
+                    "configured": bool(byo_status_for_platform(config, key)["configured"]),
+                },
+            )
+
     @router.get("/capabilities")
     def api_capabilities() -> dict[str, Any]:
         """The canonical capability contract, from its one source.
