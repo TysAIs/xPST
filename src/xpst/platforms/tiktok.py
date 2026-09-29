@@ -73,6 +73,9 @@ class TikTokUploader(PlatformUploader):
         """Initialize TikTok uploader with lazy token caching."""
         super().__init__(config)
         self._access_token: str | None = None
+        #: Cached creator_info/query privacy level (rate limits are 6 req/min;
+        #: the audited/unaudited state does not change mid-process).
+        self._privacy_level_cache: str | None = None
 
     @property
     def manifest(self) -> ProviderManifest:
@@ -180,6 +183,59 @@ class TikTokUploader(PlatformUploader):
         )
         return status_code in (403, 400) and any(m in error_body for m in markers)
 
+    async def _query_privacy_level(self, token: str) -> str:
+        """Return the privacy level to Direct Post with, from creator_info/query.
+
+        TikTok's Content Posting API forces an UNAUDITED client to private
+        privacy: a ``PUBLIC_TO_EVERYONE`` init returns
+        ``403 unaudited_client_can_only_post_to_private_accounts``. The
+        ``creator_info/query`` endpoint reports the levels this client+creator
+        may actually post with, so we consult it BEFORE init and downgrade
+        instead of failing the publish.
+
+        Fail-open by design: any error (missing ``video.publish`` scope,
+        timeout, malformed body) returns the default public level, because the
+        reactive draft fallback in ``upload()`` already handles the 403
+        refusal — a broken pre-check must not block posting outright. A
+        successful answer is cached per uploader instance (TikTok rate-limits
+        to 6 req/min and the audit state does not flip mid-process).
+        """
+        default = "PUBLIC_TO_EVERYONE"
+        if self._privacy_level_cache:
+            return self._privacy_level_cache
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    f"{TIKTOK_API_BASE}/v2/post/publish/creator_info/query/",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                if resp.status_code >= 400:
+                    logger.debug("TikTok creator_info/query returned %s — assuming public", resp.status_code)
+                    return default
+                options = ((resp.json().get("data") or {}).get("privacy_level_options")) or []
+                values = set()
+                for opt in options:
+                    if isinstance(opt, dict) and opt.get("privacy_level"):
+                        values.add(str(opt["privacy_level"]))
+                    elif isinstance(opt, str):
+                        values.add(opt)
+                if not values:
+                    return default
+                self._privacy_level_cache = default if default in values else (
+                    "SELF_ONLY" if "SELF_ONLY" in values else sorted(values)[0]
+                )
+                if self._privacy_level_cache != default:
+                    logger.warning(
+                        "TikTok: creator_info/query does not offer %s (client is likely unaudited) — "
+                        "downgrading Direct Post to %s",
+                        default,
+                        self._privacy_level_cache,
+                    )
+                return self._privacy_level_cache
+        except Exception as e:  # fail-open: the reactive draft fallback still covers 403s
+            logger.debug("TikTok creator_info/query failed (%s) — assuming %s", e, default)
+            return default
+
     async def _upload_as_draft(self, video_path: Path, caption: str, token: str) -> UploadResult:
         """Upload the video as an inbox DRAFT (video.upload scope).
 
@@ -265,6 +321,11 @@ class TikTokUploader(PlatformUploader):
         draft when TikTok refuses direct post for an unaudited client; 'never'
         keeps direct post only.
 
+        Before Direct Post, ``creator_info/query`` is consulted so an
+        unaudited client (which TikTok only allows to post privately)
+        publishes at a permitted privacy level instead of taking a
+        ``403 unaudited_client_can_only_post_to_private_accounts``.
+
         Args:
             video_path: Path to video file
             caption: Caption for the video (max 2200 chars)
@@ -294,6 +355,13 @@ class TikTokUploader(PlatformUploader):
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=UTF-8"}
         file_size = video_path.stat().st_size
 
+        # Unaudited-client pre-check: ask creator_info/query which privacy
+        # levels this client may actually Direct Post with. An unaudited app
+        # gets 403 on PUBLIC_TO_EVERYONE; querying first turns a guaranteed
+        # publish failure into a private post (or, if the query itself fails,
+        # leaves the behaviour unchanged for the reactive draft fallback).
+        privacy_level = await self._query_privacy_level(token)
+
         # P2 fix: retry once with refreshed token on 401
         for _attempt in range(2):
             try:
@@ -306,7 +374,7 @@ class TikTokUploader(PlatformUploader):
                         json={
                             "post_info": {
                                 "title": caption[:150],
-                                "privacy_level": "PUBLIC_TO_EVERYONE",
+                                "privacy_level": privacy_level,
                                 "disable_duet": False,
                                 "disable_comment": False,
                                 "disable_stitch": False,
@@ -374,6 +442,7 @@ class TikTokUploader(PlatformUploader):
                         "status": status,
                         "caption_length": len(caption),
                         "sandbox": self._is_sandbox(),
+                        "privacy_level": privacy_level,
                     }
                     processing_statuses = _TIKTOK_PROCESSING_STATUSES
                     published_statuses = _TIKTOK_PUBLISHED_STATUSES

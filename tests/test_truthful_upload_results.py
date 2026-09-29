@@ -83,6 +83,7 @@ async def test_tiktok_processing_response_is_pending_not_success(tmp_path: Path)
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     responses = [
+        _Response({"data": {"privacy_level_options": [{"privacy_level": "PUBLIC_TO_EVERYONE"}]}}),
         _Response({"data": {"publish_id": "publish-1", "upload_url": "https://upload.test/video"}}),
         _Response({}),
         _Response({"data": {"status": "PROCESSING_UPLOAD"}}),
@@ -105,6 +106,7 @@ async def test_tiktok_success_without_share_proof_is_failure_without_homepage(tm
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     responses = [
+        _Response({"data": {"privacy_level_options": [{"privacy_level": "PUBLIC_TO_EVERYONE"}]}}),
         _Response({"data": {"publish_id": "publish-1", "upload_url": "https://upload.test/video"}}),
         _Response({}),
         _Response({"data": {"status": "SUCCESS"}}),
@@ -126,6 +128,7 @@ async def test_tiktok_success_with_public_url_is_published(tmp_path: Path) -> No
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     responses = [
+        _Response({"data": {"privacy_level_options": [{"privacy_level": "PUBLIC_TO_EVERYONE"}]}}),
         _Response({"data": {"publish_id": "publish-1", "upload_url": "https://upload.test/video"}}),
         _Response({}),
         _Response(
@@ -151,6 +154,7 @@ async def test_tiktok_publish_complete_with_public_id_is_published(tmp_path: Pat
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     responses = [
+        _Response({"data": {"privacy_level_options": [{"privacy_level": "PUBLIC_TO_EVERYONE"}]}}),
         _Response({"data": {"publish_id": "publish-1", "upload_url": "https://upload.test/video"}}),
         _Response({}),
         _Response({"data": {"status": "PUBLISH_COMPLETE", "publicaly_available_post_id": [123]}}),
@@ -171,6 +175,7 @@ async def test_tiktok_success_with_malformed_public_url_is_failure(tmp_path: Pat
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     responses = [
+        _Response({"data": {"privacy_level_options": [{"privacy_level": "PUBLIC_TO_EVERYONE"}]}}),
         _Response({"data": {"publish_id": "publish-1", "upload_url": "https://upload.test/video"}}),
         _Response({}),
         _Response({"data": {"status": "PUBLISH_COMPLETE", "publicaly_available_post_url": "not-a-url"}}),
