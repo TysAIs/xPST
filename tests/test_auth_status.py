@@ -354,11 +354,17 @@ async def test_auth_mode_tiktok_source_only_checks_source(tmp_path, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_tiktok_source_only_fails_without_cookies(tmp_path, monkeypatch):
-    """source_only with no yt-dlp → honest failure with error detail."""
+    """source_only with no yt-dlp → honest failure with error detail.
+
+    "No yt-dlp" must zero the FULL probe set, not just PATH: the resolver
+    also probes ~/.local/bin and the interpreter's bin/ (where this very
+    test venv carries the yt-dlp console script as a core dependency).
+    """
     import shutil
 
     cfg = make_config(tmp_path)
     monkeypatch.setattr(shutil, "which", lambda name: None)
+    monkeypatch.setattr("xpst.utils.platform.get_ytdlp_fallback_paths", lambda: [])
 
     result = await collect_live_auth_status_async(cfg, uploaders={})
 
