@@ -143,6 +143,8 @@ class TestTikTokUploader:
         video.write_bytes(b"0" * 1024)
 
         responses = [
+            # creator_info/query pre-check (audited client → public allowed)
+            _FakeResponse(200, {"data": {"privacy_level_options": [{"privacy_level": "PUBLIC_TO_EVERYONE"}]}}),
             # init
             _FakeResponse(200, {"data": {"publish_id": "pub1", "upload_url": "https://up.tiktok/x"}}),
             # upload (PUT) — not used by post/get path mapping, but included
@@ -181,7 +183,11 @@ class TestTikTokUploader:
 
         video = tmp_path / "v.mp4"
         video.write_bytes(b"0" * 1024)
-        responses = [_FakeResponse(401, text="invalid token")]
+        responses = [
+            # creator_info/query is fail-open; the init call below still 401s
+            _FakeResponse(200, {"data": {"privacy_level_options": [{"privacy_level": "PUBLIC_TO_EVERYONE"}]}}),
+            _FakeResponse(401, text="invalid token"),
+        ]
         with _patch_httpx(responses):
             uploader = TikTokUploader(_make_config())
             result = await uploader.upload(video, "caption")
@@ -194,7 +200,11 @@ class TestTikTokUploader:
 
         video = tmp_path / "v.mp4"
         video.write_bytes(b"0" * 1024)
-        responses = [_FakeResponse(429, text="rate limited")]
+        responses = [
+            # creator_info/query pre-check first; the init call below still 429s
+            _FakeResponse(200, {"data": {"privacy_level_options": [{"privacy_level": "PUBLIC_TO_EVERYONE"}]}}),
+            _FakeResponse(429, text="rate limited"),
+        ]
         with _patch_httpx(responses):
             uploader = TikTokUploader(_make_config())
             result = await uploader.upload(video, "caption")
