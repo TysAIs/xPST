@@ -445,7 +445,7 @@ class VideoProcessor:
         # Build FFmpeg command based on platform
         if platform == "youtube":
             cmd = self._build_youtube_cmd(input_path, output_path, config)
-        elif platform == "instagram" or platform == "threads":
+        elif platform == "instagram" or platform == "threads" or platform == "facebook":
             cmd = self._build_instagram_cmd(input_path, output_path, config)
         elif platform == "x":
             cmd = self._build_x_cmd(input_path, output_path, config)
