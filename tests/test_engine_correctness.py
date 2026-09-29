@@ -360,7 +360,10 @@ class TestDurationLimits:
         manifest = MagicMock()
         manifest.extra = {"max_video_duration_seconds": limit} if platform == "x" \
             else {"max_duration_seconds": limit}
-        uploader.manifest.return_value = manifest
+        # `manifest` is a PROPERTY on real uploaders — set it as an attribute,
+        # not manifest.return_value (that models a method and silently hid the
+        # dead duration guard, punch-list #2).
+        uploader.manifest = manifest
         return uploader
 
     @pytest.mark.asyncio
