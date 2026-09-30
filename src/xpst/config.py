@@ -160,6 +160,9 @@ DEFAULT_CONFIG = {
             "access_token": "",
             "refresh_token": "",
             "sandbox": False,
+            "draft_mode": "auto",
+            "publish_mode": "auto",
+            "browser_headless": True,
         },
         "youtube": {
             "enabled": True,
@@ -347,6 +350,18 @@ class TikTokAccountConfig(AccountConfig):
     # "auto" uses draft mode only when direct post is refused for an unaudited
     # client; "always" skips direct post entirely; "never" keeps direct post.
     draft_mode: str = "auto"
+    # Publish route preference (unaudited-app reality forces a choice):
+    # "auto" = official Direct Post when the client is audited, else the
+    # inbox-draft fallback (the pre-browser behaviour, unchanged default);
+    # "browser" = opt in to the browser-native publisher (unofficial; drives
+    # the logged-in TikTok Studio web flow) BEFORE falling back to inbox-draft;
+    # "browser_only" = browser-native publisher or an honest failure.
+    # Route order: official-direct-post (if audited) > tiktok_browser >
+    # inbox-draft. See docs/TIKTOK-SOLUTION-2026-09-28.md.
+    publish_mode: str = "auto"
+    # Run the publisher browser headless (default True). False is a debugging
+    # aid on desktop installs.
+    browser_headless: bool = True
 
 
 @dataclass
@@ -853,6 +868,11 @@ class XPSTConfig:
                 config.tiktok.access_token = tk.get("access_token", config.tiktok.access_token)
                 config.tiktok.refresh_token = tk.get("refresh_token", config.tiktok.refresh_token)
                 config.tiktok.sandbox = tk.get("sandbox", config.tiktok.sandbox)
+                config.tiktok.draft_mode = tk.get("draft_mode", config.tiktok.draft_mode)
+                config.tiktok.publish_mode = tk.get("publish_mode", config.tiktok.publish_mode)
+                config.tiktok.browser_headless = tk.get(
+                    "browser_headless", config.tiktok.browser_headless
+                )
 
         # YouTube
         if "accounts" in file_config and "youtube" in file_config["accounts"]:
@@ -1194,6 +1214,12 @@ class XPSTConfig:
             config.tiktok.refresh_token = v
         if v := os.getenv("XPST_TIKTOK_SANDBOX"):
             config.tiktok.sandbox = v.lower() in ("true", "1", "yes")
+        if v := os.getenv("XPST_TIKTOK_PUBLISH_MODE"):
+            mode = v.strip().lower()
+            if mode in ("auto", "browser", "browser_only"):
+                config.tiktok.publish_mode = mode
+        if v := os.getenv("XPST_TIKTOK_BROWSER_HEADLESS"):
+            config.tiktok.browser_headless = v.lower() in ("true", "1", "yes")
 
         # Threads
         if v := os.getenv("XPST_THREADS_ENABLED"):
@@ -1413,6 +1439,9 @@ class XPSTConfig:
                     "access_token": self.tiktok.access_token,
                     "refresh_token": self.tiktok.refresh_token,
                     "sandbox": self.tiktok.sandbox,
+                    "draft_mode": self.tiktok.draft_mode,
+                    "publish_mode": self.tiktok.publish_mode,
+                    "browser_headless": self.tiktok.browser_headless,
                 },
                 "youtube": {
                     "enabled": self.youtube.enabled,

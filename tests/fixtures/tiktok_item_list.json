@@ -1,0 +1,33 @@
+{
+  "base_resp": {"status_code": 0},
+  "data": {
+    "has_more": true,
+    "item_list": [
+      {
+        "item_id": "7690634662598757662",
+        "video_id": "7690634662598757662",
+        "desc": "xPST browser-native publisher spike \ud83d\udc34 #xpst",
+        "create_time": 1790615458,
+        "post_time": 1790615458,
+        "visibility": 1,
+        "status": 102,
+        "in_review": false,
+        "share_url": "https://www.tiktok.com/@xpst-verified-canary/video/7690634662598757662",
+        "images": null
+      },
+      {
+        "item_id": "7000000000000000000",
+        "video_id": "7000000000000000000",
+        "desc": "older post",
+        "create_time": 1790500000,
+        "post_time": 1790500000,
+        "visibility": 1,
+        "status": 102,
+        "share_url": "https://www.tiktok.com/@xpst-verified-canary/video/7000000000000000000"
+      }
+    ]
+  },
+  "message": "",
+  "status_code": 0,
+  "status_msg": ""
+}
