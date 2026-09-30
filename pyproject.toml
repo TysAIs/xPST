@@ -77,6 +77,12 @@ anti-ban = [
 mcp = [
     "mcp[cli]>=1.0.0,<2.0.0",
 ]
+browser = [
+    # Optional Playwright driver for the TikTok browser-native publisher
+    # (unofficial web-session route; publish_mode browser/browser_only).
+    # After installing, run: python -m playwright install chromium
+    "playwright>=1.45.0,<2.0.0",
+]
 windows = [
     "pywin32>=306; platform_system == 'Windows'",
     "winshell>=0.6; platform_system == 'Windows'",
@@ -95,6 +101,11 @@ knowledge = [
     "lancedb>=0.5,<1.0",  # Legacy backend, still available
 ]
 full = [
+    # NOTE: 'browser' is deliberately NOT included — the engine sidecar size
+    # budget (95 MB) can't absorb playwright (~128 MB), and the browser
+    # route additionally needs a `playwright install chromium` browser
+    # download anyway, so it is an explicit opt-in: pip install
+    # "xpst[browser]".
     "xpst[mcp,dashboard,windows,knowledge]",
 ]
 dev = [
