@@ -332,6 +332,13 @@ async def collect_live_auth_status_async(
         "error": None,
         "details": {},
     }
+    if str(getattr(config.tiktok, "publish_mode", "auto") or "auto").lower() in (
+        "browser",
+        "browser_only",
+    ):
+        # The web session is the credential on this route; say so in the
+        # payload instead of the source_only/content_posting_api dichotomy.
+        tiktok_base["auth_mode"] = "session"
     if not config.tiktok.enabled:
         source_check = {
             "authenticated": False,
@@ -365,6 +372,17 @@ async def collect_live_auth_status_async(
                     "details": {},
                 }
             )
+        elif uploader_for_browser_mode := (
+            uploaders.get("tiktok")
+            if str(getattr(config.tiktok, "publish_mode", "auto") or "auto").lower()
+            in ("browser", "browser_only")
+            else None
+        ):
+            # Browser-native publish mode: the web session IS the credential,
+            # so probe the uploader (which dispatches to the browser probe)
+            # even when no Content Posting API OAuth credentials exist.
+            destination_check = await _check_via_uploader(uploader_for_browser_mode)
+            destination_check["auth_mode"] = "session"
         else:
             destination_check = {
                 "authenticated": False,

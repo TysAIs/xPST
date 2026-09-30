@@ -206,6 +206,48 @@ model. See TikTok's
 [Direct Post docs](https://developers.tiktok.com/doc/content-posting-api-direct-post)
 for the review and API requirements.
 
+### Browser-native publishing (no audit, unofficial)
+
+An unaudited client cannot Direct Post publicly, and a draft needs a phone
+tap. The **browser-native publisher** is the middle path: xPST drives your
+logged-in TikTok Studio web session with a local Playwright chromium, uploads
+through TikTok's own web pipeline, clicks Post, and only reports success when
+the manage `item_list` API returns the new item (receipt-or-fail — item id,
+share URL, post time, visibility). This is the same unofficial,
+same-origin-session pattern xPST already ships for Instagram, and it carries
+the same ToS/fragility trade-off, which is why it ships **opt-in**.
+
+```yaml
+accounts:
+  tiktok:
+    enabled: true
+    # auto (default): official Direct Post, else inbox-draft — unchanged behaviour.
+    # browser: browser-native publisher first when the client is (or turns out
+    #   to be) unaudited; inbox-draft remains the last-resort fallback.
+    # browser_only: browser route or an honest failure — no API call, so no
+    #   client_key/client_secret needed at all.
+    publish_mode: "browser"
+    browser_headless: true     # false to watch the browser on desktop
+```
+
+Setup:
+
+```bash
+pip install 'xpst[browser]'
+python -m playwright install chromium
+xpst doctor tiktok   # probes the web session; never attempts a silent login
+```
+
+The session is a persisted Playwright profile under
+`~/.xpst/browser/tiktok/`, seeded automatically from your exported cookie jar
+(`accounts.tiktok.cookies_file`, else `~/.xpst/credentials/tiktok_cookies.txt`).
+When the probe reports `TIKTOK_BROWSER_SESSION_EXPIRED`, re-export cookies or
+re-run `xpst auth tiktok`; xPST will not type credentials for you.
+`XPST_TIKTOK_PUBLISH_MODE=browser|browser_only` overrides per-run.
+
+Route preference in all modes: official Direct Post (when the client is
+audited) > browser-native publisher > inbox-draft.
+
 ---
 
 ## Troubleshooting
