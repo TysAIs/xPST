@@ -458,7 +458,9 @@ def test_browser_publisher_uses_profile_under_config_dir():
     cfg.config_dir = "/tmp/xpst-test-config"
     up = TikTokUploader(cfg)
     pub = up._browser_publisher()
-    assert str(pub.profile_dir) == "/tmp/xpst-test-config/browser/tiktok"
+    # Compare Path objects, not str(): on Windows str(Path(...)) renders
+    # backslashes and a literal "/" comparison fails the lane there.
+    assert pub.profile_dir == Path("/tmp/xpst-test-config/browser/tiktok")
     assert pub.headless is True
     cfg.tiktok.browser_headless = False
     assert up._browser_publisher().headless is False
