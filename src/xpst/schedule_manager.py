@@ -16,10 +16,18 @@ stored offset, not the machine's offset at check time, decides.
 Legacy entries written by older builds (naive local strings) are still read as
 local wall-clock time.
 
+A text-only entry (``content_type`` ``text``) is the one modality with no
+media file: ``video_path`` is stored empty and the caption IS the post. The
+fire paths resolve every entry's route through :func:`entry_fire_route` —
+never by re-branching on the media path — so a text entry can never be
+mistaken for a video (the defect: queue surfaces used to park a text post
+behind a placeholder .txt path, and the fire path handed that .txt to the
+video encoder).
+
 Each entry:
     {
         "id": "<uuid>",
-        "video_path": "/path/to/video.mp4",
+        "video_path": "/path/to/video.mp4",  # "" for a text entry
         "caption": "Post caption",
         "per_platform_captions": {"x": "short copy"},  # optional per-destination overrides
         "platforms": ["youtube", "instagram"],
@@ -69,6 +77,57 @@ logger = get_logger(__name__)
 MAX_CAPTION_LENGTH = 100_000
 
 _UTC = timezone.utc
+
+#: Route vocabulary is owned by the content contract; the fire paths and this
+#: module share one resolver so an entry can never be routed differently by
+#: two surfaces (the .txt-to-the-video-encoder defect).
+_ROUTE_TEXT = "text"
+_ROUTE_VIDEO = "video"
+_ROUTE_IMAGE = "image"
+_ROUTE_CAROUSEL = "carousel"
+
+
+def entry_fire_route(entry: Any) -> str:
+    """The publish route a schedule entry must fire through.
+
+    One resolver for every fire path (daemon pass, CLI ``schedule run``).
+    Precedence:
+
+    1. A stored ``content_type`` always wins — the queue surface recorded the
+       modality the user asked for, and the fire path honours it.
+    2. An entry with NO stored route (written before the field existed) is
+       classified by its media file: a video fires as video, an image fires
+       as image, and a file that is neither (a placeholder ``.txt`` a queue
+       surface used to park a text post behind) fires as TEXT — its caption,
+       not its path, is the post. That inference is what keeps a legacy
+       text entry from being handed to the video encoder.
+    3. Carousel only when the entry actually carries 2+ media paths.
+
+    Returns one of ``"video" | "image" | "carousel" | "text"``.
+    """
+    from xpst.content import MEDIA_KIND_IMAGE, MEDIA_KIND_VIDEO, media_kind
+
+    route = str(entry.get("content_type") or "").strip().lower()
+    if route == _ROUTE_CAROUSEL:
+        media = [str(p) for p in (entry.get("media_paths") or []) if str(p).strip()]
+        return _ROUTE_CAROUSEL if len(media) >= 2 else _ROUTE_VIDEO
+    if route in (_ROUTE_VIDEO, _ROUTE_IMAGE, _ROUTE_TEXT):
+        return route
+    # Legacy entry (no stored route). Classify by the media file itself.
+    media_paths = entry.get("media_paths") or []
+    primary = ""
+    for candidate in (entry.get("video_path"), *(media_paths or [])):
+        if str(candidate or "").strip():
+            primary = str(candidate).strip()
+            break
+    if len([p for p in media_paths if str(p).strip()]) >= 2:
+        return _ROUTE_CAROUSEL
+    kind = media_kind(primary) if primary else "unknown"
+    if kind == MEDIA_KIND_VIDEO:
+        return _ROUTE_VIDEO
+    if kind == MEDIA_KIND_IMAGE:
+        return _ROUTE_IMAGE
+    return _ROUTE_TEXT
 
 
 def normalize_per_platform_captions(raw: Any) -> dict[str, str]:
@@ -515,7 +574,11 @@ class ScheduleManager:
         """Add a new scheduled post.
 
         Args:
-            video_path: Path to the video file.
+            video_path: Path to the media file. A text-only entry (the only
+                modality with no file) passes ``""`` together with
+                ``content_type="text"``; an empty path with any other (or no)
+                content type is rejected, so the store never carries an entry
+                the fire path cannot route.
             caption: Post caption text (max 100,000 characters).
             scheduled_time: When to publish. Naive datetimes are the local
                 wall-clock time the user typed (in ``tz``); aware datetimes
@@ -527,10 +590,15 @@ class ScheduleManager:
                 overrides persisted with the entry and passed to the engine at
                 fire time (same semantics as ``xpst post --caption-for``).
             content_type: Modality of the media (``video``/``image``/
-                ``carousel``). Persisted so the fire path publishes on the
-                SAME route the poster requested — a queued image must not
-                fire through the video encoder (defect D1's schedule twin).
-                Absent = legacy entry = video (unchanged behaviour).
+                ``carousel``/``text``). Persisted so the fire path publishes on
+                the SAME route the poster requested — a queued image must not
+                fire through the video encoder (defect D1's schedule twin),
+                and a text post must not either (its twin: a queue surface
+                parked text behind a placeholder .txt and the fire path fed
+                that .txt to the encoder). ``text`` is the only modality that
+                may carry an empty ``video_path``.
+                Absent = legacy entry: the fire path classifies it from the
+                media file at fire time (see :func:`entry_fire_route`).
             media_paths: Ordered media files for a carousel entry (single
                 entries keep using ``video_path``).
 
@@ -539,14 +607,25 @@ class ScheduleManager:
 
         Raises:
             ValueError: If repeat_rule is invalid, caption exceeds
-                MAX_CAPTION_LENGTH, scheduled_time is not a datetime, or
-                per_platform_captions is not a clean platform→text mapping.
+                MAX_CAPTION_LENGTH, scheduled_time is not a datetime,
+                per_platform_captions is not a clean platform→text mapping,
+                or an entry with no media path is not a text entry.
         """
         valid_rules = (None, "daily", "weekly", "monthly")
         if repeat_rule not in valid_rules:
             raise ValueError(
                 f"Invalid repeat_rule: {repeat_rule!r}. "
-                f"Must be one of: None, 'daily', 'weekly', 'monthly'"
+                "Must be one of: None, 'daily', 'weekly', 'monthly'"
+            )
+        # The "no media" representation: only a text entry may have an empty
+        # media path. Anything else would produce an entry the fire path
+        # cannot route (no file to publish, no caption-only intent stored).
+        route_stored = str(content_type or "").strip().lower()
+        if not str(video_path or "").strip() and route_stored != _ROUTE_TEXT:
+            raise ValueError(
+                "A schedule entry needs a media file unless it is a text post "
+                f"(content_type='text'); got an empty media path with "
+                f"content_type={content_type!r}."
             )
         if not isinstance(scheduled_time, datetime):
             raise ValueError(
@@ -616,6 +695,7 @@ class ScheduleManager:
         repeat_rule: Any = _UNSET,
         tz: tzinfo | None = None,
         per_platform_captions: Any = _UNSET,
+        content_type: str | None = None,
     ) -> dict[str, Any] | None:
         """Edit a pending scheduled post in place.
 
@@ -627,7 +707,8 @@ class ScheduleManager:
 
         Args:
             entry_id: The id of the entry to edit.
-            video_path: New media path.
+            video_path: New media path ("" clears it — only valid when the
+                entry is a text post, see ``content_type``).
             caption: New caption (validated like :meth:`add`).
             scheduled_time: New publish time (naive = local wall clock in
                 ``tz``); stored as UTC.
@@ -638,14 +719,19 @@ class ScheduleManager:
             per_platform_captions: New ``{platform: caption}`` overrides
                 (validated like :meth:`add`). Omitted = unchanged; ``None``
                 clears them.
+            content_type: New route/modality (validated like :meth:`add`).
+                Omitted = unchanged. Together with ``video_path=""`` this
+                converts an entry to a text post, which is how a stray
+                placeholder-media entry is repaired in place.
 
         Returns:
             The updated entry, or None when no entry has that id.
 
         Raises:
             ValueError: On an invalid repeat_rule, oversized caption, a
-                non-datetime scheduled_time, or a bad per_platform_captions
-                mapping.
+                non-datetime scheduled_time, a bad per_platform_captions
+                mapping, an unknown content_type, or an edit that would leave
+                the entry with no media path and no text route.
         """
         if repeat_rule is not _UNSET and repeat_rule not in (None, "daily", "weekly", "monthly"):
             raise ValueError(
@@ -674,6 +760,15 @@ class ScheduleManager:
             if platforms is not None
             else None
         )
+        route_new = _UNSET
+        if content_type is not None:
+            route_candidate = str(content_type).strip().lower()
+            if route_candidate not in (_ROUTE_VIDEO, _ROUTE_IMAGE, _ROUTE_CAROUSEL, _ROUTE_TEXT):
+                raise ValueError(
+                    f"Invalid content_type: {content_type!r}. "
+                    "Must be one of: 'video', 'image', 'carousel', 'text'."
+                )
+            route_new = route_candidate
         zone = tz or self._tz
 
         with self._process_lock():
@@ -687,6 +782,26 @@ class ScheduleManager:
 
                 if video_path is not None:
                     entry["video_path"] = str(video_path)
+                if route_new is not _UNSET:
+                    entry["content_type"] = route_new
+                    # Converting an entry to text drops the placeholder media
+                    # the queue surface may have parked it behind: the caption
+                    # IS the post, so a stale .txt path would be a lie.
+                    if route_new == _ROUTE_TEXT:
+                        entry["video_path"] = ""
+                        entry.pop("media_paths", None)
+                # The no-media invariant, checked on the RESULT so an edit
+                # cannot store a half-converted entry (empty path + a media
+                # route the fire path could not honour).
+                if (
+                    not str(entry.get("video_path") or "").strip()
+                    and str(entry.get("content_type") or "").strip().lower() != _ROUTE_TEXT
+                ):
+                    raise ValueError(
+                        f"Edit would leave entry {entry_id} with no media and "
+                        "no text route; pass content_type='text' to convert "
+                        "it to a text post."
+                    )
                 if caption is not None:
                     entry["caption"] = caption
                 if clean_captions is not _UNSET:
@@ -1028,6 +1143,14 @@ class ScheduleManager:
             "post_results": {},
             "repeat_rule": repeat_rule,
         }
+        # The modality carries to every occurrence too: a recurring image or
+        # carousel entry that lost its route would silently fire the second
+        # time through the video encoder (and a text entry has no media file
+        # at all, so its route is the ONLY thing identifying the post).
+        if entry.get("content_type"):
+            new_entry["content_type"] = entry["content_type"]
+        if entry.get("media_paths"):
+            new_entry["media_paths"] = list(entry["media_paths"])
         self._entries.append(new_entry)
         logger.info(
             "Created next %s occurrence %s for %s",
@@ -1038,6 +1161,7 @@ class ScheduleManager:
 __all__ = [
     "MAX_CAPTION_LENGTH",
     "ScheduleManager",
+    "entry_fire_route",
     "local_zone",
     "normalize_per_platform_captions",
     "stored_per_platform_captions",

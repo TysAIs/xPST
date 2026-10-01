@@ -5319,8 +5319,18 @@ def schedule(ctx: click.Context):
 
 
 @schedule.command("add")
-@click.argument("file", type=click.Path())
+@click.argument("file", type=click.Path(), required=False, default=None)
 @click.option("--caption", "-c", required=True, help="Post caption text")
+@click.option(
+    "--text",
+    "text_post",
+    is_flag=True,
+    help=(
+        "Text-only post: no media file. The --caption text IS the post; the "
+        "entry is stored as content_type=text and fires through the text "
+        "route (never an encoder). FILE must be omitted."
+    ),
+)
 @click.option(
     "--caption-for",
     "caption_for",
@@ -5339,7 +5349,7 @@ def schedule(ctx: click.Context):
               help="Validate the entry and show it without writing to the schedule store")
 @json_option
 @click.pass_context
-def schedule_add(ctx: click.Context, file: str, caption: str, caption_for: tuple[str, ...], scheduled_time: str, platforms: str | None, repeat_rule: str | None, dry_run: bool, as_json: bool):
+def schedule_add(ctx: click.Context, file: str | None, caption: str, caption_for: tuple[str, ...], scheduled_time: str, platforms: str | None, repeat_rule: str | None, text_post: bool, dry_run: bool, as_json: bool):
     """Schedule a post for later publishing.
 
     Examples:
@@ -5347,13 +5357,24 @@ def schedule_add(ctx: click.Context, file: str, caption: str, caption_for: tuple
         xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08T10:00:00' -p youtube,instagram
         xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00' --repeat daily
         xpst schedule add video.mp4 --caption 'Long copy' --caption-for x='short copy' --at '2026-06-08 10:00'
+        xpst schedule add --text --caption 'A text-only post' --at '2026-06-08 10:00' -p x
     """
     from datetime import datetime
 
     from xpst.schedule_manager import MAX_CAPTION_LENGTH, ScheduleManager
 
-    video_path = Path(file)
-    if not video_path.exists():
+    if text_post and file is not None:
+        if as_json:
+            json_output(_error_payload(
+                "INVALID_TEXT_ENTRY",
+                "--text takes no media file; drop FILE for a text-only post.",
+            ), True)
+        else:
+            console.print("[red]--text takes no media file; drop FILE for a text-only post.[/red]")
+        sys.exit(EXIT_CONFIG_ERROR)
+    entry_content_type = "text" if text_post else None
+    video_path = Path(file) if file is not None else None
+    if video_path is not None and not video_path.exists():
         if as_json:
             json_output(_error_payload(
                 "FILE_NOT_FOUND", f"File not found: {file}", file=file), True)
@@ -5438,7 +5459,8 @@ def schedule_add(ctx: click.Context, file: str, caption: str, caption_for: tuple
     if dry_run:
         plan = {
             "dry_run": True,
-            "video_path": str(video_path.resolve()),
+            "video_path": str(video_path.resolve()) if video_path else "",
+            "content_type": entry_content_type,
             "caption": caption,
             "per_platform_captions": per_platform_captions,
             "scheduled_time": dt.isoformat(),
@@ -5450,7 +5472,7 @@ def schedule_add(ctx: click.Context, file: str, caption: str, caption_for: tuple
         else:
             if not ctx.obj.get("quiet", False):
                 console.print("[bold blue]Dry run — would schedule:[/bold blue]")
-            console.print(f"  File:     {video_path}")
+            console.print(f"  File:     {video_path if video_path else '(text post — no media)'}")
             console.print(f"  Caption:  {caption[:60]}{'...' if len(caption) > 60 else ''}")
             for override_platform, override_text in per_platform_captions.items():
                 console.print(
@@ -5465,12 +5487,13 @@ def schedule_add(ctx: click.Context, file: str, caption: str, caption_for: tuple
 
     manager = ScheduleManager()
     entry = manager.add(
-        video_path=str(video_path.resolve()),
+        video_path=str(video_path.resolve()) if video_path else "",
         caption=caption,
         scheduled_time=dt,
         platforms=platform_list,
         repeat_rule=effective_repeat,
         per_platform_captions=per_platform_captions,
+        content_type=entry_content_type,
     )
 
     if as_json:
@@ -5478,7 +5501,7 @@ def schedule_add(ctx: click.Context, file: str, caption: str, caption_for: tuple
     else:
         console.print("[green]✓ Scheduled post[/green]")
         console.print(f"  ID:       [bold]{entry['id']}[/bold]")
-        console.print(f"  File:     {video_path}")
+        console.print(f"  File:     {video_path if video_path else '(text post — no media)'}")
         console.print(f"  Caption:  {caption[:60]}{'...' if len(caption) > 60 else ''}")
         for override_platform, override_text in per_platform_captions.items():
             console.print(
@@ -5540,7 +5563,7 @@ def schedule_list(ctx: click.Context, as_json: bool):
     }
 
     for entry in entries:
-        file_name = Path(entry.get("video_path", "")).name
+        file_name = Path(entry.get("video_path", "")).name or "(text post)"
         caption = entry.get("caption", "")[:37]
         if len(entry.get("caption", "")) > 37:
             caption += "..."
@@ -5619,7 +5642,7 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
     Fetches posts where scheduled_time <= now and status is pending,
     then posts each one. Typically called by cron or manually.
     """
-    from xpst.schedule_manager import ScheduleManager, stored_per_platform_captions
+    from xpst.schedule_manager import ScheduleManager, entry_fire_route, stored_per_platform_captions
 
     config_obj = load_config(ctx.obj.get("config_path"))
     setup_logging(
@@ -5649,7 +5672,7 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
         else:
             console.print(f"[bold blue]Found {len(due)} due post(s)[/bold blue]")
             for entry in due:
-                console.print(f"  Would post: {entry['id']} — {Path(entry['video_path']).name} → {', '.join(entry.get('platforms', ['all']))}")
+                console.print(f"  Would post: {entry['id']} — {(Path(entry['video_path']).name if str(entry.get('video_path') or '').strip() else 'text post')} → {', '.join(entry.get('platforms', ['all']))}")
         return
 
     # Claim the due entries atomically (pending -> processing, under a
@@ -5680,8 +5703,12 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
         # Per-destination copy persisted at add time (same semantics as
         # `xpst post --caption-for`); {} = shared caption everywhere.
         per_platform_captions = stored_per_platform_captions(entry)
+        # Resolve the route FIRST (single shared resolver — entry_fire_route):
+        # a text entry has no media file, so the file-exists gate only applies
+        # to the media routes.
+        entry_route = entry_fire_route(entry)
 
-        if not video_path.exists():
+        if entry_route != "text" and not video_path.exists():
             if not as_json:
                 console.print(f"  [red]✗[/red] {entry_id}: file not found — {video_path}")
             manager.mark_complete(entry_id, success=False, error=f"File not found: {video_path}")
@@ -5691,11 +5718,17 @@ def schedule_run(ctx: click.Context, dry_run: bool, as_json: bool):
         try:
             # Route by the modality stored at add time (D1's schedule twin):
             # an image entry fires through the image route, a carousel entry
-            # through the carousel route. Entries without the field keep the
-            # video path — legacy stores are unchanged.
-            entry_route = str(entry.get("content_type") or "").strip().lower()
+            # through the carousel route, a text entry through post_text —
+            # never a placeholder .txt into the video encoder.
             entry_media = [Path(p) for p in (entry.get("media_paths") or []) if str(p).strip()]
-            if entry_route == "image":
+            if entry_route == "text":
+                result = asyncio.run(
+                    engine.post_text(
+                        caption, platforms,
+                        per_destination=per_platform_captions or None,
+                    )
+                )
+            elif entry_route == "image":
                 result = asyncio.run(
                     engine.post_manual_image(video_path, caption, platforms)
                 )
