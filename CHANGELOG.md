@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Text posts survive the schedule store.** The store now has a no-media
+  representation — a `content_type=text` entry with an empty media path — and
+  every queue surface can create one: `xpst schedule add --text` (CLI),
+  `xpst_schedule_add` without `video_path` (MCP), and window-gated manual
+  text posts (which now defer like media instead of posting at midnight).
+  Both fire paths (daemon pass and `xpst schedule run`) route entries
+  through one shared resolver (`entry_fire_route`): a stored route wins, a
+  legacy entry is classified from its media file, and a media file that is
+  neither video nor image — the placeholder `.txt` older queue surfaces
+  parked text behind — fires as TEXT through `post_text` instead of dying in
+  the video encoder. The 16 legacy `.txt` entries in a live store fire
+  correctly with no migration.
+- **Recurring entries keep their modality.** A daily/weekly/monthly entry's
+  next occurrence now carries `content_type` and `media_paths`; previously a
+  recurring image or carousel silently fired its second time through the
+  video encoder.
 - **TikTok-review favicon parity for the public site.** TikTok production review
   rejected the xPST dev app because the submitted app icon (solid green square,
   1024x1024, sRGB #1F6F3C) did not match the site's browser-tab icon. The Pages
