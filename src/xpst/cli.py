@@ -1169,7 +1169,8 @@ def post(
 
     if verdict["route"] == PUBLISH_ROUTE_TEXT:
         # The text route reads one text per destination, so a per-destination
-        # override is honoured (and validated) here too.
+        # override is honoured (and validated) here too. A text post is never
+        # window-gated, so `now` has nothing to bypass on this route.
         per_destination = {
             platform: request.text_for(platform)
             for platform in request.platforms
@@ -1187,11 +1188,12 @@ def post(
         # request correctly. The route decision is taken once, by the shared
         # content contract, and the CLI follows it like every other surface.
         result = asyncio.run(
-            engine.post_manual_image(media_paths[0], body, platform_list)
+            engine.post_manual_image(media_paths[0], body, platform_list, force_now=now)
         )
     elif verdict["route"] == PUBLISH_ROUTE_CAROUSEL:
         result = asyncio.run(
-            engine.post_manual_carousel(media_paths, body, platform_list, per_platform_captions)
+            engine.post_manual_carousel(media_paths, body, platform_list, per_platform_captions,
+                                        force_now=now)
         )
     elif verdict["route"] == PUBLISH_ROUTE_VIDEO:
         result = asyncio.run(
@@ -1201,6 +1203,7 @@ def post(
                 platform_list,
                 per_platform_captions,
                 visibility=visibility,
+                force_now=now,
             )
         )
     else:

@@ -929,6 +929,10 @@ def create_api_router(
         data = payload or {}
         request = PostRequest.from_payload(data)
         dry_run = bool(data.get("dry_run", False))
+        # HTTP twin of CLI --now / MCP force: publish outside the anti-bot
+        # window instead of deferring (ignored on the text route, which is
+        # never window-gated).
+        force_now = bool(data.get("force", False))
         draft_id = str(data.get("draft_id") or "").strip()
         confirm_stale = bool(data.get("confirm_stale", False))
         draft_service = DraftService(_load_ui_config(), config_dir) if draft_id else None
@@ -980,7 +984,7 @@ def create_api_router(
                 return JSONResponse(attach_request(envelope), status_code=409)
 
         service = PostService(_load_ui_config(), config_dir, engine_factory=engine_factory)
-        envelope = service.dry_run(request) if dry_run else service.execute(request)
+        envelope = service.dry_run(request) if dry_run else service.execute(request, force_now=force_now)
         envelope["request"] = {
             "media_paths": request.media_paths,
             "caption": request.caption,
