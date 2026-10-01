@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **TikTok-review favicon parity for the public site.** TikTok production review
+  rejected the xPST dev app because the submitted app icon (solid green square,
+  1024x1024, sRGB #1F6F3C) did not match the site's browser-tab icon. The Pages
+  site now serves that exact square as favicon.ico, 16/32/48 PNGs, an
+  apple-touch-icon and 192/512 Android icons on every page;
+  `tests/test_site_favicon_parity.py` pins the green, dimensions and `<link>`
+  tags so a page rewrite can't regress the reviewer-visible state.
 - **Bring-your-own developer app path — no App Review anywhere.** Every
   platform whose official API needs a developer app (Instagram, Threads,
   TikTok; Messenger/Facebook Page status) can now run on an app **you own**:
