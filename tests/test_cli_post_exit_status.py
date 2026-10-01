@@ -53,12 +53,13 @@ class _CannedEngine:
         self._result = result
 
     async def post_manual(  # noqa: ANN001
-        self, video_path, caption, platforms=None, per_platform_captions=None, visibility=None
+        self, video_path, caption, platforms=None, per_platform_captions=None, visibility=None,
+        force_now=False,
     ):
         return self._result
 
     async def post_manual_carousel(  # noqa: ANN001
-        self, media_paths, caption, platforms=None, per_platform_captions=None
+        self, media_paths, caption, platforms=None, per_platform_captions=None, force_now=False
     ):
         return self._result
 
