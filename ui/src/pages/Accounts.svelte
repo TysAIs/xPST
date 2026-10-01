@@ -103,6 +103,21 @@
   function roleLabel(role) {
     return role.replaceAll("_", " ");
   }
+
+  // Instagram publishes only to professional accounts (Meta cannot publish to
+  // a personal one). Show the last VERIFIED type so the state is never
+  // ambiguous; "" means never probed and renders as "unknown", never as a
+  // green light.
+  const IG_TYPE_LABELS = {
+    business: "Business account",
+    creator: "Creator account",
+    personal: "Personal account — switch to Creator to publish",
+  };
+  function igAccountNote(provider) {
+    if (provider.name !== "instagram") return "";
+    const type = provider.account_type ?? provider.details?.account_type ?? "";
+    return IG_TYPE_LABELS[type] ?? "Account type not yet confirmed";
+  }
 </script>
 
 <header class="xpst-page-header">
@@ -150,6 +165,9 @@
           <StatusBadge status={badgeFor(provider.name)} label={badgeLabel(provider.name)} />
           {#if badgeReason(provider.name)}
             <span class="xpst-badge-note">{badgeReason(provider.name)}</span>
+          {/if}
+          {#if igAccountNote(provider)}
+            <span class="xpst-badge-note" data-testid="ig-account-type">{igAccountNote(provider)}</span>
           {/if}
         </div>
         <div class="xpst-capability-grid">

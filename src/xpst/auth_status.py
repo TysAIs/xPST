@@ -318,6 +318,32 @@ async def collect_live_auth_status_async(
             entry["error"] = "disabled"
         elif name == "instagram" and entry["auth_mode"] == "graph_api":
             ok, error, details = await _graph_api_probe(config.instagram.graph_access_token)
+            # Account type rides the status payload so every surface can show
+            # it. The stored verdict (connect-time or last probe) always rides;
+            # a live re-probe runs only while the verdict is missing or
+            # "personal" — once professional, the type stops costing a call,
+            # and a personal account gets a fresh answer every refresh, which
+            # is how the post-switch re-check resolves without re-running
+            # connect.
+            details.setdefault("account_type", config.instagram.account_type)
+            details.setdefault("account_type_source", config.instagram.account_type_source)
+            if config.instagram.graph_ig_user_id and config.instagram.account_type in ("", "personal"):
+                import asyncio
+
+                from xpst.platforms.instagram_account import (
+                    detect_graph_account_type,
+                    persist_account_type,
+                )
+
+                finding = await asyncio.to_thread(
+                    detect_graph_account_type,
+                    config.instagram.graph_ig_user_id,
+                    config.instagram.graph_access_token,
+                )
+                persist_account_type(config, finding)
+                if finding.account_type.value != "unknown":
+                    details["account_type"] = finding.account_type.value
+                    details["account_type_source"] = finding.source
             entry.update(authenticated=ok, session_valid=ok, error=error, details=details)
         else:
             entry.update(await _check_via_uploader(uploader))
