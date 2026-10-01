@@ -407,6 +407,15 @@ class InstagramAccountConfig(AccountConfig):
     # is deliberately never serialized into config.yaml from the BYO path.
     app_id: str = ""
     app_secret: str = ""
+    # Verified account type from the last live probe: "business", "creator",
+    # "personal", or "" for never-probed. Meta's publishing API only serves
+    # professional accounts, so a personal account is a guided setup step, not
+    # a mystery publish failure. ``account_type_source`` records which probe
+    # decided (graph_field / graph_error / session_account_info) so the claim
+    # is auditable; an unprobed account is "" and renders as "unknown", never
+    # as a guessed verdict.
+    account_type: str = ""
+    account_type_source: str = ""
 
 
 @dataclass
@@ -920,6 +929,10 @@ class XPSTConfig:
                 # file is honoured for this process but never rewritten.
                 config.instagram.app_id = ig.get("app_id", config.instagram.app_id)
                 config.instagram.app_secret = ig.get("app_secret", config.instagram.app_secret)
+                config.instagram.account_type = ig.get("account_type", config.instagram.account_type)
+                config.instagram.account_type_source = ig.get(
+                    "account_type_source", config.instagram.account_type_source
+                )
 
         # Threads
         if "accounts" in file_config and "threads" in file_config["accounts"]:
@@ -1473,6 +1486,11 @@ class XPSTConfig:
                     "graph_access_token": self.instagram.graph_access_token,
                     "graph_ig_user_id": self.instagram.graph_ig_user_id,
                     "app_id": self.instagram.app_id,
+                    # Account type is a verified fact about the account, not a
+                    # secret — safe to serialize, and the UI renders it so the
+                    # publish-readiness state is never ambiguous.
+                    "account_type": self.instagram.account_type,
+                    "account_type_source": self.instagram.account_type_source,
                 },
                 "threads": {
                     "enabled": self.threads.enabled,
