@@ -645,6 +645,7 @@ class CrossPostEngine:
         platforms: list[str] | None = None,
         per_platform_captions: Mapping[str, str] | None = None,
         visibility: str | None = None,
+        force_now: bool = False,
     ) -> CrossPostResult:
         """Manually post a single video to specified platforms.
 
@@ -706,6 +707,7 @@ class CrossPostEngine:
                 video_id=video_id,
                 source_platform="local",
                 visibility=visibility,
+                ignore_window=force_now,
             )
 
             result.results[platform_name] = upload_result
@@ -765,6 +767,7 @@ class CrossPostEngine:
         caption: str,
         platforms: list[str] | None = None,
         per_platform_captions: Mapping[str, str] | None = None,
+        force_now: bool = False,
     ) -> CrossPostResult:
         """Manually post a carousel/multi-media to specified platforms.
 
@@ -839,6 +842,7 @@ class CrossPostEngine:
                 caption=platform_caption,
                 platform_name=platform_name,
                 video_id=video_id,
+                ignore_window=force_now,
             )
 
             result.results[platform_name] = upload_result
@@ -878,6 +882,7 @@ class CrossPostEngine:
         image_path: Path,
         caption: str,
         platforms: list[str] | None = None,
+        force_now: bool = False,
     ) -> CrossPostResult:
         """Publish a single image to the specified platforms.
 
@@ -934,6 +939,7 @@ class CrossPostEngine:
                 platform_name=platform_name,
                 video_id=video_id,
                 source_platform="local",
+                ignore_window=force_now,
             )
 
             result.results[platform_name] = upload_result

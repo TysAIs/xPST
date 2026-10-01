@@ -110,14 +110,23 @@ class UploadService:
         # read-back before it can publish a duplicate (see xpst.reconcile).
         self._attempt_ledger = AttemptLedger()
 
-    def _deferred(self, platform_name: str) -> UploadResult | None:
+    def _deferred(self, platform_name: str, *, ignore_window: bool = False) -> UploadResult | None:
         """The shared anti-bot time-of-day gate (G11: deferral != failure).
 
         Returns a deferred result when the anti-bot window says "not now" on
-        ANY upload path — the video path used to be the only one gated, so an
-        image/text post fired at midnight uploaded while a video deferred.
-        One gate, every route.
+        ANY gated upload path. The caller sets ``ignore_window`` when the
+        human/agent deliberately asked to post right now (CLI ``--now``,
+        MCP/HTTP ``force``): the flag's whole promise is a bypass at the
+        manual surface, so the gate honours it here — that is the one place
+        it can actually take effect. The text route is not gated at all:
+        the schedule store cannot carry a text post and
+        :mod:`xpst.services.manual_defer` already declares a manual text post
+        never deferrable, so gating it here produced a "deferred" row with
+        nothing queued — the user's intent evaporated, exactly the D2 failure
+        G11 forbids.
         """
+        if ignore_window:
+            return None
         if self.anti_bot and not self.anti_bot.should_post_now():
             logger.info(
                 "Anti-bot: outside posting hours, deferring %s upload",
@@ -145,6 +154,7 @@ class UploadService:
         video_id: str,
         source_platform: str = "",
         visibility: str | None = None,
+        ignore_window: bool = False,
     ) -> UploadResult:
         """Single method that handles the full upload pipeline.
 
@@ -152,11 +162,15 @@ class UploadService:
         disk space check → encode → upload with retry → record result →
         send notification.
 
+        ``ignore_window`` carries a deliberate manual bypass (CLI ``--now`` /
+        MCP+HTTP ``force``): the time-of-day gate is skipped and the post
+        goes out immediately, honouring the flag's documented promise.
+
         Returns:
             UploadResult with success/failure and metadata.
         """
         # ── Anti-bot: Time-of-day check (shared gate, G11) ──
-        deferred = self._deferred(platform_name)
+        deferred = self._deferred(platform_name, ignore_window=ignore_window)
         if deferred is not None:
             return deferred
 
@@ -621,13 +635,14 @@ class UploadService:
         platform_name: str,
         video_id: str,
         source_platform: str = "",
+        ignore_window: bool = False,
     ) -> UploadResult:
         """Upload a carousel/multi-media post to a single platform.
 
         Same pipeline as upload_to_platform but uses upload_carousel.
         """
         # Anti-bot time-of-day gate (shared with every other upload path, D2).
-        deferred = self._deferred(platform_name)
+        deferred = self._deferred(platform_name, ignore_window=ignore_window)
         if deferred is not None:
             return deferred
 
@@ -749,6 +764,7 @@ class UploadService:
         platform_name: str,
         video_id: str,
         source_platform: str = "",
+        ignore_window: bool = False,
     ) -> UploadResult:
         """Publish a single image to one platform.
 
@@ -760,7 +776,7 @@ class UploadService:
         # Anti-bot time-of-day gate: identical to the video route (D2 — one
         # gate on every upload path, so a deferred post behaves the same no
         # matter which modality it carries).
-        deferred = self._deferred(platform_name)
+        deferred = self._deferred(platform_name, ignore_window=ignore_window)
         if deferred is not None:
             return deferred
 
@@ -891,12 +907,14 @@ class UploadService:
         without server-side duplicate detection: the destination is reconciled
         (read back) first and the result surfaced for a deliberate retry only
         when that proves the post absent — never a blind double-post.
-        """
-        # Anti-bot time-of-day gate (shared with every other upload path, D2).
-        deferred = self._deferred(platform_name)
-        if deferred is not None:
-            return deferred
 
+        No time-of-day gate: a manual text post is deliberately never
+        window-gated (see :mod:`xpst.services.manual_defer` — the schedule
+        store cannot carry it, so a "deferred" row would be a black hole, and
+        a tweet at midnight is cheap enough not to warrant a queue
+        round-trip). Text reaches this method only through a manual surface;
+        the daemon never queues it.
+        """
         # ToS warning for unofficial API platforms
         if platform_name in _TOS_UNOFFICIAL_PLATFORMS:
             logger.warning(
