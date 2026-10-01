@@ -637,9 +637,37 @@ def build_canonical_status(
             "probe_class": compat_details.get("probe_class"),
             "probe_error": compat_details.get("probe_error"),
             "probe_retryable": compat_details.get("probe_retryable"),
+            # Instagram's verified account type, promoted flat so every
+            # surface can show it ("" renders as "unknown", never as green).
+            **(
+                {
+                    "account_type": str(
+                        config.instagram.account_type
+                        or compat_details.get("account_type")
+                        or ""
+                    ),
+                    "account_type_source": str(
+                        config.instagram.account_type_source
+                        or compat_details.get("account_type_source")
+                        or ""
+                    ),
+                }
+                if definition.name == "instagram"
+                else {}
+            ),
             "enabled": _enabled(config, definition.name),
             "legacy_authenticated": bool(raw.get("credentials_stored")),
         })
+    # Instagram's account type is a last-VERIFIED fact stored at connect or by
+    # a live probe (Meta only publishes to Business/Creator). It is not a
+    # live-derived field, so the offline catalog carries it too — the UI must
+    # be able to state "personal" or "unknown" without waiting on a probe.
+    ig_account = getattr(config, "instagram", None)
+    if ig_account is not None and "instagram" in result:
+        result["instagram"]["account_type"] = str(getattr(ig_account, "account_type", "") or "")
+        result["instagram"]["account_type_source"] = str(
+            getattr(ig_account, "account_type_source", "") or ""
+        )
     return result
 
 

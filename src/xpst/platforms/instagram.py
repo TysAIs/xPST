@@ -254,6 +254,27 @@ class InstagramUploader(PlatformUploader):
                 platform="instagram",
             )
 
+        # A *verified* personal account cannot publish through Meta, whatever
+        # the token says — refuse here with the guided switch instead of
+        # letting Meta's opaque access-denied be the user's first hint.
+        # "" (never probed) and "unknown" deliberately still attempt the
+        # upload: an unprobed account is not a proven personal one.
+        if self.config.instagram.account_type == "personal":
+            from xpst.platforms.instagram_account import (
+                AccountTypeFinding,
+                InstagramAccountType,
+                guidance_message,
+            )
+
+            guidance = guidance_message(
+                AccountTypeFinding(InstagramAccountType.PERSONAL, source="stored_verdict")
+            )
+            return UploadResult(
+                success=False,
+                error=guidance or "Instagram account is personal; switch to a Creator account.",
+                platform="instagram",
+            )
+
         # Truncate caption if needed
         if len(caption) > self.MAX_CAPTION_LENGTH:
             caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
@@ -323,6 +344,17 @@ class InstagramUploader(PlatformUploader):
         except httpx.HTTPStatusError as e:
             error_body = e.response.text[:300] if e.response else str(e)
             logger.error(f"Instagram Graph API HTTP error: {e}")
+            # If Meta itself says the account went personal (a switch-back
+            # after connect), record that fact so the next status shows it and
+            # the next upload refuses fast with the guided steps.
+            from xpst.platforms.instagram_account import (
+                PERSONAL_REFUSAL_MARKERS,
+                classify_graph_payload,
+                persist_account_type,
+            )
+
+            if any(marker in error_body.lower() for marker in PERSONAL_REFUSAL_MARKERS):
+                persist_account_type(self.config, classify_graph_payload({"error": {"message": error_body}}))
             return UploadResult(
                 success=False,
                 error=f"IG_GRAPH_API_HTTP_ERROR: {error_body}",
@@ -742,7 +774,7 @@ class InstagramUploader(PlatformUploader):
                 response = await client.get(
                     f"https://graph.facebook.com/v21.0/{ig_config.graph_ig_user_id}",
                     params={
-                        "fields": "id,username,followers_count",
+                        "fields": "id,username,followers_count,account_type",
                         "access_token": ig_config.graph_access_token,
                     },
                 )
@@ -756,16 +788,33 @@ class InstagramUploader(PlatformUploader):
                     error="Instagram Graph API returned no user data",
                     details={"auth_mode": "graph_api", "probe": "graph_api"},
                 )
+            # One probe, two facts: the same payload answers the account-type
+            # question (B2). Store it only when it actually says something —
+            # an absent field keeps the last verified verdict rather than
+            # being overwritten with a guess.
+            from xpst.platforms.instagram_account import (
+                classify_graph_payload,
+                persist_account_type,
+            )
+
+            finding = classify_graph_payload(data)
+            persist_account_type(self.config, finding)
+            details: dict[str, Any] = {
+                "username": data.get("username", ""),
+                "user_id": str(data.get("id", ig_config.graph_ig_user_id)),
+                "auth_mode": "graph_api",
+                "probe": "graph_api",
+                "account_type": (
+                    self.config.instagram.account_type
+                    or finding.account_type.value
+                ),
+                "account_type_source": self.config.instagram.account_type_source,
+            }
             return PlatformHealth(
                 platform="instagram",
                 authenticated=True,
                 session_valid=True,
-                details={
-                    "username": data.get("username", ""),
-                    "user_id": str(data.get("id", ig_config.graph_ig_user_id)),
-                    "auth_mode": "graph_api",
-                    "probe": "graph_api",
-                },
+                details=details,
             )
         except Exception as exc:  # noqa: BLE001 — health must fail closed
             return PlatformHealth(
@@ -775,6 +824,38 @@ class InstagramUploader(PlatformUploader):
                 error=f"Instagram Graph API health check failed: {str(exc)[:200]}",
                 details={"auth_mode": "graph_api", "probe": "graph_api"},
             )
+
+    async def detect_account_type(self) -> Any:
+        """Answer "can Meta publish to this account?" on the active auth mode.
+
+        Uses one read-only call through the credential the account already
+        has. Never raises: an unreachable account answers
+        ``unknown:<reason>``, never a guessed type.
+        """
+        from xpst.platforms.instagram_account import (
+            classify_session_account_info,
+            detect_graph_account_type,
+            persist_account_type,
+            unknown_finding,
+        )
+
+        ig = self.config.instagram
+        if ig.auth_mode == "graph_api":
+            finding = detect_graph_account_type(ig.graph_ig_user_id, ig.graph_access_token)
+            persist_account_type(self.config, finding)
+            return finding
+        try:
+            client = await self._get_client()
+            account = client.account_info()
+            info_map = {
+                "is_business": bool(getattr(account, "is_business", False)),
+                "business_category_name": getattr(account, "business_category_name", "") or "",
+            }
+            finding = classify_session_account_info(info_map)
+            persist_account_type(self.config, finding)
+            return finding
+        except Exception as exc:  # noqa: BLE001 — an unprobed account is unknown, not personal
+            return unknown_finding(f"session_probe_failed:{type(exc).__name__}")
 
     async def check_health(self) -> PlatformHealth:
         """Check Instagram authentication health.
@@ -791,6 +872,17 @@ class InstagramUploader(PlatformUploader):
             # Try to get account info to verify auth
             try:
                 account = client.account_info()
+                from xpst.platforms.instagram_account import (
+                    classify_session_account_info,
+                    persist_account_type,
+                )
+
+                info_map = {
+                    "is_business": bool(getattr(account, "is_business", False)),
+                    "business_category_name": getattr(account, "business_category_name", "") or "",
+                }
+                finding = classify_session_account_info(info_map)
+                persist_account_type(self.config, finding)
                 return PlatformHealth(
                     platform="instagram",
                     authenticated=True,
@@ -799,6 +891,9 @@ class InstagramUploader(PlatformUploader):
                         "username": account.username,
                         "user_id": str(account.pk),
                         "full_name": account.full_name,
+                        "account_type": self.config.instagram.account_type
+                        or finding.account_type.value,
+                        "account_type_source": self.config.instagram.account_type_source,
                     },
                 )
             except Exception as exc:
