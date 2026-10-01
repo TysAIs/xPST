@@ -25,6 +25,8 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from xpst.config import XPSTConfig
+
 from xpst.platforms.instagram_account import (
     SWITCH_STEPS,
     AccountTypeFinding,
@@ -246,7 +248,7 @@ class TestStatusReprobeRule:
     every status refresh; a professional verdict stops costing a call."""
 
     @staticmethod
-    def _config(tmp_path: Path) -> "XPSTConfig":  # noqa: F821
+    def _config(tmp_path: Path) -> XPSTConfig:
         from xpst.config import XPSTConfig
 
         config = XPSTConfig()
