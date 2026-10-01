@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from xpst.schedule_manager import ScheduleManager, stored_per_platform_captions
+from xpst.schedule_manager import ScheduleManager, entry_fire_route, stored_per_platform_captions
 from xpst.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -179,8 +179,12 @@ class SchedulingEngine:
                     logger.info("scheduling: %s was cancelled before posting", entry_id)
                     continue
 
+                # Resolve the route FIRST (single shared resolver — see
+                # entry_fire_route): a text entry has no media file, so the
+                # file-exists gate below only applies to media routes.
+                entry_route = entry_fire_route(entry)
                 video_path = Path(str(entry.get("video_path") or ""))
-                if not video_path.exists():
+                if entry_route != "text" and not video_path.exists():
                     counts["failed"] += 1
                     self._record(
                         entry_id,
@@ -199,15 +203,21 @@ class SchedulingEngine:
                 per_platform_captions = stored_per_platform_captions(entry)
                 # Route by the modality stored at add time (D1's schedule
                 # twin: an entry added for an IMAGE must fire through the
-                # image route, not the video encoder). Entries predating the
-                # field — and entries naming a file that is actually an image
-                # — stay on the video path only if the contract agrees.
-                entry_route = str(entry.get("content_type") or "").strip().lower()
+                # image route, not the video encoder, and a TEXT entry must
+                # not be fed its placeholder .txt to that encoder either).
                 entry_media = [
                     Path(p) for p in (entry.get("media_paths") or []) if str(p).strip()
                 ]
                 try:
-                    if entry_route == "carousel" and len(entry_media) >= 2:
+                    if entry_route == "text":
+                        result = asyncio.run(
+                            self.engine.post_text(
+                                caption,
+                                platforms,
+                                per_destination=per_platform_captions or None,
+                            )
+                        )
+                    elif entry_route == "carousel" and len(entry_media) >= 2:
                         result = asyncio.run(
                             self.engine.post_manual_carousel(
                                 entry_media,

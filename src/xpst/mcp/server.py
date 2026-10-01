@@ -579,13 +579,15 @@ TOOLS: list[Tool] = [
         description=(
             "Schedule a post for later: local video file + caption + ISO-8601 "
             "time, optional platform list, repeat rule (daily/weekly/monthly), "
-            "and per-destination caption overrides (honoured when it fires)."
+            "and per-destination caption overrides (honoured when it fires). "
+            "Omit video_path for a text-only post: caption IS the post, stored "
+            "as content_type=text and fired through the text route."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "confirm": {"type": "boolean", "description": "Required true when XPST_MCP_REQUIRE_CONFIRM is set", "default": False},
-                "video_path": {"type": "string", "description": "Local video file path"},
+                "video_path": {"type": "string", "description": "Local media file path; omit for a text-only post"},
                 "caption": {"type": "string", "description": "Post caption"},
                 "overrides": {
                     "type": "object",
@@ -601,7 +603,7 @@ TOOLS: list[Tool] = [
                 "platforms": {"type": "array", "items": {"type": "string", "enum": _PLATFORM_ENUM}, "description": "Targets (default: all enabled)"},
                 "repeat_rule": {"type": "string", "enum": ["daily", "weekly", "monthly"], "description": "Optional repeat"},
             },
-            "required": ["video_path", "caption", "scheduled_time"],
+            "required": ["caption", "scheduled_time"],
             "additionalProperties": False,
         },
     ),
@@ -1945,8 +1947,9 @@ async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) ->
 
     from xpst.schedule_manager import ScheduleManager
 
-    video_path = Path(arguments["video_path"]).expanduser()
-    if not video_path.exists():
+    raw_video = arguments.get("video_path")
+    video_path = Path(raw_video).expanduser() if raw_video else None
+    if video_path is not None and not video_path.exists():
         return CallToolResult(
             isError=True,
             content=[TextContent(type="text", text=f"Video not found: {video_path}")],
@@ -1976,12 +1979,13 @@ async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) ->
     manager = ScheduleManager(config.config_dir)
     try:
         entry = manager.add(
-            video_path=str(video_path),
+            video_path=str(video_path) if video_path else "",
             caption=arguments["caption"],
             scheduled_time=when,
             platforms=arguments.get("platforms"),
             repeat_rule=arguments.get("repeat_rule"),
             per_platform_captions=overrides,
+            content_type=None if video_path else "text",
         )
     except ValueError as exc:
         # Oversized/unusable caption payloads: a typed error, not a traceback.
