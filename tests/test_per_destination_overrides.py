@@ -120,7 +120,7 @@ class _RecordingUploadService:
 
     async def upload_to_platform(
         self, *, uploader: Any, video_path: Any, caption: str, platform_name: str, video_id: str,
-        source_platform: str = "", visibility: str | None = None,
+        source_platform: str = "", visibility: str | None = None, ignore_window: bool = False,
     ) -> UploadResult:
         # `visibility` arrives from post_manual (YouTube-only option); the
         # double records it so a test can prove it reached the upload layer.
@@ -134,7 +134,8 @@ class _RecordingUploadService:
         )
 
     async def upload_carousel_to_platform(
-        self, *, uploader: Any, media_paths: Any, caption: str, platform_name: str, video_id: str, source_platform: str = ""
+        self, *, uploader: Any, media_paths: Any, caption: str, platform_name: str, video_id: str, source_platform: str = "",
+        ignore_window: bool = False,
     ) -> UploadResult:
         self.captions[platform_name] = caption
         return UploadResult(
@@ -476,14 +477,16 @@ class _FakeEngine:
         )
 
     async def post_manual(
-        self, video_path: Any, caption: str, platforms: list[str] | None = None, per_platform_captions: Any = None
+        self, video_path: Any, caption: str, platforms: list[str] | None = None, per_platform_captions: Any = None,
+        force_now: bool = False,
     ) -> Any:
         overrides = dict(per_platform_captions or {})
         self.calls.append({"caption": caption, "overrides": overrides})
         return self._result(caption, list(platforms or []), overrides)
 
     async def post_manual_carousel(
-        self, media_paths: Any, caption: str, platforms: list[str] | None = None, per_platform_captions: Any = None
+        self, media_paths: Any, caption: str, platforms: list[str] | None = None, per_platform_captions: Any = None,
+        force_now: bool = False,
     ) -> Any:
         return await self.post_manual(media_paths[0], caption, platforms, per_platform_captions)
 
