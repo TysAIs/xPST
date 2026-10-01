@@ -461,8 +461,16 @@ class TestInputFuzz:
         assert len(entry["caption"]) == MAX_CAPTION_LEN
 
     def test_none_video_path_coerced(self, manager):
-        entry = manager.add("", "c", datetime.now() + timedelta(hours=1))
+        """Empty media path is legal ONLY as a text entry (the store's one
+        no-media representation); anything else would be an entry the fire
+        path cannot route, so add() rejects it instead of storing a lie."""
+        entry = manager.add(
+            "", "c", datetime.now() + timedelta(hours=1), content_type="text"
+        )
         assert entry["video_path"] == ""
+        assert entry["content_type"] == "text"
+        with pytest.raises(ValueError, match="text"):
+            manager.add("", "c", datetime.now() + timedelta(hours=1))
 
     def test_cannot_add_after_close_of_day_edge_dates(self, manager):
         """Feb 29 / month-end clamping for monthly recurrence."""
