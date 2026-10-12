@@ -49,97 +49,13 @@ Acquire/release the pidfile lock that prevents concurrent instances.
 
 ---
 
-## Use-Case Factory
-
-### `UseCaseFactory(deps: UseCaseDependencies)`
-
-Factory for creating use-case instances with shared dependencies.
-
-#### Methods
-- `create_fetch_videos() -> FetchNewVideosUseCase`
-- `create_cross_post() -> CrossPostVideoUseCase`
-- `create_manual_post() -> ManualPostUseCase`
-- `create_backfill() -> BackfillUseCase`
-- `create_health_check() -> HealthCheckUseCase`
-- `create_delete_post() -> DeletePostUseCase`
-
----
-
 ## Use-Cases
 
-### `FetchNewVideosUseCase(deps)`
-
-Fetch new videos from sources and filter unposted ones.
-
-```python
-result = await fetch_uc.execute(
-    source_name="tiktok",
-    max_count=5,
-    catch_up=False
-)
-# result: FetchVideosResult(videos=[...], fetch_count=3, catch_up=False)
-```
-
-### `CrossPostVideoUseCase(deps)`
-
-Cross-post a video to multiple platforms.
-
-```python
-result = await cross_post_uc.execute(
-    video_id="vid123",
-    caption="My video",
-    platforms=["youtube", "instagram"]
-)
-# result: CrossPostResult(video_id, caption, results={...}, all_success=True, partial_success=False)
-```
-
-### `ManualPostUseCase(deps)`
-
-Post a local video file.
-
-```python
-result = await manual_uc.execute(
-    video_path="/path/to/video.mp4",
-    caption="My video",
-    platforms=["youtube"]
-)
-```
-
-### `BackfillUseCase(deps)`
-
-Fetch and post historical content.
-
-```python
-result = await backfill_uc.execute(
-    source_name="tiktok",
-    max_count=10,
-    platforms=["youtube", "x"]
-)
-# result: BackfillResult(attempted=5, successful=3, results=[...])
-```
-
-### `HealthCheckUseCase(deps)`
-
-Comprehensive health check.
-
-```python
-result = await health_uc.execute()
-# result: HealthCheckResult(sources={...}, platforms={...}, circuit_breakers={...}, state={...}, quotas={...})
-```
-
-### `DeletePostUseCase(deps)`
-
-Delete post from state (and optionally platform).
-
-```python
-result = await delete_uc.execute(
-    video_id="vid123",
-    platform="youtube",  # or None for all
-    delete_from_platform=False
-)
-```
-
----
+There is no separate use-case class layer. Every surface calls
+`CrossPostEngine` (above), which delegates to the services in
+`xpst.services` (`PostService`, `UploadService`, `SourceService`,
+`RecoveryService`); the result types (`CrossPostResult` etc.) are produced
+by those services. See `xpst/engine.py` for the seams.
 
 ## StateManager
 
@@ -373,8 +289,8 @@ start_dashboard(host="0.0.0.0")
 The default bind address is `127.0.0.1`, so the dashboard is reachable only
 from the local machine. Binding to a non-loopback address (such as `0.0.0.0`)
 without `dashboard_username`/`dashboard_password_hash` configured logs a
-warning, because the authenticated endpoints (`/state`, `/analytics`,
-`/history`) would otherwise be exposed to the network without credentials.
+warning, because the mutating endpoints require an API token or Basic login
+and would otherwise be reachable from the network.
 
 ### Endpoints
 
@@ -383,8 +299,9 @@ warning, because the authenticated endpoints (`/state`, `/analytics`,
 | `/health` | GET | No | Aggregated platform health |
 | `/metrics` | GET | No | Prometheus metrics |
 | `/state` | GET | Yes | Cross-posting statistics |
-| `/analytics` | GET | Yes | Detailed analytics |
-| `/history` | GET | Yes | Post history with filters |
+| `/api/summary` | GET | Yes | Dashboard summary (recorded post counts, health) |
+| `/api/analytics/outcomes` | GET | Yes | Analytics outcomes per destination |
+| `/api/activity` | GET | Yes | Recent activity feed |
 
 ---
 
