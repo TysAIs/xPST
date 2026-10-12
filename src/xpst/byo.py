@@ -579,6 +579,27 @@ def finalize_meta_oauth_code(
                     f"IG account {ig_user_id}" if ig_user_id else "no Page carries a linked IG account yet",
                 )
 
+        # Account-type truth at connect time (B2): Meta's publishing API only
+        # serves professional accounts, so a personal account must be told to
+        # switch HERE — with the exact in-app steps — not met later by an
+        # opaque publish refusal. An inconclusive probe stores nothing rather
+        # than guessing; the UI renders "" as "unknown".
+        account_type = ""
+        if spec.platform == "instagram" and ig_user_id:
+            try:
+                from xpst.platforms.instagram_account import detect_graph_account_type
+
+                type_finding = detect_graph_account_type(ig_user_id, page_token or user_token)
+                if type_finding.account_type.value != "unknown":
+                    account_type = type_finding.account_type.value
+                record(
+                    "ig_account_type",
+                    type_finding.publish_ready,
+                    f"{type_finding.account_type.value} ({type_finding.source})",
+                )
+            except Exception:  # noqa: BLE001 — an unprobed type is unknown, never personal
+                record("ig_account_type", False, "unknown (probe failed)")
+
         cred_store = store if store is not None else _store_for(config)
         section = getattr(config, spec.platform, None)
         if spec.platform == "instagram":
@@ -592,6 +613,10 @@ def finalize_meta_oauth_code(
                 if section is not None:
                     section.graph_access_token = publish_token
                     section.graph_ig_user_id = ig_user_id
+                    section.account_type = account_type
+                    section.account_type_source = (
+                        "byo_connect" if account_type else section.account_type_source
+                    )
         else:
             cred_store.store("threads_access_token", user_token)
             try:
@@ -631,5 +656,8 @@ def finalize_meta_oauth_code(
         "steps": steps,
         "account": account,
         "ig_user_id": ig_user_id if spec.platform == "instagram" else "",
+        # Non-identifying account-type verdict so the connect UI can show the
+        # state ("" = never probed = renders as "unknown").
+        "account_type": account_type if spec.platform == "instagram" else "",
         "app_id_masked": mask_app_id(app_id),
     }
