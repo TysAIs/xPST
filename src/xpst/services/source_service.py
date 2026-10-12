@@ -22,11 +22,23 @@ class SourceService:
     Supports bidirectional cross-posting: each enabled platform can
     act as both a source AND a target. Sources are initialized based
     on configuration (TikTok always, others when username/channel is set).
+
+    Fetch failures are RECORDED, not just logged (issue #296): the
+    daemon's 15-min tick used to log ``Failed to fetch videos from
+    tiktok: ...`` to a file nobody watches and then report ``cycle
+    complete`` with green health. ``self.last_fetch_errors`` keeps the
+    in-memory verdict and — when a StateManager is wired via
+    :attr:`state` (the engine does this) — the failure is persisted so
+    ``xpst health`` / ``xpst doctor`` / MCP health degrade visibly.
     """
 
     def __init__(self, config: XPSTConfig) -> None:
         self.config = config
         self._sources: dict[str, VideoSource] = {}
+        # Set by the engine to its StateManager; None in standalone use.
+        self.state: StateManager | None = None
+        # source_name -> {"error": str, "at": iso, "consecutive_failures": int}
+        self.last_fetch_errors: dict[str, dict[str, Any]] = {}
         self._init_sources()
 
     def _init_sources(self) -> None:
@@ -119,10 +131,43 @@ class SourceService:
             return []
 
         try:
-            return await source.list_videos(max_count)
+            videos = await source.list_videos(max_count)
         except Exception as e:
             logger.error("Failed to fetch videos from %s: %s", source_name, e)
+            self._record_fetch_failure(source_name, e)
             return []
+        self._record_fetch_success(source_name)
+        return videos
+
+    def _record_fetch_failure(self, source_name: str, exc: Exception) -> None:
+        """Record a failed fetch in memory and (when wired) in state.
+
+        Issue #296: a dead source used to degrade nothing — the error lived
+        only in launchagent.err while health stayed green.
+        """
+        current = self.last_fetch_errors.get(source_name) or {
+            "consecutive_failures": 0,
+        }
+        current["error"] = str(exc)
+        current["consecutive_failures"] = int(current.get("consecutive_failures") or 0) + 1
+        self.last_fetch_errors[source_name] = current
+
+        if self.state is not None:
+            try:
+                self.state.record_source_fetch_failure(source_name, str(exc))
+            except Exception:  # noqa: BLE001 - recording must never break the cycle
+                logger.debug("Could not persist source-fetch failure for %s", source_name, exc_info=True)
+
+    def _record_fetch_success(self, source_name: str) -> None:
+        """Clear a previously recorded failure after a successful fetch."""
+        was_failing = source_name in self.last_fetch_errors
+        self.last_fetch_errors.pop(source_name, None)
+
+        if self.state is not None and was_failing:
+            try:
+                self.state.record_source_fetch_success(source_name)
+            except Exception:  # noqa: BLE001 - recording must never break the cycle
+                logger.debug("Could not clear source-fetch failure for %s", source_name, exc_info=True)
 
     def filter_new(
         self,
