@@ -37,6 +37,16 @@ Instagram is the platform most likely to ban automated accounts. xPST therefore 
 
 If your account is already a Creator/Business account, skip to [Step 2](#step-2--create-a-meta-developer-app).
 
+xPST **checks your account type when you connect** (`xpst connect instagram` and
+the in-app Sign in both ask Meta directly). If it finds a personal account it
+prints these exact steps instead of letting you discover them as a failed post,
+and the Accounts page keeps showing the verified type until you re-check.
+Re-check after switching with `xpst connect instagram` or **Refresh accounts**
+in the app — a personal account is re-probed on every status refresh, so the
+verdict updates itself once the switch is done.
+
+To switch manually:
+
 1. Open the Instagram app → **Settings and privacy** → **Account type and tools**.
 2. Tap **Switch to professional account**.
 3. Choose **Creator** (recommended for individuals) or **Business**.

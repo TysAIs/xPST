@@ -268,6 +268,31 @@ GRAPH_API_BASE = "https://graph.facebook.com/v21.0"
 GRAPH_EXPLORER_URL = "https://developers.facebook.com/tools/explorer/"
 
 
+def _ig_account_type_gate(config: XPSTConfig, access_token: str, ig_user_id: str) -> bool:
+    """Probe + store + (when needed) print the account-type guidance.
+
+    Returns True when the account is publish-ready (business/creator), False
+    when Meta says it is personal, and also True on an inconclusive probe —
+    an unprobed account must not be reported as personal, and connect must not
+    fail just because Meta would not answer the type field. The verdict is
+    stored on ``config.instagram.account_type`` (never guessed) so every
+    surface can show it; the caller's ``config.save()`` persists it.
+    """
+    from xpst.platforms.instagram_account import (
+        detect_graph_account_type,
+        guidance_message,
+    )
+
+    finding = detect_graph_account_type(ig_user_id, access_token)
+    if finding.account_type.value != "unknown":
+        config.instagram.account_type = finding.account_type.value
+        config.instagram.account_type_source = finding.source
+    message = guidance_message(finding)
+    if message:
+        console.print(f"\n[yellow]{message}[/yellow]")
+    return finding.publish_ready or finding.account_type.value == "unknown"
+
+
 def _graph_api_verify_url(ig_user_id: str, access_token: str) -> str:
     """Build the Graph API URL used to verify a token against an IG account.
 
@@ -455,6 +480,12 @@ def _connect_instagram_graph_api(config: XPSTConfig) -> bool:
         f"{data.get('media_count', media_count or '?')} posts)[/green]"
     )
 
+    # Meta's publishing API only serves professional accounts; say so HERE,
+    # with the exact in-app switch, instead of letting a personal account
+    # surface later as an opaque publish refusal. The credential stays stored
+    # either way — after the in-app switch, a re-check flips the verdict.
+    _ig_account_type_gate(config, access_token, ig_user_id)
+
     # Save to config
     config.instagram.auth_mode = "graph_api"
     config.instagram.graph_access_token = access_token
@@ -572,6 +603,33 @@ def _connect_instagram_session(config: XPSTConfig) -> bool:
 
         # Set auth_mode to session since user chose this path
         config.instagram.auth_mode = "session"
+
+        # Account-type truth on this mode comes from the private API's own
+        # account_info (the Graph API has no credential yet). A personal
+        # account still works here for now, but it cannot migrate to the
+        # ban-safe Graph path without switching first — say so at connect,
+        # not at the failed publish six weeks from now.
+        try:
+            from xpst.platforms.instagram_account import (
+                classify_session_account_info,
+                guidance_message,
+            )
+
+            info = client.account_info()
+            info_map = {
+                "is_business": bool(getattr(info, "is_business", False)),
+                "business_category_name": getattr(info, "business_category_name", "") or "",
+            }
+            finding = classify_session_account_info(info_map)
+            if finding.account_type.value != "unknown":
+                config.instagram.account_type = finding.account_type.value
+                config.instagram.account_type_source = finding.source
+            guidance = guidance_message(finding, auth_mode="session")
+            if guidance:
+                console.print(f"\n[yellow]{guidance}[/yellow]")
+        except Exception as e:
+            logger.debug("account-type probe failed (session mode): %s", e)
+
         config.save()
 
         # Verify connection
