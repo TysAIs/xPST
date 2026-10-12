@@ -254,6 +254,9 @@ class CrossPostEngine:
 
         # Initialize services
         self.source_service = SourceService(config)
+        # Issue #296: let the source service persist fetch failures so a dead
+        # source degrades visible health instead of only logging to a file.
+        self.source_service.state = self.state
         self.anti_bot = AntiBotProtection(daily_limits={
             "youtube": config.rate_limits.youtube,
             "instagram": config.rate_limits.instagram,
@@ -1717,6 +1720,23 @@ class CrossPostEngine:
                     "status": "error",
                     "error": str(e),
                 }
+
+        # Issue #296: a source whose check_health probe passes but whose
+        # actual fetch pipeline is dead must not read green. Merge the
+        # persisted fetch-failure record into the live verdict.
+        persisted_source_health: dict[str, Any] = (
+            self.state.state.get("health", {}).get("sources", {})
+            if getattr(self, "state", None) is not None
+            else {}
+        )
+        for name, entry in health["sources"].items():
+            fetch_record = persisted_source_health.get(name) or {}
+            if fetch_record.get("last_error"):
+                entry["last_fetch_error"] = fetch_record["last_error"]
+                entry["last_fetch_error_at"] = fetch_record.get("last_error_at")
+                entry["consecutive_fetch_failures"] = fetch_record.get("consecutive_failures", 0)
+                if entry.get("status") == "ok":
+                    entry["status"] = "degraded"
 
         # Check platforms (connectivity test, no uploads)
         all_known_platforms = {"youtube", "instagram", "x", "tiktok", "threads", "facebook"}
