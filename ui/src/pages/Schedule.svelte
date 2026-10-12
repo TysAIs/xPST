@@ -93,7 +93,7 @@
             <tr>
               <td>
                 <strong>{entry.caption || "Untitled post"}</strong>
-                <small class="xpst-schedule-path">{entry.video_path || "No media path"}</small>
+                <small class="xpst-schedule-path">{entry.video_path || (entry.content_type === "text" ? "Text post (no media)" : "No media path")}</small>
               </td>
               <td>
                 <div class="xpst-schedule-platforms">
