@@ -607,7 +607,12 @@ xpst schedule add video.mp4 --caption 'My video' --at '2026-06-20 10:00'
 xpst schedule add video.mp4 -c 'My video' --at '2026-06-20T10:00:00' -p youtube,instagram
 xpst schedule add video.mp4 -c 'Daily update' --at '2026-06-20 10:00' --repeat daily
 xpst schedule add video.mp4 -c 'Long copy' --caption-for x='short copy' --at '2026-06-20 10:00'
+xpst schedule add --text -c 'A text-only post' --at '2026-06-20 10:00' -p x
 ```
+
+**Text-only posts:** pass `--text` and no FILE. The caption IS the post; the
+entry is stored as `content_type=text` (no media path) and fires through the
+text route — never a media encoder.
 
 **Time formats accepted:** `YYYY-MM-DD HH:MM`, `YYYY-MM-DDTHH:MM:SS`, `YYYY-MM-DD HH:MM:SS`
 
