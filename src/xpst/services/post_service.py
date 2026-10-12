@@ -432,8 +432,14 @@ class PostService:
         """Report a content type with no publishing path, per destination."""
         return unimplemented_envelope(request)
 
-    async def execute_async(self, request: PostRequest) -> dict[str, Any]:
-        """Run the real upload path and return the truthful envelope."""
+    async def execute_async(self, request: PostRequest, *, force_now: bool = False) -> dict[str, Any]:
+        """Run the real upload path and return the truthful envelope.
+
+        ``force_now`` is the HTTP twin of the CLI ``--now`` / MCP ``force``
+        flag: a deliberate request to publish outside the anti-bot window
+        instead of deferring. It is carried to the engine's manual routes,
+        which is where the shared time-of-day gate can honour it.
+        """
         verdict = self.preflight(request)
         if not verdict["ready"]:
             return refusal_envelope(
@@ -475,12 +481,15 @@ class PostService:
         try:
             if route == PUBLISH_ROUTE_CAROUSEL:
                 result: CrossPostResult = await engine.post_manual_carousel(
-                    paths, request.caption, list(request.platforms), per_platform_captions
+                    paths, request.caption, list(request.platforms), per_platform_captions,
+                    force_now=force_now,
                 )
             elif route == PUBLISH_ROUTE_IMAGE:
                 # A single still image: no encoding stage, and no per-destination
                 # copy — the image adapter takes one caption.
-                result = await engine.post_manual_image(paths[0], request.caption, list(request.platforms))
+                result = await engine.post_manual_image(
+                    paths[0], request.caption, list(request.platforms), force_now=force_now,
+                )
             elif route == PUBLISH_ROUTE_TEXT:
                 # The text route: one text per destination, so per-destination
                 # overrides are honoured here (they are validated for text).
@@ -496,7 +505,8 @@ class PostService:
                 )
             else:
                 result = await engine.post_manual(
-                    paths[0], request.caption, list(request.platforms), per_platform_captions
+                    paths[0], request.caption, list(request.platforms), per_platform_captions,
+                    force_now=force_now,
                 )
         except Exception as exc:  # noqa: BLE001 - the caller must see the failure
             logger.error("Manual post failed before producing results: %s", exc)
@@ -531,7 +541,7 @@ class PostService:
         envelope["content"] = verdict["content"]
         return envelope
 
-    def execute(self, request: PostRequest) -> dict[str, Any]:
+    def execute(self, request: PostRequest, *, force_now: bool = False) -> dict[str, Any]:
         """Synchronous wrapper around :meth:`execute_async`.
 
         FastAPI runs sync ``def`` endpoints in a worker thread, where
@@ -542,12 +552,12 @@ class PostService:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(self.execute_async(request))
+            return asyncio.run(self.execute_async(request, force_now=force_now))
 
         box: dict[str, Any] = {}
 
         def _run() -> None:
-            box["value"] = asyncio.run(self.execute_async(request))
+            box["value"] = asyncio.run(self.execute_async(request, force_now=force_now))
 
         thread = threading.Thread(target=_run, name="xpst-api-post", daemon=True)
         thread.start()

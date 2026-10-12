@@ -124,16 +124,17 @@ class FakeEngine:
         return results
 
     async def post_manual(  # noqa: ANN001, ANN201
-        self, video_path, caption, platforms=None, per_platform_captions=None, visibility=None
+        self, video_path, caption, platforms=None, per_platform_captions=None, visibility=None,
+        force_now=False,
     ):
         self.calls.append((str(video_path), tuple(platforms or ())))
         self.captions.update(per_platform_captions or {})
         return FakePostResult("vid-1", caption, self._results(platforms))
 
-    async def post_manual_carousel(self, media_paths, caption, platforms=None, per_platform_captions=None):  # noqa: ANN001, ANN201
+    async def post_manual_carousel(self, media_paths, caption, platforms=None, per_platform_captions=None, force_now=False):  # noqa: ANN001, ANN201
         return await self.post_manual(media_paths[0], caption, platforms, per_platform_captions)
 
-    async def post_manual_image(self, image_path, caption, platforms=None):  # noqa: ANN001, ANN201
+    async def post_manual_image(self, image_path, caption, platforms=None, force_now=False):  # noqa: ANN001, ANN201
         """The image route: a single picture, recorded apart from the video path."""
         self.image_calls.append((str(image_path), tuple(platforms or ())))
         return FakePostResult("img-1", caption, self._results(platforms))

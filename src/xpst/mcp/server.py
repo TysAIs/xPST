@@ -1788,6 +1788,7 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
         # file through the VIDEO path, the same misroute as the CLI.
         result = await engine.post_manual_image(
             Path(media_paths[0]), caption, args.get("platforms"),
+            force_now=bool(args.get("force", False)),
         )
     elif verdict["route"] == PUBLISH_ROUTE_CAROUSEL:
         result = await engine.post_manual_carousel(
@@ -1795,6 +1796,7 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
             caption=caption,
             platforms=args.get("platforms"),
             per_platform_captions=overrides,
+            force_now=bool(args.get("force", False)),
         )
     else:
         result = await engine.post_manual(
@@ -1802,6 +1804,7 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
             caption=caption,
             platforms=args.get("platforms"),
             per_platform_captions=overrides,
+            force_now=bool(args.get("force", False)),
         )
     payload = _serialize_result(result)
     # Report the copy each destination actually received, so an override is
