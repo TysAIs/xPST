@@ -585,11 +585,11 @@ Response shape: a list of scheduled posts with their status, target platforms, a
 
 ## xpst_schedule_add
 
-Schedules a post for a future time: video + caption + ISO-8601 time, with an optional repeat rule and per-destination caption overrides. Creates a pending scheduled post; when it fires, each destination receives its own copy (destinations without an override keep `caption`).
+Schedules a post for a future time: video + caption + ISO-8601 time, with an optional repeat rule and per-destination caption overrides. Creates a pending scheduled post; when it fires, each destination receives its own copy (destinations without an override keep `caption`). Omit `video_path` for a **text-only post**: `caption` IS the post, stored as `content_type=text` and fired through the text route (never a media encoder).
 
 | Argument | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| `video_path` | string | yes | — | Path to the video to schedule. |
+| `video_path` | string | no | — (text post) | Path to the media to schedule. Omit for a text-only post. |
 | `caption` | string | yes | — | Caption/title for the post. |
 | `overrides` | object | no | — | Per-destination caption overrides: `{"x": "short copy"}` or `{"x": {"text": "short copy"}}`. Same shape as `xpst_post`'s `overrides`. |
 | `scheduled_time` | string | yes | — | ISO-8601 timestamp for publishing. |

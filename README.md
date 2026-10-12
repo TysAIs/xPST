@@ -318,7 +318,7 @@ xPST provides 47 top-level commands (74 including subcommands). Run `xpst --help
 | `xpst backfill --dry-run` | Show what would be backfilled without uploading |
 | `xpst delete VIDEO_ID` | Delete a posted video from platforms; use `--platform` to target one |
 | `xpst delete RZ6i-0HM5dM -p youtube` | VIDEO_ID may also be a platform-side post id or a full post URL |
-| `xpst schedule add FILE --caption TEXT --at TIME` | Schedule a post for later publishing |
+| `xpst schedule add FILE --caption TEXT --at TIME` | Schedule a post for later publishing (omit FILE with `--text` for a text-only post) |
 | `xpst schedule list` | List all scheduled posts |
 | `xpst schedule remove ID` | Remove a scheduled post by ID |
 | `xpst schedule run` | Process all due scheduled posts (typically called by cron) |
