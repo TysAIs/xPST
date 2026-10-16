@@ -298,7 +298,7 @@ class TestGetCrossPostAnalytics:
         assert g["total_engagement_rate"] == 11.5
         assert g["engagement_tier"] == "high"
 
-    def test_group_with_no_snapshots_zeros(self, tmp_path):
+    def test_group_with_no_snapshots_is_missing_not_zeros(self, tmp_path):
         collector = AnalyticsCollector(config_dir=str(tmp_path))
         collector._store().record_cross_post_group(
             content_hash="hash2", video_id="vid2", caption="c", source_url="u",
@@ -307,11 +307,14 @@ class TestGetCrossPostAnalytics:
         groups = collector.get_cross_post_analytics()
         assert len(groups) == 1
         g = groups[0]
-        assert g["total_views"] == 0
-        assert g["total_engagement_rate"] == 0
-        assert g["engagement_tier"] == "low"
-        assert g["platforms"]["youtube"]["engagement_rate"] == 0
-        assert g["platforms"]["youtube"]["engagement_tier"] == "low"
+        # Hidden-counts contract (audit 2026-08-28 follow-up): a group whose
+        # members reported nothing is MISSING data, not a fabricated zero —
+        # 0 would read as "captured, got nothing".
+        assert g["total_views"] is None
+        assert g["total_engagement_rate"] is None
+        assert g["engagement_tier"] == "unknown"
+        assert g["platforms"]["youtube"]["engagement_rate"] is None
+        assert g["platforms"]["youtube"]["engagement_tier"] == "unknown"
 
     def test_empty_store_returns_empty_list(self, tmp_path):
         collector = AnalyticsCollector(config_dir=str(tmp_path))
