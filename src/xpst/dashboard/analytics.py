@@ -164,16 +164,38 @@ def _fmt_num(n: int | float | None) -> str:
     return str(int(n))
 
 
-def _engagement_tier(rate: float) -> str:
+def _engagement_tier(rate: float | None) -> str:
     """Classify an engagement rate into a color-coded tier (B4.3).
 
     >5% → "high" (green), 1–5% → "medium" (yellow), <1% → "low" (red).
+    ``None`` (a component was missing, so the rate cannot be computed
+    honestly) → "unknown" — never a tier invented from a fabricated zero.
     """
+    if rate is None:
+        return "unknown"
     if rate >= 5:
         return "high"
     if rate >= 1:
         return "medium"
     return "low"
+
+
+def _accumulate(total: int | None, value: Any) -> int | None:
+    """Add a possibly-missing metric into a rollup total (hidden-counts rule).
+
+    ``None`` means "no snapshot reported this metric" (e.g. likes hidden on
+    a YouTube video). Missing values never turn a missing total into a
+    fabricated zero: the total stays ``None`` until at least one real value
+    is added; a real reported zero sums normally (analytics-accuracy audit
+    2026-08-28 follow-up).
+    """
+    if value is None:
+        return total
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return total
+    return (total or 0) + number
 
 
 def _relative_time(ts_str: str | None) -> str:
@@ -438,8 +460,12 @@ class AnalyticsReadModel:
         safe on any thread (G20). Same shape as get_engagement_data."""
         state = load_state(self.config_dir)
         posted = state.get("posted_videos", {})
+        # Metric fields start as None, not 0: a platform whose snapshots
+        # never reported a metric (hidden counts) stays "missing" in the
+        # rollup — a zero is only shown when a snapshot actually said 0
+        # (analytics-accuracy audit follow-up, hidden counts).
         engagement: dict[str, dict] = {
-            name: {"posts": 0, "views": 0, "likes": 0, "comments": 0, "shares": 0}
+            name: {"posts": 0, "views": None, "likes": None, "comments": None, "shares": None}
             for name in ["youtube", "instagram", "x", "tiktok", "threads"]
         }
         for video_data in posted.values():
@@ -457,7 +483,7 @@ class AnalyticsReadModel:
                 if target is None:
                     continue
                 for key in ("views", "likes", "comments", "shares"):
-                    target[key] += agg.get(key) or 0
+                    target[key] = _accumulate(target[key], agg.get(key))
         except Exception as exc:
             logger.debug("Snapshot read failed: %s", exc)
         return engagement
@@ -493,19 +519,21 @@ class AnalyticsReadModel:
 
         engagement = self.get_engagement_data() if live else self.get_engagement_from_snapshots()
         summary = self.get_summary_stats(engagement=engagement)
-        totals = {"views": 0, "likes": 0, "comments": 0, "shares": 0}
+        totals: dict[str, int | None] = {"views": None, "likes": None, "comments": None, "shares": None}
         platforms = []
         for platform, metrics in engagement.items():
             for key in totals:
-                totals[key] += metrics.get(key, 0)
+                totals[key] = _accumulate(totals[key], metrics.get(key))
             platforms.append(
                 {
                     "platform": platform,
                     "posts": metrics.get("posts", 0),
-                    "total_views": metrics.get("views", 0),
-                    "total_likes": metrics.get("likes", 0),
-                    "total_comments": metrics.get("comments", 0),
-                    "total_shares": metrics.get("shares", 0),
+                    # None = no snapshot reported this metric (hidden counts
+                    # stay missing, never a fabricated 0).
+                    "total_views": metrics.get("views"),
+                    "total_likes": metrics.get("likes"),
+                    "total_comments": metrics.get("comments"),
+                    "total_shares": metrics.get("shares"),
                     "available_metrics": self.get_available_metrics(platform),
                 }
             )
@@ -526,12 +554,13 @@ class AnalyticsReadModel:
             pass
         top_posts = []
         for post in self.get_top_posts(limit=5):
-            views = likes = 0
+            views: int | None = None
+            likes: int | None = None
             for platform, info in (post.get("platforms") or {}).items():
                 row = metrics_by_post.get((platform, resolve_platform_post_id(info)))
                 if row:
-                    views += row.get("views") or 0
-                    likes += row.get("likes") or 0
+                    views = _accumulate(views, row.get("views"))
+                    likes = _accumulate(likes, row.get("likes"))
             top_posts.append({**post, "total_views": views, "total_likes": likes})
 
         return {
@@ -567,23 +596,42 @@ class AnalyticsReadModel:
         result: list[dict[str, Any]] = []
         for group in groups:
             platforms = group.get("platforms", [])
-            total_views = 0
-            total_likes = 0
-            total_comments = 0
-            total_shares = 0
+            total_views: int | None = None
+            total_likes: int | None = None
+            total_comments: int | None = None
+            total_shares: int | None = None
+            # Per-field memory of whether ANY group member failed to report
+            # the metric (hidden counts). Subset totals stay useful, but the
+            # group engagement rate would silently undercount, so it goes
+            # None instead of lying.
+            group_missing: set[str] = set()
             platform_metrics: dict[str, dict[str, Any]] = {}
             for p in platforms:
                 snapshots = store.latest_for_post(p["platform"], p["post_id"])
                 metrics = snapshots[-1] if snapshots else {}
-                views = metrics.get("views", 0) or 0
-                likes = metrics.get("likes", 0) or 0
-                comments = metrics.get("comments", 0) or 0
-                shares = metrics.get("shares", 0) or 0
-                total_views += views
-                total_likes += likes
-                total_comments += comments
-                total_shares += shares
-                er = round((likes + comments + shares) / views * 100, 1) if views > 0 else 0
+                views = metrics.get("views")
+                likes = metrics.get("likes")
+                comments = metrics.get("comments")
+                shares = metrics.get("shares")
+                for key, value in (
+                    ("views", views),
+                    ("likes", likes),
+                    ("comments", comments),
+                    ("shares", shares),
+                ):
+                    if value is None:
+                        group_missing.add(key)
+                total_views = _accumulate(total_views, views)
+                total_likes = _accumulate(total_likes, likes)
+                total_comments = _accumulate(total_comments, comments)
+                total_shares = _accumulate(total_shares, shares)
+                # An engagement rate is only honest when EVERY component was
+                # reported: a missing count (hidden likes) would deflate the
+                # rate, so the rate is None ("unknown"), not a low number
+                # computed from a fabricated zero.
+                er: float | None = None
+                if views is not None and likes is not None and comments is not None and shares is not None:
+                    er = round((likes + comments + shares) / views * 100, 1) if views > 0 else 0
                 platform_metrics[p["platform"]] = {
                     "post_id": p["post_id"],
                     "url": p["url"],
@@ -594,9 +642,17 @@ class AnalyticsReadModel:
                     "engagement_rate": er,
                     "engagement_tier": _engagement_tier(er),
                 }
-            total_er = (
-                round((total_likes + total_comments + total_shares) / total_views * 100, 1) if total_views > 0 else 0
-            )
+            total_er: float | None = None
+            if (
+                total_views is not None
+                and total_likes is not None
+                and total_comments is not None
+                and total_shares is not None
+                and not group_missing
+            ):
+                total_er = round((total_likes + total_comments + total_shares) / total_views * 100, 1)
+                if total_views == 0:
+                    total_er = 0.0
             result.append(
                 {
                     "content_hash": group["content_hash"],
@@ -674,7 +730,7 @@ class AnalyticsReadModel:
         max_engagement = 0
         for platform, metrics in engagement.items():
             if metrics["posts"] > 0:  # Only consider platforms with posts
-                total_engagement = metrics["views"] + metrics["likes"] + metrics["comments"] + metrics["shares"]
+                total_engagement = sum(metrics[k] or 0 for k in ("views", "likes", "comments", "shares"))
                 if total_engagement > max_engagement:
                     max_engagement = total_engagement
                     best_platform = platform
@@ -785,7 +841,7 @@ class AnalyticsReadModel:
         error; callers inside a running asyncio loop must not use this path
         (it calls ``asyncio.run``) — await ``AnalyticsCollector.collect_all``
         directly instead. With no ids at all there is nothing to fetch, so
-        state-derived post counts are returned with zero metrics.
+        state-derived post counts are returned with missing (None) metrics.
 
         Returns dict keyed by platform name with aggregated metrics:
             {platform: {posts, views, likes, comments, shares}}
@@ -799,10 +855,13 @@ class AnalyticsReadModel:
         for name in ["youtube", "instagram", "x", "tiktok", "threads"]:
             engagement[name] = {
                 "posts": 0,
-                "views": 0,
-                "likes": 0,
-                "comments": 0,
-                "shares": 0,
+                # Missing counts stay missing: a platform whose posts never
+                # reported a metric (e.g. hidden YouTube likes) rollups to
+                # None, not a fabricated 0 (analytics-accuracy follow-up).
+                "views": None,
+                "likes": None,
+                "comments": None,
+                "shares": None,
             }
 
         # Count posts per platform from state
@@ -843,10 +902,8 @@ class AnalyticsReadModel:
             for platform, posts_data in data.items():
                 if platform in engagement:
                     for metrics in posts_data.values():
-                        engagement[platform]["views"] += metrics.get("views", 0)
-                        engagement[platform]["likes"] += metrics.get("likes", 0)
-                        engagement[platform]["comments"] += metrics.get("comments", 0)
-                        engagement[platform]["shares"] += metrics.get("shares", 0)
+                        for key in ("views", "likes", "comments", "shares"):
+                            engagement[platform][key] = _accumulate(engagement[platform][key], metrics.get(key))
 
         return engagement
 
