@@ -596,6 +596,58 @@ class StateManager:
         except (TypeError, ValueError):
             return None
 
+    def record_source_fetch_failure(self, source_name: str, error: str) -> None:
+        """Record a source-pipeline fetch failure (issue #296).
+
+        A dead source must degrade visible status instead of surfacing only
+        in a log file. The failure is persisted under
+        ``health.sources[source_name]`` so the daemon, ``xpst health``,
+        ``xpst doctor`` and MCP health readers all see it, even after a
+        daemon restart.
+
+        Args:
+            source_name: Source identifier (e.g. ``"tiktok"``).
+            error: The exception message (already formatted).
+        """
+        now = _utc_now_iso()
+
+        def update(state: dict[str, Any]) -> dict[str, Any]:
+            sources = state.setdefault("health", {}).setdefault("sources", {})
+            entry = sources.setdefault(
+                source_name,
+                {"status": "ok", "last_success": None, "consecutive_failures": 0, "last_error": None, "last_error_at": None},
+            )
+            entry["status"] = "error"
+            entry["last_error"] = str(error)
+            entry["last_error_at"] = now
+            entry["consecutive_failures"] = int(entry.get("consecutive_failures") or 0) + 1
+            return state
+
+        self._store.update(update)
+
+    def record_source_fetch_success(self, source_name: str) -> None:
+        """Clear a recorded source-fetch failure after a successful fetch.
+
+        No-op (no write) when the source was never failing, so the healthy
+        15-minute tick does not churn the state file — ``last_check`` already
+        records liveness per cycle.
+        """
+        current = self._state.get("health", {}).get("sources", {}).get(source_name) or {}
+        if not current.get("last_error") and not int(current.get("consecutive_failures") or 0):
+            return
+
+        def update(state: dict[str, Any]) -> dict[str, Any]:
+            sources = state.setdefault("health", {}).setdefault("sources", {})
+            entry = sources.setdefault(source_name, {})
+            entry["status"] = "ok"
+            entry["last_error"] = None
+            entry["last_error_at"] = None
+            entry["consecutive_failures"] = 0
+            entry["last_success"] = _utc_now_iso()
+            return state
+
+        self._store.update(update)
+
     # ── Circuit Breaker State ──
 
     def record_circuit_breaker_failure(self, platform: str) -> None:
