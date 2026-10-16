@@ -109,6 +109,11 @@
                   >
                     {row.badge.label}
                   </span>
+                  {#if row.badge.stalenessNote}
+                    <span class="xpst-staleness-note" data-stale={row.badge.stale ? "true" : "false"}>
+                      {row.badge.stalenessNote}
+                    </span>
+                  {/if}
                   <span class="xpst-source-note">{row.ownershipLabel}</span>
                 </td>
               </tr>
