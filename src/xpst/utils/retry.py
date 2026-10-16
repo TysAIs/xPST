@@ -42,6 +42,21 @@ logger = get_logger(__name__)
 
 T = TypeVar("T")
 
+#: Substrings that mark an error as a provider throttle (mirrors
+#: UploadService._is_rate_limit; kept here to avoid an import cycle).
+_RATE_LIMIT_MARKERS = (
+    "429",
+    "rate limit",
+    "rate_limit",
+    "too many requests",
+    "throttl",
+)
+
+
+def _looks_like_rate_limit(lowered_error: str) -> bool:
+    """True when an error string describes a provider rate limit."""
+    return any(marker in lowered_error for marker in _RATE_LIMIT_MARKERS)
+
 
 @dataclass
 class RetryConfig:
@@ -314,6 +329,7 @@ async def retry_operation(
     ledger: AttemptLedger | None = None,
     content_hash: str = "",
     caption: str = "",
+    on_rate_limit: Callable[[str], None] | None = None,
     **kwargs: Any,
 ) -> Any:
     """
@@ -321,6 +337,13 @@ async def retry_operation(
 
     Fatal errors (401, 403, invalid format, etc.) are raised immediately.
     Retryable errors (429, timeout, etc.) are retried with backoff.
+
+    ``on_rate_limit`` is called with the error text whenever a failed result
+    or exception looks like a rate limit, at the moment it is first seen —
+    including when the uploader returned the throttle as a failed
+    ``UploadResult`` that no keyword re-raises. This is how the persistent
+    cooldown state machine always learns about a throttle, even on paths
+    where the in-call retry never fires.
 
     An UNKNOWN outcome (timeout, connection drop, 5xx raised after the request
     was sent) is settled by a read-back before any retry: pass ``reconciler``
@@ -365,6 +388,8 @@ async def retry_operation(
                 and result.error
             ):
                 error_msg = str(result.error).lower()
+                if on_rate_limit is not None and _looks_like_rate_limit(error_msg):
+                    on_rate_limit(str(result.error))
                 # Unknown outcomes (timeout/connection/5xx after submit) can
                 # mean the request SUCCEEDED server-side with the response
                 # lost. Re-invoking the operation then double-posts on
@@ -400,6 +425,9 @@ async def retry_operation(
             return result
         except config.retryable_exceptions as e:
             last_exception = e
+
+            if on_rate_limit is not None and _looks_like_rate_limit(str(e).lower()):
+                on_rate_limit(str(e))
 
             # Check if error is fatal - don't retry
             if is_fatal(e, platform):
