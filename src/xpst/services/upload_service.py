@@ -21,6 +21,8 @@ Edge case handling:
 
 import asyncio
 import hashlib
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +57,28 @@ _TOS_UNOFFICIAL_PLATFORMS = {"instagram", "x"}
 def _as_str(value: Any) -> str | None:
     """Return value when it is a real string, else None (mock-safe)."""
     return value if isinstance(value, str) and value else None
+
+
+_COOLDOWN_ERROR_TOKEN = "RATE_LIMIT_COOLDOWN"
+
+
+def _is_cooldown_deferral(error: str | None) -> bool:
+    """True when the error is our own cooldown deferral (scheduling, not failure)."""
+    return bool(error) and _COOLDOWN_ERROR_TOKEN in error
+
+
+def _parse_retry_after_s(error: str | None) -> float | None:
+    """Pull a Retry-After hint out of an error string, if the platform sent one.
+
+    Providers surface it in different shapes (``Retry-After: 120``,
+    ``retry_after=120``, ``{'retry_after': 120}``); the value is the number
+    that follows the token. None when absent — the escalation ladder then
+    decides the pause on its own.
+    """
+    if not error:
+        return None
+    match = re.search(r"retry[-_ ]after\D{0,3}(\d{1,6})", error, re.IGNORECASE)
+    return int(match.group(1)) if match else None
 
 
 class AuthExpiredError(Exception):
@@ -105,7 +129,27 @@ class UploadService:
         self.config = config
         self.anti_bot = anti_bot
         self._crash_recovery: Any = None  # Injected by engine
-        self._rate_limit_paused: dict[str, float] = {}
+        # Durable per-platform rate-limit cooldown state machine (10-01 halt
+        # hardening). Replaces the old in-memory pause dict that a daemon
+        # restart silently wiped. Test doubles may pass a path or disable
+        # persistence; anything unresolved degrades to in-process cooling.
+        from xpst.utils.cooldown_store import CooldownStore
+
+        store_dir = getattr(config, "config_dir", None)
+        if not isinstance(store_dir, (str, Path)):
+            store_dir = None
+            try:
+                from xpst.utils.platform import get_config_dir
+
+                store_dir = get_config_dir()
+            except Exception:  # pragma: no cover - defensive import-time guard
+                pass
+        self.rate_cooldowns = (
+            CooldownStore(store_dir)
+            if store_dir is not None
+            else CooldownStore(store_dir, persist=False)
+        )
+        self._rate_limit_paused: dict[str, float] = {}  # legacy in-process marker
         # Records unknown-outcome attempts so a retry reconciles the destination
         # read-back before it can publish a duplicate (see xpst.reconcile).
         self._attempt_ledger = AttemptLedger()
@@ -155,6 +199,7 @@ class UploadService:
         source_platform: str = "",
         visibility: str | None = None,
         ignore_window: bool = False,
+        dry_run: bool = False,
     ) -> UploadResult:
         """Single method that handles the full upload pipeline.
 
@@ -165,6 +210,11 @@ class UploadService:
         ``ignore_window`` carries a deliberate manual bypass (CLI ``--now`` /
         MCP+HTTP ``force``): the time-of-day gate is skipped and the post
         goes out immediately, honouring the flag's documented promise.
+
+        ``dry_run`` performs every preflight and scheduling decision but
+        touches no live API: an upload attempted while the platform is in a
+        rate-limit cooldown is reported as a deferred schedule instead of
+        blocking, and the uploader itself is never awaited past this gate.
 
         Returns:
             UploadResult with success/failure and metadata.
@@ -198,21 +248,36 @@ class UploadService:
                 )
                 await asyncio.sleep(wait_time)
 
-        # ── Rate limit pause/resume ──
-        if platform_name in self._rate_limit_paused:
-            import time
-
-            paused_until = self._rate_limit_paused[platform_name]
-            now = time.time()
-            if now < paused_until:
-                wait_secs = paused_until - now
-                logger.info(
-                    "Rate limit: waiting %.0fs for %s",
-                    wait_secs,
-                    platform_name,
-                )
-                await asyncio.sleep(wait_secs)
-            del self._rate_limit_paused[platform_name]
+        # ── Rate-limit cooldown gate (persistent state machine) ──
+        # The pause now lives in CooldownStore, so a daemon restart no longer
+        # forgets an active cooldown and re-triggers the same Meta wall on the
+        # first post after boot (the 10-01 halt failure mode). While cooling:
+        # defer (schedule, do not fail, do not encode, do not call the API).
+        cooldown_remaining = self.rate_cooldowns.remaining_s(platform_name)
+        if cooldown_remaining > 0:
+            resume = datetime.fromtimestamp(
+                datetime.now().timestamp() + cooldown_remaining
+            ).isoformat(timespec="seconds")
+            logger.info(
+                "Rate-limit cooldown: deferring %s upload, %.0fs remaining",
+                platform_name,
+                cooldown_remaining,
+            )
+            return UploadResult(
+                success=False,
+                error=(
+                    f"RATE_LIMIT_COOLDOWN: {platform_name} cooling, "
+                    f"resume after {resume}"
+                ),
+                platform=platform_name,
+                metadata={
+                    "deferred": True,
+                    "cooldown": True,
+                    "dry_run": dry_run,
+                    "resume_after": resume,
+                    "remaining_s": round(cooldown_remaining, 1),
+                },
+            )
 
         # ── Anti-bot: Vary caption ──
         if self.anti_bot:
@@ -387,6 +452,11 @@ class UploadService:
             retry_kwargs: dict[str, Any] = {
                 "config": STANDARD_RETRY,
                 "platform": platform_name,
+                # First-sight throttle → one strike in the persistent cooldown
+                # state machine (escalating ladder, Retry-After honoured, Meta
+                # family cooled). Survives daemon restart, unlike the old
+                # in-memory pause dict — the 10-01 halt failure mode.
+                "on_rate_limit": self._note_rate_limit(platform_name),
                 # X maps duplicate posts to success server-side; IG/YT do
                 # not, so an unknown outcome there is reconciled against the
                 # destination before any retry (G07) — never blind-retried.
@@ -431,6 +501,9 @@ class UploadService:
                 self.circuit_breakers.record_success(platform_name)
                 self.state.update_platform_health(platform_name, True)
                 self.quota_manager.record_upload(platform_name)
+                # A clean publish decays the cooldown strike count so a
+                # recovered platform walks back down the escalation ladder.
+                self.rate_cooldowns.note_success(platform_name)
 
                 # Record in anti-bot tracker
                 if self.anti_bot:
@@ -450,19 +523,22 @@ class UploadService:
                         error=f"AUTH EXPIRED: {upload_result.error}",
                     )
 
-                # Check for rate limit and schedule pause
+                # The cooldown strike was already recorded at first sight of
+                # the throttle (retry_operation's on_rate_limit hook). Make
+                # sure the legacy in-process marker agrees, for callers that
+                # still read it.
                 if self._is_rate_limit(upload_result.error):
                     import time
 
-                    pause_duration = self._calculate_rate_limit_pause(platform_name)
-                    self._rate_limit_paused[platform_name] = time.time() + pause_duration
-                    logger.warning(
-                        "Rate limit hit for %s, pausing for %.0fs",
-                        platform_name,
-                        pause_duration,
-                    )
+                    remaining = self.rate_cooldowns.remaining_s(platform_name)
+                    if remaining > 0:
+                        self._rate_limit_paused[platform_name] = (
+                            time.time() + remaining
+                        )
 
-                if upload_result.metadata.get("deferred"):
+                if upload_result.metadata.get("deferred") or _is_cooldown_deferral(
+                    upload_result.error
+                ):
                     # G11: an anti-bot deferral is scheduling, not failure —
                     # recording it as failure polluted the DLQ and platform
                     # health and masked real problems.
@@ -481,7 +557,7 @@ class UploadService:
                         platform_name,
                         upload_result.error,
                     )
-                self.state.update_platform_health(platform_name, False)
+                    self.state.update_platform_health(platform_name, False)
                 # Notify if circuit breaker just opened
                 if self.circuit_breakers._breakers.get(platform_name, None):
                     breaker = self.circuit_breakers._breakers[platform_name]
@@ -520,6 +596,22 @@ class UploadService:
                 error=f"Upload failed: {truncate_error(str(e))}",
                 platform=platform_name,
             )
+
+    def _note_rate_limit(self, platform_name: str):
+        """Build the once-only on_rate_limit hook for one upload call."""
+        fired = {"done": False}
+
+        def _note(error_text: str) -> None:
+            if fired["done"]:
+                return
+            fired["done"] = True
+            self.rate_cooldowns.record_hit(
+                platform_name,
+                retry_after_s=_parse_retry_after_s(error_text),
+                reason=error_text,
+            )
+
+        return _note
 
     def _reconcile_gate(
         self,
@@ -606,9 +698,11 @@ class UploadService:
         return any(ind in error_lower for ind in rate_limit_indicators)
 
     def _calculate_rate_limit_pause(self, platform_name: str) -> float:
-        """Calculate pause duration for rate limit with exponential backoff.
+        """Legacy pause ladder (60s doubling, 1h cap), kept for API compat.
 
-        Starts at 60s, doubles each time, max 3600s (1 hour).
+        The authoritative schedule now lives in
+        :attr:`UploadService.rate_cooldowns` (persistent CooldownStore,
+        24h cap) — this helper only feeds the legacy in-process marker dict.
 
         Args:
             platform_name: Platform that hit the limit.

@@ -725,7 +725,11 @@ class CrossPostEngine:
                     video_id=video_id,
                     post_url=upload_result.post_url or "",
                 )
-            elif upload_result.error != "Circuit breaker open" and "QUOTA_EXHAUSTED" not in (upload_result.error or ""):
+            elif (
+                upload_result.error != "Circuit breaker open"
+                and "QUOTA_EXHAUSTED" not in (upload_result.error or "")
+                and "RATE_LIMIT_COOLDOWN" not in (upload_result.error or "")
+            ):
                 self.notifier.notify_upload_failure(
                     platform=platform_name,
                     video_id=video_id,
