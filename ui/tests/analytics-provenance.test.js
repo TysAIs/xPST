@@ -17,6 +17,7 @@ import {
   metricCell,
   outcomeRows,
   platformRows,
+  relativeAge,
   reportHeadline,
   sourceBadge,
 } from "../src/lib/analytics.js";
@@ -169,4 +170,54 @@ test("the API client asks the outcomes endpoint for live data explicitly", async
   const api = await text(join(UI_ROOT, "src/lib/api.js"));
   assert.match(api, /\/api\/analytics\/outcomes/);
   assert.match(api, /outcomeReport/);
+});
+
+// Staleness honesty (analytics-accuracy audit 2026-08-28 follow-up): a
+// recorded row must say how old it is — "as of Xh ago" — so a stale
+// snapshot is never read as a live number.
+
+test("relativeAge formats staleness hours as human age copy", () => {
+  assert.equal(relativeAge(0), "just now");
+  assert.equal(relativeAge(0.5), "30m ago");
+  assert.equal(relativeAge(2.75), "2h ago");
+  assert.equal(relativeAge(30), "1d ago");
+  assert.equal(relativeAge(50.9), "2d ago");
+  assert.equal(relativeAge(null), null);
+  assert.equal(relativeAge(undefined), null);
+  assert.equal(relativeAge(-1), null);
+});
+
+test("a recorded badge carries an 'as of Xh ago' staleness note", () => {
+  const fresh = sourceBadge({
+    data_source: "recorded",
+    staleness: "fresh",
+    staleness_hours: 2.5,
+    last_captured: "2026-09-14T14:21:17+00:00",
+  });
+  assert.equal(fresh.stalenessNote, "as of 2h ago");
+  assert.equal(fresh.stale, false);
+  assert.match(fresh.title, /captured 2h ago/);
+
+  const stale = sourceBadge({
+    data_source: "recorded",
+    staleness: "stale",
+    staleness_hours: 30,
+    last_captured: "2026-09-13T08:00:00+00:00",
+  });
+  assert.equal(stale.stalenessNote, "as of 1d ago");
+  assert.equal(stale.stale, true);
+  assert.match(stale.title, /stale: older than 24h/);
+
+  const live = sourceBadge({ data_source: "live" });
+  assert.equal(live.stalenessNote, null);
+});
+
+test("the Analytics page renders the staleness note and the CSS styles it", async () => {
+  const source = await text(join(UI_ROOT, "src/pages/Analytics.svelte"));
+  assert.match(source, /xpst-staleness-note/);
+  assert.match(source, /row\.badge\.stalenessNote/);
+  const css = await text(join(UI_ROOT, "src/app.css"));
+  const note = css.match(/\.xpst-staleness-note\s*\{[^}]*\}/);
+  assert.ok(note, "no .xpst-staleness-note rule");
+  assert.match(css, /\.xpst-staleness-note\[data-stale="true"\]/);
 });
