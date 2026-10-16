@@ -11,13 +11,16 @@ and on the TEXT route (which the schedule store cannot carry, so
 * ``_deferred`` respects ``ignore_window``;
 * every engine manual route forwards ``force_now`` as ``ignore_window``;
 * CLI ``--now``, MCP ``force`` and HTTP ``force`` reach the engine kwarg;
-* a text post fired outside the window PUBLISHES (no gate, no queue, no
-  dead deferred row) on the engine and on the CLI.
+* a text post fired outside the window PUBLISHES on the engine (no gate,
+  no dead deferred row), and on the CLI it is either queued to the schedule
+  store (the 50f95fd contract: text entries fire through ``post_text``) or
+  published outright under ``--now``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -204,7 +207,12 @@ def test_text_post_publishes_outside_the_window(tmp_path: Path, monkeypatch) -> 
     uploader.post_text.assert_awaited_once()
 
 
-def test_cli_text_post_outside_the_window_publishes(config_dir: str, night) -> None:
+def test_cli_text_post_outside_the_window_defers_to_the_queue(config_dir: str, night) -> None:
+    """A night-time CLI text post without --now is QUEUED, not dropped and not
+    force-published. 50f95fd made the schedule store able to carry text
+    entries (they fire through post_text), so the CLI defers like every other
+    route instead of publishing past the gate — the old 'must publish' premise
+    was the black hole; the queue is now the honest parking spot."""
     calls: dict[str, Any] = {}
 
     class _Engine:
@@ -224,8 +232,6 @@ def test_cli_text_post_outside_the_window_publishes(config_dir: str, night) -> N
 
     import xpst.cli as cli_mod
     calls_engine = _Engine()
-    monkey = AsyncMock()
-    monkey.attach = calls_engine  # keep ref
 
     original = cli_mod.CrossPostEngine
     cli_mod.CrossPostEngine = lambda cfg: calls_engine
@@ -239,7 +245,58 @@ def test_cli_text_post_outside_the_window_publishes(config_dir: str, night) -> N
         cli_mod.CrossPostEngine = original
 
     assert result.exit_code == 0, result.output
+    payload = json.loads(result.output[result.output.index("{"):])
+    assert payload.get("deferred") is True, payload
+    assert payload.get("reason") == "outside_anti_bot_window", payload
+    assert "post_text" not in calls, "deferred CLI posts must not publish past the gate"
+
+    entries = json.loads(
+        (Path(config_dir) / "schedule.json").read_text(encoding="utf-8")
+    )
+    assert len(entries) == 1, entries
+    assert entries[0]["content_type"] == "text"
+    assert entries[0]["video_path"] == "", "text deferral must not fake a media path"
+
+
+def test_cli_now_publishes_text_outside_the_window(config_dir: str, night) -> None:
+    """--now keeps its documented promise on the text route: publish now,
+    no queue entry, even with the window closed."""
+    calls: dict[str, Any] = {}
+
+    class _Engine:
+        def __init__(self, _cfg: Any = None) -> None:
+            self.config = XPSTConfig.load(str(Path(config_dir) / "config.yaml"))
+            self._platforms: dict[str, Any] = {"x": MagicMock()}
+
+        async def post_text(self, text, platforms, *, per_destination=None):
+            calls["post_text"] = text
+            return CrossPostResult(
+                video_id="text-1",
+                caption=text,
+                results={"x": UploadResult(
+                    success=True, post_id="1",
+                    post_url="https://x.com/i/status/1", platform="x")},
+            )
+
+    import xpst.cli as cli_mod
+    calls_engine = _Engine()
+
+    original = cli_mod.CrossPostEngine
+    cli_mod.CrossPostEngine = lambda cfg: calls_engine
+    try:
+        result = CliRunner().invoke(
+            main,
+            ["--config", str(Path(config_dir) / "config.yaml"),
+             "post", "--text", TEXT, "--platform", "x", "--now", "--json"],
+        )
+    finally:
+        cli_mod.CrossPostEngine = original
+
+    assert result.exit_code == 0, result.output
     assert calls.get("post_text") == TEXT
+    assert not (Path(config_dir) / "schedule.json").exists() or json.loads(
+        (Path(config_dir) / "schedule.json").read_text(encoding="utf-8")
+    ) == [], "--now must not also queue the post"
 
 
 def test_cli_now_flag_reaches_the_engine_video_route(config_dir: str, night, tmp_path: Path) -> None:
