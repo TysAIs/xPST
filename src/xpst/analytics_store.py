@@ -167,7 +167,7 @@ class AnalyticsStore:
         with self._connect() as conn:
             return [self._row_to_dict(r) for r in conn.execute(query, params)]
 
-    def platform_totals(self) -> dict[str, dict[str, int]]:
+    def platform_totals(self) -> dict[str, dict[str, int | None]]:
         """Sum core metrics over the LATEST snapshot per post, by platform.
 
         Same semantics as summing ``latest()`` rows in Python, but the
@@ -177,17 +177,24 @@ class AnalyticsStore:
         /state request and collapsed under concurrent load (GIL starvation);
         this keeps the dashboard O(platforms) instead of O(snapshots).
 
+        Missing counts stay missing (analytics-accuracy audit 2026-08-28,
+        hidden-counts follow-up): SQLite ``SUM`` ignores NULLs, so a field
+        whose every latest snapshot is NULL (e.g. likes hidden on every
+        YouTube video) returns ``None`` — "no snapshot reported this" —
+        NOT a fabricated real zero. A real reported zero still sums to 0.
+
         Returns:
             {platform: {views, likes, comments, shares, reposts, saves}}
+            with per-field values of ``int`` or ``None``.
         """
         query = """
             SELECT s.platform AS platform,
-                   COALESCE(SUM(s.views), 0)    AS views,
-                   COALESCE(SUM(s.likes), 0)    AS likes,
-                   COALESCE(SUM(s.comments), 0) AS comments,
-                   COALESCE(SUM(s.shares), 0)   AS shares,
-                   COALESCE(SUM(s.reposts), 0)  AS reposts,
-                   COALESCE(SUM(s.saves), 0)    AS saves
+                   SUM(s.views)    AS views,
+                   SUM(s.likes)    AS likes,
+                   SUM(s.comments) AS comments,
+                   SUM(s.shares)   AS shares,
+                   SUM(s.reposts)  AS reposts,
+                   SUM(s.saves)    AS saves
             FROM metric_snapshots s
             JOIN (
                 SELECT platform, post_id, MAX(captured_at) AS captured_at
@@ -267,10 +274,12 @@ class AnalyticsStore:
             result.setdefault(str(row.get("post_id") or ""), []).append(row)
         return result
 
-    def totals_before(self, cutoff_iso: str) -> dict[str, int] | None:
+    def totals_before(self, cutoff_iso: str) -> dict[str, int | None] | None:
         """Sum of each core metric over the latest snapshot per post captured
         at or before ``cutoff_iso``. None when no history that old exists —
-        callers show "no history yet" instead of fabricating a comparison."""
+        callers show "no history yet" instead of fabricating a comparison.
+        Per-field ``None`` means no snapshot that old reported the metric
+        (hidden counts stay missing, never a fabricated zero)."""
         query = """
             SELECT s.* FROM metric_snapshots s
             JOIN (
@@ -285,10 +294,12 @@ class AnalyticsStore:
             rows = [self._row_to_dict(r) for r in conn.execute(query, (cutoff_iso,))]
         if not rows:
             return None
-        totals = {"views": 0, "likes": 0, "comments": 0, "shares": 0}
+        totals: dict[str, int | None] = {"views": None, "likes": None, "comments": None, "shares": None}
         for row in rows:
             for key in totals:
-                totals[key] += row.get(key) or 0
+                value = row.get(key)
+                if value is not None:
+                    totals[key] = (totals[key] or 0) + int(value)
         return totals
 
     def snapshot_count(self) -> int:
