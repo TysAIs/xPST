@@ -736,6 +736,19 @@ input,
   line-height: 1;
 }
 
+.xpst-staleness-note {
+  margin-left: var(--xpst-space-1);
+  font: var(--xpst-type-label);
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  color: var(--xpst-color-text-muted);
+  white-space: nowrap;
+}
+
+.xpst-staleness-note[data-stale="true"] {
+  color: var(--xpst-color-warning, #b45309);
+}
+
 .xpst-source-badge[data-source="none"] {
   border-style: dashed;
   border-color: var(--xpst-color-border-strong);
