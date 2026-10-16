@@ -132,7 +132,13 @@ def test_live_totals_equal_recorded_snapshot_totals(tmp_path):
 def test_missing_id_is_expected_shape_and_never_fabricates(tmp_path):
     """A destination entry without an id (writer default for a failed
     upload) must not error and must not fabricate metrics — posts are
-    counted from state, metrics stay honestly zero, no fetch is made."""
+    counted from state, metrics stay honestly MISSING (None, never a
+    fabricated 0), no fetch is made.
+
+    Hidden-counts follow-up (audit 2026-08-28): "honestly zero" became
+    "honestly missing". A failed upload has NO reported metrics, so every
+    metric is None, not 0 — a 0 would read as "the platform reported zero".
+    """
     _record_post_via_state_manager(tmp_path, post_id=None)
     _assert_state_uses_real_schema(tmp_path)
 
@@ -148,10 +154,10 @@ def test_missing_id_is_expected_shape_and_never_fabricates(tmp_path):
 
     collector.collect_all.assert_not_awaited()
     assert engagement["x"]["posts"] == 1
-    assert engagement["x"]["views"] == 0
-    assert engagement["x"]["likes"] == 0
-    assert engagement["x"]["comments"] == 0
-    assert engagement["x"]["shares"] == 0
+    assert engagement["x"]["views"] is None
+    assert engagement["x"]["likes"] is None
+    assert engagement["x"]["comments"] is None
+    assert engagement["x"]["shares"] is None
 
 
 def test_collection_error_propagates_fail_closed(tmp_path):
