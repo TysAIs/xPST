@@ -17,7 +17,6 @@ from xpst.config import XPSTConfig
 from xpst.services.source_service import SourceService
 from xpst.state import StateManager
 
-
 DEAD_SOURCE_ERROR = "[Errno 2] No such file or directory: 'yt-dlp'"
 
 
@@ -157,6 +156,7 @@ class TestDoctorSurfacesDeadSource:
     def test_doctor_lists_source_pipeline_issue(self, config, capsys):
         """doctor must include a warning issue for a recorded dead source."""
         import click
+
         from xpst.cli import doctor as doctor_cmd
 
         state = StateManager(config.config_dir)
