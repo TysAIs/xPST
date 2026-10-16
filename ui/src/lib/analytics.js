@@ -11,22 +11,41 @@ export const SOURCE_LABEL = {
   recorded: "Recorded",
 };
 
+/** Human relative age for a staleness_hours value: "as of 2h ago" copy. */
+export function relativeAge(stalenessHours) {
+  if (stalenessHours === null || stalenessHours === undefined) return null;
+  const hours = Number(stalenessHours);
+  if (!Number.isFinite(hours) || hours < 0) return null;
+  if (hours < 1 / 60) return "just now";
+  if (hours < 1) return `${Math.floor(hours * 60)}m ago`;
+  if (hours < 24) return `${Math.floor(hours)}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 /** Title/tone for a platform row's provenance badge. */
 export function sourceBadge(entry) {
   const source = entry?.data_source;
   if (source === "live") {
-    return { label: SOURCE_LABEL.live, tone: "live", title: "Fetched from the platform API during this run" };
+    return { label: SOURCE_LABEL.live, tone: "live", title: "Fetched from the platform API during this run", stalenessNote: null };
   }
   if (source === "recorded") {
+    // Staleness honesty (analytics-accuracy audit follow-up): a recorded
+    // row says how old it is, right next to the badge — "as of 3h ago" —
+    // so nobody reads a two-day-old snapshot as a live number.
+    const age = relativeAge(entry?.staleness_hours);
     return {
       label: SOURCE_LABEL.recorded,
       tone: "recorded",
-      title: entry?.last_captured
-        ? `Last snapshot captured ${entry.last_captured}`
-        : "Last snapshot xPST persisted",
+      stale: entry?.staleness === "stale",
+      stalenessNote: age ? `as of ${age}` : null,
+      title: age
+        ? `Last snapshot captured ${age}${entry?.staleness === "stale" ? " (stale: older than 24h)" : ""}`
+        : entry?.last_captured
+          ? `Last snapshot captured ${entry.last_captured}`
+          : "Last snapshot xPST persisted",
     };
   }
-  return { label: "No data", tone: "none", title: entry?.note || "Nothing recorded for this platform yet" };
+  return { label: "No data", tone: "none", title: entry?.note || "Nothing recorded for this platform yet", stalenessNote: null };
 }
 
 /**
