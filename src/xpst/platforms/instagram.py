@@ -127,6 +127,18 @@ class InstagramUploader(PlatformUploader):
     # a truncation boundary: xPST never silently drops items from a carousel.
     MAX_CAROUSEL_ITEMS = 10
 
+    # ── retry economy (pinned by ``xpst.utils.request_budget``) ───────────
+    #: Extra attempts the instagrapi path makes for TRANSIENT errors (503,
+    #: timeouts). 3 extra attempts = at most 4 provider requests per upload
+    #: call.
+    MAX_TRANSIENT_RETRIES = 3
+    #: A rate limit is NOT retried here: the service's ``retry_operation`` owns
+    #: that retry and records the cooldown. Looping on a throttle in both
+    #: layers multiplied one throttled post into 16 provider requests / ~96s of
+    #: sleeping (measured). ``tests/test_retry_economy_budget.py`` derives the
+    #: worst case from this flag and fails loudly if it is ever flipped back.
+    RETRIES_A_THROTTLE = False
+
     def __init__(self, config: XPSTConfig) -> None:
         """Initialize Instagram uploader with lazy client caching."""
         super().__init__(config)
@@ -679,7 +691,7 @@ class InstagramUploader(PlatformUploader):
         if len(caption) > self.MAX_CAPTION_LENGTH:
             caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
 
-        max_retries = 3
+        max_retries = self.MAX_TRANSIENT_RETRIES
         last_error = None
 
         for attempt in range(max_retries + 1):
