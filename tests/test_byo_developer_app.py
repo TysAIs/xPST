@@ -39,6 +39,7 @@ from xpst.byo import (
 )
 from xpst.cli import main
 from xpst.config import XPSTConfig
+from xpst.mcp.server import result_is_error
 
 APP_ID = "1234567890123456"
 APP_SECRET = "meta-fake-secret-9"
@@ -283,7 +284,7 @@ def test_no_secret_in_mcp_payloads(config):
         )
     )
     stored_text = stored.content[0].text
-    assert stored.isError is not True
+    assert result_is_error(stored) is not True
     assert APP_SECRET not in stored_text
     assert json.loads(stored_text)["app_id_masked"] == "…3456"
 

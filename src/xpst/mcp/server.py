@@ -21,12 +21,12 @@ from typing import TYPE_CHECKING, Any
 try:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
+    from mcp.types import CallToolResult as _SDKCallToolResult
     from mcp.types import (
-        CallToolResult,
         ListToolsResult,
         TextContent,
-        Tool,
     )
+    from mcp.types import Tool as _SDKTool
     _MCP_IMPORT_ERROR: ImportError | None = None
     HAS_MCP = True
 except ImportError as exc:  # pragma: no cover - exercised only without the extra
@@ -68,10 +68,58 @@ except ImportError as exc:  # pragma: no cover - exercised only without the extr
 
     Server = _MCPStub  # type: ignore[assignment,misc]
     stdio_server = None  # type: ignore[assignment]
-    CallToolResult = _MCPStub  # type: ignore[assignment,misc]
     ListToolsResult = _MCPStub  # type: ignore[assignment,misc]
     TextContent = _MCPStub  # type: ignore[assignment,misc]
-    Tool = _MCPStub  # type: ignore[assignment,misc]
+    _SDKCallToolResult = _MCPStub  # type: ignore[assignment,misc]
+    _SDKTool = _MCPStub  # type: ignore[assignment,misc]
+
+# The tool registry and every tool result are built with the *wire* field names
+# (``inputSchema``, ``isError``). mcp 1.x exposes those as the Python field
+# names; 2.x renamed the Python fields to ``input_schema``/``is_error`` but
+# still accepts the camelCase aliases when constructing. Only the type stubs
+# disagree, and mypy can only see whichever SDK line is installed, so the two
+# constructors are declared untyped here: one seam instead of 65 call sites
+# pinned to one SDK version. tests/test_mcp_*.py assert the resulting shapes on
+# both lines.
+CallToolResult: Any = _SDKCallToolResult
+Tool: Any = _SDKTool
+
+
+def result_is_error(result: Any) -> bool:
+    """True when a tool result carries an error verdict, on any mcp SDK line.
+
+    mcp 1.x names the wire field ``isError``; 2.x renamed the Python field to
+    ``is_error`` and dropped the camelCase attribute. Both SDKs accept the
+    camelCase *keyword* when building a result, so only reads need this.
+    """
+    for attribute in ("isError", "is_error"):
+        value = getattr(result, attribute, None)
+        if value is not None:
+            return bool(value)
+    return False
+
+
+def tool_input_schema(tool: Any) -> dict[str, Any]:
+    """A tool's JSON input schema, on any mcp SDK line (``inputSchema``/``input_schema``)."""
+    for attribute in ("inputSchema", "input_schema"):
+        schema = getattr(tool, attribute, None)
+        if schema is not None:
+            return dict(schema)
+    return {}
+
+
+def initialization_server_info(result: Any) -> Any:
+    """The ``initialize`` payload's server identity, on any mcp SDK line.
+
+    Client-side helper for the stdio smoke scripts: mcp 2.x renamed
+    ``InitializeResult.serverInfo`` to ``server_info``.
+    """
+    for attribute in ("serverInfo", "server_info"):
+        info = getattr(result, attribute, None)
+        if info is not None:
+            return info
+    return None
+
 
 from xpst.config import XPSTConfig
 from xpst.content import (
@@ -2909,17 +2957,53 @@ async def _handle_kb_tool(name: str, args: dict[str, Any]) -> CallToolResult:
 # every library bump — the defect the 2026-09-28 socials QA logged as D5.
 from xpst import __version__ as _xpst_version  # noqa: E402
 
-app = Server("xpst-mcp", version=_xpst_version)
+# mcp 2.0 replaced decorator registration (``@app.list_tools()`` /
+# ``@app.call_tool()``) with constructor handlers that receive
+# ``(request_context, params)``. The dependency range spans both lines
+# (``mcp>=1.0.0,<3.0.0``), so probe the installed SDK instead of pinning the
+# module to one of them.
+_SERVER_DECORATOR_API = HAS_MCP and hasattr(Server, "list_tools")
 
 
-@app.list_tools()
 async def list_tools() -> ListToolsResult:
+    """Serve ``tools/list``: the registry agents discover. Version-independent."""
     return ListToolsResult(tools=TOOLS)
 
 
-@app.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+    """Serve ``tools/call``: one dispatch into the guarded handler."""
     return await handle_call_tool(name, arguments)
+
+
+def _make_app() -> Any:
+    """Build the MCP server on the installed SDK's registration API."""
+    if not _SERVER_DECORATOR_API:  # mcp>=2.0, or the no-extra stub
+        # 2.x handlers are ``(request_context, params)``; params is a
+        # CallToolRequestParams / PaginatedRequestParams model. The result
+        # types are deliberately unannotated here: with the 'mcp' extra absent
+        # ListToolsResult/CallToolResult are stub *values*, not types.
+        async def _on_list_tools(_context: Any, _params: Any):
+            return await list_tools()
+
+        async def _on_call_tool(_context: Any, params: Any):
+            return await call_tool(
+                getattr(params, "name", ""), getattr(params, "arguments", None) or {}
+            )
+
+        return Server(
+            "xpst-mcp",
+            version=_xpst_version,
+            on_list_tools=_on_list_tools,
+            on_call_tool=_on_call_tool,
+        )
+
+    server = Server("xpst-mcp", version=_xpst_version)
+    server.list_tools()(list_tools)
+    server.call_tool()(call_tool)
+    return server
+
+
+app = _make_app()
 
 
 async def main(config: XPSTConfig | None = None) -> None:

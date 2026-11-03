@@ -34,6 +34,7 @@ from typing import Any
 
 import pytest
 
+from xpst.mcp.server import result_is_error
 from xpst.schedule_manager import ScheduleManager, entry_fire_route
 from xpst.scheduling_engine import SchedulingEngine
 
@@ -402,7 +403,7 @@ def test_mcp_schedule_add_without_video_path_creates_text_entry(tmp_path: Path):
             },
         )
     )
-    assert not result.isError
+    assert not result_is_error(result)
     payload = json.loads(result.content[0].text)
     entry = payload["scheduled"]
     assert entry["content_type"] == "text"

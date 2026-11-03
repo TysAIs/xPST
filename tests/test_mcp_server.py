@@ -10,6 +10,7 @@ pytest.importorskip("mcp", reason="mcp extra not installed")
 
 from xpst.config import XPSTConfig
 from xpst.mcp import server as mcp_server
+from xpst.mcp.server import result_is_error
 
 
 def _text_payload(result) -> dict:
@@ -68,7 +69,7 @@ async def test_mcp_providers_tool_returns_catalog_without_engine_init(tmp_path):
 
     data = _text_payload(result)
 
-    assert result.isError is not True
+    assert result_is_error(result) is not True
     assert "sources" in data
     assert "destinations" in data
     assert {item["name"] for item in data["destinations"]} >= {"youtube", "instagram", "x"}
