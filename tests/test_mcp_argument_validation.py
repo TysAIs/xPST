@@ -15,8 +15,6 @@ from pathlib import Path
 
 import pytest
 
-from xpst.mcp.server import result_is_error
-
 mcp_server = pytest.importorskip("xpst.mcp.server")
 
 _argument_shape_block = mcp_server._argument_shape_block
@@ -175,7 +173,7 @@ class TestGuardIsWiredIntoDispatch:
         result = asyncio.run(
             mcp_server.handle_call_tool("xpst_post", {"video_path": "/etc/passwd", "caption": "x"})
         )
-        assert result_is_error(result) is True
+        assert mcp_server.result_is_error(result) is True
         assert "SENTINEL_BLOCKED" in result.content[0].text
 
     def test_source_calls_the_guard_before_engine_init(self):
