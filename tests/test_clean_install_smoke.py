@@ -58,6 +58,25 @@ def test_write_smoke_config_uses_temp_paths(tmp_path):
 
     text = config_path.read_text(encoding="utf-8")
     assert "smoke_creator" in text
-    assert str(Path.home()) not in text
     assert "enabled: false" in text
     assert json.dumps(str(tmp_path)) not in text
+
+    # "Avoids real user state" means every absolute path the generated config
+    # points at stays inside the throwaway work dir. Compare against the
+    # sandbox itself, not Path.home(): pytest's tmp_path sits under $HOME
+    # whenever TMPDIR does (agent sandboxes, some Linux setups), which made the
+    # old `str(Path.home()) not in text` assertion fail on a perfectly good
+    # config.
+    absolute_paths = [
+        value
+        for value in (
+            line.split(":", 1)[1].strip().strip('"')
+            for line in text.splitlines()
+            if ":" in line
+        )
+        if value and Path(value).is_absolute()
+    ]
+    assert absolute_paths, "smoke config must point at the sandbox with absolute paths"
+    sandbox = tmp_path.resolve()
+    for value in absolute_paths:
+        assert Path(value).is_relative_to(sandbox), f"{value} escapes the work dir {sandbox}"
