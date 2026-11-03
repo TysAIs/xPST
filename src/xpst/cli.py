@@ -2696,6 +2696,41 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
                 "fix": "xpst quota",
             })
 
+    # 2b. Source-pipeline health (issue #296). A source whose every fetch
+    # fails (e.g. launchd's PATH missing yt-dlp) used to be invisible here:
+    # the daemon logged the error to launchagent.err and reported "cycle
+    # complete" while doctor said all_clear. The daemon now records the
+    # failure in state; surface it as a warning (not an auth error —
+    # the pipeline is dead, the credentials are not).
+    try:
+        state_health_sources = (
+            StateManager(config.config_dir).state.get("health", {}).get("sources", {})
+        )
+    except Exception as e:  # noqa: BLE001 - a broken state file must not kill doctor
+        logger.debug("Could not read source health for doctor: %s", e)
+        state_health_sources = {}
+    for src_name, src_entry in sorted(state_health_sources.items()):
+        fetch_error = (src_entry or {}).get("last_error")
+        if not fetch_error:
+            continue
+        issues.append({
+            "severity": "warning",
+            "platform": src_name,
+            "problem": (
+                f"Source pipeline '{src_name}' is failing: {fetch_error} "
+                f"({src_entry.get('consecutive_failures', '?')} consecutive fetch "
+                f"failure(s), last at {src_entry.get('last_error_at', 'unknown')}). "
+                "The daemon runs but never fetches new videos."
+            ),
+            "fix": (
+                "Check the daemon log (launchagent.err). Verify the helper "
+                "binary is installed for the daemon's environment: "
+                "`xpst doctor` environment section below shows the resolved "
+                "path; compare with the daemon's PATH. Restart the daemon "
+                "after fixing."
+            ),
+        })
+
     # 3. Environment prerequisites.
     # Route through resolve_*_path so the check agrees with what the engine
     # actually uses: XPST_*_PATH override > system install > the copy xPST
