@@ -644,17 +644,19 @@ class TestTempFileCleanup:
         assert len(tmp_files) == 0
 
     def test_platform_specific_temp_dir(self):
-        """tempfile.gettempdir() returns a platform-appropriate directory."""
+        """tempfile.gettempdir() returns a usable platform-appropriate directory."""
         tmp_dir = tempfile.gettempdir()
-        system = platform.system()
+        resolved = Path(tmp_dir)
 
-        if system == "Darwin" or system == "Linux":
-            assert "/tmp" in tmp_dir or "/var" in tmp_dir
-        elif system == "Windows":
-            assert "Temp" in tmp_dir or "tmp" in tmp_dir.lower() or "C:\\" in tmp_dir
-        else:
-            # Just verify it's a valid path
-            assert Path(tmp_dir).exists()
+        # Hardcoding "/tmp" or "/var" fails wherever TMPDIR is set to anything
+        # else (systemd PrivateTmp, agent sandboxes, CI scratch dirs). The
+        # property that actually matters is that it is an absolute, existing
+        # directory that is not the process working directory.
+        assert resolved.is_absolute(), tmp_dir
+        assert resolved.is_dir(), tmp_dir
+        assert resolved != Path.cwd(), tmp_dir
+        if platform.system() == "Windows":
+            assert resolved.drive, tmp_dir
 
 
 # ---------------------------------------------------------------------------
