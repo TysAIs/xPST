@@ -632,8 +632,13 @@ class InstagramUploader(PlatformUploader):
 
         Includes anti-ban safeguards:
         - Pre-upload delay (1-3s with jitter) to mimic human behavior
-        - Retry with exponential backoff for transient errors (429, 503)
+        - Retry with exponential backoff for transient errors (503)
         - Max 3 retry attempts before giving up
+
+        Rate limits are NOT retried here. The service layer's
+        ``retry_operation`` owns that retry (and records the cooldown), so
+        looping again inside the uploader multiplied one throttled post into
+        16 provider requests / ~96s of sleeping.
         """
         import asyncio
         import random
@@ -760,15 +765,25 @@ class InstagramUploader(PlatformUploader):
                     )
 
                 if "rate limit" in error_msg or "too many" in error_msg or "429" in error_msg:
-                    if attempt < max_retries:
-                        backoff = await self._instagram_backoff(attempt)
-                        logger.warning(f"Instagram rate limited, retrying in {backoff:.1f}s (attempt {attempt + 1}/{max_retries})")
-                        await asyncio.sleep(backoff)
-                        continue
+                    # ONE retry layer, not two. A throttle is the provider
+                    # asking for less traffic; retrying it here *and* in the
+                    # service's ``retry_operation`` cost 4x4 = 16 provider
+                    # requests and ~96s of sleeping for a single post on the
+                    # mode this box runs (instagram.auth_mode: session).
+                    # Hand the throttle back immediately: the service owns the
+                    # retry economy, and its cooldown state machine records the
+                    # pause with the provider's Retry-After.
+                    logger.warning(
+                        "Instagram rate limited (attempt %s/%s) — returning it to the "
+                        "service retry layer instead of looping here",
+                        attempt + 1,
+                        max_retries + 1,
+                    )
                     return UploadResult(
                         success=False,
-                        error="IG_RATE_LIMITED: Too many requests after retries, try again later",
+                        error="IG_RATE_LIMITED: Too many requests, try again later",
                         platform="instagram",
+                        metadata={"rate_limited": True, "uploader_attempts": attempt + 1},
                     )
 
                 # Retry on 503 / transient server errors
