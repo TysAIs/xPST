@@ -123,6 +123,7 @@ Quality gates (run these before you push):
 python -m pytest tests/ -q         # full suite
 ruff check src/                    # lint
 mypy src/xpst/                     # types
+uv lock --check                    # committed uv.lock still matches pyproject.toml
 cd ui && npm ci && npm test        # web UI tests
 ```
 

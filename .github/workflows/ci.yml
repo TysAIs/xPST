@@ -79,6 +79,37 @@ jobs:
           xpst version --json
           xpst health --json
 
+  lockfile:
+    name: Lockfile freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv.lock is generated with this exact uv version. A different uv can
+      # rewrite the lockfile format or re-resolve transitively, which makes
+      # `uv lock --check` fail for reasons unrelated to the change under test.
+      # Bumping this pin means regenerating uv.lock in the same PR.
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.4"
+          python-version: "3.13"
+
+      # The committed lock has to describe the extras declared in
+      # pyproject.toml (e.g. the optional `browser` extra). Without this gate a
+      # stale lock is invisible: the matrix installs with pip, never with uv.
+      - name: Verify uv.lock matches pyproject.toml
+        run: |
+          if uv lock --check; then
+            exit 0
+          fi
+          # A bare failure says nothing about *what* drifted; re-resolve and
+          # show the difference so the fix is obvious from the log.
+          echo "::error::uv.lock does not match pyproject.toml; uv expects these changes:"
+          uv lock
+          git --no-pager diff --stat -- uv.lock
+          git --no-pager diff -U2 -- uv.lock | head -200
+          exit 1
+
   shell:
     name: Shell (Tauri/Rust)
     runs-on: ubuntu-22.04

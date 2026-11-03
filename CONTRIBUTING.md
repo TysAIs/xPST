@@ -22,6 +22,28 @@ pip install -e ".[dev,mcp]"
 xpst readiness --json
 ```
 
+### Dependency lockfile
+
+`pip` is the supported install path — the CI matrix installs with
+`pip install -e ".[full,dev]"`, and that is what every release artifact is built
+from. The committed `uv.lock` is a convenience lock for contributors who use
+[uv](https://docs.astral.sh/uv/): it pins the exact resolution of every extra,
+including opt-in ones such as `browser`, so a `uv sync --frozen` environment
+reproduces a known-good tree.
+
+Because it is committed, it has to stay in step with `pyproject.toml`:
+
+```bash
+uv lock          # after any dependency or extra change in pyproject.toml
+uv lock --check  # what CI runs; must pass before you push
+```
+
+Regenerate it with uv 0.13.4 (the version CI pins). Bumping the uv version
+means regenerating `uv.lock` in the same PR, otherwise `uv lock --check` can
+fail on a lockfile-format change that has nothing to do with your work. Do not
+use `uv lock --upgrade` for an unrelated change: it re-resolves every package
+and buries the real diff.
+
 ## Before Opening an Issue
 
 - Search existing issues first.
