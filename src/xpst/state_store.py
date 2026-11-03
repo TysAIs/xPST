@@ -296,6 +296,11 @@ class StateStore:
         state.setdefault("version", self.SCHEMA_VERSION)
         state.setdefault("posted_videos", {})
         state.setdefault("content_hashes", {})
+        if isinstance(state.get("health"), dict):
+            # Issue #296: per-source fetch health lives beside the platform
+            # health. Older state files never wrote this key — create it
+            # lazily rather than failing on legacy state.
+            state["health"].setdefault("sources", {})
         state.setdefault("health", {
             "platforms": {
                 "youtube": {"status": "ok", "last_success": None, "failures": 0, "last_error": None},
@@ -304,6 +309,7 @@ class StateStore:
                 "tiktok": {"status": "ok", "last_success": None, "failures": 0, "last_error": None},
                 "threads": {"status": "ok", "last_success": None, "failures": 0, "last_error": None},
             },
+            "sources": {},
             "total_processed": 0,
             "last_check": None,
             "last_wake_check": None,
@@ -324,6 +330,7 @@ class StateStore:
                     "tiktok": {"status": "ok", "last_success": None, "failures": 0},
                     "threads": {"status": "ok", "last_success": None, "failures": 0},
                 },
+                "sources": {},
                 "total_processed": 0,
                 "last_check": None,
                 "last_wake_check": None,
