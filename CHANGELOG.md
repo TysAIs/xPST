@@ -61,6 +61,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deadlines.
 
 ### Fixed
+- **One throttled Instagram (instagrapi session mode) post no longer costs 16
+  provider requests.** The uploader retried a rate limit 4× internally and the
+  service retried that whole upload 4× more, so a single throttled post made 16
+  calls and slept ~96 s before giving up — on the mode
+  `instagram.auth_mode: session` actually runs, on the platform that caused the
+  2026-10-01 halt. The uploader now hands a throttle straight back and the
+  service's retry layer owns the retry (4 attempts, ~14 s, one request each),
+  which also matches the Instagram Graph path. A recovered throttle is now
+  visible to the cooldown state machine instead of being swallowed. Ceilings are
+  pinned in `tests/test_rate_limit_failure_injection.py`, and the retry economy
+  is now executable policy: `xpst.utils.request_budget` derives the worst case
+  from the live uploader/service constants and
+  `tests/test_retry_economy_budget.py` fails loudly if a nested retry layer
+  comes back.
 - **A first TikTok publish from an unaudited dev app no longer dies with a
   403.** Direct Post hardcoded `privacy_level: PUBLIC_TO_EVERYONE`, but TikTok
   forces an unaudited Content Posting API client to private privacy — the
