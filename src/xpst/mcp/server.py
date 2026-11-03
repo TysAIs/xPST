@@ -684,6 +684,21 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="xpst_rate_limit_status",
+        description=(
+            "Read-only view of active rate-limit cooldowns: per platform the "
+            "remaining seconds, strike count, resume time and the platform's "
+            "recorded reason. A cooldown defers posts, it does not fail them. "
+            "Pure local read — no uploads, no platform API calls, no sleeps, "
+            "safe to call repeatedly and in dry runs."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    Tool(
         name="xpst_backfill",
         description=(
             "Retry failed or incomplete posts from history. `attempted` / "
@@ -1386,6 +1401,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         elif name == "xpst_status":
             engine = server.get_engine()
             result = await _handle_status(engine)
+        elif name == "xpst_rate_limit_status":
+            result = await _handle_rate_limit_status(server.config)
         elif name == "xpst_backfill":
             engine = server.get_engine()
             result = await _handle_backfill(engine, arguments)
@@ -1833,10 +1850,14 @@ async def _handle_health(engine: CrossPostEngine) -> CallToolResult:
     (one fact, one answer — see ``tests/test_status_surface_agreement.py``).
     """
     from xpst.auth_status import collect_live_auth_status_async, platform_health_entries
+    from xpst.rate_limit_status import cooldown_report
 
     health = await engine.check_health(include_platforms=False)
     canonical = await collect_live_auth_status_async(engine.config)
     health["platforms"] = platform_health_entries(canonical)
+    # Same local persisted cooldown view the CLI health reports, so a cooldown
+    # is never visible on one surface and invisible on the other.
+    health["rate_limit_cooldowns"] = cooldown_report(engine.config)
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(health, indent=2, default=str))],
     )
@@ -1847,6 +1868,20 @@ async def _handle_status(engine: CrossPostEngine) -> CallToolResult:
     stats = engine.state.get_statistics()
     return CallToolResult(
         content=[TextContent(type="text", text=json.dumps(stats, indent=2, default=str))],
+    )
+
+
+async def _handle_rate_limit_status(config: XPSTConfig) -> CallToolResult:
+    """Handle xpst_rate_limit_status tool (read-only, local state only).
+
+    Deliberately does not touch the engine: answering "is a platform cooling?"
+    must not run a probe, an upload, or a sleep, so it stays dry-run safe.
+    """
+    from xpst.rate_limit_status import cooldown_report
+
+    payload = cooldown_report(config)
+    return CallToolResult(
+        content=[TextContent(type="text", text=json.dumps(payload, indent=2, default=str))],
     )
 
 

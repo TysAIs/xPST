@@ -1,6 +1,6 @@
 # xPST MCP (Model Context Protocol) Tutorial
 
-> **Complete guide** to using xPST's 41 MCP tools with AI agents. Drive the entire cross-posting workflow from Claude Desktop, Cursor, or any MCP-compatible client.
+> **Complete guide** to using xPST's 42 MCP tools with AI agents. Drive the entire cross-posting workflow from Claude Desktop, Cursor, or any MCP-compatible client.
 
 ---
 
@@ -19,7 +19,7 @@
 
 ## What is MCP?
 
-The **Model Context Protocol** (MCP) is an open standard that lets AI assistants interact with external tools and data sources. xPST exposes 41 MCP tools that let any MCP-compatible AI agent:
+The **Model Context Protocol** (MCP) is an open standard that lets AI assistants interact with external tools and data sources. xPST exposes 42 MCP tools that let any MCP-compatible AI agent:
 
 - Fetch and post videos across platforms
 - Check platform health and auth status
@@ -101,9 +101,9 @@ If running from a source checkout:
 
 ## Tool Reference
 
-xPST exposes 41 MCP tools across five groups: core operations, analytics & insights, content & knowledge, configuration & scheduling, and the knowledge base. The provider registry includes posting paths for YouTube, Instagram, X/Twitter, TikTok, and Threads, but current availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-table) for the live-verified, source-only, and disabled states.
+xPST exposes 42 MCP tools across five groups: core operations, analytics & insights, content & knowledge, configuration & scheduling, and the knowledge base. The provider registry includes posting paths for YouTube, Instagram, X/Twitter, TikTok, and Threads, but current availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-table) for the live-verified, source-only, and disabled states.
 
-### Core Operations (6 tools)
+### Core Operations (7 tools)
 
 #### `xpst_run`
 
@@ -171,6 +171,16 @@ Test connectivity to all platforms without uploading.
 ```
 
 **Returns:** Per-platform health status (ok/error with details).
+
+#### `xpst_rate_limit_status`
+
+Read-only view of the persisted rate-limit cooldowns. A cooldown defers posts to a platform; it does not fail them. This tool reads `rate_cooldowns.json` from the config dir once — no uploads, no platform API calls, no sleeps.
+
+```json
+{}
+```
+
+**Returns:** the cooldown state (`cooling`/`idle`), the platforms currently paused, and per platform the remaining seconds, strike count, resume time and the platform's recorded reason. Empty cooldowns mean nothing is paused.
 
 #### `xpst_status`
 
