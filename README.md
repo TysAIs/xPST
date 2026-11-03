@@ -12,7 +12,7 @@
   <a href="https://github.com/TysAIs/xPST/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/TysAIs/xPST/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-8-blue"></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/os-Linux%20|%20macOS%20|%20Windows-lightgrey"></a>
-  <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-41%20tools-orange"></a>
+  <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-42%20tools-orange"></a>
   <a href="#"><img alt="Desktop" src="https://img.shields.io/badge/desktop-Tauri%202-blueviolet"></a>
 </p>
 
@@ -49,7 +49,7 @@ xPST includes integrations for **seven platforms** — YouTube, Instagram, X/Twi
 It runs three ways:
 - **Desktop shell** — one Tauri 2 app (a native window over the local dashboard)
 - **CLI** — 47 top-level commands (74 including subcommands) covering the entire workflow
-- **MCP server** — 41 tools so AI agents can drive the entire product
+- **MCP server** — 42 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
 
@@ -97,7 +97,7 @@ platform API calls you configure. See
 ### Three Drivable Surfaces
 - **Desktop shell** — Tauri 2 wrapper around the local dashboard: one native app, built from `src-tauri/` plus the Python engine sidecar. Platform installers (`.dmg`, NSIS `.exe`/`.msi`, `.deb`/`.AppImage`) come from `.github/workflows/tauri-release.yml`
 - **CLI** — 47 Click-based commands (74 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
-- **MCP server** — 41 tools (35 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
+- **MCP server** — 42 tools (36 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 #### Surface counts
 
@@ -106,7 +106,7 @@ These numbers are generated from the shipped code, not maintained by hand. `pyth
 <!-- BEGIN GENERATED SURFACE COUNTS -->
 | Surface | Count | Measured from |
 |---------|-------|---------------|
-| MCP tools | **41** | `tools/list` over a real stdio handshake with `xpst mcp start` |
+| MCP tools | **42** | `tools/list` over a real stdio handshake with `xpst mcp start` |
 | CLI top-level commands | **47** | `xpst.cli.main.commands` |
 | CLI commands including subcommands | **74** | recursive walk of the Click command tree |
 | HTTP routes (dashboard app) | **48** | FastAPI route table (44 xPST routes + 4 framework docs routes) |
@@ -539,7 +539,7 @@ Add to your MCP client config (Claude Desktop, Claude Code, etc.):
 
 <!-- BEGIN GENERATED README TOOL INDEX -->
 
-### 41 Tools
+### 42 Tools
 
 Generated from the live registry — full schemas, consent gates, and per-tool notes live in [docs/MCP_TOOLS.md](docs/MCP_TOOLS.md).
 
@@ -563,6 +563,7 @@ Generated from the live registry — full schemas, consent gates, and per-tool n
 | `xpst_failures_retry` | Retry ONE recorded upload failure, identified by video_id + platform — the MC… | **Yes** |
 | `xpst_health` | Test connectivity to all platforms and sources (no uploads) | No |
 | `xpst_status` | Show cross-posting statistics and health status | No |
+| `xpst_rate_limit_status` | Read-only view of active rate-limit cooldowns: per platform the remaining sec… | No |
 | `xpst_backfill` | Retry failed or incomplete posts from history. `attempted` / `successful` are… | **Yes** |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No |
 | `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No |
