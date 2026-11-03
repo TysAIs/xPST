@@ -725,10 +725,14 @@ def test_family_cooldown_still_spreads_to_siblings(tmp_path):
 # Instagram session (instagrapi) path — the mode this box actually runs
 # ---------------------------------------------------------------------------
 
-#: The instagrapi path has two retry layers inside it (the uploader's own
-#: 4-attempt loop and the service's 4-attempt retry), so its ceiling is 4x4.
-#: Recorded here rather than hidden: it is a known nesting, not a storm.
-MAX_ATTEMPTS_IG_SESSION = 16
+#: The instagrapi path must have exactly ONE retry layer. The uploader hands a
+#: throttle straight back and the service's ``retry_operation`` owns the retry
+#: (and the cooldown), so one logical post costs at most the service's 4
+#: attempts — one provider request each. It used to nest 4x4 = 16.
+MAX_ATTEMPTS_IG_SESSION = 4
+#: Wait ceiling for that: 4 anti-ban pre-upload delays (1-3s, ≤12s) plus the
+#: service's 1/2/4s retry backoff = 19s worst case. The nested loop cost ~96s.
+MAX_WAIT_IG_SESSION_S = 19.5
 
 
 @pytest.fixture
@@ -749,7 +753,7 @@ def global_sleeps(monkeypatch):
 def test_instagram_session_throttle_pauses_and_stays_bounded(
     fault, tmp_path, monkeypatch, global_sleeps
 ):
-    """The instagrapi path (production IG mode) also pauses and never posts."""
+    """The instagrapi path (production IG mode) pauses, never posts, stays cheap."""
     transport = InstagramSessionTransport(fault)
     uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
     clock = Clock()
@@ -762,8 +766,102 @@ def test_instagram_session_throttle_pauses_and_stays_bounded(
         f"instagrapi/{fault.label} did not engage the cooldown (error={result.error!r})"
     )
     assert service.state.is_video_posted("vid-s", "instagram") is False
-    assert transport.calls <= MAX_ATTEMPTS_IG_SESSION
-    print(f"MEASURED instagram-session/{fault.label}: attempts={transport.calls} wait_s={sum(global_sleeps):.2f}")
+    assert transport.calls == MAX_ATTEMPTS_IG_SESSION, (
+        f"instagrapi/{fault.label}: one throttled post cost {transport.calls} provider "
+        f"requests; the retry economy allows exactly {MAX_ATTEMPTS_IG_SESSION} "
+        f"(one per service attempt, no uploader-side loop)"
+    )
+    total_wait = sum(global_sleeps)
+    assert total_wait <= MAX_WAIT_IG_SESSION_S, (
+        f"instagrapi/{fault.label}: one throttled post slept {total_wait:.2f}s; "
+        f"ceiling is {MAX_WAIT_IG_SESSION_S}s"
+    )
+    print(
+        f"MEASURED instagram-session/{fault.label}: attempts={transport.calls} "
+        f"wait_s={total_wait:.2f}"
+    )
+
+
+@pytest.mark.parametrize("fault", THROTTLE_FAULTS, ids=lambda f: f.label)
+def test_instagram_session_uploader_does_not_retry_a_throttle_itself(
+    fault, tmp_path, monkeypatch, global_sleeps
+):
+    """The uploader alone makes ONE request per throttle call.
+
+    Called directly (no service around it), the instagrapi uploader must not
+    loop on a throttle: that loop is what multiplied the service's retries into
+    16 provider requests. The pre-upload anti-ban delay is still applied once.
+    """
+    transport = InstagramSessionTransport(fault)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+
+    result = asyncio.run(uploader.upload(make_video(tmp_path), "single layer"))
+
+    assert result.success is False
+    assert transport.calls == 1, (
+        f"instagrapi/{fault.label}: the uploader retried a throttle internally "
+        f"({transport.calls} requests) — the service layer owns that retry"
+    )
+    assert (result.error or "").startswith("IG_RATE_LIMITED"), result.error
+    assert result.metadata.get("rate_limited") is True
+    # The anti-ban pre-upload delay is a single sleep; no backoff loop.
+    assert len(global_sleeps) == 1, global_sleeps
+
+
+def test_instagram_session_throttle_that_clears_is_published_by_the_service_retry(
+    tmp_path, monkeypatch, global_sleeps
+):
+    """Dropping the uploader's loop must not cost in-call recovery.
+
+    A throttle that clears on the second service attempt is still published:
+    the service retry layer is the one automatic recovery path for a failed
+    attempt (a DLQ entry alone is only retried by hand).
+    """
+
+    class ClearsAfterOneThrottle(InstagramSessionTransport):
+        """Throttled once, then healthy — a short-lived provider window."""
+
+        def __init__(self) -> None:
+            super().__init__(FAULT_META_CODE_THROTTLE)
+            self.remaining_failures = 1
+
+        def clip_upload(self, path, caption=None, thumbnail=None):  # noqa: ANN001
+            if self.remaining_failures > 0:
+                self.remaining_failures -= 1
+                return super().clip_upload(path, caption, thumbnail)
+            self.recorder.hit("clip_upload")
+            return SimpleNamespace(pk="ig-media-2", code="def456")
+
+    transport = ClearsAfterOneThrottle()
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    result = asyncio.run(
+        post(service, uploader, "instagram", make_video(tmp_path), "vid-clears")
+    )
+
+    assert result.success is True, result.error
+    assert result.post_url == "https://www.instagram.com/reel/def456/"
+    assert transport.calls == 2, (
+        f"expected one throttled attempt plus one recovering attempt, got {transport.calls}"
+    )
+    assert service.state.is_video_posted("vid-clears", "instagram") is True
+    # The throttle strike was recorded, and the later clean publish started
+    # decaying it (decay is gradual: N clean publishes per strike).
+    record = service.rate_cooldowns.snapshot()["instagram"]
+    assert record["strikes"] == 1
+    assert record["clean_publishes_since_hit"] == 1
+
+    # Pinned consequence: the throttle is now visible to the cooldown machine
+    # even though the retry recovered, so the next post inside the window is
+    # DEFERRED (scheduled, not failed) and costs zero provider requests.
+    follow_up = asyncio.run(
+        post(service, uploader, "instagram", make_video(tmp_path, "next.mp4"), "vid-next")
+    )
+    assert follow_up.metadata.get("cooldown") is True
+    assert follow_up.metadata.get("deferred") is True
+    assert transport.calls == 2
 
 
 # ---------------------------------------------------------------------------
