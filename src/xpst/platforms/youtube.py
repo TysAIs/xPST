@@ -14,6 +14,7 @@ Upload specs:
 """
 
 import asyncio
+import contextlib
 from pathlib import Path
 
 from xpst.config import XPSTConfig
@@ -294,11 +295,23 @@ class YouTubeUploader(PlatformUploader):
             error_msg = str(e)
             logger.error(f"YouTube upload failed: {error_msg}")
 
+            # googleapiclient raises HttpError with the response attached; the
+            # back-off window lives in its Retry-After header, not in the
+            # message. Carry it into the error text the persistent cooldown
+            # parses, so a YouTube throttle resumes when YouTube asked.
+            retry_hint = ""
+            resp = getattr(e, "resp", None)
+            if resp is not None:
+                with contextlib.suppress(Exception):
+                    hint = resp.get("retry-after") or resp.get("Retry-After")
+                    if hint:
+                        retry_hint = f" (Retry-After: {hint})"
+
             # Check for specific errors
             if "quota" in error_msg.lower():
                 return UploadResult(
                     success=False,
-                    error="YOUTUBE_QUOTA_EXCEEDED: Daily quota limit reached",
+                    error=f"YOUTUBE_QUOTA_EXCEEDED: Daily quota limit reached{retry_hint}",
                     platform="youtube",
                 )
 
@@ -311,7 +324,7 @@ class YouTubeUploader(PlatformUploader):
 
             return UploadResult(
                 success=False,
-                error=f"YOUTUBE_UPLOAD_ERROR: {error_msg[:200]}",
+                error=f"YOUTUBE_UPLOAD_ERROR: {error_msg[:200]}{retry_hint}",
                 platform="youtube",
             )
 
