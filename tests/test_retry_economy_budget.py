@@ -19,8 +19,10 @@ This module pins that decision as code and fails loudly if it is broken again:
 
 Everything here runs on the failure-injection doubles from
 ``tests/test_rate_limit_failure_injection.py`` (fake transports, recorded
-sleeps). **Zero live posts, zero sockets** — and this module proves the socket
-claim itself instead of inheriting it from a neighbouring run.
+sleeps). **Zero live posts, zero non-loopback connections** — and this module
+proves the socket claim itself instead of inheriting it from a neighbouring run
+(loopback is allowed: Windows emulates the event loop's self-pipe with a
+127.0.0.1 connect, which says nothing about provider traffic).
 """
 
 from __future__ import annotations
@@ -47,21 +49,78 @@ from xpst.utils.request_budget import (
     derive_instagram_session_worst_case,
 )
 
+#: Loopback is not "the network": on Windows, ``socket.socketpair()`` — which
+#: the ProactorEventLoop uses for its self-pipe — is emulated with a real
+#: AF_INET connect to 127.0.0.1. Blocking that would fail every test that runs
+#: an event loop there, and it would say nothing about provider traffic.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", ""})
+
+
+def _host_of(address: Any) -> Any:
+    return address[0] if isinstance(address, tuple) and address else address
+
 
 @pytest.fixture(autouse=True)
 def socket_guard(monkeypatch):
-    """Fail the test if anything in this module opens a real connection."""
-    attempted: list[Any] = []
+    """Fail the test if anything in this module opens a NON-loopback connection.
 
-    def refuse(address, *a, **kw):  # noqa: ANN001, ANN003
+    The provider calls on this path are fake transports, so a real connection
+    would mean some other layer reached the network during a dry-run post.
+    """
+    attempted: list[Any] = []
+    real_connect = socket.socket.connect
+    real_create_connection = socket.create_connection
+
+    def guarded_connect(self, address):  # noqa: ANN001
+        if _host_of(address) in _LOOPBACK_HOSTS:
+            return real_connect(self, address)
         attempted.append(address)
         raise AssertionError(
-            f"this suite must not open sockets, but something connected to {address!r}"
+            f"this suite must not call the network, but something connected to {address!r}"
         )
 
-    monkeypatch.setattr(socket.socket, "connect", refuse)
-    monkeypatch.setattr(socket, "create_connection", refuse)
+    def guarded_create_connection(address, *a, **kw):  # noqa: ANN001, ANN003
+        if _host_of(address) in _LOOPBACK_HOSTS:
+            return real_create_connection(address, *a, **kw)
+        attempted.append(address)
+        raise AssertionError(
+            f"this suite must not call the network, but something connected to {address!r}"
+        )
+
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+    monkeypatch.setattr(socket, "create_connection", guarded_create_connection)
     yield attempted
+    assert attempted == [], (
+        f"{len(attempted)} outbound socket connection(s) attempted in a dry-run "
+        f"suite: {attempted}"
+    )
+
+
+def test_socket_guard_allows_the_loopback_self_pipe_but_not_the_network(socket_guard):
+    """The guard's own allow-list is exercised, so it cannot be silently dead.
+
+    Windows emulates ``socket.socketpair()`` with a 127.0.0.1 connect; that must
+    pass. A non-loopback address must be refused and recorded.
+    """
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        client.connect(listener.getsockname())  # loopback: allowed
+        assert socket_guard == [], "a loopback connect must not be recorded"
+    finally:
+        client.close()
+        listener.close()
+
+    remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        with pytest.raises(AssertionError, match="must not call the network"):
+            remote.connect(("192.0.2.1", 9))  # TEST-NET-1, refused by the guard
+    finally:
+        remote.close()
+    assert socket_guard == [("192.0.2.1", 9)]
+    socket_guard.clear()  # this test deliberately attempted one; the gate is 0
 
 
 @pytest.fixture
