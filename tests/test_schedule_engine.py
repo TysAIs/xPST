@@ -292,8 +292,11 @@ def test_legacy_naive_entries_still_evaluate_as_local_wall_clock(manager, config
         encoding="utf-8",
     )
     restarted = ScheduleManager(config_dir, tz=DENVER)
-    assert restarted.get_due() == []  # 09:00 local is still in the future
-    assert len(restarted.get_due(now=datetime(2026, 11, 1, 9, 30))) == 1
+    # Explicit clock: a wall-clock assertion against the real clock goes red
+    # as soon as the hardcoded date drops into the past (it did on 2026-11-01
+    # 09:00 local, turning main's suite red for every runner).
+    assert restarted.get_due(now=datetime(2026, 11, 1, 8, 30, tzinfo=DENVER)) == []
+    assert len(restarted.get_due(now=datetime(2026, 11, 1, 9, 30, tzinfo=DENVER))) == 1
 
 
 # ── 3. run-due: on start and while running ─────────────────────────────
