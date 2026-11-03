@@ -31,6 +31,7 @@ from xpst.cli import main
 from xpst.config import XPSTConfig
 from xpst.engine import CrossPostEngine, CrossPostResult
 from xpst.mcp import server as mcp_server
+from xpst.mcp.server import result_is_error, tool_input_schema
 from xpst.platforms.base import UploadResult
 from xpst.schedule_manager import ScheduleManager
 from xpst.services import recovery_service
@@ -202,7 +203,7 @@ def test_schedule_cancel_unknown_id_fails_identically_and_changes_nothing(
     assert mcp_payload["ok"] is False
     assert mcp_payload["error"]["code"] == recovery_service.SCHEDULE_ENTRY_NOT_FOUND
     assert mcp_payload["cancelled"] is False
-    assert mcp_result.isError is True
+    assert result_is_error(mcp_result) is True
 
     # Nothing was written to the store.
     assert ScheduleManager().list() == before
@@ -360,7 +361,7 @@ def test_targeted_retry_refusals_agree_and_never_upload(
     assert mcp_payload["error"]["code"] == expected_code
     assert cli_payload["ok"] is False and mcp_payload["ok"] is False
     assert mcp_payload["attempted"] is False and mcp_payload["posted"] is False
-    assert mcp_result.isError is True
+    assert result_is_error(mcp_result) is True
     # Nothing was uploaded for a retry that was refused.
     assert calls == []
 
@@ -509,8 +510,8 @@ def test_delete_tool_description_states_its_scope() -> None:
     assert "platform_deleted per destination" in description
     assert "aggregate" in description
     # The schema now promises a platform deletion, and says so.
-    assert "platform" in delete.inputSchema["properties"]["video_id"]["description"]
-    assert "Destination platform" in delete.inputSchema["properties"]["platform"]["description"]
+    assert "platform" in tool_input_schema(delete)["properties"]["video_id"]["description"]
+    assert "Destination platform" in tool_input_schema(delete)["properties"]["platform"]["description"]
 
 
 def test_new_parity_tools_are_registered_and_gated(allow_mutations):
@@ -590,4 +591,4 @@ def test_delete_reports_failure_when_it_removed_nothing() -> None:
     assert payload["results"] == []
     assert payload["platform_deleted"] is False
     assert "tiktok" in payload["error"]
-    assert result.isError is True
+    assert result_is_error(result) is True

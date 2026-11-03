@@ -26,6 +26,7 @@ from xpst.config import XPSTConfig
 from xpst.connect import disconnect_platform
 from xpst.engine import DeleteOutcome
 from xpst.mcp import server as mcp_server
+from xpst.mcp.server import result_is_error
 from xpst.state import StateManager
 from xpst.utils.credentials import CredentialStore
 
@@ -179,7 +180,7 @@ def test_mcp_disconnect_tool_registered_and_guarded():
 def test_mcp_disconnect_blocked_by_readonly(monkeypatch):
     monkeypatch.setenv("XPST_MCP_READONLY", "1")
     result = asyncio.run(mcp_server.handle_call_tool("xpst_disconnect", {"platform": "x"}))
-    assert result.isError is True
+    assert result_is_error(result) is True
     assert "XPST_MCP_READONLY" in result.content[0].text
 
 
