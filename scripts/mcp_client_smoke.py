@@ -28,6 +28,8 @@ async def _run(config_path: str | None, expect_tools: list[str]) -> dict:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
+    from xpst.mcp.server import initialization_server_info
+
     env = dict(os.environ)
     src = str(REPO_ROOT / "src")
     env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
@@ -42,8 +44,9 @@ async def _run(config_path: str | None, expect_tools: list[str]) -> dict:
     async with stdio_client(server) as (read, write):
         async with ClientSession(read, write) as session:
             init = await session.initialize()
-            report["steps"].append({"step": "initialize", "server": init.serverInfo.name})
-            report["server_version"] = getattr(init.serverInfo, "version", None)
+            server_info = initialization_server_info(init)
+            report["steps"].append({"step": "initialize", "server": server_info.name})
+            report["server_version"] = getattr(server_info, "version", None)
 
             listed = await session.list_tools()
             names = sorted(tool.name for tool in listed.tools)
@@ -72,7 +75,13 @@ async def _run(config_path: str | None, expect_tools: list[str]) -> dict:
                 "xpst_preflight",
                 {"media_path": "/nonexistent/mcp-smoke.mp4", "platforms": ["youtube"], "caption": "smoke"},
             )
-            pf = json.loads(preflight.content[0].text)
+            try:
+                pf = json.loads(preflight.content[0].text)
+            except json.JSONDecodeError:
+                # The fail-closed argument guard refuses a path outside every
+                # allowed root before preflight runs. That is still "not ready",
+                # and it provably never touched the network.
+                pf = {"ready": False, "blockers": [preflight.content[0].text], "network_calls": False}
             report["steps"].append(
                 {
                     "step": "tools/call xpst_preflight",

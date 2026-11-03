@@ -27,6 +27,7 @@ from xpst.content import (
     parse_destination_texts,
 )
 from xpst.engine import caption_for_destination
+from xpst.mcp.server import tool_input_schema
 from xpst.platforms.base import UploadResult
 
 VIDEO_BYTES = b"\x00" * 4096
@@ -709,4 +710,4 @@ def test_mcp_tool_schemas_declare_overrides() -> None:
 
     for name in ("xpst_post", "xpst_preflight"):
         tool = next(item for item in TOOLS if item.name == name)
-        assert "overrides" in tool.inputSchema["properties"], f"{name} does not accept per-destination copy"
+        assert "overrides" in tool_input_schema(tool)["properties"], f"{name} does not accept per-destination copy"

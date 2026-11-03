@@ -34,7 +34,7 @@ from xpst.cli import main
 from xpst.config import XPSTConfig
 from xpst.dashboard.api import create_api_router
 from xpst.engine import CrossPostEngine, CrossPostResult
-from xpst.mcp.server import _handle_post
+from xpst.mcp.server import _handle_post, result_is_error
 from xpst.platforms.base import PlatformUploader, UploadResult
 from xpst.services.upload_service import UploadService
 
@@ -347,7 +347,7 @@ def test_mcp_force_reaches_the_engine(config: XPSTConfig, night) -> None:
     payload = asyncio.run(_handle_post(
         engine, {"video_path": "/tmp/clip.mp4", "caption": "c", "platforms": ["x"], "force": True}
     ))
-    assert payload.isError is False or payload.isError is None, payload
+    assert not result_is_error(payload), payload
     assert engine.post_manual.await_args.kwargs.get("force_now") is True
 
 
