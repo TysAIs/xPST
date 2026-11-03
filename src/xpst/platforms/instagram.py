@@ -60,6 +60,36 @@ _RECONCILE_WINDOW = timedelta(minutes=30)
 _META_THROTTLE_CODES = frozenset({4, 17, 32, 613})
 
 
+def _rate_limited_result(
+    error_text: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> UploadResult:
+    """Hand a throttle back to the service retry layer, keeping its hint.
+
+    The service owns the retry economy and the cooldown state machine, so a
+    throttle must reach it with the provider's own ``Retry-After`` intact:
+    dropping the hint cost the cooldown a 60s floor where the provider had
+    asked for 15 minutes, and left the retry layer unable to tell a short
+    throttle (worth retrying) from a long one (futile to re-ask).
+    """
+    from xpst.utils.retry import parse_declared_retry_after_s
+
+    message = "IG_RATE_LIMITED: Too many requests, try again later"
+    declared = parse_declared_retry_after_s(error_text)
+    if declared:
+        message = f"{message} (Retry-After: {int(declared)})"
+    meta = {"rate_limited": True}
+    if metadata:
+        meta.update(metadata)
+    return UploadResult(
+        success=False,
+        error=message,
+        platform="instagram",
+        metadata=meta,
+    )
+
+
 def _meta_throttle_response(response: Any, body: str) -> bool:
     """Whether a Graph response is a throttle, by status or Meta error code."""
     if getattr(response, "status_code", None) == 429:
@@ -791,11 +821,9 @@ class InstagramUploader(PlatformUploader):
                         attempt + 1,
                         max_retries + 1,
                     )
-                    return UploadResult(
-                        success=False,
-                        error="IG_RATE_LIMITED: Too many requests, try again later",
-                        platform="instagram",
-                        metadata={"rate_limited": True, "uploader_attempts": attempt + 1},
+                    return _rate_limited_result(
+                        str(e),
+                        metadata={"uploader_attempts": attempt + 1},
                     )
 
                 # Retry on 503 / transient server errors
@@ -1254,11 +1282,7 @@ class InstagramUploader(PlatformUploader):
                 )
 
             if "rate limit" in error_msg or "too many" in error_msg or "429" in error_msg:
-                return UploadResult(
-                    success=False,
-                    error="IG_RATE_LIMITED: Too many requests, try again later",
-                    platform="instagram",
-                )
+                return _rate_limited_result(str(e))
 
             return UploadResult(
                 success=False,
@@ -1409,11 +1433,7 @@ class InstagramUploader(PlatformUploader):
                 )
 
             if "rate limit" in error_msg or "too many" in error_msg:
-                return UploadResult(
-                    success=False,
-                    error="IG_RATE_LIMITED: Too many requests, try again later",
-                    platform="instagram",
-                )
+                return _rate_limited_result(str(e))
 
             return UploadResult(
                 success=False,
