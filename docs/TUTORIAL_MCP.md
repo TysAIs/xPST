@@ -127,7 +127,7 @@ Manually post a video file to selected platforms.
 {
   "video_path": "/path/to/video.mp4",
   "caption": "Check out this video!",
-  "platforms": ["youtube", "x", "threads"]  // optional; any of youtube, instagram, x, tiktok, threads; defaults to all enabled
+  "platforms": ["youtube", "x", "threads"]  // optional; any of youtube, instagram, x, tiktok, threads, facebook; defaults to all enabled
 }
 ```
 
