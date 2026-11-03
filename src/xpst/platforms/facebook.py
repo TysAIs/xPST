@@ -296,7 +296,21 @@ class FacebookGraphClient:
             with contextlib.suppress(json.JSONDecodeError, ValueError):
                 payload = response.json()
             message = f"{action} failed: HTTP {response.status_code}: {self.error_message(response)}"
-            raise FacebookError(message, code=_ERROR_CODE_MAP.get(_error_code(payload) or -1))
+            # Meta sends its back-off window in the Retry-After header, not in
+            # the JSON body. Dropping it made the persistent cooldown resume on
+            # the 60s ladder instead of the window the platform actually asked
+            # for, so carry the hint into the error text the cooldown parses.
+            hint = response.headers.get("retry-after")
+            if hint:
+                message = f"{message} (Retry-After: {hint})"
+            code = _ERROR_CODE_MAP.get(_error_code(payload) or -1)
+            if code == "FACEBOOK_RATE_LIMITED":
+                # Meta's throttle prose ("Application request limit reached")
+                # contains no "rate limit" wording, so the typed code is the
+                # only signal that reaches the cooldown. Put it in the text the
+                # uploader returns, or the strike is silently never recorded.
+                message = f"{code}: {message}"
+            raise FacebookError(message, code=code)
         try:
             payload = response.json()
         except (json.JSONDecodeError, ValueError) as exc:

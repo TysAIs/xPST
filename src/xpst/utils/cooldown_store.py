@@ -119,6 +119,16 @@ class CooldownStore:
     def family_for(self, platform: str) -> str:
         return _FAMILY_BY_PLATFORM.get(platform, platform)
 
+    @staticmethod
+    def _deadline(until_iso: str) -> float:
+        """Epoch seconds of a persisted ``until`` stamp (0.0 when unusable)."""
+        if not until_iso:
+            return 0.0
+        try:
+            return datetime.fromisoformat(until_iso).timestamp()
+        except ValueError:
+            return 0.0
+
     def remaining_s(self, platform: str) -> float:
         """Seconds until ``platform`` may post again (0 when it may post now).
 
@@ -198,11 +208,17 @@ class CooldownStore:
 
         # Cool the whole upstream family: Meta counts IG/FB/Threads/Messenger
         # against one app pool, and cooling a sibling is always the safe side.
+        # Cooling must only ever *extend* a sibling's window: a short 60s strike
+        # on one member must never cut short a longer Retry-After window that a
+        # sibling already earned (that would silently un-cool it early).
         family = self.family_for(platform)
+        deadline = now + pause
         for member in _FAMILY_MEMBERS.get(family, []):
             if member == platform:
                 continue
             sibling = self._records.setdefault(member, CooldownRecord())
+            if self._deadline(sibling.until_iso) >= deadline:
+                continue
             sibling.until_iso = record.until_iso
             sibling.last_reason = f"family cooldown via {platform}: {reason[:200]}"
 
