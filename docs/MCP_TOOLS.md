@@ -2,7 +2,7 @@
 
 The xPST MCP server exposes local xPST workflows over stdio so AI assistants and automation tools can inspect setup, check status, run posting workflows, and query the personal content knowledge base without scraping CLI text.
 
-This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). The current registry contains **41 tools: 35 `xpst_*` + 2 `messenger_*` + 4 `kb_*`**, including the canonical capability, readiness, browser-free auth plan, resumable setup tools, the failure/activity recovery tools (list + targeted retry), scheduling incl. cancel, and the canonical post preflight.
+This reference is generated from the live tool registry in `src/xpst/mcp/server.py` (xpst_* tools) and `src/xpst/knowledge/mcp/tools.py` (kb_* handlers). The current registry contains **42 tools: 36 `xpst_*` + 2 `messenger_*` + 4 `kb_*`**, including the canonical capability, readiness, browser-free auth plan, resumable setup tools, the failure/activity recovery tools (list + targeted retry), scheduling incl. cancel, the canonical post preflight, and the read-only rate-limit cooldown view.
 
 xPST posts to the destinations enabled by your configuration — YouTube, Instagram, and X/Twitter are the live-verified destinations (TikTok publishing is not available yet and awaits external TikTok developer review; Threads and Messenger are opt-in integrations, currently disabled/unauthenticated — see the [INSTALL.md capability truth table](INSTALL.md#capability-truth-table)) — and pulls source video from TikTok, YouTube, Instagram, X, and local files.
 
@@ -58,6 +58,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_failures_retry` | Retry ONE recorded upload failure, identified by video_id + platform — the MC… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_health` | Test connectivity to all platforms and sources (no uploads) | No | — |
 | `xpst_status` | Show cross-posting statistics and health status | No | — |
+| `xpst_rate_limit_status` | Read-only view of active rate-limit cooldowns: per platform the remaining sec… | No | — |
 | `xpst_backfill` | Retry failed or incomplete posts from history. `attempted` / `successful` are… | **Yes** | `XPST_MCP_ALLOW_MUTATIONS=1`, or `XPST_MCP_REQUIRE_CONFIRM=1` + `confirm: true` |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) | No | — |
 | `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… | No | — |
@@ -82,7 +83,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_setup_resume` | Resume setup with safe step state or caller-verified readiness | No | — |
 | `xpst_setup_reset` | Reset the shared setup transaction and its recovery copies | No | — |
 
-Registry size: **41 tools**.
+Registry size: **42 tools**.
 <!-- END GENERATED TOOL INDEX -->
 
 ---
@@ -195,6 +196,22 @@ Example call:
 ```
 
 Response shape: a per-provider health dict (`ok`/error detail for each configured source and destination).
+
+## xpst_rate_limit_status
+
+Read-only view of the persisted rate-limit cooldowns (`rate_cooldowns.json` under the config dir). It exists so an operator or agent can answer "why hasn't it posted?" without opening the file by hand. A cooldown defers a post; it does not fail it.
+
+Pure local read: no uploads, no platform API calls, no sleeps, no writes — safe in dry runs and safe to poll.
+
+Arguments: none.
+
+Example call:
+
+```json
+{ "name": "xpst_rate_limit_status", "arguments": {} }
+```
+
+Response shape: `state` (`cooling`/`idle`/`unknown`), `active` (platforms whose pause has not expired), `cooldowns` (per platform: `strikes`, `until_iso`, `last_hit_iso`, `last_reason`, `remaining_s`, `remaining_human`), `source` (the file read) and `file_present`. An absent file is a normal fresh install, not an error.
 
 ## xpst_run
 
