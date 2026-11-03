@@ -110,8 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service's retry layer owns the retry — 4 attempts, one request each, and
   ≤~16 s of sleeping (measured in the suite above: 15.98 s for a bare 429 and
   15.18 s for a 403 rate-limit body), which also matches the Instagram Graph
-  path. A recovered throttle is now
-  visible to the cooldown state machine instead of being swallowed. Ceilings are
+  path. A recovered throttle is now visible to the cooldown state machine
+  instead of being swallowed. Ceilings are
   pinned in `tests/test_rate_limit_failure_injection.py`, and the retry economy
   is now executable policy: `xpst.utils.request_budget` derives the worst case
   from the live uploader/service constants and
