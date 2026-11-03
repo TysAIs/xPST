@@ -52,6 +52,32 @@ logger = get_logger(__name__)
 _POST_PUBLISH_ERROR_MARKERS = ("qe/expose", "expose/")
 _RECONCILE_WINDOW = timedelta(minutes=30)
 
+#: Meta Graph error codes that mean "slow down": 4 (app request limit),
+#: 17 (user request limit), 32 (Page request limit), 613 (calls-per-hour).
+#: Meta's prose for these is usually "Please reduce the amount of data you're
+#: asking for…" — no "rate limit" wording, no 429 anywhere in the body — so the
+#: code is the only reliable throttle signal on the Graph publishing path.
+_META_THROTTLE_CODES = frozenset({4, 17, 32, 613})
+
+
+def _meta_throttle_response(response: Any, body: str) -> bool:
+    """Whether a Graph response is a throttle, by status or Meta error code."""
+    if getattr(response, "status_code", None) == 429:
+        return True
+    try:
+        import json
+
+        payload = json.loads(body)
+    except (TypeError, ValueError):
+        return False
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return False
+    try:
+        return int(error.get("code")) in _META_THROTTLE_CODES
+    except (TypeError, ValueError):
+        return False
+
 
 def _normalize_caption(text: str | None) -> str:
     """Collapse whitespace and case so a caption can match the published media."""
@@ -344,6 +370,20 @@ class InstagramUploader(PlatformUploader):
         except httpx.HTTPStatusError as e:
             error_body = e.response.text[:300] if e.response else str(e)
             logger.error(f"Instagram Graph API HTTP error: {e}")
+            # A Meta throttle on the Graph publishing path arrives as HTTP 429
+            # with a body whose only signal is the numeric error code (4/17/32/
+            # 613) — no "rate limit" wording anywhere. Left unmapped it looked
+            # like a generic failure, so no cooldown was recorded and the next
+            # video walked straight back into the same wall.
+            if _meta_throttle_response(getattr(e, "response", None), error_body):
+                hint = ""
+                with contextlib.suppress(Exception):
+                    hint = (e.response.headers.get("retry-after") or "").strip()
+                error = (
+                    "IG_RATE_LIMITED: Meta throttled the Graph API — backing off"
+                    + (f" (Retry-After: {hint})" if hint else "")
+                )
+                return UploadResult(success=False, error=error, platform="instagram")
             # If Meta itself says the account went personal (a switch-back
             # after connect), record that fact so the next status shows it and
             # the next upload refuses fast with the guided steps.
