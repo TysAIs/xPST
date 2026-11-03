@@ -408,9 +408,16 @@ class XUploader(PlatformUploader):
                 )
 
             if "rate limit" in error_msg:
+                # Keep the provider's own text: X/twikit carry the back-off
+                # window there ("Retry-After: 900") and the persistent cooldown
+                # parses the hint out of this string. Flattening it to prose
+                # made every X throttle resume on the 60s ladder instead.
                 return UploadResult(
                     success=False,
-                    error="X_RATE_LIMITED: Too many requests, try again later",
+                    error=(
+                        "X_RATE_LIMITED: Too many requests, try again later"
+                        f" ({truncate_error(str(e))})"
+                    ),
                     platform="x",
                 )
 
