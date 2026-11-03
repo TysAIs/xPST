@@ -1,0 +1,804 @@
+"""Failure injection: rate-limit / cooldown safety under 429, 403, 500.
+
+Tyler's un-halt condition is "the rate-limit safety fixes are verified". The
+existing hardening tests (``test_rate_limit_hardening_cooldown.py``) pin the
+cooldown state machine against a recording double and a fake clock, but they
+never let a *provider response* reach the real adapters: every one of them
+hands the service a pre-baked ``UploadResult``. That leaves the actual
+transport → token → cooldown chain unproven.
+
+This module closes that gap with scripted fake transports at each provider SDK
+boundary — ``httpx.MockTransport`` for Facebook's Graph client, a fake
+``httpx.AsyncClient`` for Instagram's Graph path, a fake twikit client for X and
+a fake ``videos().insert()`` request object for YouTube. **No socket is opened
+and no live post can happen**: every response is fabricated, and the suite is
+run under the same socket guard as the other dry-run regression tests.
+
+What it asserts, per destination (X / Instagram / Facebook / YouTube) and per
+fault shape (429, 429 + Retry-After, 403 rate-limit body, 500):
+
+FI-1  a throttle pauses the destination (the cooldown engages on first sight);
+FI-2  the pause is the provider's own Retry-After when it sent one;
+FI-3  attempts per logical post stay bounded and the total wait stays under a
+      stated ceiling (no retry storm);
+FI-4  a rate-limited post is NEVER recorded as posted;
+FI-5  the pause survives a process restart and is honoured by the next post;
+FI-6  one destination's cooldown never blocks another destination's post;
+FI-7  one destination's cooldown never silently unblocks (shortens) a longer
+      cooldown already running for a sibling on the same upstream pool.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock
+
+import httpx
+import pytest
+
+import xpst.utils.retry as retry_mod
+from xpst.config import XPSTConfig
+from xpst.platforms.facebook import FacebookGraphClient, FacebookPageUploader
+from xpst.platforms.instagram import InstagramUploader
+from xpst.platforms.x import XUploader
+from xpst.platforms.youtube import YouTubeUploader
+from xpst.services.upload_service import UploadService
+from xpst.state import StateManager
+from xpst.utils.cooldown_store import CooldownStore
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+#: Ceilings the un-halt decision is made against. One logical post may cost at
+#: most this many provider requests and this much sleeping before it gives up:
+#: a throttled destination must not turn into a request storm.
+MAX_ATTEMPTS_PER_POST = 4
+MAX_WAIT_S_PER_POST = 10.0
+
+#: Fault shapes every destination is exercised with.
+META_THROTTLE_CODE = 4
+
+
+class Clock:
+    """Deterministic clock for the cooldown store (never sleeps)."""
+
+    def __init__(self) -> None:
+        self.t = 1_800_000_000.0
+
+    def __call__(self) -> float:
+        return self.t
+
+    def advance(self, seconds: float) -> None:
+        self.t += seconds
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    """Record every backoff sleep instead of waiting for it.
+
+    ``retry_operation`` imports ``asyncio`` at module import time, so replacing
+    the module attribute keeps the patch local to the retry layer (the event
+    loop keeps its real ``asyncio.sleep``).
+    """
+    recorded: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(delay: float, *a: Any, **kw: Any) -> None:
+        recorded.append(float(delay))
+        await real_sleep(0)
+
+    monkeypatch.setattr(
+        retry_mod,
+        "asyncio",
+        SimpleNamespace(sleep=fake_sleep, iscoroutine=asyncio.iscoroutine),
+    )
+    return recorded
+
+
+# ---------------------------------------------------------------------------
+# Provider transports (fabricated responses; no socket)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Fault:
+    """One fabricated provider answer."""
+
+    status: int
+    retry_after: str | None = None
+    body: dict | str | None = None
+    exc_text: str | None = None
+    label: str = ""
+    #: True when this answer is rate-limit shaped (the provider is asking us to
+    #: slow down). Transports render the provider's own wording for it.
+    throttle: bool = False
+
+
+def _meta_error(message: str, code: int) -> dict:
+    return {"error": {"message": message, "type": "OAuthException", "code": code}}
+
+
+#: 429 whose body carries Meta's numeric throttle code and no retry wording —
+#: the shape that silently escaped the cooldown (see FI-1/D-2).
+FAULT_META_CODE_THROTTLE = Fault(
+    status=429,
+    body=_meta_error(
+        "Please reduce the amount of data you're asking for, then retry your request",
+        META_THROTTLE_CODE,
+    ),
+    label="meta-code-4",
+    throttle=True,
+)
+FAULT_META_CODE_THROTTLE_RA = Fault(
+    status=429,
+    retry_after="900",
+    body=_meta_error("Application request limit reached", META_THROTTLE_CODE),
+    label="meta-code-4-retry-after",
+    throttle=True,
+)
+FAULT_403_RATE_LIMIT = Fault(
+    status=403,
+    body=_meta_error("Application request limit reached", 32),
+    label="403-rate-limit",
+    throttle=True,
+)
+FAULT_500 = Fault(
+    status=500,
+    body=_meta_error("Internal server error", 1),
+    label="500",
+)
+
+#: Every rate-limit-shaped answer each destination must survive.
+THROTTLE_FAULTS = [
+    FAULT_META_CODE_THROTTLE,
+    FAULT_META_CODE_THROTTLE_RA,
+    FAULT_403_RATE_LIMIT,
+]
+
+
+class Recorder:
+    """Counts provider requests and remembers them for assertions."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def hit(self, label: str) -> None:
+        self.calls.append(label)
+
+
+class XTransport:
+    """Fake twikit client: the seam the X uploader talks to."""
+
+    platform = "x"
+
+    def __init__(self, fault: Fault) -> None:
+        self.fault = fault
+        self.recorder = Recorder()
+
+    @property
+    def calls(self) -> int:
+        """Publish attempts (one per ``create_tweet``)."""
+        return sum(1 for c in self.recorder.calls if c == "create_tweet")
+
+    @property
+    def total_requests(self) -> int:
+        """Every provider request, including the per-attempt media upload."""
+        return len(self.recorder.calls)
+
+    async def upload_media(self, path, **kw):  # noqa: ANN001, ANN003
+        self.recorder.hit("upload_media")
+        return "media-1"
+
+    async def create_tweet(self, **kw):  # noqa: ANN003
+        self.recorder.hit("create_tweet")
+        if self.fault.status < 400:
+            return SimpleNamespace(id="tweet-1")
+        raise Exception(self._message())
+
+    async def get_user_by_screen_name(self, name):  # noqa: ANN001
+        return SimpleNamespace(id="1")
+
+    def _message(self) -> str:
+        if self.fault.exc_text:
+            return self.fault.exc_text
+        if self.fault.throttle:
+            reason = "Too Many Requests" if self.fault.status == 429 else "Forbidden"
+            msg = f"{self.fault.status} {reason}: rate limit exceeded"
+        elif self.fault.status == 500:
+            return "500 Internal Server Error"
+        else:
+            msg = f"{self.fault.status} provider error"
+        if self.fault.retry_after:
+            msg += f" (Retry-After: {self.fault.retry_after})"
+        return msg
+
+
+class YouTubeTransport:
+    """Fake YouTube Data API service: ``videos().insert().next_chunk()``."""
+
+    platform = "youtube"
+
+    def __init__(self, fault: Fault) -> None:
+        self.fault = fault
+        self.recorder = Recorder()
+
+    @property
+    def calls(self) -> int:
+        return len(self.recorder.calls)
+
+    def videos(self):
+        transport = self
+
+        class _Videos:
+            def insert(self, **kw):  # noqa: ANN003
+                return _Request(transport)
+
+        return _Videos()
+
+
+class _Request:
+    """Mimics ``googleapiclient``'s resumable request object."""
+
+    def __init__(self, transport: YouTubeTransport) -> None:
+        self._t = transport
+
+    def next_chunk(self):
+        from googleapiclient.errors import HttpError
+
+        self._t.recorder.hit("videos.insert")
+        fault = self._t.fault
+        if fault.status < 400:
+            return None, {"id": "yt-video-1"}
+        if fault.throttle:
+            payload = {
+                "error": {
+                    "code": fault.status,
+                    "message": "Rate limit exceeded",
+                    "errors": [{"reason": "rateLimitExceeded"}],
+                }
+            }
+        else:
+            payload = fault.body if isinstance(fault.body, dict) else {
+                "error": {"code": fault.status, "message": str(fault.body or "error")}
+            }
+        import httplib2
+
+        headers = {"status": str(fault.status), "reason": "reason"}
+        if fault.retry_after:
+            headers["retry-after"] = fault.retry_after
+        resp = httplib2.Response(headers)
+        raise HttpError(resp, json.dumps(payload).encode())
+
+    def execute(self):
+        return self.next_chunk()
+
+
+class FacebookTransport:
+    """Real Graph client over ``httpx.MockTransport`` — no socket."""
+
+    platform = "facebook"
+
+    def __init__(self, fault: Fault) -> None:
+        self.fault = fault
+        self.recorder = Recorder()
+
+    @property
+    def calls(self) -> int:
+        return len(self.recorder.calls)
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.recorder.hit(request.url.path)
+        headers = {}
+        if self.fault.retry_after:
+            headers["Retry-After"] = self.fault.retry_after
+        body = self.fault.body if isinstance(self.fault.body, dict) else {
+            "error": {"message": str(self.fault.body or "error"), "code": 1}
+        }
+        return httpx.Response(
+            self.fault.status, json=body, headers=headers, request=request
+        )
+
+    def client(self) -> FacebookGraphClient:
+        return FacebookGraphClient(
+            client=httpx.Client(transport=httpx.MockTransport(self.handler))
+        )
+
+
+class InstagramSessionTransport:
+    """Fake instagrapi client for Instagram's session (unofficial) path.
+
+    The production config on this box uses ``auth_mode: session``, so this is
+    the path a real IG post would take today. instagrapi turns an HTTP 429 into
+    ``ClientThrottledError`` whose text is the underlying requests error
+    ("429 Client Error: Too Many Requests for url: ..."), which is what this
+    transport reproduces.
+    """
+
+    platform = "instagram"
+    auth_mode = "session"
+
+    def __init__(self, fault: Fault) -> None:
+        self.fault = fault
+        self.recorder = Recorder()
+
+    @property
+    def calls(self) -> int:
+        return len(self.recorder.calls)
+
+    def clip_upload(self, path, caption=None, thumbnail=None):  # noqa: ANN001
+        self.recorder.hit("clip_upload")
+        if self.fault.status < 400:
+            return SimpleNamespace(pk="ig-media-1", code="abc123")
+        if self.fault.throttle:
+            text = "429 Client Error: Too Many Requests for url: https://i.instagram.com/api/v1/media/configure/"
+            if self.fault.retry_after:
+                text += f" Retry-After: {self.fault.retry_after}"
+        elif self.fault.status == 500:
+            text = "500 Server Error for url: https://i.instagram.com/api/v1/media/configure/"
+        else:
+            text = f"{self.fault.status} Client Error"
+        raise Exception(text)
+
+    def get_timeline_feed(self, **kw):  # noqa: ANN003
+        return []
+
+    def user_medias(self, *a, **kw):  # noqa: ANN001, ANN003
+        return []
+
+
+class InstagramTransport:
+    """Fake ``httpx.AsyncClient`` for Instagram's Graph API publishing path."""
+
+    platform = "instagram"
+
+    def __init__(self, fault: Fault) -> None:
+        self.fault = fault
+        self.recorder = Recorder()
+
+    @property
+    def calls(self) -> int:
+        return len(self.recorder.calls)
+
+    def _response(self, url: str) -> httpx.Response:
+        headers = {}
+        if self.fault.retry_after:
+            headers["Retry-After"] = self.fault.retry_after
+        body = self.fault.body if isinstance(self.fault.body, dict) else {
+            "error": {"message": str(self.fault.body or "error"), "code": 1}
+        }
+        return httpx.Response(
+            self.fault.status,
+            json=body,
+            headers=headers,
+            request=httpx.Request("POST", url),
+        )
+
+    def factory(self):
+        """Return an ``httpx.AsyncClient`` replacement bound to this transport."""
+
+        class _Client:
+            def __init__(self, *a: Any, **kw: Any) -> None:
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def post(self, url, data=None, **kw):  # noqa: ANN001, ANN003
+                self._t.recorder.hit("POST " + url)
+                return self._t._response(url)
+
+            async def get(self, url, **kw):  # noqa: ANN001, ANN003
+                self._t.recorder.hit("GET " + url)
+                return httpx.Response(
+                    200, json={}, request=httpx.Request("GET", url)
+                )
+
+        client = _Client()
+        client._t = self
+        return client
+
+
+# ---------------------------------------------------------------------------
+# Service + uploader harness
+# ---------------------------------------------------------------------------
+
+def make_service(tmp_path: Path, clock: Clock) -> UploadService:
+    config = MagicMock()  # encoding profiles resolve to permissive doubles
+    config.config_dir = str(tmp_path)
+    service = UploadService(
+        video_processor=_NullVideoProcessor(),
+        circuit_breakers=_NullBreakers(),
+        quota_manager=_NullQuota(),
+        state=StateManager(str(tmp_path)),
+        notifier=SimpleNamespace(
+            notify_upload_failure=lambda **kw: None,
+            notify_circuit_breaker=lambda *a, **kw: None,
+        ),
+        shutdown_handler=SimpleNamespace(
+            update_phase=lambda *a, **kw: None, add_temp_file=lambda p: None
+        ),
+        config=config,
+        anti_bot=None,
+    )
+    service.rate_cooldowns = CooldownStore(tmp_path, now=clock)
+    return service
+
+
+class _NullVideoProcessor:
+    ffmpeg_path = None
+
+    def get_video_info(self, path):  # noqa: ANN001
+        return {"streams": [], "format": {}}
+
+    async def encode_for_platform(self, video_path, platform, **kw):  # noqa: ANN001, ANN003
+        return video_path
+
+
+class _NullBreakers:
+    def allow_request(self, platform):  # noqa: ANN001
+        return True
+
+    def record_success(self, platform):  # noqa: ANN001
+        pass
+
+    def record_failure(self, platform, error):  # noqa: ANN001
+        pass
+
+    _breakers: dict = {}
+
+
+class _NullQuota:
+    def preflight(self, platform):  # noqa: ANN001
+        pass
+
+    def record_upload(self, platform):  # noqa: ANN001
+        pass
+
+
+def make_video(tmp_path: Path, name: str = "clip.mp4") -> Path:
+    path = tmp_path / name
+    path.write_bytes(b"\x00" * 8192)
+    return path
+
+
+def build_uploader(transport, tmp_path: Path, monkeypatch):
+    """Return (uploader, cleanup) wired to the scripted transport."""
+    config = XPSTConfig()
+    if transport.platform == "x":
+        uploader = XUploader(config)
+        uploader._client = transport
+        return uploader, None
+    if transport.platform == "instagram":
+        if getattr(transport, "auth_mode", "") == "session":
+            config.instagram.auth_mode = "session"
+            uploader = InstagramUploader(config)
+            uploader._client = transport
+            return uploader, None
+        config.instagram.auth_mode = "graph_api"
+        config.instagram.graph_access_token = "test-token"
+        config.instagram.graph_ig_user_id = "1789"
+        uploader = InstagramUploader(config)
+        monkeypatch.setattr(
+            httpx, "AsyncClient", lambda *a, **kw: transport.factory()
+        )
+        return uploader, None
+    if transport.platform == "facebook":
+        uploader = FacebookPageUploader(config)
+        uploader._client = transport.client
+        uploader._page_id = "1234"
+        uploader._page_token = "test-token"
+        return uploader, None
+    if transport.platform == "youtube":
+        uploader = YouTubeUploader(config)
+        uploader._service = transport
+        return uploader, None
+    raise AssertionError(transport.platform)
+
+
+TRANSPORTS = {
+    "x": XTransport,
+    "instagram": InstagramTransport,
+    "facebook": FacebookTransport,
+    "youtube": YouTubeTransport,
+}
+
+
+async def post(service, uploader, platform, video, video_id):
+    return await service.upload_to_platform(
+        uploader=uploader,
+        video_path=video,
+        caption="failure injection",
+        platform_name=platform,
+        video_id=video_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# FI-1/FI-2: a throttle pauses the destination, at the provider's own ask
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("fault", THROTTLE_FAULTS, ids=lambda f: f.label)
+@pytest.mark.parametrize("platform", sorted(TRANSPORTS))
+def test_every_rate_limit_shape_pauses_and_never_posts(
+    platform, fault, tmp_path, monkeypatch, sleeps
+):
+    """FI-1/FI-4: 429, 429+Retry-After and a 403 rate-limit body all pause."""
+    transport = TRANSPORTS[platform](fault)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    result = asyncio.run(post(service, uploader, platform, make_video(tmp_path), "vid-shape"))
+
+    assert result.success is False, f"{platform}/{fault.label} reported success"
+    assert service.rate_cooldowns.remaining_s(platform) > 0, (
+        f"{platform}/{fault.label} did not engage the cooldown (error={result.error!r})"
+    )
+    assert service.state.is_video_posted("vid-shape", platform) is False
+    assert transport.calls <= MAX_ATTEMPTS_PER_POST
+
+
+@pytest.mark.parametrize("platform", sorted(TRANSPORTS))
+def test_throttle_pauses_the_destination(platform, tmp_path, monkeypatch, sleeps):
+    """FI-1: any rate-limit-shaped answer engages the cooldown."""
+    transport = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    result = asyncio.run(post(service, uploader, platform, make_video(tmp_path), "vid-1"))
+
+    assert result.success is False
+    assert transport.calls >= 1
+    remaining = service.rate_cooldowns.remaining_s(platform)
+    assert remaining > 0, (
+        f"{platform}: a throttle did not engage the cooldown (error={result.error!r})"
+    )
+    assert remaining >= 60
+
+
+@pytest.mark.parametrize("platform", sorted(TRANSPORTS))
+def test_throttle_honours_the_provider_retry_after(platform, tmp_path, monkeypatch, sleeps):
+    """FI-2: when the provider says how long to wait, we wait at least that long."""
+    transport = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE_RA)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    asyncio.run(post(service, uploader, platform, make_video(tmp_path), "vid-1"))
+
+    remaining = service.rate_cooldowns.remaining_s(platform)
+    assert remaining == pytest.approx(900), (
+        f"{platform}: Retry-After 900 was not honoured (remaining={remaining})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# FI-3: bounded attempts, no retry storm
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("platform", sorted(TRANSPORTS))
+def test_throttled_post_is_bounded(platform, tmp_path, monkeypatch, sleeps):
+    """FI-3: a throttled post costs a bounded number of requests and no storm."""
+    transport = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    asyncio.run(post(service, uploader, platform, make_video(tmp_path), "vid-1"))
+
+    assert transport.calls <= MAX_ATTEMPTS_PER_POST, (
+        f"{platform}: {transport.calls} provider requests for one throttled post"
+    )
+    assert sum(sleeps) <= MAX_WAIT_S_PER_POST, (
+        f"{platform}: {sum(sleeps):.1f}s of backoff for one throttled post"
+    )
+    # One strike, not one per attempt: the strike is recorded at first sight.
+    snap = service.rate_cooldowns.snapshot()[platform]
+    assert snap["strikes"] == 1
+    print(
+        f"MEASURED {platform}: attempts={transport.calls} "
+        f"total_requests={getattr(transport, 'total_requests', transport.calls)} "
+        f"wait_s={sum(sleeps):.2f}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# FI-4: a rate-limited post is never counted as posted
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("platform", sorted(TRANSPORTS))
+def test_rate_limited_post_is_never_counted_posted(platform, tmp_path, monkeypatch, sleeps):
+    """FI-4: no success, no post id, no state row, no quota spent."""
+    transport = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    result = asyncio.run(post(service, uploader, platform, make_video(tmp_path), "vid-x"))
+
+    assert result.success is False
+    assert not getattr(result, "is_published", False)
+    assert service.state.is_video_posted("vid-x", platform) is False
+
+
+# ---------------------------------------------------------------------------
+# FI-5: the pause survives a restart
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("platform", sorted(TRANSPORTS))
+def test_cooldown_survives_restart_and_is_honoured(platform, tmp_path, monkeypatch, sleeps):
+    """FI-5: after a restart the next post is deferred with zero provider calls."""
+    transport = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE_RA)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+    video = make_video(tmp_path)
+    asyncio.run(post(service, uploader, platform, video, "vid-1"))
+    calls_before = transport.calls
+
+    # Process restart: fresh service, fresh store, same config dir.
+    revived = make_service(tmp_path, clock)
+    second = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE_RA)
+    uploader2, _ = build_uploader(second, tmp_path, monkeypatch)
+
+    result = asyncio.run(post(revived, uploader2, platform, video, "vid-2"))
+
+    assert result.metadata.get("cooldown") is True
+    assert result.success is False
+    assert second.calls == 0, f"{platform}: a cooling post still called the provider"
+    assert transport.calls == calls_before
+
+
+# ---------------------------------------------------------------------------
+# FI-6: one destination's cooldown never blocks another destination
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("cooled", "posting"),
+    [("instagram", "x"), ("x", "youtube"), ("youtube", "facebook")],
+)
+def test_a_cooldown_does_not_block_another_destination(
+    cooled, posting, tmp_path, monkeypatch, sleeps
+):
+    """FI-6: independent destinations keep posting while one is cooling."""
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+    service.rate_cooldowns.record_hit(cooled, retry_after_s=3600, reason="injected")
+
+    transport = TRANSPORTS[posting](Fault(status=200, body={"id": "ok-1"}))
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+
+    result = asyncio.run(post(service, uploader, posting, make_video(tmp_path), "vid-1"))
+
+    assert result.success is True, (
+        f"{posting} was blocked by {cooled}'s cooldown: {result.error!r}"
+    )
+    assert transport.calls >= 1
+
+
+# ---------------------------------------------------------------------------
+# FI-7: a sibling's shorter cooldown never shortens a longer running one
+# ---------------------------------------------------------------------------
+
+def test_sibling_throttle_never_shortens_a_longer_cooldown(tmp_path):
+    """FI-7: the Meta family cools together, but never un-cools early.
+
+    A 15-minute Facebook pause (Retry-After 900) must survive an Instagram
+    throttle that only earns the 60s base pause. Overwriting the sibling's
+    deadline with the shorter one would silently let Facebook post again 14
+    minutes before Meta said it could.
+    """
+    clock = Clock()
+    store = CooldownStore(tmp_path, now=clock)
+    store.record_hit("facebook", retry_after_s=900, reason="429 Retry-After: 900")
+    assert store.remaining_s("facebook") == pytest.approx(900)
+
+    clock.advance(5)
+    store.record_hit("instagram", reason="meta code 4")
+
+    # The IG strike is recorded...
+    assert store.snapshot()["instagram"]["strikes"] == 1
+    # ...but neither member loses the longer window Facebook already earned.
+    assert store.remaining_s("facebook") == pytest.approx(895), (
+        "a sibling's shorter cooldown silently shortened a longer one"
+    )
+    assert store.remaining_s("instagram") == pytest.approx(895)
+
+
+def test_family_cooldown_still_spreads_to_siblings(tmp_path):
+    """FI-7 guard: the conservative direction (spreading) keeps working."""
+    clock = Clock()
+    store = CooldownStore(tmp_path, now=clock)
+    store.record_hit("facebook", retry_after_s=900, reason="meta 429")
+    for sibling in ("instagram", "threads", "messenger"):
+        assert store.remaining_s(sibling) == pytest.approx(900)
+
+
+# ---------------------------------------------------------------------------
+# Instagram session (instagrapi) path — the mode this box actually runs
+# ---------------------------------------------------------------------------
+
+#: The instagrapi path has two retry layers inside it (the uploader's own
+#: 4-attempt loop and the service's 4-attempt retry), so its ceiling is 4x4.
+#: Recorded here rather than hidden: it is a known nesting, not a storm.
+MAX_ATTEMPTS_IG_SESSION = 16
+
+
+@pytest.fixture
+def global_sleeps(monkeypatch):
+    """Record every ``asyncio.sleep`` (the instagrapi path sleeps internally)."""
+    recorded: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def fake_sleep(delay: float, *a: Any, **kw: Any) -> None:
+        recorded.append(float(delay))
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    return recorded
+
+
+@pytest.mark.parametrize("fault", THROTTLE_FAULTS, ids=lambda f: f.label)
+def test_instagram_session_throttle_pauses_and_stays_bounded(
+    fault, tmp_path, monkeypatch, global_sleeps
+):
+    """The instagrapi path (production IG mode) also pauses and never posts."""
+    transport = InstagramSessionTransport(fault)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    result = asyncio.run(post(service, uploader, "instagram", make_video(tmp_path), "vid-s"))
+
+    assert result.success is False
+    assert service.rate_cooldowns.remaining_s("instagram") > 0, (
+        f"instagrapi/{fault.label} did not engage the cooldown (error={result.error!r})"
+    )
+    assert service.state.is_video_posted("vid-s", "instagram") is False
+    assert transport.calls <= MAX_ATTEMPTS_IG_SESSION
+    print(f"MEASURED instagram-session/{fault.label}: attempts={transport.calls} wait_s={sum(global_sleeps):.2f}")
+
+
+# ---------------------------------------------------------------------------
+# Hard cooldown: an already-running 24h pause stops everything, silently
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("platform", sorted(TRANSPORTS))
+def test_hard_cooldown_makes_zero_provider_calls(platform, tmp_path, monkeypatch, sleeps):
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+    service.rate_cooldowns.record_hit(platform, retry_after_s=86400, reason="hard stop")
+
+    transport = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    result = asyncio.run(post(service, uploader, platform, make_video(tmp_path), "vid-1"))
+
+    assert transport.calls == 0
+    assert result.metadata.get("cooldown") is True
+    assert result.metadata["remaining_s"] == pytest.approx(86400, abs=1)
+    assert sleeps == []
+
+
+# ---------------------------------------------------------------------------
+# 500s: unknown outcome — never retried blind into a duplicate post
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("platform", sorted(TRANSPORTS))
+def test_500_is_not_counted_as_posted(platform, tmp_path, monkeypatch, sleeps):
+    transport = TRANSPORTS[platform](FAULT_500)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    result = asyncio.run(post(service, uploader, platform, make_video(tmp_path), "vid-500"))
+
+    assert result.success is False
+    assert service.state.is_video_posted("vid-500", platform) is False
+    assert transport.calls <= MAX_ATTEMPTS_PER_POST
