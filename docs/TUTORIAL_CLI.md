@@ -450,7 +450,16 @@ xpst post -v ./img1.jpg -v ./img2.jpg -v ./img3.jpg -c "Swipe to see more!" -p i
 # Different caption per destination (override wins for that destination only)
 xpst post -v ./my-video.mp4 -c "Full story in the video!" -p youtube,x \
   --caption-for x="Short version — full story on YouTube."
+```
 
+**One length verdict per destination.** A caption longer than a destination's
+limit is refused with the destination and the number named — xPST never
+truncates a post into something you did not write — and the refusal is the same
+in `--dry-run`, in the live run, and in the uploader itself. `--caption-for`
+is the way through: the override is what gets validated for that destination, so
+a YouTube-length body plus a short X copy publishes to both.
+
+```bash
 # Dry run
 xpst post -v ./my-video.mp4 -c "Test" --dry-run
 
