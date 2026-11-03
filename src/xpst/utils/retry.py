@@ -22,6 +22,7 @@ Example usage:
 import asyncio
 import functools
 import random
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -56,6 +57,25 @@ _RATE_LIMIT_MARKERS = (
 def _looks_like_rate_limit(lowered_error: str) -> bool:
     """True when an error string describes a provider rate limit."""
     return any(marker in lowered_error for marker in _RATE_LIMIT_MARKERS)
+
+
+#: ``Retry-After: 120`` / ``retry_after=120`` / ``{'retry_after': 120}`` —
+#: the shapes providers use when they tell us how long to wait.
+_RETRY_AFTER_RE = r"retry[-_ ]after\D{0,3}(\d{1,6})"
+
+
+def parse_declared_retry_after_s(error: str | None) -> float | None:
+    """Seconds the provider itself asked us to wait, or ``None``.
+
+    This is the *provider's* claim ("come back in N seconds"), which is
+    different in kind from our own conservative escalation floor: a retry
+    scheduled before a provider-declared window expires is provably futile,
+    while a retry inside our own floor may still succeed.
+    """
+    if not error:
+        return None
+    match = re.search(_RETRY_AFTER_RE, error, re.IGNORECASE)
+    return float(match.group(1)) if match else None
 
 
 @dataclass
@@ -103,6 +123,26 @@ class RetryConfig:
             backoff += random.uniform(-jitter_range, jitter_range)
 
         return max(0, backoff)
+
+    def raw_delay(self, attempt: int) -> float:
+        """Unjittered scheduled delay for ``attempt`` (planning/diagnostics)."""
+        if self.fixed_delays and attempt < len(self.fixed_delays):
+            return float(self.fixed_delays[attempt])
+        return float(min(self.backoff_base**attempt, self.backoff_max))
+
+    def remaining_budget_s(self, attempt: int) -> float:
+        """Total sleeping this call still plans, including the next backoff.
+
+        Used to decide whether a provider-declared ``Retry-After`` can still be
+        met in-call: a retry scheduled inside a window the provider itself
+        named cannot recover anything, so it is not worth the request. The sum
+        is deliberately unjittered (the plan, not one lucky draw), and it is 0
+        once the last attempt has been made.
+        """
+        return sum(
+            self.raw_delay(later)
+            for later in range(attempt, self.max_retries)
+        )
 
 
 # Predefined configs for common scenarios
@@ -249,6 +289,31 @@ def retry_async(
     return decorator
 
 
+def _provider_wait_outlasts_budget(
+    config: RetryConfig, attempt: int, error: str | None
+) -> bool:
+    """Whether the provider's own ``Retry-After`` is beyond this call's budget.
+
+    A retry scheduled before a provider-declared window expires re-asks a
+    provider that already said "not yet", so the request is spent for nothing.
+    Our own escalation floor is deliberately not consulted here (see
+    :func:`retry_operation`).
+    """
+    declared = parse_declared_retry_after_s(error)
+    if declared is None:
+        return False
+    budget = config.remaining_budget_s(attempt)
+    if declared <= budget:
+        return False
+    logger.info(
+        "Not retrying: the provider asked for %.0fs (Retry-After), this call "
+        "only plans %.0fs more of backoff",
+        declared,
+        budget,
+    )
+    return True
+
+
 async def _gate_unknown_outcome(
     result: UploadResult,
     *,
@@ -345,6 +410,26 @@ async def retry_operation(
     cooldown state machine always learns about a throttle, even on paths
     where the in-call retry never fires.
 
+    Retry ownership (kanban t_2ba3e805): the uploader that talked to the
+    provider decides whether another attempt can help.
+
+    * ``UploadResult.retryable is False`` is authoritative — the failure is
+      terminal and this layer does not retry it, whatever its error text says.
+      The ``on_rate_limit`` hook still fires and an unknown outcome is still
+      reconciled first (a terminal *retry* must never skip the read-back that
+      proves a post landed).
+    * ``retryable is None`` keeps the legacy keyword heuristic untouched, so
+      adapters that declare nothing behave exactly as before.
+    * ``retryable is True`` stays advisory: honouring it can only *add*
+      attempts (a Threads container poll costs minutes), so it is not enforced
+      here.
+    * A provider-declared ``Retry-After`` longer than this layer's whole
+      remaining backoff budget stops the retry: re-asking inside a window the
+      provider itself named cannot recover anything. A hint inside the budget
+      still retries — short throttles are what in-call recovery is for. Our
+      own escalation floor is *not* consulted: it is policy about when the
+      next post may start, not a claim that an earlier attempt would fail.
+
     An UNKNOWN outcome (timeout, connection drop, 5xx raised after the request
     was sent) is settled by a read-back before any retry: pass ``reconciler``
     (a read-only destination read-back) and ``ledger`` (records the attempt)
@@ -411,6 +496,18 @@ async def retry_operation(
                         return gated
                     # The read-back proved nothing landed — retry it.
                     raise Exception(result.error)
+                # The uploader talked to the provider and declared the failure
+                # terminal. Its word wins over the error text: an adapter that
+                # already exhausted its own attempts must not be re-run by this
+                # layer just because "try again" appears in its message.
+                if result.retryable is False:
+                    logger.info(
+                        "Not retrying %s: the uploader declared the failure "
+                        "terminal (retryable=False): %s",
+                        platform or result.platform or "destination",
+                        result.error,
+                    )
+                    return result
                 retryable_keywords = [
                     "rate_limit",
                     "rate limit",
@@ -420,6 +517,10 @@ async def retry_operation(
                     "try again",
                 ]
                 if any(kw in error_msg for kw in retryable_keywords):
+                    if attempt < config.max_retries and _provider_wait_outlasts_budget(
+                        config, attempt, str(result.error)
+                    ):
+                        return result
                     raise Exception(result.error)
 
             return result
@@ -438,6 +539,12 @@ async def retry_operation(
                 raise
 
             if attempt < config.max_retries:
+                if _provider_wait_outlasts_budget(
+                    config, attempt, str(e)
+                ):
+                    # The provider named a window this call cannot wait out;
+                    # report the failure now instead of re-asking inside it.
+                    raise
                 backoff = config.get_backoff(attempt)
                 cat = categorize_error(e, platform)
                 logger.warning(
