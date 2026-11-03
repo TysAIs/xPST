@@ -25,6 +25,7 @@ from click.testing import CliRunner
 from xpst.analytics_store import AnalyticsStore
 from xpst.cli import main
 from xpst.dashboard.analytics import AnalyticsCollector, _engagement_tier
+from xpst.mcp.server import result_is_error
 
 # ── Helpers / fixtures ──────────────────────────────────────────────────
 
@@ -547,7 +548,7 @@ class TestMcpCrossPostTool:
                 "xpst_cross_post_analytics", {}
             )
 
-        assert result.isError is not True
+        assert result_is_error(result) is not True
         data = _text_payload(result)
         assert data["group_count"] == 1
         assert data["cross_post_groups"][0]["content_hash"] == "mcphash"

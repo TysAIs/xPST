@@ -82,6 +82,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configured, instead of completing the handshake for anybody who asks.
   Docs (`docs/DASHBOARD.md`, `docs/setup-messenger.md`) updated with the two new
   refusal reasons.
+- **The MCP server runs on mcp 2.x as well as 1.x.** `mcp[cli]` is now allowed up
+  to `<3.0.0`. mcp 2.0 removed `Server.list_tools`/`Server.call_tool` decorator
+  registration (handlers are constructor keywords taking
+  `(request_context, params)`) and renamed the model fields
+  `isError`/`inputSchema`/`serverInfo` to snake_case. `src/xpst/mcp/server.py`
+  now registers against whichever SDK line is installed and reads those fields
+  through three accessors (`result_is_error`, `tool_input_schema`,
+  `initialization_server_info`), so the same 41-tool registry, typed schemas and
+  fail-closed guards serve either version. Proven end to end on 2.3.0 and
+  1.30.0: `tools/list` returns all 41 tools and the refusal paths still refuse
+  without `XPST_MCP_ALLOW_MUTATIONS`. `scripts/mcp_client_smoke.py` also stopped
+  assuming the argument guard lets a missing media path through to preflight.
 
 ## [1.2.1] — 2026-09-25
 
