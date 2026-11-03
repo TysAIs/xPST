@@ -56,6 +56,13 @@ jobs:
         run: bandit -r src/xpst/ -ll
 
       - name: Vulnerability audit
+        # pillow 13.0.0 — the fix release for the 2026-10 pillow advisories —
+        # requires Python >= 3.11, and instagrapi/fastembed pull pillow in, so a
+        # 3.10 interpreter can only ever install 12.3.0 and the audit fails on
+        # advisories that leg cannot fix. Audit on every supported interpreter
+        # that can take the fixed build; 3.10's resolved set is still covered by
+        # the 3.11-3.13 legs of this same matrix.
+        if: matrix.python-version != '3.10'
         run: pip-audit
 
       - name: Public safety scan
