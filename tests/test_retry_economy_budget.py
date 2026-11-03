@@ -34,6 +34,7 @@ from typing import Any
 import pytest
 
 from tests.test_rate_limit_failure_injection import (
+    FAULT_META_CODE_THROTTLE_RA_SHORT,
     THROTTLE_FAULTS,
     Clock,
     InstagramSessionTransport,
@@ -48,6 +49,7 @@ from xpst.utils.request_budget import (
     RequestBudgetExceededError,
     derive_instagram_session_worst_case,
 )
+from xpst.utils.retry import STANDARD_RETRY
 
 #: Loopback is not "the network": on Windows, ``socket.socketpair()`` — which
 #: the ProactorEventLoop uses for its self-pipe — is emulated with a real
@@ -241,6 +243,24 @@ class BudgetedSessionTransport(InstagramSessionTransport):
         return super().clip_upload(path, caption, thumbnail)
 
 
+def decided_attempts(fault) -> int:  # noqa: ANN001
+    """Provider requests one throttled post spends on this fault shape.
+
+    The decided economy is a *ceiling*, not a target: 4 requests is the most a
+    throttled post may cost, and a provider-declared ``Retry-After`` that
+    outlasts everything this call still plans to sleep is the one shape that
+    legitimately costs fewer — exactly one. Retrying inside a window the
+    provider itself named spends a request that cannot recover anything, so the
+    uploader declares the failure terminal and the cooldown holds the platform
+    instead (retry ownership, t_2ba3e805). The threshold is read from the live
+    service config rather than restated, so the two cannot drift apart.
+    """
+    declared = float(fault.retry_after) if fault.retry_after else None
+    if declared is not None and declared > STANDARD_RETRY.remaining_budget_s(0):
+        return 1
+    return IG_SESSION_ECONOMY.requests
+
+
 @pytest.mark.parametrize("fault", THROTTLE_FAULTS, ids=lambda f: f.label)
 def test_one_throttled_post_consumes_at_most_the_decided_request_budget(
     fault, tmp_path, monkeypatch, global_sleeps
@@ -259,11 +279,15 @@ def test_one_throttled_post_consumes_at_most_the_decided_request_budget(
     assert service.state.is_video_posted(f"vid-budget-{fault.label}", "instagram") is False
 
     # The measured cost of one throttled post...
-    assert budget.requests == transport.calls == IG_SESSION_ECONOMY.requests, (
+    expected = decided_attempts(fault)
+    assert budget.requests == transport.calls == expected, (
         f"instagrapi/{fault.label}: one throttled post cost {budget.requests} provider "
-        f"requests; the decided budget is {IG_SESSION_ECONOMY.requests} "
-        f"(nested layering cost {IG_SESSION_ECONOMY.request_ceiling})"
+        f"requests; the decided economy for this shape is {expected} "
+        f"(budget {IG_SESSION_ECONOMY.requests}, nested-layering ceiling "
+        f"{IG_SESSION_ECONOMY.request_ceiling})"
     )
+    # ...never exceeds the ceiling, whichever shape it is.
+    assert budget.requests <= IG_SESSION_ECONOMY.requests
     # ...must satisfy the same budget the guard checks at runtime.
     budget.finish(waited_s=sum(global_sleeps))
 
@@ -276,6 +300,38 @@ def test_one_throttled_post_consumes_at_most_the_decided_request_budget(
         f"wait_s={sum(global_sleeps):.2f} budget={IG_SESSION_ECONOMY.requests} "
         f"ceiling={IG_SESSION_ECONOMY.request_ceiling}"
     )
+
+
+def test_a_short_declared_wait_still_spends_the_full_decided_budget(
+    tmp_path, monkeypatch, global_sleeps
+):
+    """A recoverable throttle keeps its attempts: #322 narrows nothing here.
+
+    The terminal-wait rule only fires when the provider's window outlasts what
+    this call plans to sleep. A short ``Retry-After`` is inside that plan, so
+    in-call recovery stays exactly as the economy decided it: the same 4
+    requests, and still no post.
+    """
+    fault = FAULT_META_CODE_THROTTLE_RA_SHORT
+    # Guard the premise: this shape must be the retryable kind, or the test
+    # below would silently be asserting the terminal path twice.
+    assert decided_attempts(fault) == IG_SESSION_ECONOMY.requests
+
+    budget = RequestBudget(label=f"throttle/{fault.label}")
+    transport = BudgetedSessionTransport(fault, budget)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    service = make_service(tmp_path, Clock())
+
+    result = asyncio.run(
+        post_via_service(service, uploader, tmp_path, video_id=f"vid-budget-{fault.label}")
+    )
+
+    assert result.success is False
+    assert transport.calls == IG_SESSION_ECONOMY.requests, (
+        f"instagrapi/{fault.label}: a declared wait inside the plan must keep "
+        f"in-call recovery, got {transport.calls} of {IG_SESSION_ECONOMY.requests} attempts"
+    )
+    budget.finish(waited_s=sum(global_sleeps))
 
 
 @pytest.mark.parametrize("fault", THROTTLE_FAULTS, ids=lambda f: f.label)
@@ -321,11 +377,14 @@ def test_cooldown_state_is_entered_once_per_throttled_post(
     )
     assert service.rate_cooldowns.remaining_s("instagram") > 0
     # ...and that measurement is only meaningful over the decided attempt count:
-    # the service retry layer DOES retry (4 attempts), the uploader does not.
-    assert transport.calls == IG_SESSION_ECONOMY.requests, (
-        f"expected the one service retry layer to make "
-        f"{IG_SESSION_ECONOMY.requests} attempts, got {transport.calls} provider "
-        f"requests — a nested uploader loop is back"
+    # the service retry layer DOES retry up to the ceiling, the uploader does
+    # not loop — unless the provider declared a wait this call cannot sit out,
+    # in which case one attempt is the whole decided cost.
+    expected = decided_attempts(fault)
+    assert transport.calls == expected, (
+        f"expected {expected} provider requests for instagrapi/{fault.label} "
+        f"(ceiling {IG_SESSION_ECONOMY.requests}), got {transport.calls} — a nested "
+        f"uploader loop is back, or a terminal provider wait was retried anyway"
     )
     budget.finish(waited_s=sum(global_sleeps))
 

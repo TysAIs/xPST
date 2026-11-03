@@ -139,6 +139,16 @@ FAULT_META_CODE_THROTTLE_RA = Fault(
     label="meta-code-4-retry-after",
     throttle=True,
 )
+#: The same throttle with a wait the retry layer can actually sit out: the
+#: window is shorter than the whole remaining backoff budget, so retrying is
+#: not futile and in-call recovery must be preserved.
+FAULT_META_CODE_THROTTLE_RA_SHORT = Fault(
+    status=429,
+    retry_after="1",
+    body=_meta_error("Application request limit reached", META_THROTTLE_CODE),
+    label="meta-code-4-retry-after-1",
+    throttle=True,
+)
 FAULT_403_RATE_LIMIT = Fault(
     status=403,
     body=_meta_error("Application request limit reached", 32),
@@ -584,6 +594,63 @@ def test_throttle_honours_the_provider_retry_after(platform, tmp_path, monkeypat
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("platform", sorted(TRANSPORTS))
+def test_provider_wait_beyond_the_retry_budget_costs_one_request(
+    platform, tmp_path, monkeypatch, sleeps
+):
+    """A provider-declared wait longer than the whole retry budget is answered once.
+
+    ``Retry-After: 900`` against a 7s retry ladder: the other three attempts are
+    spent inside a window the provider itself said would last 15 minutes, and
+    the cooldown defers the next post for those same 900s anyway. One request
+    is the honest cost; the post stays unpublished and the destination stays
+    cooling.
+    """
+    transport = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE_RA)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    result = asyncio.run(post(service, uploader, platform, make_video(tmp_path), "vid-ra"))
+
+    assert result.success is False
+    assert transport.calls == 1, (
+        f"{platform}: a 900s provider wait cost {transport.calls} requests; only "
+        "the first one can possibly succeed"
+    )
+    assert sleeps == [], f"{platform}: slept {sleeps} inside a window it cannot wait out"
+    assert service.rate_cooldowns.remaining_s(platform) == pytest.approx(900)
+    print(
+        f"MEASURED {platform}/retry-after-900: attempts={transport.calls} "
+        f"wait_s={sum(sleeps):.2f}"
+    )
+
+
+@pytest.mark.parametrize("platform", sorted(TRANSPORTS))
+def test_short_provider_wait_keeps_in_call_recovery(platform, tmp_path, monkeypatch, sleeps):
+    """A hint the retry budget *can* cover still retries: that is the recovery path.
+
+    ``Retry-After: 1`` is inside the 7s budget, so all four attempts happen —
+    a throttle that clears within seconds is published in-call instead of
+    waiting for a human to retry the DLQ entry.
+    """
+    transport = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE_RA_SHORT)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    asyncio.run(post(service, uploader, platform, make_video(tmp_path), "vid-ra1"))
+
+    assert transport.calls == MAX_ATTEMPTS_PER_POST, (
+        f"{platform}: a 1s provider wait was treated as futile "
+        f"({transport.calls} requests) — in-call recovery was lost"
+    )
+    print(
+        f"MEASURED {platform}/retry-after-1: attempts={transport.calls} "
+        f"wait_s={sum(sleeps):.2f}"
+    )
+
+
+@pytest.mark.parametrize("platform", sorted(TRANSPORTS))
 def test_throttled_post_is_bounded(platform, tmp_path, monkeypatch, sleeps):
     """FI-3: a throttled post costs a bounded number of requests and no storm."""
     transport = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE)
@@ -734,6 +801,18 @@ MAX_ATTEMPTS_IG_SESSION = 4
 #: service's 1/2/4s retry backoff = 19s worst case. The nested loop cost ~96s.
 MAX_WAIT_IG_SESSION_S = 19.5
 
+#: Attempts a throttled post may cost, per provider fault shape. A fault that
+#: carries a ``Retry-After`` beyond the retry layer's whole remaining budget
+#: (7s for the standard 1/2/4s ladder) is answered once and then left to the
+#: cooldown: re-asking at +1s/+3s/+7s inside a window the provider said lasts
+#: 900s cannot recover anything. Every other shape keeps the full 4 attempts,
+#: because a short throttle is exactly what in-call recovery is for.
+EXPECTED_ATTEMPTS_IG_SESSION = {
+    "meta-code-4": 4,             # no hint: the uploader's own floor is policy
+    "meta-code-4-retry-after": 1,  # Retry-After 900 >> 7s budget
+    "403-rate-limit": 4,
+}
+
 
 @pytest.fixture
 def global_sleeps(monkeypatch):
@@ -766,9 +845,10 @@ def test_instagram_session_throttle_pauses_and_stays_bounded(
         f"instagrapi/{fault.label} did not engage the cooldown (error={result.error!r})"
     )
     assert service.state.is_video_posted("vid-s", "instagram") is False
-    assert transport.calls == MAX_ATTEMPTS_IG_SESSION, (
+    expected = EXPECTED_ATTEMPTS_IG_SESSION[fault.label]
+    assert transport.calls == expected, (
         f"instagrapi/{fault.label}: one throttled post cost {transport.calls} provider "
-        f"requests; the retry economy allows exactly {MAX_ATTEMPTS_IG_SESSION} "
+        f"requests; this fault shape allows exactly {expected} "
         f"(one per service attempt, no uploader-side loop)"
     )
     total_wait = sum(global_sleeps)
@@ -776,9 +856,21 @@ def test_instagram_session_throttle_pauses_and_stays_bounded(
         f"instagrapi/{fault.label}: one throttled post slept {total_wait:.2f}s; "
         f"ceiling is {MAX_WAIT_IG_SESSION_S}s"
     )
+    # A provider that says how long to wait must be believed: the cooldown
+    # window is the provider's own number, not the 60s escalation floor. The
+    # instagrapi path used to drop the hint entirely when it normalised the
+    # throttle into IG_RATE_LIMITED.
+    if fault.retry_after:
+        assert service.rate_cooldowns.remaining_s("instagram") == pytest.approx(
+            float(fault.retry_after)
+        ), (
+            f"instagrapi/{fault.label}: the cooldown did not honour the provider's "
+            f"Retry-After ({fault.retry_after}s)"
+        )
     print(
         f"MEASURED instagram-session/{fault.label}: attempts={transport.calls} "
-        f"wait_s={total_wait:.2f}"
+        f"wait_s={total_wait:.2f} "
+        f"cooldown_s={service.rate_cooldowns.remaining_s('instagram'):.0f}"
     )
 
 
