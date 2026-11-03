@@ -21,7 +21,6 @@ Edge case handling:
 
 import asyncio
 import hashlib
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -74,11 +73,14 @@ def _parse_retry_after_s(error: str | None) -> float | None:
     ``retry_after=120``, ``{'retry_after': 120}``); the value is the number
     that follows the token. None when absent — the escalation ladder then
     decides the pause on its own.
+
+    Delegates to :func:`xpst.utils.retry.parse_declared_retry_after_s` so the
+    retry layer's futility test and the cooldown state machine read the same
+    hint from the same parser.
     """
-    if not error:
-        return None
-    match = re.search(r"retry[-_ ]after\D{0,3}(\d{1,6})", error, re.IGNORECASE)
-    return int(match.group(1)) if match else None
+    from xpst.utils.retry import parse_declared_retry_after_s
+
+    return parse_declared_retry_after_s(error)
 
 
 class AuthExpiredError(Exception):
