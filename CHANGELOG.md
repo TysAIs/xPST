@@ -70,7 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service's retry layer owns the retry (4 attempts, ~14 s, one request each),
   which also matches the Instagram Graph path. A recovered throttle is now
   visible to the cooldown state machine instead of being swallowed. Ceilings are
-  pinned in `tests/test_rate_limit_failure_injection.py`.
+  pinned in `tests/test_rate_limit_failure_injection.py`, and the retry economy
+  is now executable policy: `xpst.utils.request_budget` derives the worst case
+  from the live uploader/service constants and
+  `tests/test_retry_economy_budget.py` fails loudly if a nested retry layer
+  comes back.
 - **A first TikTok publish from an unaudited dev app no longer dies with a
   403.** Direct Post hardcoded `privacy_level: PUBLIC_TO_EVERYONE`, but TikTok
   forces an unaudited Content Posting API client to private privacy — the
