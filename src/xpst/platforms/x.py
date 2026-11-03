@@ -79,6 +79,35 @@ class XUploader(PlatformUploader):
         super().__init__(config)
         self._client = None  # Cached twikit Client
 
+    def _caption_limit_violation(self, caption: str) -> UploadResult | None:
+        """Refuse a media caption past X's limit instead of truncating it.
+
+        The content gate (``xpst.content.validate_content_request``) refuses
+        the same caption with the same number, so this path exists to keep the
+        *sender* honest when it is called directly (adapter probes, plugins,
+        tests) — before this, a 463-character caption was refused by preflight
+        and silently cut to ``277 + "..."`` here. Two answers for one question
+        is the defect; the answer is the one every other destination already
+        gives: **refused, never truncated** (``PlatformUploader._text_limit_violation``).
+        """
+        limit = self.MAX_TEXT_LENGTH
+        if limit is None or len(caption) <= limit:
+            return None
+        logger.warning(
+            "Refusing X media upload: caption is %s characters, limit is %s", len(caption), limit
+        )
+        return UploadResult(
+            success=False,
+            error=(
+                f"X_CAPTION_TOO_LONG: {len(caption)} characters exceeds the {limit}-character "
+                f"limit for x; xPST will not truncate it. Shorten the caption, or give x its "
+                f"own with --caption-for x='…' (MCP: overrides)."
+            ),
+            platform="x",
+            retryable=False,
+            metadata={"caption_length": len(caption), "limit": limit},
+        )
+
     @property
     def manifest(self) -> ProviderManifest:
         """Return X video-destination capabilities for the active auth mode."""
@@ -218,9 +247,11 @@ class XUploader(PlatformUploader):
 
         self._validate_video(video_path)
 
-        # Truncate caption if needed
-        if len(caption) > 280:
-            caption = caption[:277] + "..."
+        # Refused, never truncated: the gate refuses the same caption with the
+        # same number, so the sender must not quietly shorten what it sends.
+        violation = self._caption_limit_violation(caption)
+        if violation is not None:
+            return violation
 
         try:
             async with AsyncOAuth1Client(
@@ -348,9 +379,10 @@ class XUploader(PlatformUploader):
         """Upload via twikit (cookie-based, unofficial path)."""
         self._validate_video(video_path)
 
-        # Truncate caption if needed
-        if len(caption) > 280:
-            caption = caption[:277] + "..."
+        # Refused, never truncated (see _caption_limit_violation).
+        violation = self._caption_limit_violation(caption)
+        if violation is not None:
+            return violation
 
         try:
             client = await self._get_client()
@@ -778,8 +810,10 @@ class XUploader(PlatformUploader):
                 metadata={"content_type": "image"},
             )
 
-        if len(caption) > 280:
-            caption = caption[:277] + "..."
+        # Refused, never truncated (see _caption_limit_violation).
+        violation = self._caption_limit_violation(caption)
+        if violation is not None:
+            return violation
 
         media_type = _IMAGE_MIME_TYPES.get(image_path.suffix.lower(), "image/jpeg")
         try:
@@ -891,8 +925,10 @@ class XUploader(PlatformUploader):
                 metadata={"content_type": "image"},
             )
 
-        if len(caption) > 280:
-            caption = caption[:277] + "..."
+        # Refused, never truncated (see _caption_limit_violation).
+        violation = self._caption_limit_violation(caption)
+        if violation is not None:
+            return violation
 
         try:
             client = await self._get_client()
@@ -1003,7 +1039,10 @@ class XUploader(PlatformUploader):
                 metadata={"content_type": "thread", "items": len(items)},
             )
 
-        # Truncate caption if needed (with thread indicator)
+        # Trim for the "🧵 1/N" header this adapter appends: the gate measures
+        # the caption it was given, and the header is the adapter's own addition,
+        # so the room it needs is reserved here. (Media captions sent verbatim are
+        # refused, not trimmed — see _caption_limit_violation.)
         thread_header = f"\n\n🧵 1/{len(items)}"
         max_caption = 280 - len(thread_header)
         if len(caption) > max_caption:

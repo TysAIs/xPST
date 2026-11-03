@@ -116,10 +116,10 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
     Two properties the old ``open(path, "w")`` did not have:
 
-    * config.yaml carries credentials (TikTok client_secret / access_token,
-      Messenger page_access_token, Graph API tokens), so the file is created
-      ``0600`` — a world-readable ``~/.xpst/config.yaml`` leaked every stored
-      token to any local user.
+    * config.yaml carries account details (and, for an install without the
+      encrypted store, credentials), so the file is created ``0600`` — a
+      world-readable ``~/.xpst/config.yaml`` leaked every stored token to any
+      local user.
     * a crash or a full disk part-way through the write must leave the
       *previous* config intact.  ``open(..., "w")`` truncated it first, so a
       failed write destroyed the user's accounts.
@@ -127,6 +127,86 @@ def _atomic_write_text(path: Path, text: str) -> None:
     from xpst.utils.atomic import write_text_atomic
 
     write_text_atomic(path, text, mode=0o600)
+
+
+#: Config fields that belong in the encrypted credential store, not the YAML.
+#:
+#: ``accounts.tiktok.client_secret`` was written in cleartext to a 0644 file
+#: while every other token lived in the store (card t_95928695 D6). The YAML
+#: slot stays in the schema (empty) so the file shape is stable and an install
+#: without ``cryptography`` can still fall back to writing the value there.
+_SECRET_CONFIG_FIELDS: dict[tuple[str, str], str] = {
+    ("tiktok", "client_secret"): "tiktok_client_secret",
+}
+
+
+def _store_config_secret(config_dir: str, key: str, value: str) -> bool:
+    """Persist one config secret in the encrypted store; False when impossible."""
+
+    try:
+        from xpst.utils.credentials import CredentialStore
+
+        CredentialStore(config_dir).store(key, value)
+        return True
+    except Exception as exc:  # noqa: BLE001 - keep the config usable either way
+        logger.warning(
+            "Could not store %s in the encrypted credential store (%s); it stays "
+            "in config.yaml, which is written 0600.",
+            key,
+            exc,
+        )
+        return False
+
+
+def _load_config_secret(config_dir: str, key: str) -> str | None:
+    """Read one config secret back from the encrypted store, if it is there."""
+
+    # Building a CredentialStore derives key material (scrypt) and logs, so it
+    # is only done when the secret can actually be there: an encrypted file for
+    # this key, or the OS keychain, which is opt-in via XPST_USE_KEYRING.
+    creds = Path(config_dir).expanduser() / "credentials"
+    encrypted = creds / f"{key}.enc"
+    keyring_opt_in = os.environ.get("XPST_USE_KEYRING", "").lower() in ("1", "true", "yes")
+    if not encrypted.is_file() and not (keyring_opt_in and creds.is_dir()):
+        return None
+    try:
+        from xpst.utils.credentials import CredentialStore
+
+        return CredentialStore(config_dir).retrieve(key) or None
+    except Exception as exc:  # noqa: BLE001 - an unreadable store is "absent"
+        logger.debug("Could not read %s from the credential store: %s", key, exc)
+        return None
+
+
+def _tighten_config_permissions(path: Path) -> None:
+    """Make the config owner-only, and say why if that is impossible.
+
+    The file holds account details and, on an install without the encrypted
+    store, secrets. xPST writes it 0600, but a file written by an older version
+    (or by hand, or by a backup restore) keeps whatever mode it had until
+    something rewrites it — so it is tightened here instead of being reported
+    and left alone. The fix is silent on success (a load must not print) and
+    only speaks up when the chmod genuinely fails.
+    """
+
+    if os.name == "nt":  # POSIX mode bits are not meaningful there
+        return
+    try:
+        import stat as _stat
+
+        mode = _stat.S_IMODE(path.stat().st_mode)
+        if not mode & 0o077:
+            return
+        os.chmod(path, 0o600)
+        logger.debug("Tightened %s from %s to 0600 (owner-only).", path, oct(mode))
+    except OSError as exc:
+        logger.warning(
+            "XPST config %s is group/world-readable and could not be tightened (%s); "
+            "it carries account details and must stay private. Fix: chmod 600 %s",
+            path,
+            exc,
+            path,
+        )
 
 
 #: Credential-file fields whose shipped defaults point at ``~/.xpst``.
@@ -789,6 +869,7 @@ class XPSTConfig:
             # a raw "Permission denied: .../backups" from the migrator into an
             # actionable message naming the directory and the fix.
             ensure_config_dir_usable(cfg_path.parent)
+            _tighten_config_permissions(cfg_path)
         try:
             with open(cfg_path, "rb") as f:
                 raw = f.read()
@@ -827,6 +908,16 @@ class XPSTConfig:
             )
         config = cls._merge_config(config, file_config)
         config.config_dir = str(cfg_path.parent)
+
+        # Secrets live in the encrypted store, not the YAML (an install without
+        # the store still writes them to the config, see save()).
+        for (section, field_name), store_key in _SECRET_CONFIG_FIELDS.items():
+            account = getattr(config, section, None)
+            if account is None or getattr(account, field_name, ""):
+                continue
+            stored = _load_config_secret(config.config_dir, store_key)
+            if stored:
+                setattr(account, field_name, stored)
 
         # Auto-migrate config from older versions
         from xpst.config_migration import auto_migrate
@@ -1629,6 +1720,19 @@ class XPSTConfig:
             "first_run_complete": self.first_run_complete,
             "provider_mode": self.provider_mode,
         }
+
+        # Secrets belong in the encrypted credential store: the YAML keeps the
+        # (empty) slot so the file shape is stable, and load() reads the value
+        # back. When the store cannot be written (no cryptography/keyring) the
+        # value stays in the file rather than being lost.
+        for (section, field_name), store_key in _SECRET_CONFIG_FIELDS.items():
+            section_values = config_dict.get("accounts", {}).get(section)
+            if not isinstance(section_values, dict):
+                continue
+            secret = str(section_values.get(field_name) or "")
+            store_dir = str(Path(str(config_path)).parent)
+            if secret and _store_config_secret(store_dir, store_key, secret):
+                section_values[field_name] = ""
 
         # Serialize first, then publish atomically: a dump failure must not
         # truncate the existing config (data-loss vector on disk-full).
