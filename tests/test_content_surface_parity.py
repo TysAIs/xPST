@@ -43,7 +43,7 @@ from xpst.content import (
 )
 from xpst.dashboard.api import create_api_router
 from xpst.mcp import server as mcp_server
-from xpst.mcp.server import _handle_post
+from xpst.mcp.server import _handle_post, result_is_error, tool_input_schema
 from xpst.platforms.base import PlatformRegistry
 
 if TYPE_CHECKING:
@@ -129,7 +129,7 @@ def _mcp_post(config: XPSTConfig, payload: dict[str, Any], engine: MagicMock) ->
 def _mcp_tool_payload(name: str, config: XPSTConfig, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     mcp_server._server = mcp_server.XPSTMCPServer(config)
     result = asyncio.run(mcp_server.handle_call_tool(name, arguments or {}))
-    assert not result.isError, result.content[0].text
+    assert not result_is_error(result), result.content[0].text
     return json.loads(result.content[0].text)
 
 
@@ -221,7 +221,7 @@ def test_cli_mcp_and_http_serve_the_same_capability_document(
 
 def test_mcp_post_schema_states_the_canonical_vocabulary_and_allows_text() -> None:
     tool = next(item for item in mcp_server.TOOLS if item.name == "xpst_post")
-    schema = tool.inputSchema
+    schema = tool_input_schema(tool)
     assert schema["properties"]["content_type"]["enum"] == [item.value for item in CONTENT_TYPES]
     assert "video_path" not in schema["required"], "a text post carries no file"
     assert "caption" in schema["required"]

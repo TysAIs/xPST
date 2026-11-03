@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 from xpst.cli import EXIT_CONFIG_ERROR, main
 from xpst.config import XPSTConfig
 from xpst.dashboard.api import create_api_router
-from xpst.mcp.server import _handle_post, _handle_preflight, _handle_run
+from xpst.mcp.server import _handle_post, _handle_preflight, _handle_run, result_is_error
 from xpst.services.post_preflight import (
     NO_DESTINATIONS_CODE,
     NO_DESTINATIONS_MESSAGE,
@@ -185,7 +185,7 @@ def test_mcp_run_refuses_without_a_destination(tmp_path: Path) -> None:
 
     result = asyncio.run(_handle_run(engine, {"source": "tiktok"}))
 
-    assert result.isError is True
+    assert result_is_error(result) is True
     payload = json.loads(result.content[0].text)
     assert payload["error"]["code"] == NO_DESTINATIONS_CODE
     assert payload["error"]["message"] == MESSAGE
@@ -200,7 +200,7 @@ def test_mcp_post_refuses_without_a_destination(tmp_path: Path) -> None:
         _handle_post(engine, {"video_path": str(media), "caption": "hi"})
     )
 
-    assert result.isError is True
+    assert result_is_error(result) is True
     payload = json.loads(result.content[0].text)
     assert payload["error"]["code"] == NO_DESTINATIONS_CODE
     assert payload["error"]["message"] == MESSAGE

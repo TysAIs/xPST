@@ -35,6 +35,7 @@ import yaml
 from click.testing import CliRunner
 
 from xpst.cli import main
+from xpst.mcp.server import result_is_error
 from xpst.schedule_manager import (
     MAX_CAPTION_LENGTH,
     ScheduleManager,
@@ -398,7 +399,7 @@ def test_mcp_schedule_add_stores_overrides(store_dir, tmp_path):
         "platforms": ["youtube", "x"],
         "overrides": {"x": "short copy"},
     }))
-    assert not result.isError, result.content[0].text
+    assert not result_is_error(result), result.content[0].text
     scheduled = json.loads(result.content[0].text)["scheduled"]
     assert scheduled["per_platform_captions"] == {"x": "short copy"}
 
@@ -420,6 +421,6 @@ def test_mcp_schedule_add_rejects_a_bad_overrides_payload(store_dir, tmp_path):
         "scheduled_time": "2026-12-25T10:00:00",
         "overrides": {"x": ["not", "text"]},
     }))
-    assert result.isError
+    assert result_is_error(result)
     assert "overrides" in result.content[0].text
     assert ScheduleManager(store_dir).list() == [], "a refused add stores nothing"

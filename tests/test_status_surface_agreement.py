@@ -48,6 +48,7 @@ from xpst.config import XPSTConfig
 from xpst.dashboard.api import create_api_router
 from xpst.engine import CrossPostResult
 from xpst.mcp import server as mcp_server
+from xpst.mcp.server import result_is_error
 from xpst.platforms.base import PlatformHealth, UploadResult
 from xpst.readiness import build_readiness_report
 from xpst.utils.probe_errors import (
@@ -278,7 +279,7 @@ def surface_data() -> dict[str, Any]:
                 return await mcp_server.handle_call_tool(name, {})
 
             result = asyncio.run(_call())
-            assert not result.isError
+            assert not result_is_error(result)
             return json.loads(result.content[0].text)
 
         try:

@@ -7,6 +7,7 @@ import pytest
 
 from xpst.analytics_store import AnalyticsStore
 from xpst.dashboard.analytics import AnalyticsCollector as DashboardAnalytics
+from xpst.mcp.server import result_is_error, tool_input_schema
 
 
 def _seed_store(config_dir, rows):
@@ -86,7 +87,7 @@ class TestMcpSurface:
             "tiktok", "youtube", "x", "instagram", "local",
         }
         run_tool = next(t for t in mcp_server.TOOLS if t.name == "xpst_run")
-        assert run_tool.inputSchema["properties"]["source"]["enum"] == (
+        assert tool_input_schema(run_tool)["properties"]["source"]["enum"] == (
             mcp_server._SOURCE_ENUM
         )
 
@@ -95,7 +96,7 @@ class TestMcpSurface:
         from xpst.mcp import server as mcp_server
 
         tool = next(t for t in mcp_server.TOOLS if t.name == "xpst_analytics")
-        assert "live" in tool.inputSchema["properties"]
+        assert "live" in tool_input_schema(tool)["properties"]
         assert tool.description
 
     @pytest.mark.asyncio
@@ -237,14 +238,14 @@ class TestScheduleTools:
             "video_path": str(tmp_path / "missing.mp4"),
             "caption": "c", "scheduled_time": "2026-06-12T09:30:00",
         })
-        assert r1.isError
+        assert result_is_error(r1)
         video = tmp_path / "v.mp4"
         video.write_bytes(b"x")
         r2 = await _handle_schedule_add(config, {
             "video_path": str(video), "caption": "c",
             "scheduled_time": "not-a-time",
         })
-        assert r2.isError
+        assert result_is_error(r2)
 
     @pytest.mark.asyncio
     async def test_schedule_add_is_guarded(self, monkeypatch):
@@ -252,4 +253,4 @@ class TestScheduleTools:
         from xpst.mcp.server import handle_call_tool
 
         result = await handle_call_tool("xpst_schedule_add", {})
-        assert result.isError and "Blocked" in result.content[0].text
+        assert result_is_error(result) and "Blocked" in result.content[0].text
