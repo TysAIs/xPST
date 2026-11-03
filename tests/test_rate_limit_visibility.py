@@ -276,7 +276,7 @@ class TestMcpTool:
 
         result = asyncio.run(mcp_server.handle_call_tool("xpst_rate_limit_status", {}))
 
-        assert not result.isError
+        assert not mcp_server.result_is_error(result)
         payload = json.loads(result.content[0].text)
         assert payload["state"] == "cooling"
         assert "instagram" in payload["active"]
@@ -291,5 +291,5 @@ class TestMcpTool:
 
         result = asyncio.run(mcp_server.handle_call_tool("xpst_rate_limit_status", {}))
 
-        assert not result.isError
+        assert not mcp_server.result_is_error(result)
         assert json.loads(result.content[0].text)["state"] == "cooling"
