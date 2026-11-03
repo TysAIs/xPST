@@ -21,6 +21,7 @@ import pytest
 pytest.importorskip("mcp", reason="mcp extra not installed")
 
 from xpst.mcp import server as mcp_server
+from xpst.mcp.server import result_is_error
 from xpst.platforms.base import DeleteOutcome, DeleteResult
 
 VIDEO_ID = "tiktok:abc123"
@@ -152,7 +153,7 @@ def test_delete_unknown_video_is_an_error() -> None:
     result = _run(engine, {"video_id": "ghost"})
     payload = _payload(result)
 
-    assert result.isError is True
+    assert result_is_error(result) is True
     assert payload["ok"] is False
     assert payload["platform_deleted"] is False
     assert payload["results"] == []

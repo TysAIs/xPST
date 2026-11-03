@@ -6,6 +6,7 @@ import pytest
 
 from xpst.config import XPSTConfig
 from xpst.mcp import server
+from xpst.mcp.server import result_is_error
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +23,7 @@ async def test_capabilities_returns_role_aware_catalog_without_engine_start(tmp_
 
     result = await server.handle_call_tool("xpst_capabilities", {})
 
-    assert not result.isError
+    assert not result_is_error(result)
     payload = server.json.loads(result.content[0].text)
     assert payload["ok"] is True
     assert payload["contract_version"] == 1
@@ -40,7 +41,7 @@ async def test_readiness_returns_stable_report_without_engine_start(tmp_path: Pa
 
     result = await server.handle_call_tool("xpst_readiness", {})
 
-    assert not result.isError
+    assert not result_is_error(result)
     payload = server.json.loads(result.content[0].text)
     # `ok` must mirror the readiness verdict instead of being a constant: an
     # agent that read ok=True while readiness.ready was False reported a setup
@@ -59,7 +60,7 @@ async def test_auth_start_is_human_action_plan_and_never_opens_browser(tmp_path:
 
     result = await server.handle_call_tool("xpst_auth_start", {"platform": "youtube"})
 
-    assert not result.isError
+    assert not result_is_error(result)
     payload = server.json.loads(result.content[0].text)
     assert payload == {
         "ok": True,

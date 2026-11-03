@@ -173,7 +173,7 @@ class TestGuardIsWiredIntoDispatch:
         result = asyncio.run(
             mcp_server.handle_call_tool("xpst_post", {"video_path": "/etc/passwd", "caption": "x"})
         )
-        assert result.isError is True
+        assert mcp_server.result_is_error(result) is True
         assert "SENTINEL_BLOCKED" in result.content[0].text
 
     def test_source_calls_the_guard_before_engine_init(self):

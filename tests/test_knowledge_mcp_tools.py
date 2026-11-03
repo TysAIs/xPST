@@ -18,6 +18,7 @@ from xpst.knowledge.mcp import tools as kb_tools
 from xpst.knowledge.models import Area, Nugget
 from xpst.knowledge.store.json_store import JsonKnowledgeStore
 from xpst.knowledge.workspace import Workspace
+from xpst.mcp.server import result_is_error, tool_input_schema
 
 # ── Lazy-import wall ──
 
@@ -71,11 +72,11 @@ def test_mcp_server_registers_four_kb_tools():
     assert {"kb_add", "kb_query", "kb_organize", "kb_areas"} <= tool_names
 
     by_name = {tool.name: tool for tool in mcp_server.TOOLS}
-    assert by_name["kb_add"].inputSchema["required"] == ["source"]
-    assert by_name["kb_query"].inputSchema["required"] == ["text"]
+    assert tool_input_schema(by_name["kb_add"])["required"] == ["source"]
+    assert tool_input_schema(by_name["kb_query"])["required"] == ["text"]
     # organize/areas take only an optional workspace (+ threshold for organize).
-    assert "required" not in by_name["kb_organize"].inputSchema
-    assert "required" not in by_name["kb_areas"].inputSchema
+    assert "required" not in tool_input_schema(by_name["kb_organize"])
+    assert "required" not in tool_input_schema(by_name["kb_areas"])
 
 
 # ── Workspace isolation ──
@@ -320,7 +321,7 @@ async def test_server_dispatches_kb_query_without_engine_init(isolated_home, mon
         with patch.object(fake_server, "initialize", new=AsyncMock()) as initialize:
             result = await mcp_server.handle_call_tool("kb_query", {"text": "embedding"})
 
-    assert result.isError is not True
+    assert result_is_error(result) is not True
     payload = json.loads(result.content[0].text)
     assert payload["count"] == 1
     assert "embedding" in payload["nuggets"][0]["point"]

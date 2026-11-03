@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from xpst.cli import main as cli
+from xpst.mcp.server import result_is_error
 
 
 class TestUpdaterGuards:
@@ -130,7 +131,7 @@ class TestMcpGuardrails:
         from xpst.mcp.server import handle_call_tool
 
         result = await handle_call_tool("xpst_post", {"video_path": "/x.mp4"})
-        assert result.isError
+        assert result_is_error(result)
         assert "Blocked" in result.content[0].text
 
     @pytest.mark.asyncio
@@ -140,7 +141,7 @@ class TestMcpGuardrails:
         from xpst.mcp.server import handle_call_tool
 
         result = await handle_call_tool("xpst_run", {})
-        assert result.isError
+        assert result_is_error(result)
         assert "confirm" in result.content[0].text
 
     @pytest.mark.asyncio
@@ -173,7 +174,7 @@ class TestMcpMutationConsent:
 
         for name in sorted(_MUTATING_TOOLS):
             result = await handle_call_tool(name, {})
-            assert result.isError, f"{name} was allowed without any opt-in"
+            assert result_is_error(result), f"{name} was allowed without any opt-in"
             text = result.content[0].text
             assert "XPST_MCP_ALLOW_MUTATIONS" in text, name
             assert "XPST_MCP_REQUIRE_CONFIRM" in text, name
@@ -187,7 +188,7 @@ class TestMcpMutationConsent:
 
         result = await handle_call_tool("xpst_delete", {"video_id": "v1", "platform": "youtube"})
 
-        assert result.isError
+        assert result_is_error(result)
         assert "XPST_MCP_READONLY" in result.content[0].text
 
     @pytest.mark.asyncio
@@ -211,7 +212,7 @@ class TestMcpMutationConsent:
         from xpst.mcp.server import handle_call_tool
 
         blocked = await handle_call_tool("xpst_post", {"video_path": "/nonexistent/x.mp4", "caption": "c"})
-        assert blocked.isError
+        assert result_is_error(blocked)
         assert '"confirm": true' in blocked.content[0].text
 
         with_confirm = await handle_call_tool(

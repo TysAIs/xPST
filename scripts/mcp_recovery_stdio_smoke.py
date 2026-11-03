@@ -91,6 +91,8 @@ async def _run(config_path: Path, *, allow_mutations: bool = True) -> dict:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
+    from xpst.mcp.server import initialization_server_info, result_is_error
+
     env = await _session_env(str(REPO_ROOT / "src"), allow_mutations=allow_mutations)
     server = StdioServerParameters(
         command=sys.executable,
@@ -102,7 +104,7 @@ async def _run(config_path: Path, *, allow_mutations: bool = True) -> dict:
     async with stdio_client(server) as (read, write):
         async with ClientSession(read, write) as session:
             init = await session.initialize()
-            report["server"] = init.serverInfo.name
+            report["server"] = initialization_server_info(init).name
 
             listed = await session.list_tools()
             tools = {tool.name: tool for tool in listed.tools}
@@ -122,7 +124,7 @@ async def _run(config_path: Path, *, allow_mutations: bool = True) -> dict:
             # Fail-closed proof comes first: without the opt-in nothing may run.
             blocked = await session.call_tool("xpst_schedule_cancel", {"entry_id": "anything"})
             if not allow_mutations:
-                _require(blocked.isError is True, "cancel was allowed without an opt-in")
+                _require(result_is_error(blocked) is True, "cancel was allowed without an opt-in")
                 text = blocked.content[0].text
                 _require("XPST_MCP_ALLOW_MUTATIONS" in text, "refusal does not name the opt-in")
                 _require("XPST_MCP_REQUIRE_CONFIRM" in text, "refusal does not name the confirm gate")
@@ -163,7 +165,7 @@ async def _run(config_path: Path, *, allow_mutations: bool = True) -> dict:
 
             missing = await session.call_tool("xpst_schedule_cancel", {"entry_id": "nosuchid"})
             missing_payload = _payload(missing)
-            _require(missing.isError is True, "cancelling an unknown id was not an error")
+            _require(result_is_error(missing) is True, "cancelling an unknown id was not an error")
             _require(
                 missing_payload["error"]["code"] == "POST_NOT_FOUND",
                 f"unknown id code was {missing_payload['error']}",
@@ -200,7 +202,7 @@ async def _run(config_path: Path, *, allow_mutations: bool = True) -> dict:
             # Delete: an unknown video is an error; nothing reaches a platform.
             deleted = await session.call_tool("xpst_delete", {"video_id": "ghost"})
             deleted_payload = _payload(deleted)
-            _require(deleted.isError is True, "deleting an unknown video was not an error")
+            _require(result_is_error(deleted) is True, "deleting an unknown video was not an error")
             _require(
                 deleted_payload["scope"] == "platform_and_local_state",
                 "delete scope is wrong",
