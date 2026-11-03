@@ -38,7 +38,7 @@ def test_tools_list_serves_the_whole_registry() -> None:
     listed = asyncio.run(list_tools())
     served = [tool.name for tool in listed.tools]
     assert served == [tool.name for tool in TOOLS]
-    assert len(served) == 41
+    assert len(served) == 42
 
 
 @pytest.mark.skipif(
