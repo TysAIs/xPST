@@ -430,7 +430,7 @@ xpst mcp
 
 ### Available Tools
 
-xPST exposes 41 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
+xPST exposes 42 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 
 | Tool | Description |
 |------|-------------|
@@ -452,6 +452,7 @@ xPST exposes 41 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 | `xpst_failures_retry` | Retry ONE recorded upload failure, identified by video_id + platform — the MC… |
 | `xpst_health` | Test connectivity to all platforms and sources (no uploads) |
 | `xpst_status` | Show cross-posting statistics and health status |
+| `xpst_rate_limit_status` | Read-only view of active rate-limit cooldowns: per platform the remaining sec… |
 | `xpst_backfill` | Retry failed or incomplete posts from history. `attempted` / `successful` are… |
 | `xpst_config_show` | Display current configuration (with sensitive values masked) |
 | `xpst_auth_status` | Show live authentication status and the truthful per-platform badge (connecte… |
@@ -585,7 +586,7 @@ xpst/
 │   ├── sessions.py     # SessionManager (auth consolidation)
 │   ├── video.py        # FFmpeg encoding per platform
 │   └── platform.py     # Cross-platform paths
-├── mcp/                # MCP server (41 tools)
+├── mcp/                # MCP server (42 tools)
 │   └── server.py       # stdio MCP server with audit logging
 ├── dashboard/          # Web API dashboard
 │   ├── server.py       # FastAPI server

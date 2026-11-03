@@ -38,7 +38,7 @@ live availability is not uniform. See [INSTALL.md](INSTALL.md#capability-truth-t
 │  └──────────────────────────────────────────────────────┘   │
 │                                                              │
 │  Surfaces: CLI (46 cmds) │ Desktop shell (Tauri + engine)  │
-│            Dashboard (FastAPI) │ MCP Server (41 tools)      │
+│            Dashboard (FastAPI) │ MCP Server (42 tools)      │
 └─────────────────────────────────────────────────────────────┘
 ```
 

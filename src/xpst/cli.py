@@ -256,6 +256,11 @@ json_option = click.option(
 )
 
 
+def _stdout_is_tty() -> bool:
+    """Whether stdout is an interactive terminal (auto-JSON is off then)."""
+    return sys.stdout.isatty()
+
+
 def load_config(config_path: str | None = None) -> XPSTConfig:
     """Load configuration from file with user-friendly error handling.
 
@@ -312,7 +317,7 @@ def main(ctx: click.Context, config: str | None, verbose: bool, quiet: bool, jso
                 pass
 
     # Auto-enable JSON mode when stdout is not a TTY (piped)
-    ctx.obj["json"] = json_output or not sys.stdout.isatty()
+    ctx.obj["json"] = json_output or not _stdout_is_tty()
 
     # Setup logging
     log_level = "DEBUG" if verbose else "WARNING" if quiet else "INFO"
@@ -1772,6 +1777,12 @@ def health(ctx: click.Context, as_json: bool):
     health_data = asyncio.run(engine.check_health(include_platforms=False))
     health_data["platforms"] = platform_health_entries(collect_live_auth_status(config))
     health_data["sessions"] = _session_health(config)
+    # Rate-limit cooldowns are local, persisted state (no probe, no upload), so
+    # they belong in every health answer: without them the only way to see why
+    # a platform was skipped was to read rate_cooldowns.json by hand.
+    from xpst.rate_limit_status import cooldown_report
+
+    health_data["rate_limit_cooldowns"] = cooldown_report(config)
     # Connectivity: without it every "not authenticated"/timeout below is
     # ambiguous, so state the network answer explicitly and first.
     from xpst.utils.net import check_network
@@ -1885,6 +1896,25 @@ def health(ctx: click.Context, as_json: bool):
                 console.print(f"  🟡 {cb_name.title()}: HALF-OPEN (testing)")
             else:
                 console.print(f"  🟢 {cb_name.title()}: CLOSED (healthy)")
+
+    # ── Rate-limit cooldowns (persisted; survive a restart) ──
+    cooldowns = health_data.get("rate_limit_cooldowns") or {}
+    cooling = cooldowns.get("active") or []
+    console.print("\n[bold]Rate-limit Cooldowns:[/bold]")
+    if not cooling:
+        console.print("  🟢 none active")
+    else:
+        for cd_platform in cooling:
+            record = (cooldowns.get("cooldowns") or {}).get(cd_platform, {})
+            console.print(
+                f"  ⏳ {cd_platform.title()}: {record.get('remaining_human', '?')} remaining"
+                f" (strike {record.get('strikes', '?')}"
+                + (f", until {record['until_display']}" if record.get("until_display") else "")
+                + ")"
+            )
+            if record.get("last_reason"):
+                console.print(f"     [dim]{record['last_reason']}[/dim]")
+        console.print(f"  [dim]{cooldowns.get('note', '')}[/dim]")
 
     # ── Quotas ──
     quota_status = health_data.get("quotas", {})
@@ -2551,6 +2581,12 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     sessions = _session_health(config)
     quota_mgr = QuotaManager(config.config_dir, config=config)
     quota_status = quota_mgr.get_detailed_status()
+    # Rate-limit cooldowns: local persisted state, read-only. An operator asking
+    # "why didn't it post?" gets the answer here instead of opening
+    # rate_cooldowns.json by hand.
+    from xpst.rate_limit_status import cooldown_report
+
+    cooldowns = cooldown_report(config)
 
     # 2. Per-platform findings.
     platforms_report: dict[str, dict[str, Any]] = {}
@@ -2810,11 +2846,35 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
                 "fix": entry["fix"],
             })
 
+    # A cooldown is a state, not a failure: nothing to fix, but it is the
+    # answer to "why hasn't it posted yet", so it belongs in notes (which never
+    # flip all_clear / the exit code) rather than in issues.
+    if cooldowns.get("active"):
+        detail = ", ".join(
+            f"{p} ({cooldowns['cooldowns'][p]['remaining_human']} remaining)"
+            for p in cooldowns["active"]
+        )
+        notes.append({
+            "severity": "info",
+            "platform": None,
+            "problem": (
+                f"Rate-limit cooldown active for {detail}. Posts to these "
+                "platforms are deferred, not failed."
+            ),
+            "fix": (
+                "Nothing to fix — xPST resumes automatically when the pause "
+                "expires. Watch it with `xpst health` or the MCP tool "
+                "`xpst_rate_limit_status`; the persisted state is "
+                f"{cooldowns.get('source')}."
+            ),
+        })
+
     report: dict[str, Any] = {
         "doctor": True,
         "platforms": platforms_report,
         "canonical": {"providers": canonical, "roles": ["source", "video_destination", "messaging", "analytics"]},
         "environment": environment,
+        "rate_limit_cooldowns": cooldowns,
         "issues": issues,
         # Not failures: facts a reader needs that no fix-it item can express.
         # Kept out of ``issues``/``all_clear`` so a source-only platform never
@@ -2851,6 +2911,22 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
     for entry in environment:
         mark = "✅" if entry["ok"] else "❌"
         console.print(f"  {mark} {entry['name']}: {entry['detail']}")
+
+    console.print("\n[bold]Rate-limit Cooldowns:[/bold]")
+    if not cooldowns.get("active"):
+        console.print("  🟢 none active")
+    else:
+        for cd_platform in cooldowns["active"]:
+            record = cooldowns["cooldowns"].get(cd_platform, {})
+            console.print(
+                f"  ⏳ {cd_platform}: {record.get('remaining_human', '?')} remaining"
+                f" (strike {record.get('strikes', '?')}"
+                + (f", until {record['until_display']}" if record.get("until_display") else "")
+                + ")"
+            )
+            if record.get("last_reason"):
+                console.print(f"     [dim]{record['last_reason']}[/dim]")
+        console.print(f"  [dim]{cooldowns.get('note', '')}[/dim]")
 
     if notes:
         console.print("\n[bold]Notes:[/bold]")
