@@ -1049,8 +1049,17 @@ class ContentRequest:
         platforms: Sequence[str] | None = None,
         *,
         content_type: ContentType | str | None = None,
+        overrides: Mapping[str, Any] | None = None,
     ) -> ContentRequest:
-        """Build a request from pre-contract arguments (``media_paths``/``caption``)."""
+        """Build a request from pre-contract arguments (``media_paths``/``caption``).
+
+        ``overrides`` is the per-destination copy a surface parsed from
+        ``--caption-for`` (CLI) or ``overrides`` (MCP/HTTP). It must be carried
+        on the request: the copy that is *validated* has to be the copy that is
+        *sent*, or a valid short X caption is refused because the shared
+        YouTube-length body is what the gate read (the 1.3.0 release post could
+        not be published to X and YouTube together).
+        """
         resolved: ContentType | None = None
         raw: str | None = None
         if content_type is not None:
@@ -1059,11 +1068,24 @@ class ContentRequest:
                 resolved = coerce_content_type(content_type)
             except UnknownContentTypeError:
                 resolved = None
+        typed_overrides: dict[str, DestinationOverride] = {}
+        for name, value in (overrides or {}).items():
+            key = str(name).strip().lower()
+            if not key:
+                continue
+            override = (
+                value
+                if isinstance(value, DestinationOverride)
+                else DestinationOverride.from_payload(value)
+            )
+            if override.text is not None or override.content_type is not None:
+                typed_overrides[key] = override
         return cls(
             content_type=resolved,
             media=tuple(str(item).strip() for item in (media_paths or []) if str(item).strip())[:MAX_MEDIA_ITEMS],
             text=caption,
             platforms=tuple(str(item).strip().lower() for item in (platforms or []) if str(item).strip()),
+            overrides=typed_overrides,
             raw_content_type=raw,
         )
 
@@ -1184,18 +1206,17 @@ def _text_issues(request: ContentRequest) -> list[ContentIssue]:
             continue
         limit = text_limit(key)
         if limit is not None and len(body) > limit:
+            advice = (
+                "shorten the text"
+                if request.override_for(key) is not None
+                else f"shorten the text, or give {key} its own shorter text with a per-destination override"
+            )
             issues.append(
                 ContentIssue(
                     code="content_type.text_too_long",
                     message=(
                         f"{key} accepts at most {limit} characters per post; this one has "
-                        f"{len(body)}. xPST will not truncate it — shorten the text"
-                        + (
-                            ""
-                            if request.override_for(key) is not None
-                            else f", or give {key} its own shorter text with a per-destination override."
-                        )
-                        + "."
+                        f"{len(body)}. xPST will not truncate it — {advice}."
                     ),
                     severity="error",
                     platform=key,
