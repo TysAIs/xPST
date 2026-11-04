@@ -448,7 +448,14 @@ class TestXAPIv2:
             local_path.unlink(missing_ok=True)
 
     @pytest.mark.asyncio
-    async def test_api_v2_truncates_long_caption(self):
+    async def test_api_v2_refuses_long_caption_instead_of_truncating(self):
+        """One verdict for the X limit: the sender refuses, as the gate does.
+
+        This used to cut the text to ``277 + "..."`` and post something the
+        user never wrote while preflight refused the same caption (card
+        t_95928695 D1). The uploader now fails with ``X_CAPTION_TOO_LONG`` and
+        sends nothing.
+        """
         from xpst.platforms.x import XUploader
 
         config = self._make_config()
@@ -460,44 +467,17 @@ class TestXAPIv2:
             video_path = Path(f.name)
 
         try:
-            # Mock the OAuth client to capture what caption is sent
             mock_client = AsyncMock()
-            mock_response_init = MagicMock()
-            mock_response_init.json.return_value = {"media_id": "123"}
-            mock_response_init.raise_for_status = MagicMock()
-
-            mock_response_append = MagicMock()
-            mock_response_append.raise_for_status = MagicMock()
-
-            mock_response_finalize = MagicMock()
-            mock_response_finalize.raise_for_status = MagicMock()
-
-            mock_response_tweet = MagicMock()
-            mock_response_tweet.json.return_value = {"data": {"id": "tweet_789"}}
-            mock_response_tweet.raise_for_status = MagicMock()
-
-            mock_client.post = AsyncMock(side_effect=[
-                mock_response_init,
-                mock_response_append,
-                mock_response_finalize,
-                mock_response_tweet,
-            ])
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=None)
-
             long_caption = "A" * 300  # 300 chars, over 280 limit
 
             with patch("authlib.integrations.httpx_client.AsyncOAuth1Client", return_value=mock_client):
                 result = await uploader.upload(video_path, long_caption)
 
-            assert result.success
-            assert result.post_id == "tweet_789"
-            assert result.metadata["auth_mode"] == "api_v2"
-
-            # Check that the tweet text was truncated (4th post call = tweet creation)
-            tweet_call = mock_client.post.call_args_list[3]
-            sent_text = tweet_call.kwargs.get("json", {}).get("text", "")
-            assert len(sent_text) <= 280
+            assert result.success is False
+            assert result.error is not None and result.error.startswith("X_CAPTION_TOO_LONG")
+            assert "300" in result.error and "280" in result.error
+            # Nothing was sent: the refusal happens before the media upload.
+            mock_client.post.assert_not_called()
         finally:
             video_path.unlink(missing_ok=True)
 

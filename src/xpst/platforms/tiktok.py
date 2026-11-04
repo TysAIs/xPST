@@ -63,8 +63,8 @@ class TikTokUploader(PlatformUploader):
     """TikTok uploader using the official Content Posting API (Direct Post)."""
 
     # TikTok limits
-    #: The same number the preflight gate refuses on (``xpst.content``); the
-    #: uploader truncates at it, so it must not be a second, drifting literal.
+    #: The same number the preflight gate refuses on (``xpst.content``); this
+    #: uploader refuses at it too, so the two can never disagree.
     MAX_CAPTION_LENGTH = TEXT_LIMITS["tiktok"]
     # Rate limit: 6 req/min per user (enforced server-side)
     RATE_LIMIT_PER_MIN = 6
@@ -483,8 +483,22 @@ class TikTokUploader(PlatformUploader):
             token = await self._get_access_token()
             return await self._upload_as_draft(video_path, caption, token)
 
+        # Refused, never truncated — same rule and the same number the content
+        # gate enforces (``xpst.content.TEXT_LIMITS``). A shortened caption is a
+        # caption the user never wrote.
         if len(caption) > self.MAX_CAPTION_LENGTH:
-            caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
+            return UploadResult(
+                success=False,
+                error=(
+                    f"TIKTOK_CAPTION_TOO_LONG: {len(caption)} characters exceeds the "
+                    f"{self.MAX_CAPTION_LENGTH}-character limit for tiktok; xPST will not "
+                    f"truncate it. Shorten the caption, or give tiktok its own with "
+                    f"--caption-for tiktok='…' (MCP: overrides)."
+                ),
+                platform="tiktok",
+                retryable=False,
+                metadata={"caption_length": len(caption), "limit": self.MAX_CAPTION_LENGTH},
+            )
 
         mode = self._publish_mode()
 

@@ -38,6 +38,7 @@ exactly mirroring ``engine._init_platforms``.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -246,6 +247,34 @@ def _build_uploaders(config: XPSTConfig) -> dict[str, Any]:
     return uploaders
 
 
+#: Uploader classes per platform, for probing a DISABLED provider's stored
+#: credential. ``_build_uploaders`` only instantiates enabled platforms, but a
+#: switched-off provider still holds a credential that can die (card
+#: t_95928695 D5), so the probe needs its own instance.
+_PROBE_UPLOADER_CLASSES: dict[str, tuple[str, str]] = {
+    "youtube": ("xpst.platforms.youtube", "YouTubeUploader"),
+    "x": ("xpst.platforms.x", "XUploader"),
+    "instagram": ("xpst.platforms.instagram", "InstagramUploader"),
+}
+
+
+def _probe_uploader_for(config: XPSTConfig, platform: str) -> Any | None:
+    """Build an uploader for a disabled platform, or None when unavailable."""
+
+    entry = _PROBE_UPLOADER_CLASSES.get(platform)
+    if entry is None:
+        return None
+    module_name, class_name = entry
+    try:
+        module = importlib.import_module(module_name)
+        uploader = getattr(module, class_name)(config)
+        uploader._session_manager = SessionManager(config.config_dir)
+        return uploader
+    except Exception as exc:  # noqa: BLE001 - a missing dep is "cannot probe"
+        logger.debug("Cannot probe %s's stored credential: %s", platform, exc)
+        return None
+
+
 async def _check_via_uploader(uploader: Any) -> dict[str, Any]:
     """Run one uploader's check_health() with a hard timeout."""
     try:
@@ -316,6 +345,23 @@ async def collect_live_auth_status_async(
         uploader = uploaders.get(name)
         if not getattr(config, name).enabled or uploader is None:
             entry["error"] = "disabled"
+            # A disabled provider still HOLDS a credential, and that credential
+            # can die while nothing is posting there (an Instagram session does
+            # exactly that; card t_95928695 D5). Probe the stored one —
+            # read-only, no upload — so the health report can warn instead of
+            # reporting "disabled" and nothing else, which is how enabling it
+            # later fails on the first post.
+            credential = _credential_file_for(config, name)
+            if credential and Path(str(credential)).expanduser().is_file():
+                probe_target = uploader or _probe_uploader_for(config, name)
+                if probe_target is not None:
+                    probe = await _check_via_uploader(probe_target)
+                    entry["details"]["stored_credential"] = {
+                        "checked": True,
+                        "alive": bool(probe.get("authenticated")),
+                        "error": probe.get("error"),
+                        "probe": "check_health",
+                    }
         elif name == "instagram" and entry["auth_mode"] == "graph_api":
             ok, error, details = await _graph_api_probe(config.instagram.graph_access_token)
             # Account type rides the status payload so every surface can show

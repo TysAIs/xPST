@@ -143,6 +143,26 @@ def build_credential_health(
 
         if state in NOT_A_CREDENTIAL_STATES:
             item["bucket"] = "not_applicable"
+            if state == TOKEN_STATE_DISABLED:
+                # Disabled means "not posting here today" — it does not mean
+                # "the stored credential is fine". When a local probe of the
+                # stored credential ran and failed, the first post after the
+                # provider is re-enabled would fail with nothing having warned
+                # (card t_95928695 D5). It is not in needs_attention because it
+                # blocks nothing today; it is named in its own bucket so a
+                # surface cannot silently drop it.
+                probe = entry.get("details") or {}
+                probe = probe.get("stored_credential") if isinstance(probe, Mapping) else None
+                if isinstance(probe, Mapping) and probe.get("checked") and not probe.get("alive"):
+                    item["bucket"] = "disabled_but_dead"
+                    reason = str(probe.get("error") or "the stored credential fails a live check")
+                    if len(reason) > 160:
+                        reason = reason[:157].rstrip() + "…"
+                    item["attention"] = (
+                        f"{platform} is disabled, but its stored credential is dead "
+                        f"({reason}). The first post after you enable it will fail — "
+                        f"run `xpst connect {platform}` first."
+                    )
         elif platform not in PLATFORM_ORDER:
             # The local file source (and any future catalog entry) is not an
             # account: there is nothing to renew, so it must not appear in a
@@ -194,6 +214,7 @@ def build_credential_health(
 
     needs_attention = [e for e in entries if e["bucket"] == "needs_attention"]
     unverifiable = [e for e in entries if e["bucket"] == "unverifiable"]
+    disabled_but_dead = [e for e in entries if e["bucket"] == "disabled_but_dead"]
 
     # Order by urgency: known deadlines first (soonest first), then the ones
     # already broken, then platforms without a readable deadline.
@@ -218,6 +239,11 @@ def build_credential_health(
             f"{len(unverifiable)} provider(s) cannot be predicted ahead of time: "
             + ", ".join(e["platform"] for e in unverifiable)
         )
+    if disabled_but_dead:
+        parts.append(
+            "disabled but holding a dead credential: "
+            + ", ".join(e["platform"] for e in disabled_but_dead)
+        )
 
     return {
         "generated_at": moment,
@@ -225,6 +251,7 @@ def build_credential_health(
         "reauth_horizon_days": int(reauth_horizon_days),
         "needs_attention": needs_attention,
         "unverifiable": unverifiable,
+        "disabled_but_dead": disabled_but_dead,
         "not_applicable": [e for e in entries if e["bucket"] == "not_applicable"],
         "ok": [e for e in entries if e["bucket"] == "ok"],
         "entries": entries,
@@ -252,4 +279,10 @@ def render_health_lines(health: Mapping[str, Any]) -> list[str]:
     if unverifiable:
         names = ", ".join(str(i.get("platform")) for i in unverifiable)
         lines.append(f"Cannot warn ahead of time (no reported expiry): {names}")
+    disabled_but_dead = health.get("disabled_but_dead") or []
+    if disabled_but_dead:
+        lines.append("Disabled, but holding a dead credential (fix before enabling):")
+        for item in disabled_but_dead:
+            action = item.get("action") or f"xpst connect {item['platform']}"
+            lines.append(f"  - {item['platform']}: {item.get('attention')} -> {action}")
     return lines
