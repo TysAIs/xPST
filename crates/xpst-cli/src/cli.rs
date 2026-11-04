@@ -91,14 +91,14 @@ fn add_params(mut command: Command, params: &[ParamSpec], is_root: bool) -> Comm
             );
             continue;
         }
-        command = command.arg(build_arg(param));
+        command = command.args(build_arg(param));
     }
     command
 }
 
-fn build_arg(param: &ParamSpec) -> Arg {
+fn build_arg(param: &ParamSpec) -> Vec<Arg> {
     if param.is_positional() {
-        return build_positional(param);
+        return vec![build_positional(param)];
     }
     build_option(param)
 }
@@ -125,7 +125,7 @@ fn build_positional(param: &ParamSpec) -> Arg {
     arg
 }
 
-fn build_option(param: &ParamSpec) -> Arg {
+fn build_option(param: &ParamSpec) -> Vec<Arg> {
     let longs = param.long_opts();
     // A parameter with no long form would be unreachable on the command line;
     // the manifest always has one, and a missing one is a capture bug worth
@@ -135,18 +135,46 @@ fn build_option(param: &ParamSpec) -> Arg {
         .copied()
         .unwrap_or_else(|| panic!("option `{}` has no --long form", param.name));
 
-    let mut arg = Arg::new(format!("opt:{}", param.name))
+    let mut args = Vec::new();
+    let on_id = format!("opt:{}", param.name);
+
+    // Click boolean pair (`--merge/--replace`): the second long is the OFF form,
+    // not an alias of the first. Modelling it as an alias would make
+    // `--replace` mean `--merge`, which is the opposite of what it says.
+    let pair_off = (param.is_flag && longs.len() > 1).then(|| longs[1]);
+
+    let mut arg = Arg::new(on_id.clone())
         .long(primary_long.trim_start_matches("--").to_string())
         .help(param.help.clone());
 
-    for alias in longs.iter().skip(1) {
-        arg = arg.visible_alias(alias.trim_start_matches("--").to_string());
-    }
-    if let Some(short) = param.short_opts().first() {
-        arg = arg.short(*short);
+    if let Some(off_long) = pair_off {
+        let off_id = format!("opt:{}:off", param.name);
+        let off = Arg::new(off_id)
+            .long(off_long.trim_start_matches("--").to_string())
+            .action(ArgAction::SetTrue)
+            .help(format!(
+                "Opposite of --{}",
+                primary_long.trim_start_matches("--")
+            ));
+        if let Some(short) = param.short_opts().first() {
+            // A short form belongs to the parameter, i.e. to the ON side.
+            arg = arg.short(*short);
+        }
+        args.push(off);
+    } else {
+        for alias in longs.iter().skip(1) {
+            arg = arg.visible_alias(alias.trim_start_matches("--").to_string());
+        }
+        if let Some(short) = param.short_opts().first() {
+            arg = arg.short(*short);
+        }
     }
 
     if param.is_flag {
+        // Plain presence flags. On-by-default flags (`--merge`, `--api-only`)
+        // and their OFF forms are resolved by `crate::flag_with_default`, which
+        // reads the default from the manifest: clap cannot express "true unless
+        // the paired off-flag is given" on a SetTrue argument.
         arg = arg.action(ArgAction::SetTrue);
     } else {
         arg = arg.action(if param.multiple {
@@ -176,7 +204,8 @@ fn build_option(param: &ParamSpec) -> Arg {
     if param.required {
         arg = arg.required(true);
     }
-    arg
+    args.push(arg);
+    args
 }
 
 #[cfg(test)]
@@ -196,6 +225,50 @@ mod tests {
                 .filter(|c| c.path.len() == 1)
                 .count()
         );
+    }
+
+    #[test]
+    fn on_by_default_flags_parse_as_true_when_absent() {
+        // `config import --merge/--replace` is a Click boolean pair with
+        // default=True: --merge is on unless --replace is given, and the two are
+        // opposites rather than aliases.
+        let path = vec!["config".to_string(), "import".to_string()];
+        let mut command = build();
+        let matches = command
+            .try_get_matches_from_mut(["xpst", "config", "import", "in.yaml"])
+            .expect("config import parses");
+        let leaf = matches
+            .subcommand_matches("config")
+            .and_then(|m| m.subcommand_matches("import"))
+            .expect("config import subcommand");
+        assert!(
+            crate::flag_with_default(leaf, &path, "merge"),
+            "--merge must default to true"
+        );
+
+        let mut command = build();
+        let matches = command
+            .try_get_matches_from_mut(["xpst", "config", "import", "in.yaml", "--replace"])
+            .expect("--replace parses");
+        let leaf = matches
+            .subcommand_matches("config")
+            .and_then(|m| m.subcommand_matches("import"))
+            .expect("config import subcommand");
+        assert!(
+            !crate::flag_with_default(leaf, &path, "merge"),
+            "--replace must turn --merge off"
+        );
+
+        // A flag with no declared default stays off.
+        let mut command = build();
+        let matches = command
+            .try_get_matches_from_mut(["xpst", "config", "import", "in.yaml"])
+            .expect("parses");
+        let leaf = matches
+            .subcommand_matches("config")
+            .and_then(|m| m.subcommand_matches("import"))
+            .expect("config import subcommand");
+        assert!(!crate::flag_with_default(leaf, &path, "strict"));
     }
 
     #[test]
