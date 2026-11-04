@@ -39,22 +39,31 @@ artifacts (sdist, wheel, desktop bundle).
   `example.com`, synthetic `UC…` channel IDs).
 - Product-level identifiers that happen to contain a person's initials (the
   bundle id) are allowed but must be *justified in place* with a comment, so a
-  future reader can tell a product id from a leak.
+  future reader can tell a product id from a leak. The same exemptions are
+  recorded as `allow:` lines in `.public-safety-denylist`.
 - Nothing is ever reported with the matched value in it: scan output carries
   paths, categories and offsets only.
 
-**Enforcement today**: `scripts/scan_public_safety.py` plus
+**Enforcement**: `scripts/scan_public_safety.py` plus
 `.github/workflows/public-safety.yml` (tree + artifact scan on every push and
-PR, history scan on demand). Measured 2026-11-03: the tree scan is clean over
-720 publishable files.
+PR, history scan on demand). The personal-identifier deny list is checked in at
+`.public-safety-denylist` and the scanner loads it in every mode, so the gate
+enforces it in CI with no environment plumbing; `XPST_PUBLIC_SAFETY_DENYLIST`
+is unioned in for one-off local scans. The same file carries the
+product-identifier exemptions as `allow:` lines (project URLs, the bundle id),
+so the permitted identifiers sit next to the banned names and are reviewed
+together. Matching is case-insensitive on word boundaries, a documented
+placeholder (`example`, `demo`, ...) always wins over a deny-list token, and a
+finding never echoes the matched value.
 
-**Known gap (must close)**: the personal-identifier deny list is read only from
-the `XPST_PUBLIC_SAFETY_DENYLIST` environment variable, and CI sets nothing, so
-the deny list is empty in every gate run. A real handle can sit in `src/` or
-`tests/` and the gate stays green. The fix is a checked-in deny list file that
-the scanner loads by default, with the existing hits cleaned up in the same
-change. Until then, D-2 is a rule with a partial gate, and reviewers check it by
-hand.
+Measured 2026-11-03 with this gate: the tree scan is clean over 732 publishable
+files with the deny list active, and adding a banned handle to a `src/` file
+fails the same scan. `tests/test_public_safety_scan.py` covers the checked-in
+file, the env-var union, comment/blank-line parsing, the placeholder allow-list
+and the deny list's exemption from its own scan.
+
+History mode stays report-only: it names the categories and commits it finds,
+and a full-history rewrite remains a human decision.
 
 ## D-3 — All-Rust rebuild
 

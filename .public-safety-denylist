@@ -1,0 +1,44 @@
+# Personal-identifier deny list for scripts/scan_public_safety.py.
+#
+# D-2 of docs/DIRECTION.md: zero personal data in the codebase. This file is
+# loaded by the scanner by default (tree, artifact and history modes) and is
+# unioned with XPST_PUBLIC_SAFETY_DENYLIST, so the gate enforces it in CI with
+# no environment plumbing.
+#
+# Format: one banned token per line, matched case-insensitively on word
+# boundaries in the publishable tree and in built artifacts, and reported
+# (never gating) in git history. '#' starts a comment; blank lines are
+# ignored. Findings never echo the matched value.
+#
+# This file is the list of banned names, not personal data: it is the one
+# tracked file the scan exempts from its own deny list.
+
+# The maintainer's public handles and account names.
+tysais
+tys.ais
+tys_ais
+tysn
+tysn.dev
+tysn_dev
+
+# The maintainer's name, and the account name from the earlier build machine.
+tyler
+itxji
+jerman
+
+# Account identifiers from earlier personal accounts (channel id, user id).
+UCRF2kQGQ6DJiWR4BbY4SPqA
+10991179
+
+# Product-level identifiers. D-2 permits these because they name the project,
+# not the person; matching ignores any banned token that occurs inside one of
+# them. Everything outside these strings is still reported.
+allow: github.com/tysais
+allow: tysais/xpst
+allow: tysais@users.noreply.github.com
+allow: tysais.github.io
+allow: com.tysais.xpst
+
+# The GitHub account name quoted in backticks, as documentation writes it
+# (the PyPI trusted-publisher form needs the exact spelling; see docs/PYPI.md).
+allow: `tysais`

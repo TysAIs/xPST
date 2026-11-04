@@ -58,7 +58,10 @@ telemetry, analytics endpoint, or hosted account. Everything — videos,
 captions, upload state, cookies, OAuth tokens — lives on your machine under
 `~/.xpst/` (the credential store uses encrypted files by default and can use
 an OS keychain when explicitly enabled). The only network traffic is the
-platform API calls you configure. See
+platform API calls you configure. The repository itself is held to the same
+rule: a checked-in deny list (`.public-safety-denylist`) and
+`scripts/scan_public_safety.py` fail CI if a personal handle, home path or
+secret appears in the tree or in a built artifact. See
 [docs/PRIVACY.md](docs/PRIVACY.md) for the full model.
 
 ---

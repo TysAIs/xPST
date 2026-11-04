@@ -185,12 +185,12 @@ def test_find_new_item_uses_owner_hint_when_no_row_has_share_url():
         payloads,
         started_at=time.time() - 600,
         caption="owner hint smoke",
-        owner_hint="tysn.dev",
+        owner_hint="example",
     )
     assert receipt is not None
     assert receipt.item_id == "7000000000000000003"
     assert receipt.share_url == (
-        "https://www.tiktok.com/@tysn.dev/video/7000000000000000003"
+        "https://www.tiktok.com/@example/video/7000000000000000003"
     )
     # An explicit row share_url always wins over the hint.
     payloads[0]["data"]["item_list"][0]["share_url"] = (

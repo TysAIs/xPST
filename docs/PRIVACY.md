@@ -30,6 +30,16 @@ credential rather than falling back to plaintext. Platform-specific token,
 cookie, and session files may still be written with owner-only permissions;
 treat the whole `~/.xpst/` directory as sensitive.
 
+## Repository Hygiene
+
+Nothing in this repository identifies a real person. Tracked files, test
+fixtures, documentation and built artifacts (sdist, wheel, desktop bundle) are
+scanned by `scripts/scan_public_safety.py`, and the gate fails CI on secrets,
+personal e-mail addresses, absolute home paths, machine names and the personal
+handles listed in the checked-in deny list at `.public-safety-denylist`.
+Fixtures use fictional identities; the deny list holds names, not data. Git
+history is scanned on demand and reported, never rewritten automatically.
+
 ## User Responsibility
 
 Users are responsible for:
