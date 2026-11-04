@@ -1,42 +1,88 @@
 # PyPI publication
 
-xPST is published to PyPI by `.github/workflows/publish-pypi.yml` (GitHub
-Actions) using the `PYPI_API_TOKEN` repository secret — a PyPI API token scoped
-to the `xpst` project. The workflow builds the sdist and wheel, validates both
-with `twine check`, and uploads them when a version tag is pushed or a GitHub
-release is published.
+**Status: the `xpst` name is still unclaimed.** `pypi.org/pypi/xpst/json` returns
+HTTP 404, so `pip install xpst` does not work yet. The publish path below is
+wired and ready; nothing has been uploaded because no version tag has been pushed
+since the credential path changed.
 
-No maintainer step is needed to publish: the secret is already configured
-(`TysAIs/xPST` → **Settings** → **Secrets and variables** → **Actions**), and
-the publish job references no protected environment, so nothing waits for a
-human approval click. Rotating the token is the only recurring chore, and only
-if it is revoked.
+## Which workflows touch PyPI
 
-## Why a token and not trusted publishing
+Two workflows in this repository reference PyPI. Only the first is the
+authoritative publisher:
 
-PyPI Trusted Publishing (OIDC) needs a one-time, account-scoped registration in
-the PyPI web UI: **Your projects** → **Publishing** → **Add a pending
-publisher** with owner `TysAIs`, repository `xPST`, workflow `publish-pypi.yml`
-and environment `pypi`. Until that registration exists, an OIDC publish fails
-with `invalid-publisher` — which is exactly why publishing was broken before
-the token path was wired up.
+- **`.github/workflows/publish-pypi.yml` — the publisher.** It builds the sdist
+  and wheel, validates both with `twine check`, and uploads them to PyPI. The
+  upload job runs only on a `v*.*.*` tag push or a published GitHub release. A
+  `workflow_dispatch` run is build-and-validate only: the publish job is gated to
+  tag/release events, so a dispatch can never prove publishing.
+- **`.github/workflows/release.yml` — the release lane.** It has its own PyPI
+  upload step on tag pushes, marked `continue-on-error: true` so the GitHub
+  release is never held hostage by the registry. It authenticates with the same
+  repository secret. If both workflows upload the same version, PyPI accepts the
+  first and rejects the second with `file already exists` (PyPI files are
+  immutable); the release lane ignores that, so the release still completes.
 
-Switching to trusted publishing later (it stores no long-lived secret) means:
+When you diagnose a failed publish, read the workflow **at the tag you are
+diagnosing**, not the copy on `main`. Tag `v1.2.1` still carries the older
+OIDC-only form, and its run (41796222963) failed with `invalid-publisher` while
+`main` had already switched to the token. Diagnosing a tagged run against `main`
+points at the wrong credential.
+
+## Credential: the PYPI_API_TOKEN secret
+
+The publisher authenticates with the `PYPI_API_TOKEN` repository secret — a PyPI
+API token scoped to the `xpst` project. The secret value is never quoted in
+documentation; only its name is public.
+
+- It is already configured (`TysAIs/xPST` → **Settings** → **Secrets and
+  variables** → **Actions**), so no maintainer step is needed to publish.
+- The token path needs **no** `id-token: write` permission and **no**
+  `environment:` on the publish job, and `publish-pypi.yml` declares neither.
+  The repository does have a `pypi` environment (with no protection rules), but
+  the token path does not use it, so nothing waits for a human approval click.
+- Rotating the token is the only recurring chore, and only if it is revoked:
+  issue a new project-scoped token on PyPI and replace the secret.
+
+## Alternative: trusted publishing (OIDC)
+
+PyPI Trusted Publishing stores no long-lived secret, but it needs a one-time,
+account-scoped registration in the PyPI web UI before any publish can succeed.
+Register a **pending publisher** at **Your projects** → **Publishing** → **Add a
+pending publisher** with exactly these claims:
+
+| Field | Value |
+| --- | --- |
+| PyPI project name | `xpst` |
+| Owner | `TysAIs` |
+| Repository name | `xPST` |
+| Workflow name | `publish-pypi.yml` |
+| Environment name | `pypi` |
+
+Until that registration exists, an OIDC publish fails with `invalid-publisher`
+("Publisher with matching claims was not found") — which is exactly why tag
+`v1.2.1` failed before the token path was wired up.
+
+Switching to trusted publishing later means, in one commit:
 
 1. Register the pending publisher above on PyPI.
-2. Re-add `id-token: write` to the workflow and publish-job `permissions`.
+2. Re-add `id-token: write` to the workflow-level `permissions:` and to the
+   publish job's `permissions:`.
 3. Re-add `environment: pypi` to the publish job.
-4. Drop the `password:` input from the publish step.
+4. Drop the `password:` input from the publish step, and make the same change in
+   the `release.yml` upload step.
 
-The workflow file carries the same note next to the publish step.
+The workflow file carries the same note next to the publish step, and
+`tests/test_pypi_workflow.py` fails if the workflow and this document disagree on
+the credential, the `environment`/`id-token` requirements, or the
+`workflow_dispatch` behaviour.
 
 ## Release procedure
 
 1. Update the package version in `pyproject.toml` (and every other version
    surface pinned by `tests/test_tauri_production_assembly.py`) so it matches
-   the release tag — version `1.2.2` uses tag `v1.2.2`. The version on `main`
-   must be published only once: PyPI versions are immutable and cannot be
-   reused, re-uploaded or deleted-and-replaced.
+   the release tag — version `1.2.2` uses tag `v1.2.2`. A version can be
+   published only once: PyPI versions are immutable and cannot be reused,
+   re-uploaded or deleted-and-replaced.
 2. Merge the version change to `main`. Publish from a commit on `main`, never
    from a dirty tree or a branch.
 3. Push the version tag, or publish a GitHub release for the existing tag:
@@ -46,9 +92,8 @@ The workflow file carries the same note next to the publish step.
    git push origin v1.2.2
    ```
 
-   The workflow runs on version-tag pushes and on published GitHub releases. A
-   `workflow_dispatch` run is build-and-validate only: its publish job is gated
-   to tag/release events, so a dispatch cannot prove publishing.
+   The publish job runs on version-tag pushes (`v*.*.*`) and on published
+   GitHub releases. A `workflow_dispatch` run only builds and validates.
 4. Verify the registry and the installed package after the job succeeds — read
    the index back, do not trust the green check alone:
 
