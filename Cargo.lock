@@ -447,6 +447,9 @@ version = "1.2.1"
 [[package]]
 name = "xtask"
 version = "1.2.1"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "zmij"

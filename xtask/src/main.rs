@@ -4,17 +4,24 @@
 //! than assert:
 //!
 //! * `parity` — regenerate the CLI parity manifest from the Python engine and
-//!   report whether the checked-in copy still matches. This is the drift alarm
-//!   behind proposal §4 ("differential harness"): when `src/xpst/cli.py` grows a
-//!   command, this fails until the manifest is re-captured and reviewed.
+//!   report whether the checked-in copy still describes the same CLI. This is
+//!   the drift alarm behind proposal §4 ("differential harness"): when
+//!   `src/xpst/cli.py` grows a command, this fails until the manifest is
+//!   re-captured and reviewed.
 //! * `size` — build the release binary and report its size. P0's first data
 //!   point toward the ≤ 25 MB target.
 //!
 //! It is development tooling, and the only place a Python interpreter is
 //! invoked. The shipped `xpst` binary never shells out to Python.
+//!
+//! The comparison deliberately looks at `commands` only. Provenance
+//! (`captured_from`) names the local commit and would otherwise make every run
+//! "stale"; the command surface is the contract.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use serde_json::Value;
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -46,12 +53,13 @@ fn usage() {
          \n\
          COMMANDS:\n    \
          parity    Re-capture the CLI parity manifest from the Python engine and\n              \
-         diff it against the checked-in copy (needs python3 with click,\n              \
-         e.g. the xPST dev venv)\n    \
+         compare its command list with the checked-in copy\n              \
+         (--write updates the checked-in copy)\n    \
          size      Build the release binary and report its size\n\
          \n\
          ENV:\n    \
-         XPST_PYTHON   interpreter to use for `parity` (default: python3)\n"
+         XPST_PYTHON   interpreter to use for `parity` (default: python3); it\n                  \
+         must be able to import `xpst.cli` (see crates/README.md)\n"
     );
 }
 
@@ -63,18 +71,13 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Re-capture the manifest and diff it against the checked-in copy.
+/// Re-capture the manifest and compare the command list with the checked-in copy.
 fn parity(args: &[String]) -> i32 {
     let root = repo_root();
     let fixture = root.join("crates/xpst-cli/src/parity/cli_parity.json");
     let script = root.join("xtask/scripts/capture_python_cli.py");
     let python = std::env::var("XPST_PYTHON").unwrap_or_else(|_| "python3".to_string());
-
-    if let Some(target) = args.first() {
-        if target == "--write" {
-            println!("xtask parity: writing {fixture:?}");
-        }
-    }
+    let write = args.iter().any(|a| a == "--write");
 
     let output = Command::new(&python)
         .arg(&script)
@@ -86,52 +89,108 @@ fn parity(args: &[String]) -> i32 {
         Ok(output) => output,
         Err(error) => {
             eprintln!("xtask parity: cannot run `{python}`: {error}");
-            eprintln!("  set XPST_PYTHON to an interpreter that has click installed");
+            eprintln!("  set XPST_PYTHON to an interpreter that can import `xpst.cli`");
             return 2;
         }
     };
     if !output.status.success() {
-        eprintln!("xtask parity: capture failed");
+        eprintln!("xtask parity: capture failed ({python} could not introspect xpst.cli)");
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
         return 2;
     }
-
     let fresh = String::from_utf8_lossy(&output.stdout).to_string();
-    let checked_in = std::fs::read_to_string(&fixture).unwrap_or_default();
 
-    if fresh == checked_in {
-        println!("xtask parity: CLI manifest matches the Python engine");
-        return 0;
-    }
+    let checked_in = match std::fs::read_to_string(&fixture) {
+        Ok(text) => text,
+        Err(error) => {
+            eprintln!("xtask parity: cannot read {fixture:?}: {error}");
+            return 2;
+        }
+    };
 
-    if args.first().is_some_and(|a| a == "--write") {
-        std::fs::write(&fixture, &fresh).expect("write manifest");
-        println!("xtask parity: manifest updated at {fixture:?} — review the diff");
-        return 0;
-    }
-
-    eprintln!("xtask parity: manifest is stale — the Python CLI and the Rust tree disagree");
-    eprintln!("  checked in: {fixture:?}");
-    eprintln!("  re-run: cargo xtask parity --write, then review the diff");
-    // A line-level summary beats a wall of JSON.
-    let fresh_lines: Vec<&str> = fresh.lines().collect();
-    let old_lines: Vec<&str> = checked_in.lines().collect();
-    for (index, (new, old)) in fresh_lines.iter().zip(old_lines.iter()).enumerate() {
-        if new != old {
-            eprintln!("  first difference at line {}:", index + 1);
-            eprintln!("    python : {}", new.trim());
-            eprintln!("    checked: {}", old.trim());
-            break;
+    match compare_commands(&fresh, &checked_in) {
+        Ok(()) => {
+            println!("xtask parity: command list matches the Python engine");
+            0
+        }
+        Err(difference) => {
+            if write {
+                std::fs::write(&fixture, &fresh).expect("write manifest");
+                println!("xtask parity: manifest updated at {fixture:?} — review the diff");
+                return 0;
+            }
+            eprintln!(
+                "xtask parity: manifest is stale — the Python CLI and the Rust tree disagree"
+            );
+            eprintln!("  checked in: {fixture:?}");
+            eprintln!("  {difference}");
+            eprintln!("  re-run: cargo xtask parity --write, then review the diff");
+            1
         }
     }
-    if fresh_lines.len() != old_lines.len() {
-        eprintln!(
-            "  line count differs: python {} vs checked {}",
-            fresh_lines.len(),
-            old_lines.len()
-        );
+}
+
+/// Compare two manifests by contract content.
+///
+/// Ignores `captured_from` (local provenance) and only reports the first place
+/// the command surface diverges, plus counts, so the message stays readable.
+fn compare_commands(fresh: &str, checked_in: &str) -> Result<(), String> {
+    let fresh: Value =
+        serde_json::from_str(fresh).map_err(|e| format!("fresh capture is not JSON: {e}"))?;
+    let checked: Value = serde_json::from_str(checked_in)
+        .map_err(|e| format!("checked-in manifest is not JSON: {e}"))?;
+
+    let fresh_commands = fresh.get("commands").cloned().unwrap_or(Value::Null);
+    let checked_commands = checked.get("commands").cloned().unwrap_or(Value::Null);
+
+    let fresh_list = fresh_commands.as_array().cloned().unwrap_or_default();
+    let checked_list = checked_commands.as_array().cloned().unwrap_or_default();
+
+    if fresh_list.len() != checked_list.len() {
+        return Err(format!(
+            "command count: python {} vs checked {}",
+            fresh_list.len(),
+            checked_list.len()
+        ));
     }
-    1
+
+    for (index, (new, old)) in fresh_list.iter().zip(checked_list.iter()).enumerate() {
+        if new != old {
+            let path = old
+                .get("path")
+                .and_then(|p| p.as_array())
+                .map(|p| {
+                    p.iter()
+                        .filter_map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .unwrap_or_default();
+            let path = if path.is_empty() {
+                "<root>".to_string()
+            } else {
+                path
+            };
+            return Err(format!(
+                "first difference at command #{index} (`{path}`):\n    python : {}\n    checked: {}",
+                summarise(new),
+                summarise(old)
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// One-line summary of a command entry, for the difference message.
+fn summarise(command: &Value) -> String {
+    let params = command
+        .get("params")
+        .and_then(|p| p.as_array())
+        .map(|p| p.len())
+        .unwrap_or(0);
+    let help = command.get("help").and_then(|h| h.as_str()).unwrap_or("");
+    format!("{params} params, help={help:?}")
 }
 
 /// Build the release binary and print its size.

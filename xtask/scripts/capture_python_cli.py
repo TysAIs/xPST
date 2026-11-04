@@ -44,19 +44,26 @@ def _param(p: click.Parameter) -> dict:
     opts = list(getattr(p, "opts", []))
     secondary = list(getattr(p, "secondary_opts", []))
     is_argument = isinstance(p, click.Argument)
+    is_flag = bool(getattr(p, "is_flag", False))
     return {
         "name": p.name,
         "kind": "argument" if is_argument else "option",
         "opts": opts,
         "secondary_opts": secondary,
-        "is_flag": bool(getattr(p, "is_flag", False)),
+        "is_flag": is_flag,
         "multiple": bool(getattr(p, "multiple", False)),
         "required": bool(p.required),
         "nargs": int(getattr(p, "nargs", 1)),
         "metavar": getattr(p, "metavar", None),
         "type": str(getattr(getattr(p, "type", None), "name", "")),
         "choices": _choices(p),
-        "default": _jsonable(p.default if not callable(p.default) else None),
+        # A flag's "default" needs normalizing, not dropping: Click 8.5 returns an
+        # UNSET sentinel for an undeclared flag default while older versions
+        # return False, so recording the raw value would make the manifest
+        # depend on the installed Click. A flag is on-by-default only when it was
+        # explicitly declared that way (`--merge`, `--api-only` today), and every
+        # other case is False in every Click version.
+        "default": _flag_default(p) if is_flag else _jsonable(p.default if not callable(p.default) else None),
         "help": (getattr(p, "help", "") or "").strip(),
     }
 
@@ -73,6 +80,15 @@ def _jsonable(value):
 def _choices(p: click.Parameter):
     choices = getattr(getattr(p, "type", None), "choices", None)
     return [str(c) for c in choices] if choices else None
+
+
+def _flag_default(p: click.Parameter) -> bool:
+    """On-by-default flag, in a form that does not vary by Click version.
+
+    Click's UNSET sentinel is not a bool, so `is True` is the only comparison
+    that survives both the sentinel-era and the False-era behaviour.
+    """
+    return p.default is True
 
 
 def _command(cmd: click.Command, path: list[str]) -> dict:
@@ -113,7 +129,9 @@ manifest = {
     },
     "note": (
         "Generated contract: the Rust engine must expose every command path and "
-        "flag listed here. Do not hand-edit; re-run the capture script."
+        "flag listed here. Do not hand-edit; re-run the capture script. "
+        "`captured_from` is provenance only and is excluded from parity "
+        "comparisons, which look at `commands` alone."
     ),
     "command_count": len(flat),
     "commands": flat,
