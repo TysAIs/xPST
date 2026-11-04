@@ -65,8 +65,8 @@ never produce a second bundle.
 
 - [ ] Tag pushed: `git tag vX.Y.Z` (signed) and pushed to `origin`
 - [ ] `.github/workflows/release.yml` triggered by the tag and completes green
-- [ ] PyPI publish succeeds (Trusted Publishing configured) — `pip install xpst`
-      works from a clean environment
+- [ ] PyPI publish succeeds (`PYPI_API_TOKEN` secret; see `docs/PYPI.md`) —
+      `pip install xpst` works from a clean environment
 - [ ] GitHub Release published with all artifacts attached
 - [ ] macOS artifacts signed with Developer ID and notarized
 - [ ] Windows executable signed for broad distribution
