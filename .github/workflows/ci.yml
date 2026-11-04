@@ -163,3 +163,63 @@ jobs:
 
       - name: Smoke Docker CLI
         run: docker run --rm xpst:ci version --json
+
+  # Rust engine rebuild, phase P0 (docs/PROPOSAL-RUST-REBUILD.md §5).
+  #
+  # This lane is additive: the Python matrix above stays the shipped surface and
+  # is neither replaced nor weakened. It gates the workspace under `crates/` and
+  # `xtask/`, which `src-tauri` is deliberately not a member of.
+  rust:
+    name: Rust engine (P0 scaffold)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins 1.99.1 so `fmt --check` and `clippy -D warnings`
+      # mean the same thing here as they do on a developer machine.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+      # The capture script introspects the real Click tree, so it needs the
+      # Python engine importable. A base install (`-e .`, no extras) is enough
+      # to import `xpst.cli`.
+      #
+      # `cargo xtask parity` compares the *command surface* (not the raw bytes:
+      # provenance names the local commit, and Click's flag-default sentinel
+      # varies by version), so this is the same check a developer runs.
+      - name: CLI parity manifest is current
+        run: |
+          python -m pip install --quiet -e .
+          XPST_PYTHON=python cargo xtask parity
+
+      - name: Build release binary
+        run: cargo build --release -p xpst-cli
+
+      # First recorded data point against the <= 25 MB target in D-4. Reported,
+      # not gated yet: P5 owns the budget.
+      - name: Record release binary size
+        run: |
+          bytes=$(stat -c %s target/release/xpst)
+          awk -v b="$bytes" 'BEGIN { printf "release binary: %d bytes (%.2f MiB)\n", b, b/1048576 }'
+          echo "release-binary-bytes=$bytes" >> "$GITHUB_OUTPUT"
+
+      - name: Security audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: cargo audit
+        run: cargo audit

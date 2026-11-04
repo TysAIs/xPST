@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+# The Rust engine rebuild (docs/PROPOSAL-RUST-REBUILD.md, P0). The existing
+# Tauri shell keeps its own manifest and is deliberately NOT a member: the
+# proposal folds it into `xpst-app` at P4+, and P0 must not touch it.
+members = [
+    "crates/xpst-cli",
+    "crates/xpst-core",
+    "crates/xpst-config",
+    "crates/xpst-state",
+    "crates/xpst-auth",
+    "crates/xpst-provider",
+    "crates/xpst-provider-youtube",
+    "crates/xpst-provider-x",
+    "crates/xpst-provider-instagram",
+    "crates/xpst-provider-tiktok",
+    "crates/xpst-provider-threads",
+    "crates/xpst-provider-meta",
+    "crates/xpst-source",
+    "crates/xpst-media",
+    "crates/xpst-store",
+    "crates/xpst-api",
+    "crates/xpst-mcp",
+    "crates/xpst-app",
+    "xtask",
+]
+exclude = ["src-tauri"]
+
+[workspace.package]
+version = "1.2.1"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/TysAIs/xPST"
+authors = ["xPST contributors"]
+
+[workspace.dependencies]
+# One runtime, per the proposal §2: no OpenSSL, no plugin loader.
+clap = { version = "4", features = ["derive", "wrap_help", "string"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "2"
+xpst-config = { path = "crates/xpst-config" }
+xpst-state = { path = "crates/xpst-state" }
+xpst-media = { path = "crates/xpst-media" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

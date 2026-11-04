@@ -1,0 +1,12 @@
+[package]
+name = "xpst-media"
+description = "Local media tool discovery: ffmpeg/ffprobe on PATH, no network (P0)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
