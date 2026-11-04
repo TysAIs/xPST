@@ -27,12 +27,26 @@ DAY_NAMES = [
 ]
 
 
+def default_analytics_db_path() -> Path:
+    """Return the analytics database for the active config directory.
+
+    Mirrors :func:`xpst.analytics_store.default_analytics_db_path`: the
+    zero-argument default must follow ``XPST_CONFIG_DIR`` (the documented
+    sandbox hook), never a hardcoded ``~/.xpst``. The MCP ``xpst_best_time``
+    tool built ``BestTimeAnalyzer()`` with no path, so it read the operator's
+    real database even under a sandboxed config dir.
+    """
+    from xpst.analytics_store import default_analytics_db_path as _path
+
+    return _path()
+
+
 class BestTimeAnalyzer:
     """Analyze historical metrics to recommend best posting times."""
 
     def __init__(self, db_path: Path | str | None = None) -> None:
         if db_path is None:
-            db_path = Path("~/.xpst/analytics.db").expanduser()
+            db_path = default_analytics_db_path()
         self.db_path = Path(db_path).expanduser()
 
     def _connect(self):
