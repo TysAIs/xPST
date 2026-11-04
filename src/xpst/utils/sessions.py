@@ -217,7 +217,8 @@ class SessionManager:
                 # Verify session is valid. Use account_info() (the same probe
                 # instagram.py check_health uses) — get_timeline_feed() raises
                 # spurious LoginRequired on sessions that are actually valid
-                # (verified 2026-08-24 against a live tys.ais session).
+                # (verified 2026-08-24 against a live session; the project's
+                # own handle is product identity and stays out of the tree).
                 try:
                     client.account_info()
                     logger.info("Instagram session valid (sessionid auth)")
