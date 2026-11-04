@@ -1,0 +1,25 @@
+[package]
+name = "xpst-cli"
+description = "The `xpst` binary: full command tree, documented exit codes, P0 read-only commands."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "xpst"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+xpst-config.workspace = true
+xpst-media.workspace = true
+xpst-state.workspace = true
+
+[lints]
+workspace = true
