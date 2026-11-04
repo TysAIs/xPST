@@ -314,6 +314,120 @@ def test_denylist_env_flags_configured_identifier(tmp_path, monkeypatch):
     assert [f["kind"] for f in result["findings"]] == ["user_name"]
 
 
+# --- Checked-in deny list (D-2 enforcement) -------------------------------
+# Tokens are assembled from fragments so this module stays clean when it is
+# itself scanned, exactly like the fixture values above.
+DENY_FILE = ".public-safety-denylist"
+
+
+def _write_denylist(root, text):
+    (root / DENY_FILE).write_text(text, encoding="utf-8")
+
+
+def test_denylist_file_flags_configured_identifier(tmp_path):
+    token = "zzqq" + "-file-token"
+    _write_denylist(tmp_path, f"# checked-in list\n\n{token}\n")
+    source = tmp_path / "notes.md"
+    source.write_text(f"builds run on {token}\n", encoding="utf-8")
+
+    result = scan_public_safety(tmp_path, [source])
+
+    assert [f["kind"] for f in result["findings"]] == ["user_name"]
+    assert token not in json.dumps(result)
+
+
+def test_denylist_env_unions_with_checked_in_file(tmp_path, monkeypatch):
+    file_token = "zzqq" + "-file-token"
+    env_token = "zzqq" + "-env-token"
+    _write_denylist(tmp_path, f"{file_token}\n")
+    monkeypatch.setenv("XPST_PUBLIC_SAFETY_DENYLIST", env_token)
+    source = tmp_path / "notes.md"
+    source.write_text(f"{file_token} and {env_token}\n", encoding="utf-8")
+
+    result = scan_public_safety(tmp_path, [source])
+
+    assert [f["kind"] for f in result["findings"]] == ["user_name", "user_name"]
+    assert scanner.denylist_tokens(tmp_path) == [file_token, env_token]
+
+
+def test_denylist_file_ignores_comments_and_blank_lines(tmp_path):
+    real_token = "zzqq" + "-real-token"
+    commented_token = "zzqq" + "-commented-token"
+    _write_denylist(
+        tmp_path,
+        f"# {commented_token} is only a comment\n\n{real_token}  # trailing note\n",
+    )
+
+    assert scanner.denylist_tokens(tmp_path) == [real_token]
+
+    source = tmp_path / "notes.md"
+    source.write_text(f"{commented_token} stays, {real_token} trips\n", encoding="utf-8")
+    result = scan_public_safety(tmp_path, [source])
+
+    assert [f["kind"] for f in result["findings"]] == ["user_name"]
+
+
+def test_placeholder_allow_list_wins_over_denylist(tmp_path):
+    # An operator-supplied token that is a documented placeholder must never
+    # flag the documentation it was meant to protect.
+    _write_denylist(tmp_path, "demo\n")
+    doc = tmp_path / "README.md"
+    doc.write_text("Try the demo account.\n", encoding="utf-8")
+
+    result = scan_public_safety(tmp_path, [doc])
+
+    assert result["ok"] is True, result["findings"]
+
+
+def test_denylist_file_is_exempt_from_its_own_scan(tmp_path):
+    token = "zzqq" + "-self-token"
+    _write_denylist(tmp_path, f"# the list of banned names\n{token}\n")
+
+    clean = scan_public_safety(tmp_path)
+    assert clean["ok"] is True, clean["findings"]
+
+    (tmp_path / "src.py").write_text(f'owner = "{token}"\n', encoding="utf-8")
+    tripped = scan_public_safety(tmp_path)
+
+    assert [f["path"] for f in tripped["findings"]] == ["src.py"]
+
+
+def test_denylist_allow_lines_exempt_product_identifiers(tmp_path):
+    token = "zzqq" + "brand"
+    _write_denylist(tmp_path, f"{token}\nallow: github.com/{token}\n")
+    source = tmp_path / "README.md"
+
+    source.write_text(f"git clone https://github.com/{token}/xPST.git\n", encoding="utf-8")
+    assert scan_public_safety(tmp_path, [source])["ok"] is True
+
+    # The same token outside the allowed product string is still a finding.
+    source.write_text(f'git config user.name "{token}"\n', encoding="utf-8")
+    assert scan_public_safety(tmp_path, [source])["ok"] is False
+
+
+def test_check_denylist_fails_when_list_is_empty(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(scanner, "ROOT", tmp_path)
+    monkeypatch.delenv("XPST_PUBLIC_SAFETY_DENYLIST", raising=False)
+
+    assert scanner.main(["--check-denylist"]) == 1
+    assert "Deny list is empty" in capsys.readouterr().err
+
+    _write_denylist(tmp_path, "# only a comment\n\nzzqq" + "-token\n")
+
+    assert scanner.main(["--check-denylist"]) == 0
+    assert "Deny list loaded: 1 token" in capsys.readouterr().out
+
+
+def test_checked_in_denylist_is_present_and_parsed():
+    tokens = scanner.denylist_tokens(scanner.ROOT)
+
+    assert tokens, "the checked-in deny list must never be empty"
+    assert all(token == token.lower() for token in tokens)
+    assert len(tokens) == len(set(tokens))
+    # The product-identifier exemptions live in the same file and must parse.
+    assert scanner._product_allow_pattern(scanner.ROOT) is not None
+
+
 # --- No matched values in the report --------------------------------------
 def test_report_never_contains_matched_values(tmp_path):
     token = "ghp_" + ("Z" * 40)

@@ -23,6 +23,13 @@ Categories detected:
 ``home_path_macos``, ``home_path_linux``, ``home_path_windows``,
 ``personal_email``, ``phone_number``, ``machine_name``, ``user_name``.
 
+Personal identifiers that are not machine names or e-mail shapes (account
+handles, a person's name, old account ids) come from the checked-in deny list
+``.public-safety-denylist`` plus the ``XPST_PUBLIC_SAFETY_DENYLIST`` environment
+variable. The file is loaded in every mode, so the gate enforces it in CI
+without environment plumbing; the file also carries ``allow:`` lines for the
+product-level identifiers D-2 permits (project URLs, the bundle id).
+
 Absolute home paths for any OS use a shared placeholder allow-list so that
 documentation like ``/Users/<user>``, ``C:\\Users\\tester`` or ``/home/xpst``
 stays clean while a real machine username is reported.
@@ -261,20 +268,88 @@ MACHINE_NAME_RE = re.compile(
 # Only uppercase environment-style assignments are treated as machine/user
 # names; a lowercase ``username = ...`` in application code is a config field,
 # not an identity. Real account names leaked inside paths are reported by the
-# home-path categories above, and known personal identifiers can be supplied
-# through the ``XPST_PUBLIC_SAFETY_DENYLIST`` environment variable.
+# home-path categories above, and known personal identifiers come from the
+# checked-in deny list (``.public-safety-denylist``) unioned with the
+# ``XPST_PUBLIC_SAFETY_DENYLIST`` environment variable (see ``_denylist``).
 USER_NAME_RE = re.compile(
     r"""(?x)(?<![A-Za-z0-9_])(?:USER|USERNAME|LOGNAME)\s*[:=]\s*['"]?([A-Za-z][A-Za-z0-9._-]{2,})"""
 )
 _USER_NAME_NON_VALUES = ("os", "environ", "getenv", "none", "null", "self", "str", "param", "arg", "env")
 
+# --- Personal-identifier deny list ----------------------------------------
+# D-2 of docs/DIRECTION.md: zero personal data. The deny list is checked in as
+# ``.public-safety-denylist`` (one token per line, ``#`` comments) so every CI
+# run enforces it without environment plumbing; ``XPST_PUBLIC_SAFETY_DENYLIST``
+# is still unioned in for one-off local scans. The file also carries
+# ``allow:`` lines for the product-level identifiers D-2 permits: matching
+# ignores banned tokens that occur inside one of those strings.
+#
+# The deny list file is exempt from its own scan -- it *is* the list of banned
+# names -- and a finding still never carries the matched value.
 _DENYLIST_ENV = "XPST_PUBLIC_SAFETY_DENYLIST"
+_DENYLIST_FILE_NAME = ".public-safety-denylist"
+_DENYLIST_ALLOW_PREFIX = "allow:"
 
 
-def _denylist() -> list[re.Pattern[str]]:
-    raw = os.environ.get(_DENYLIST_ENV, "")
-    tokens = [t for t in re.split(r"[,\s]+", raw) if t]
-    return [re.compile(r"(?<![\w.-])" + re.escape(t) + r"(?![\w.-])", re.IGNORECASE) for t in tokens]
+def _denylist_path(root: Path | None = None) -> Path:
+    return Path(root if root is not None else ROOT) / _DENYLIST_FILE_NAME
+
+
+def _read_denylist_file(root: Path | None = None) -> tuple[list[str], list[str]]:
+    """Return ``(tokens, allowed_product_strings)`` from the checked-in deny list."""
+    try:
+        raw = _denylist_path(root).read_text(encoding="utf-8")
+    except OSError:
+        return [], []
+    tokens: list[str] = []
+    allowed: list[str] = []
+    for line in raw.splitlines():
+        entry = line.split("#", 1)[0].strip()
+        if not entry:
+            continue
+        if entry.lower().startswith(_DENYLIST_ALLOW_PREFIX):
+            value = entry[len(_DENYLIST_ALLOW_PREFIX) :].strip()
+            if value:
+                allowed.append(value)
+            continue
+        tokens.append(entry)
+    return tokens, allowed
+
+
+def denylist_tokens(root: Path | None = None) -> list[str]:
+    """Return the resolved deny-list tokens (checked-in file + env), deduped.
+
+    Public so tests and CI can assert the gate is not silently empty and so
+    fixture-cleanliness tests check the same list the scanner enforces.
+    """
+    file_tokens, _allowed = _read_denylist_file(root)
+    env_tokens = [token for token in re.split(r"[,\s]+", os.environ.get(_DENYLIST_ENV, "")) if token]
+    resolved: list[str] = []
+    for token in [*file_tokens, *env_tokens]:
+        lowered = token.lower()
+        if lowered not in resolved:
+            resolved.append(lowered)
+    return resolved
+
+
+def _product_allow_pattern(root: Path | None = None) -> re.Pattern[str] | None:
+    """Compiled pattern for the product-level identifiers the deny list allows."""
+    _tokens, allowed = _read_denylist_file(root)
+    unique = sorted({value for value in allowed if value}, key=len, reverse=True)
+    if not unique:
+        return None
+    return re.compile("|".join(re.escape(value) for value in unique), re.IGNORECASE)
+
+
+def _denylist(root: Path | None = None) -> list[re.Pattern[str]]:
+    return [
+        re.compile(r"(?<![\w.-])" + re.escape(token) + r"(?![\w.-])", re.IGNORECASE) for token in denylist_tokens(root)
+    ]
+
+
+def _is_denylist_file(label: str) -> bool:
+    """True when a path or artifact-member label is the deny list itself."""
+    return label.replace("\\", "/").rsplit("/", 1)[-1].split("!")[-1] == _DENYLIST_FILE_NAME
 
 
 @dataclass
@@ -302,12 +377,15 @@ def _scan_text(
     label: str,
     *,
     denylist: list[re.Pattern[str]] | None = None,
+    product_allow: re.Pattern[str] | None = None,
     binary: bool = False,
 ) -> list[Finding]:
     """Scan a single text blob. Never returns the matched value.
 
     ``binary`` marks text recovered from executable/compressed members: email and
     phone shapes are skipped there because such data is almost always noise.
+    ``product_allow`` masks the product-level identifiers the deny list permits
+    (project URLs, the bundle id) before deny-list matching.
     """
     findings: list[Finding] = []
     denylist = denylist or []
@@ -365,16 +443,36 @@ def _scan_text(
             continue
         findings.append(Finding(label, "user_name", "Explicit machine/user-name assignment."))
 
+    deny_haystack = _mask_products(text, product_allow)
     for pattern in denylist:
-        if pattern.search(text):
-            findings.append(Finding(label, "user_name", "Matched configured personal-identifier deny list."))
+        match = pattern.search(deny_haystack)
+        if match is None:
+            continue
+        if _is_placeholder(match.group(0)):
+            # A documented placeholder (``example``, ``demo``, ...) always wins
+            # over the deny list, so an over-broad operator token cannot flag
+            # the documentation it was meant to protect.
+            continue
+        findings.append(Finding(label, "user_name", "Matched configured personal-identifier deny list."))
 
     return findings
 
 
-def scan_text(text: str, label: str) -> list[Finding]:
+def _mask_products(text: str, product_allow: re.Pattern[str] | None) -> str:
+    """Blank out deny-list-exempt product identifiers, preserving offsets."""
+    if product_allow is None:
+        return text
+    return product_allow.sub(lambda match: "\x00" * len(match.group(0)), text)
+
+
+def scan_text(text: str, label: str, root: Path | None = None) -> list[Finding]:
     """Public wrapper used by tests and CI to scan an in-memory blob."""
-    return _scan_text(text, label, denylist=_denylist())
+    return _scan_text(
+        text,
+        label,
+        denylist=_denylist(root),
+        product_allow=_product_allow_pattern(root),
+    )
 
 
 # --- Working-tree scan ---------------------------------------------------
@@ -409,7 +507,8 @@ def scan_public_safety(root: Path = ROOT, paths: list[Path] | None = None) -> di
     """Return publishable-file scan results (no matched values)."""
     root = root.resolve()
     files = paths if paths is not None else _git_publishable_files(root)
-    denylist = _denylist()
+    denylist = _denylist(root)
+    product_allow = _product_allow_pattern(root)
     findings: list[Finding] = []
     scanned = 0
 
@@ -422,6 +521,11 @@ def scan_public_safety(root: Path = ROOT, paths: list[Path] | None = None) -> di
             rel = path.relative_to(root).as_posix()
         except ValueError:
             rel = str(path)
+
+        if _is_denylist_file(rel):
+            # The deny list IS the list of banned names; scanning it against
+            # itself would flag every entry it exists to enforce.
+            continue
 
         if any(pattern.match(rel) for pattern in SENSITIVE_FILE_PATTERNS):
             findings.append(
@@ -444,7 +548,7 @@ def scan_public_safety(root: Path = ROOT, paths: list[Path] | None = None) -> di
         # in their metadata; scan extracted printable strings, not the raw bytes.
         binary = _is_binary(data)
         text = "\n".join(_printable_runs(data)) if binary else data.decode("utf-8", errors="ignore")
-        findings.extend(_scan_text(text, rel, denylist=denylist, binary=binary))
+        findings.extend(_scan_text(text, rel, denylist=denylist, product_allow=product_allow, binary=binary))
 
     summary = _summarize(findings)
     return {
@@ -480,13 +584,18 @@ def _printable_runs(data: bytes, min_run: int = PRINTABLE_MIN_RUN) -> Iterator[s
         yield "".join(current)
 
 
-def _scan_member_bytes(data: bytes, label: str, denylist: list[re.Pattern[str]]) -> list[Finding]:
+def _scan_member_bytes(
+    data: bytes,
+    label: str,
+    denylist: list[re.Pattern[str]],
+    product_allow: re.Pattern[str] | None = None,
+) -> list[Finding]:
     if len(data) > MAX_ARTIFACT_MEMBER_BYTES:
         data = data[:MAX_ARTIFACT_MEMBER_BYTES]
     # Binary/executable members are scanned as extracted printable strings.
     binary = _is_binary(data)
     text = "\n".join(_printable_runs(data)) if binary else data.decode("utf-8", errors="ignore")
-    return _scan_text(text, label, denylist=denylist, binary=binary)
+    return _scan_text(text, label, denylist=denylist, product_allow=product_allow, binary=binary)
 
 
 def _iter_zip_members(path: Path) -> Iterator[tuple[str, bytes]]:
@@ -586,7 +695,8 @@ def _split_artifact_findings(findings: list[Finding]) -> tuple[list[Finding], li
 def scan_artifact(path: Path, root: Path | None = None) -> dict[str, Any]:
     """Scan a built artifact (archive, .app tree or PyInstaller onedir)."""
     path = Path(path)
-    denylist = _denylist()
+    denylist = _denylist(root)
+    product_allow = _product_allow_pattern(root)
     findings: list[Finding] = []
     scanned = 0
     members = 0
@@ -596,8 +706,11 @@ def scan_artifact(path: Path, root: Path | None = None) -> dict[str, Any]:
     for name, data in _iter_artifact_members(path):
         members += 1
         label = f"{path}/{name}" if path.is_dir() else f"{path.name}!{name}"
+        if _is_denylist_file(label):
+            # The checked-in deny list is the list of banned names, not a leak.
+            continue
         scanned += 1
-        findings.extend(_scan_member_bytes(data, label, denylist))
+        findings.extend(_scan_member_bytes(data, label, denylist, product_allow))
 
     gating, informational = _split_artifact_findings(findings)
     summary = _summarize(gating)
@@ -665,7 +778,8 @@ def _tree_blobs(root: Path, commit: str) -> list[str]:
 def scan_history(root: Path = ROOT, *, sample_commits: int | None = None) -> dict[str, Any]:
     """Walk every commit/blob reachable from any ref. Report only, never values."""
     root = root.resolve()
-    denylist = _denylist()
+    denylist = _denylist(root)
+    product_allow = _product_allow_pattern(root)
     commits = [c for c in _git(root, "rev-list", "--all").split() if c]
 
     # object -> path hints (informational, masked to paths already in the repo).
@@ -709,9 +823,14 @@ def scan_history(root: Path = ROOT, *, sample_commits: int | None = None) -> dic
     # are reduced to printable strings first, exactly like the tree/artifact scans.
     blob_categories: dict[str, set[str]] = {}
     for sha, raw in blob_bytes.items():
+        hint = obj_path.get(sha, sha)
+        if _is_denylist_file(hint):
+            # History carries every past version of the deny list itself; it is
+            # the list of banned names, not a leak.
+            continue
         binary = _is_binary(raw)
         text = "\n".join(_printable_runs(raw)) if binary else raw.decode("utf-8", "ignore")
-        kinds = {f.kind for f in _scan_text(text, obj_path.get(sha, sha), denylist=denylist, binary=binary)}
+        kinds = {f.kind for f in _scan_text(text, hint, denylist=denylist, product_allow=product_allow, binary=binary)}
         if kinds:
             blob_categories[sha] = kinds
 
@@ -776,7 +895,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sample-commits", type=int, help="Limit commit SHAs per category in history output")
     parser.add_argument("--no-fail", action="store_true", help="Always exit 0 (report only)")
     parser.add_argument("--fail-on-history", action="store_true", help="Exit non-zero when history has findings")
+    parser.add_argument(
+        "--check-denylist",
+        action="store_true",
+        help="Exit non-zero when the deny list (checked-in file + env var) is empty; scans nothing",
+    )
     args = parser.parse_args(argv)
+
+    if args.check_denylist:
+        tokens = denylist_tokens(ROOT)
+        _file_tokens, allowed = _read_denylist_file(ROOT)
+        if not tokens:
+            print(
+                f"Deny list is empty: no tokens in {_denylist_path(ROOT)} or ${_DENYLIST_ENV}.",
+                file=sys.stderr,
+            )
+            return 1
+        print(
+            f"Deny list loaded: {len(tokens)} token(s) from {_DENYLIST_FILE_NAME} and ${_DENYLIST_ENV}; "
+            f"{len(allowed)} product identifier(s) allowed."
+        )
+        return 0
 
     if args.history:
         result = scan_history(ROOT, sample_commits=args.sample_commits)
@@ -787,9 +926,21 @@ def main(argv: list[str] | None = None) -> int:
             p = Path(item)
             if p.is_dir():
                 # accept a dist dir: scan each artifact inside it.
-                children = [c for c in sorted(p.iterdir()) if c.is_file() and c.suffix.lower() in {
-                    ".dmg", ".zip", ".whl", ".tar", ".gz", ".tgz", ".app",
-                }]
+                children = [
+                    c
+                    for c in sorted(p.iterdir())
+                    if c.is_file()
+                    and c.suffix.lower()
+                    in {
+                        ".dmg",
+                        ".zip",
+                        ".whl",
+                        ".tar",
+                        ".gz",
+                        ".tgz",
+                        ".app",
+                    }
+                ]
                 if children:
                     artifact_paths.extend(children)
                 else:

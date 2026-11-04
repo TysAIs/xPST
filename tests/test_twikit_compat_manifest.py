@@ -19,6 +19,7 @@ import asyncio
 import re
 from pathlib import Path
 
+from scripts import scan_public_safety as scanner
 from xpst.platforms.twikit_compat import apply_twikit_patches
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -33,7 +34,9 @@ def test_fixtures_exist_and_are_pii_clean() -> None:
     # account data (repo rule: zero personal data).
     assert re.search(r',\d+:"ondemand\.s"', html)
     assert "twitter-site-verification" in html
-    for token in ("tysn", "itxji", "Tyler", "sessionid", "ct0"):
+    # Personal identifiers come from the checked-in deny list itself, so this
+    # fixture is asserted clean against exactly the tokens CI enforces.
+    for token in (*scanner.denylist_tokens(), "sessionid", "ct0"):
         assert token not in html
         assert token not in js
 

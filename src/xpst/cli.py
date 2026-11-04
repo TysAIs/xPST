@@ -4163,6 +4163,11 @@ def _desktop_shell_candidates() -> list[Path]:
 
     The shell is a native binary/``.app`` bundle (``com.tysais.xpst``), not a
     Python module, so it is located on disk instead of imported.
+
+    ``com.tysais.xpst`` is the product's reverse-DNS bundle identifier, not
+    personal data: it is the shipped id from ``src-tauri/tauri.conf.json``, and
+    the public-safety deny list carries it as an allowed product identifier
+    (see ``.public-safety-denylist`` and D-2 in ``docs/DIRECTION.md``).
     """
     home = Path.home()
     if sys.platform == "darwin":
