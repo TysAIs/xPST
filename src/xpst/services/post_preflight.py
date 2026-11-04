@@ -33,11 +33,14 @@ from xpst.media.specs import (
     MediaReport,
     verify_media,
 )
+from xpst.utils.logger import get_logger
 from xpst.utils.quota import QuotaManager
 from xpst.utils.video import VideoProcessor
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+logger = get_logger(__name__)
 
 _SUPPORTED_PLATFORMS = tuple(PLATFORM_SPECS)
 # Caption limits come from ``xpst.content.text_limit`` — the same table the
@@ -60,8 +63,11 @@ NO_DESTINATIONS_CODE = "NO_DESTINATIONS"
 NO_DESTINATIONS_MESSAGE = "Choose at least one destination platform."
 
 # Canonical destination order for "all configured platforms". Matches the
-# engine's registration order so a UI list and a CLI resolution never differ.
-DESTINATION_ORDER = ("youtube", "x", "instagram", "tiktok", "threads")
+# engine's registration order so a UI list and a CLI resolution never differ —
+# including ``facebook``, which the engine registers as a destination when
+# ``accounts.facebook.enabled`` is true. Omitting it here meant `xpst post` with
+# no ``-p`` never targeted a configured Page at all (card t_95928695 D4).
+DESTINATION_ORDER = ("youtube", "x", "instagram", "tiktok", "threads", "facebook")
 
 
 def destinations_blocker(target_platforms: Sequence[str] | None) -> PreflightIssue | None:
@@ -871,13 +877,111 @@ def _local_auth_readiness(platform: str, config: XPSTConfig) -> AuthReadiness:
         ready = bool(account.session_file and Path(account.session_file).expanduser().is_file())
         return AuthReadiness(ready, "ready" if ready else "missing", "Instagram session file exists." if ready else "Instagram session file is missing.", "session")
     if platform == "tiktok":
-        ready = bool(account.access_token)
-        return AuthReadiness(ready, "ready" if ready else "missing", "TikTok access token is configured." if ready else "TikTok access token is missing.", "oauth")
+        return _tiktok_auth_readiness(account, config)
     if platform == "threads":
         ready = bool(account.graph_access_token and account.threads_user_id)
         detail = "Threads credentials are configured." if ready else "Threads access token and user ID are missing."
         return AuthReadiness(ready, "ready" if ready else "missing", detail, "oauth")
+    if platform == "facebook":
+        return _facebook_auth_readiness(account, config)
     return AuthReadiness(False, "unsupported", f"No local auth readiness rule exists for {platform}.")
+
+
+def _tiktok_auth_readiness(account: Any, config: XPSTConfig) -> AuthReadiness:
+    """TikTok readiness for the route the config actually publishes through.
+
+    ``publish_mode: browser`` (or ``browser_only``) never touches the Content
+    Posting API: ``TikTokUploader.upload`` dispatches to the browser publisher
+    and the credential is the stored web session (an exported cookie jar and/or
+    the persisted browser profile). Demanding ``access_token`` on that route was
+    a false blocker — a post that publishes fine was planned as ``ready: false``
+    with "TikTok access token is missing." (card t_95928695 D3).
+
+    The session locations come from the uploader itself, so the check cannot
+    drift from where the publisher looks.
+    """
+    mode = str(getattr(account, "publish_mode", "auto") or "auto").lower()
+    if mode not in ("browser", "browser_only"):
+        ready = bool(account.access_token)
+        return AuthReadiness(
+            ready,
+            "ready" if ready else "missing",
+            "TikTok access token is configured." if ready else "TikTok access token is missing.",
+            "oauth",
+        )
+
+    from xpst.platforms.tiktok import TikTokUploader
+
+    uploader = TikTokUploader(config)
+    jar = uploader._tiktok_cookie_jar_path()
+    profile = uploader._browser_profile_dir()
+    profile_has_session = False
+    try:
+        profile_has_session = profile.is_dir() and any(profile.iterdir())
+    except OSError:  # an unreadable profile is "no usable session", not a crash
+        profile_has_session = False
+
+    if jar is not None:
+        return AuthReadiness(
+            True,
+            "ready",
+            f"TikTok publishes through the browser (publish_mode: {mode}); "
+            f"the web session cookie jar exists at {jar}.",
+            "session",
+        )
+    if profile_has_session:
+        return AuthReadiness(
+            True,
+            "ready",
+            f"TikTok publishes through the browser (publish_mode: {mode}); "
+            f"a persisted browser profile exists at {profile}.",
+            "session",
+        )
+    return AuthReadiness(
+        False,
+        "missing",
+        f"TikTok publishes through the browser (publish_mode: {mode}) but no stored "
+        f"web session was found (looked for {profile} and a tiktok_cookies.txt jar). "
+        f"Run `xpst auth tiktok`.",
+        "session",
+    )
+
+
+def _facebook_auth_readiness(account: Any, config: XPSTConfig) -> AuthReadiness:
+    """Facebook Page readiness: a Page id plus that Page's access token.
+
+    ``xpst auth facebook`` keeps both halves in the encrypted credential store
+    (``FACEBOOK_CRED_KEYS``), so a config field alone is not proof of *absence*:
+    read the local store too (no network, no write). This is the rule that was
+    missing entirely — the planner fell through to ``unsupported`` for a
+    destination the engine publishes to (card t_95928695 D4).
+    """
+    page_id = str(getattr(account, "page_id", "") or "")
+    token = str(getattr(account, "page_access_token", "") or "")
+    if not (page_id and token):
+        creds_dir = Path(str(config.config_dir)).expanduser() / "credentials"
+        if creds_dir.is_dir():
+            try:
+                from xpst.platforms.facebook import FACEBOOK_CRED_KEYS
+                from xpst.utils.credentials import CredentialStore
+
+                store = CredentialStore(config.config_dir)
+                page_id = page_id or str(store.retrieve(FACEBOOK_CRED_KEYS["page_id"]) or "")
+                token = token or str(store.retrieve(FACEBOOK_CRED_KEYS["page_access_token"]) or "")
+            except Exception as exc:  # noqa: BLE001 - readiness must stay reportable
+                logger.debug("Facebook credential store read failed: %s", exc)
+    ready = bool(page_id and token)
+    return AuthReadiness(
+        ready,
+        "ready" if ready else "missing",
+        (
+            f"Facebook Page {page_id} credentials are configured."
+            if ready
+            else "Facebook Page credentials are missing (Page id and Page access token) — "
+            "run `xpst auth facebook`."
+        ),
+        "oauth",
+    )
 
 
 def local_auth_readiness(platform: str, config: XPSTConfig) -> AuthReadiness:

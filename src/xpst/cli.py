@@ -984,8 +984,18 @@ def post(
     targets = _resolved_destinations(config, platform_list)
 
     # ONE content answer, from the contract module: the same request produces
-    # the same verdict on the CLI, in MCP, and over HTTP.
-    request = ContentRequest.from_legacy(media_paths, body, targets, content_type=content_type)
+    # the same verdict on the CLI, in MCP, and over HTTP. Per-destination copy
+    # rides the request itself (``overrides``), so the text that is validated
+    # for each destination is the text that destination is sent — without this,
+    # `--caption-for x=<short>` planned clean and still exited 1 on the base
+    # caption's length.
+    request = ContentRequest.from_legacy(
+        media_paths,
+        body,
+        targets,
+        content_type=content_type,
+        overrides=per_platform_captions,
+    )
     verdict = content_verdict(request)
     # Transport refusals are the pipeline's to report, destination by
     # destination (see _pre_upload_refusal_blockers).

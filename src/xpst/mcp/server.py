@@ -1710,11 +1710,12 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
 
     targets = list(args.get("platforms") or list(engine._platforms.keys()))
     media_paths = (([video_path] if video_path else []) + carousel_paths)
-    request = ContentRequest.from_legacy(media_paths, caption, targets, content_type=content_type)
-    verdict = content_verdict(request)
 
     # Per-destination copy, parsed by the shared contract parser so MCP accepts
-    # exactly the shape the HTTP API and the CLI accept.
+    # exactly the shape the HTTP API and the CLI accept. Parsed BEFORE the
+    # request is built: the copy that is validated must be the copy that is
+    # sent, or a valid short X override is refused for the shared caption's
+    # length and the live run aborts (card t_95928695 D2).
     from xpst.content import ContentContractError, parse_destination_texts
 
     try:
@@ -1730,6 +1731,11 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                 }, indent=2),
             )],
         )
+
+    request = ContentRequest.from_legacy(
+        media_paths, caption, targets, content_type=content_type, overrides=overrides
+    )
+    verdict = content_verdict(request)
 
     if dry_run:
         # Same canonical, side-effect-free verdict the CLI and the dashboard use.
