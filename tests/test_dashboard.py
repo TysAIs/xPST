@@ -18,6 +18,14 @@ from click.testing import CliRunner
 from xpst.cli import main
 from xpst.dashboard.server import start_dashboard
 
+# Fictional identities for the bio fixture (repo rule: zero personal data).
+# Assertions below are built from these, so the page is checked against the
+# configured handle rather than a handle hardcoded into the assertion.
+YOUTUBE_HANDLE = "video_channel"
+X_HANDLE = "sample_user"
+TIKTOK_HANDLE = "sample.clips"
+BIO_WEBSITE = "https://example.com"
+
 
 def test_default_bind_host_is_loopback():
     """start_dashboard must default to 127.0.0.1, not 0.0.0.0."""
@@ -151,15 +159,15 @@ def test_bio_page_renders_social_and_custom_links(tmp_path):
     client = _bio_app(
         tmp_path,
         accounts={
-            "youtube": {"enabled": True, "username": "tysais"},
-            "x": {"enabled": True, "username": "sample_user"},
+            "youtube": {"enabled": True, "username": YOUTUBE_HANDLE},
+            "x": {"enabled": True, "username": X_HANDLE},
             "instagram": {"enabled": False, "username": "hidden_ig"},
-            "tiktok": {"enabled": True, "username": "tys.ais"},
+            "tiktok": {"enabled": True, "username": TIKTOK_HANDLE},
             "threads": {"enabled": False, "threads_user_id": "12345"},
         },
         bio={
             "handle": "Maintainer AI",
-            "links": [{"label": "Website", "url": "https://tysais.com"}],
+            "links": [{"label": "Website", "url": BIO_WEBSITE}],
         },
     )
     resp = client.get("/bio")
@@ -167,13 +175,13 @@ def test_bio_page_renders_social_and_custom_links(tmp_path):
     assert "text/html" in resp.headers["content-type"]
     html = resp.text
     assert "Maintainer AI" in html
-    assert "https://youtube.com/@tysais" in html
-    assert "https://x.com/sample_user" in html
-    assert "https://tiktok.com/@tys.ais" in html
+    assert f"https://youtube.com/@{YOUTUBE_HANDLE}" in html
+    assert f"https://x.com/{X_HANDLE}" in html
+    assert f"https://tiktok.com/@{TIKTOK_HANDLE}" in html
     assert "https://instagram.com/hidden_ig" not in html   # disabled
     assert "https://threads.net/" not in html              # disabled
     assert '>Website<' in html
-    assert "https://tysais.com" in html
+    assert BIO_WEBSITE in html
 
 
 def test_bio_page_skips_disabled_and_handleless_accounts(tmp_path):
@@ -333,7 +341,7 @@ def test_health_endpoint_reports_healthy(tmp_path):
     """GET /health returns 200 with aggregated platform health."""
     client = _bio_app(
         tmp_path,
-        accounts={"youtube": {"enabled": True, "username": "tysais"}},
+        accounts={"youtube": {"enabled": True, "username": YOUTUBE_HANDLE}},
     )
     _write_state(
         tmp_path,
@@ -378,7 +386,7 @@ def test_state_endpoint_returns_summary(tmp_path):
     """Authenticated GET /state returns the analytics summary dict."""
     client = _bio_app(
         tmp_path,
-        accounts={"youtube": {"enabled": True, "username": "tysais"}},
+        accounts={"youtube": {"enabled": True, "username": YOUTUBE_HANDLE}},
     )
     _write_state(tmp_path, platforms={"youtube": {"status": "ok"}}, total=3)
     data = client.get("/state").json()
