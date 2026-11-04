@@ -1,0 +1,17 @@
+[package]
+name = "xpst-state"
+description = "xPST state read path: state.json v2 and the schedule file, read-only (P0)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
