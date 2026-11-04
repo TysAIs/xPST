@@ -1,0 +1,13 @@
+[package]
+name = "xpst-app"
+description = "Tauri 2 shell hosting the engine in-process (P4; src-tauri is untouched until then)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
