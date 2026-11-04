@@ -425,6 +425,10 @@ class TestEngineRecordsGroup:
                 return list(targets)
 
         class FakeConfig:
+            # Real XPSTConfig carries config_dir; the engine resolves its
+            # analytics ledger from it (never a hardcoded ~/.xpst default).
+            config_dir = str(tmp_path)
+
             class video:  # noqa: N801 - mirrors XPSTConfig.video attribute name
                 download_dir = str(tmp_path)
                 cleanup_after_post = False
