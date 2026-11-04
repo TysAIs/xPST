@@ -207,7 +207,7 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
-          git config user.name "TysAIs"
+          git config user.name "xPST release bot"
           git config user.email "TysAIs@users.noreply.github.com"
           git add updates/latest.json
           if [[ -n "$(git status --porcelain updates/latest.json)" ]]; then
