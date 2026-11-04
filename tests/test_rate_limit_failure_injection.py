@@ -14,8 +14,8 @@ a fake ``videos().insert()`` request object for YouTube. **No socket is opened
 and no live post can happen**: every response is fabricated, and the suite is
 run under the same socket guard as the other dry-run regression tests.
 
-What it asserts, per destination (X / Instagram / Facebook / YouTube) and per
-fault shape (429, 429 + Retry-After, 403 rate-limit body, 500):
+What it asserts, per destination (X / Instagram / Facebook / YouTube / TikTok)
+and per fault shape (429, 429 + Retry-After, 403 rate-limit body, 500):
 
 FI-1  a throttle pauses the destination (the cooldown engages on first sight);
 FI-2  the pause is the provider's own Retry-After when it sent one;
@@ -26,6 +26,20 @@ FI-5  the pause survives a process restart and is honoured by the next post;
 FI-6  one destination's cooldown never blocks another destination's post;
 FI-7  one destination's cooldown never silently unblocks (shortens) a longer
       cooldown already running for a sibling on the same upstream pool.
+
+TikTok was the one destination this harness used to omit (gate G3 in the
+un-halt packet, "cannot prove"). It is now covered on the route that has a
+provider status surface at all — the Content Posting API (``publish_mode:
+auto``). Two TikTok-specific facts are pinned rather than hidden:
+
+* the uploader maps a 429 to ``TIKTOK_RATE_LIMITED`` and never reads the
+  response's ``Retry-After``, so the cooldown runs at the 60s escalation floor
+  even when the provider asked for 900s
+  (``test_tiktok_429_drops_the_provider_retry_after_hint``);
+* ``publish_mode: browser`` (what this host runs) has no HTTP status surface
+  at all — Playwright drives TikTok Studio and failures are typed stage codes,
+  so no 429 can reach the cooldown machine on that route
+  (``test_tiktok_browser_route_has_no_provider_status_surface``).
 """
 
 from __future__ import annotations
@@ -44,6 +58,8 @@ import xpst.utils.retry as retry_mod
 from xpst.config import XPSTConfig
 from xpst.platforms.facebook import FacebookGraphClient, FacebookPageUploader
 from xpst.platforms.instagram import InstagramUploader
+from xpst.platforms.tiktok import TikTokUploader
+from xpst.platforms.tiktok_browser import BrowserPublishError
 from xpst.platforms.x import XUploader
 from xpst.platforms.youtube import YouTubeUploader
 from xpst.services.upload_service import UploadService
@@ -414,6 +430,131 @@ class InstagramTransport:
         return client
 
 
+class TikTokTransport:
+    """Fake ``httpx.AsyncClient`` for TikTok's Content Posting API.
+
+    This is the route with a provider status surface: ``publish_mode: auto``
+    (the configured default) goes init → upload PUT → status fetch against
+    open.tiktokapis.com, and a 429 there is what ``_handle_http_error`` maps.
+    The adapter's real request sequence runs unmodified; only the wire answers
+    are fabricated.
+
+    ``calls`` counts publish attempts (the ``video/init`` POST) — the unit the
+    other transports report — so the suite's attempt ceilings mean the same
+    thing here. ``total_requests`` also counts the per-attempt
+    creator_info/query and the upload PUT, because TikTok's route spends them.
+    """
+
+    platform = "tiktok"
+
+    def __init__(self, fault: Fault) -> None:
+        self.fault = fault
+        self.recorder = Recorder()
+
+    @property
+    def calls(self) -> int:
+        return sum(1 for c in self.recorder.calls if c == "video/init")
+
+    @property
+    def total_requests(self) -> int:
+        return len(self.recorder.calls)
+
+    def _response(self, status: int, payload: dict, url: str) -> httpx.Response:
+        headers = {}
+        if self.fault.retry_after:
+            # The provider's own hint, on the wire exactly as TikTok sends it.
+            headers["Retry-After"] = self.fault.retry_after
+        return httpx.Response(
+            status, json=payload, headers=headers, request=httpx.Request("POST", url)
+        )
+
+    def _error_payload(self) -> dict:
+        """TikTok's error envelope (code/message/log_id), not Meta's."""
+        if self.fault.throttle:
+            return {
+                "error": {
+                    "code": "rate_limit_exceeded",
+                    "message": "Too many requests. Please try again later.",
+                    "log_id": "2026110412000000000000",
+                }
+            }
+        return {
+            "error": {
+                "code": "server_error",
+                "message": "Internal server error.",
+                "log_id": "2026110412000000000000",
+            }
+        }
+
+    async def post(self, url, headers=None, json=None, params=None, **kw):  # noqa: ANN001, ANN003
+        if "creator_info/query" in url:
+            # Fail-open in the adapter, and answered normally here: the fault
+            # under test belongs to the publish, not to the privacy probe.
+            self.recorder.hit("creator_info/query")
+            return self._response(
+                200, {"data": {"privacy_level_options": ["PUBLIC_TO_EVERYONE"]}}, url
+            )
+        if "video/init" in url:
+            self.recorder.hit("video/init")
+            if self.fault.status >= 400:
+                return self._response(self.fault.status, self._error_payload(), url)
+            return self._response(
+                200,
+                {
+                    "data": {
+                        "publish_id": "v_pub_file_1",
+                        "upload_url": "https://open-upload.tiktokapis.com/upload/1",
+                    },
+                    "error": {"code": "ok", "message": "", "log_id": "2026110412000000000000"},
+                },
+                url,
+            )
+        if "status/fetch" in url:
+            self.recorder.hit("status/fetch")
+            if self.fault.status >= 400:
+                return self._response(self.fault.status, self._error_payload(), url)
+            return self._response(
+                200,
+                {
+                    "data": {
+                        "status": "PUBLISH_COMPLETE",
+                        "publicaly_available_post_id": ["7000000000000000001"],
+                        "publicaly_available_post_url": (
+                            "https://www.tiktok.com/@xpst-fixture/video/7000000000000000001"
+                        ),
+                    }
+                },
+                url,
+            )
+        raise AssertionError(f"unscripted TikTok request: {url}")
+
+    async def put(self, url, **kw):  # noqa: ANN003
+        self.recorder.hit("upload")
+        return httpx.Response(201, json={}, request=httpx.Request("PUT", url))
+
+    def factory(self):
+        """Return an ``httpx.AsyncClient`` replacement bound to this transport."""
+
+        class _Client:
+            def __init__(self, *a: Any, **kw: Any) -> None:
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def post(self, url, **kw):  # noqa: ANN001, ANN003
+                return await transport.post(url, **kw)
+
+            async def put(self, url, **kw):  # noqa: ANN001, ANN003
+                return await transport.put(url, **kw)
+
+        transport = self
+        return _Client()
+
+
 # ---------------------------------------------------------------------------
 # Service + uploader harness
 # ---------------------------------------------------------------------------
@@ -508,6 +649,14 @@ def build_uploader(transport, tmp_path: Path, monkeypatch):
         uploader = YouTubeUploader(config)
         uploader._service = transport
         return uploader, None
+    if transport.platform == "tiktok":
+        # Content Posting API route (publish_mode stays the production default
+        # "auto"); an access token is the only thing the route needs to talk to
+        # the fabricated httpx client at all.
+        config.tiktok.access_token = "test-token"
+        uploader = TikTokUploader(config)
+        monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: transport.factory())
+        return uploader, None
     raise AssertionError(transport.platform)
 
 
@@ -516,7 +665,19 @@ TRANSPORTS = {
     "instagram": InstagramTransport,
     "facebook": FacebookTransport,
     "youtube": YouTubeTransport,
+    "tiktok": TikTokTransport,
 }
+
+#: Whether the uploader carries a provider-declared ``Retry-After`` into its
+#: error text (the only place the cooldown machine reads it from). Every Meta
+#: path and YouTube do; TikTok does NOT — ``TikTokUploader._handle_http_error``
+#: returns a static ``TIKTOK_RATE_LIMITED`` string and never touches the
+#: response headers, so its cooldown runs at the 60s escalation floor. That is
+#: a real gap, pinned by
+#: ``test_tiktok_429_drops_the_provider_retry_after_hint``; the shared
+#: Retry-After cases below skip this destination with that reason instead of
+#: quietly asserting a property TikTok cannot yet satisfy.
+HONOURS_PROVIDER_RETRY_AFTER = {"tiktok": False}
 
 
 async def post(service, uploader, platform, video, video_id):
@@ -584,9 +745,19 @@ def test_throttle_honours_the_provider_retry_after(platform, tmp_path, monkeypat
     asyncio.run(post(service, uploader, platform, make_video(tmp_path), "vid-1"))
 
     remaining = service.rate_cooldowns.remaining_s(platform)
-    assert remaining == pytest.approx(900), (
-        f"{platform}: Retry-After 900 was not honoured (remaining={remaining})"
-    )
+    if HONOURS_PROVIDER_RETRY_AFTER.get(platform, True):
+        assert remaining == pytest.approx(900), (
+            f"{platform}: Retry-After 900 was not honoured (remaining={remaining})"
+        )
+    else:
+        # The hint reached the wire (TikTokTransport sends the header) and the
+        # uploader dropped it: only the base escalation floor applies. This is
+        # the defect, asserted rather than skipped — see
+        # test_tiktok_429_drops_the_provider_retry_after_hint.
+        assert remaining == pytest.approx(60), (
+            f"{platform}: expected the documented 60s floor while Retry-After "
+            f"is unread, got {remaining}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +776,12 @@ def test_provider_wait_beyond_the_retry_budget_costs_one_request(
     is the honest cost; the post stays unpublished and the destination stays
     cooling.
     """
+    if not HONOURS_PROVIDER_RETRY_AFTER.get(platform, True):
+        pytest.skip(
+            f"{platform} drops the provider's Retry-After, so the 900s window is "
+            "invisible to this layer and all attempts are spent "
+            "(pinned by test_tiktok_429_drops_the_provider_retry_after_hint)"
+        )
     transport = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE_RA)
     uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
     clock = Clock()
@@ -729,7 +906,13 @@ def test_cooldown_survives_restart_and_is_honoured(platform, tmp_path, monkeypat
 
 @pytest.mark.parametrize(
     ("cooled", "posting"),
-    [("instagram", "x"), ("x", "youtube"), ("youtube", "facebook")],
+    [
+        ("instagram", "x"),
+        ("x", "youtube"),
+        ("youtube", "facebook"),
+        ("facebook", "tiktok"),
+        ("tiktok", "youtube"),
+    ],
 )
 def test_a_cooldown_does_not_block_another_destination(
     cooled, posting, tmp_path, monkeypatch, sleeps
@@ -954,6 +1137,110 @@ def test_instagram_session_throttle_that_clears_is_published_by_the_service_retr
     assert follow_up.metadata.get("cooldown") is True
     assert follow_up.metadata.get("deferred") is True
     assert transport.calls == 2
+
+
+# ---------------------------------------------------------------------------
+# TikTok (gate G3): the route the harness used to omit
+# ---------------------------------------------------------------------------
+
+def test_tiktok_429_drops_the_provider_retry_after_hint(
+    tmp_path, monkeypatch, sleeps
+):
+    """The 429 pauses TikTok, but its ``Retry-After`` header is never read.
+
+    DEFECT, pinned deliberately (not hidden): ``TikTokUploader._handle_http_error``
+    maps 429 to a static ``TIKTOK_RATE_LIMITED`` string and never looks at the
+    response headers, so a provider that asked for 900s is only believed for
+    the 60s escalation floor. Every Meta path and YouTube carry the hint into
+    the error text (that is the cooldown machine's only input), so this is a
+    TikTok gap, not a harness limitation.
+
+    The safety consequence is *late, not wrong*: the destination still cools,
+    the post is still not counted posted, and the next attempt is deferred —
+    it just re-asks far earlier than the provider permitted. When the uploader
+    learns to append ``Retry-After: <n>`` this test fails on the floor
+    assertion and should be inverted to the 900s expectation.
+    """
+    transport = TikTokTransport(FAULT_META_CODE_THROTTLE_RA)
+    uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    result = asyncio.run(
+        post(service, uploader, "tiktok", make_video(tmp_path), "vid-tt-hint")
+    )
+
+    assert result.success is False
+    assert "TIKTOK_RATE_LIMITED" in (result.error or ""), result.error
+    assert "Retry-After" not in (result.error or ""), (
+        "the uploader started surfacing the provider hint — invert this "
+        f"assertion and expect 900s, got {result.error!r}"
+    )
+    # Retry-After 900 is invisible here, so all four service attempts are spent
+    # inside the window the provider already said would last 15 minutes.
+    assert transport.calls == MAX_ATTEMPTS_PER_POST, (
+        f"one throttled TikTok post cost {transport.calls} publish attempts"
+    )
+    assert sum(sleeps) <= MAX_WAIT_S_PER_POST
+    assert service.rate_cooldowns.remaining_s("tiktok") == pytest.approx(60), (
+        "TikTok must still cool at the escalation floor"
+    )
+    assert service.state.is_video_posted("vid-tt-hint", "tiktok") is False
+
+
+class _FailingBrowserPublisher:
+    """Stands in for ``TikTokBrowserPublisher``: fails at a named stage."""
+
+    def __init__(self, code: str = "BROWSER_COMPOSER_TIMEOUT") -> None:
+        self.code = code
+        self.publishes = 0
+
+    def publish(self, video_path, caption):  # noqa: ANN001
+        self.publishes += 1
+        raise BrowserPublishError(self.code, "the composer never appeared")
+
+
+def test_tiktok_browser_route_has_no_provider_status_surface(
+    tmp_path, monkeypatch, sleeps
+):
+    """``publish_mode: browser`` has no 429 for the cooldown machine to learn from.
+
+    The host is configured for the browser-native route, so this is the path a
+    real TikTok post takes today. It is Playwright driving TikTok Studio: no
+    Content Posting API status code is observed, failures arrive as typed
+    stage codes, and none of them carries a rate-limit signal. The cooldown
+    therefore stays idle on this route by construction — the rate-limit proof
+    covers the API route only, which is why the packet must stop implying a
+    pending provider-throttle proof for the browser path.
+
+    What *is* proven here is the safety default: an unconfirmed browser failure
+    blocks the retry instead of duplicating the post.
+    """
+    config = XPSTConfig()
+    config.tiktok.publish_mode = "browser"
+    config.tiktok.access_token = ""  # browser route needs no API credential
+    uploader = TikTokUploader(config)
+    publisher = _FailingBrowserPublisher()
+    uploader._browser_publisher = lambda: publisher  # type: ignore[method-assign]
+    clock = Clock()
+    service = make_service(tmp_path, clock)
+
+    result = asyncio.run(
+        post(service, uploader, "tiktok", make_video(tmp_path), "vid-tt-browser")
+    )
+
+    assert result.success is False
+    assert "TIKTOK_BROWSER_COMPOSER_TIMEOUT" in (result.error or ""), result.error
+    assert result.metadata.get("route") == "tiktok_browser"
+    # A composer timeout may mean the upload was already submitted: the
+    # unknown-outcome gate blocks rather than re-publishing.
+    assert result.metadata.get("blocked_retry") is True, result.metadata
+    assert publisher.publishes == 1
+    assert service.rate_cooldowns.remaining_s("tiktok") == 0, (
+        "the browser route must not invent a cooldown: it never saw a provider "
+        "status code"
+    )
+    assert service.state.is_video_posted("vid-tt-browser", "tiktok") is False
 
 
 # ---------------------------------------------------------------------------
