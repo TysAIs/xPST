@@ -145,3 +145,7 @@ docs/QA-REPORT-*.md
 GOAL-*.md
 */**/platform-auth-checklist*.md
 tiktok_dev_account.txt
+
+# Rust engine workspace (crates/, xtask) build output. The Tauri shell has its
+# own entry above; this one is the new workspace root.
+/target/

@@ -1,0 +1,4881 @@
+{
+ "schema_version": 1,
+ "captured_from": {
+  "repo": "TysAIs/xPST",
+  "git_ref": "ba335d4",
+  "source": "src/xpst/cli.py",
+  "framework": "click",
+  "captured_by": "xtask/scripts/capture_python_cli.py"
+ },
+ "note": "Generated contract: the Rust engine must expose every command path and flag listed here. Do not hand-edit; re-run the capture script.",
+ "command_count": 87,
+ "commands": [
+  {
+   "path": [],
+   "name": "main",
+   "help": "xPST - Enterprise-grade cross-posting for short-form video",
+   "about": "xPST - Enterprise-grade cross-posting for short-form video\n\nAutomatically distribute TikTok videos to YouTube Shorts, X/Twitter,\nand Instagram Reels.",
+   "params": [
+    {
+     "name": "config",
+     "kind": "option",
+     "opts": [
+      "--config",
+      "-c"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Path to config file"
+    },
+    {
+     "name": "verbose",
+     "kind": "option",
+     "opts": [
+      "--verbose",
+      "-v"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Enable verbose logging"
+    },
+    {
+     "name": "quiet",
+     "kind": "option",
+     "opts": [
+      "--quiet",
+      "-q"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Suppress decorative output"
+    },
+    {
+     "name": "json_output",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Output in JSON format"
+    },
+    {
+     "name": "version",
+     "kind": "option",
+     "opts": [
+      "--version"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show the version and exit."
+    }
+   ]
+  },
+  {
+   "path": [
+    "analytics"
+   ],
+   "name": "analytics",
+   "help": "Show cross-platform analytics summary",
+   "about": "Show cross-platform analytics summary\n\nBy default this refreshes through the collector's cache (15 minutes).\n``--live`` forces a fresh provider round-trip now; ``--recorded`` reads the\nlocal snapshot store only and makes zero network calls.",
+   "params": [
+    {
+     "name": "platforms",
+     "kind": "option",
+     "opts": [
+      "--platforms",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Comma-separated platforms (default: all)"
+    },
+    {
+     "name": "refresh",
+     "kind": "option",
+     "opts": [
+      "--refresh",
+      "-r"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Force refresh (ignore cache)"
+    },
+    {
+     "name": "live",
+     "kind": "option",
+     "opts": [
+      "--live"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Force a live collection now, bypassing the cache (the MCP xpst_analytics live=true equivalent)"
+    },
+    {
+     "name": "recorded",
+     "kind": "option",
+     "opts": [
+      "--recorded"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Never touch the network: report the recorded snapshots only (the MCP xpst_analytics live=false equivalent)"
+    },
+    {
+     "name": "cross_post",
+     "kind": "option",
+     "opts": [
+      "--cross-post"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show cross-post group correlation analytics (one video across platforms)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "analytics",
+    "export"
+   ],
+   "name": "export",
+   "help": "Export analytics data to a file.",
+   "about": "Export analytics data to a file.\n\nCollects engagement metrics from all platforms and writes to JSON or CSV.",
+   "params": [
+    {
+     "name": "fmt",
+     "kind": "option",
+     "opts": [
+      "--format"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "json",
+      "csv"
+     ],
+     "default": "json",
+     "help": "Export format"
+    },
+    {
+     "name": "output",
+     "kind": "option",
+     "opts": [
+      "--output",
+      "-o"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "path",
+     "choices": null,
+     "default": null,
+     "help": "Output file path"
+    },
+    {
+     "name": "platforms",
+     "kind": "option",
+     "opts": [
+      "--platforms",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Comma-separated platforms (default: all)"
+    },
+    {
+     "name": "refresh",
+     "kind": "option",
+     "opts": [
+      "--refresh",
+      "-r"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Force refresh (ignore cache)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "app"
+   ],
+   "name": "app",
+   "help": "Launch the installed xPST desktop app (Tauri shell).",
+   "about": "Launch the installed xPST desktop app (Tauri shell).\n\nThe desktop app is the Tauri shell under ``src-tauri/``, which spawns the\nbundled Python engine sidecar itself. Build it with\n``scripts/build-engine.sh`` + ``cargo tauri build`` (see docs/PACKAGING.md)\nor install a published bundle from the GitHub Releases page.",
+   "params": []
+  },
+  {
+   "path": [
+    "auth"
+   ],
+   "name": "auth",
+   "help": "Authenticate with a platform or check auth status.",
+   "about": "Authenticate with a platform or check auth status.\n\nUsage:\n    xpst auth youtube     # Authenticate with YouTube\n    xpst auth x           # Authenticate with X/Twitter\n    xpst auth instagram   # Authenticate with Instagram\n    xpst auth tiktok      # Authenticate with TikTok\n    xpst auth facebook    # Authenticate a Facebook Page (BYO Meta app)\n    xpst auth status      # Show auth status for all platforms\n    xpst auth status --refresh   # Refresh expiring tokens, then report",
+   "params": [
+    {
+     "name": "platform",
+     "kind": "argument",
+     "opts": [
+      "platform"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "refresh",
+     "kind": "option",
+     "opts": [
+      "--refresh"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Refresh due/expiring tokens first (bounded retry), then report status"
+    },
+    {
+     "name": "rotate",
+     "kind": "option",
+     "opts": [
+      "--rotate"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "With `api-token`: generate a new API token, invalidating the old one"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "backfill"
+   ],
+   "name": "backfill",
+   "help": "Retry failed or incomplete posts",
+   "about": "Retry failed or incomplete posts",
+   "params": [
+    {
+     "name": "platforms",
+     "kind": "option",
+     "opts": [
+      "--platforms",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Comma-separated platforms"
+    },
+    {
+     "name": "limit",
+     "kind": "option",
+     "opts": [
+      "--limit",
+      "-l"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": 10,
+     "help": "Maximum videos to backfill"
+    },
+    {
+     "name": "dry_run",
+     "kind": "option",
+     "opts": [
+      "--dry-run"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show what would be backfilled without uploading"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "best-time"
+   ],
+   "name": "best-time",
+   "help": "Show recommended posting times based on engagement history.",
+   "about": "Show recommended posting times based on engagement history.\n\nAnalyzes when your posts get the highest engagement and recommends\nthe best day-of-week and hour to post per platform.",
+   "params": [
+    {
+     "name": "platform",
+     "kind": "option",
+     "opts": [
+      "--platform",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Filter to a specific platform"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "bio"
+   ],
+   "name": "bio",
+   "help": "Print your Link-in-Bio page URL (start the dashboard with `xpst dashboard` first)",
+   "about": "Print your Link-in-Bio page URL (start the dashboard with `xpst dashboard` first)\n\nAlso prints the admin editor URL. The editor is a plain HTML form, so the\ndashboard API token attached to it is what authorises its writes when no\ndashboard username/password is configured. Because a URL with a live\ncredential pastes into chat, tickets and screenshots as easily as a\npassword, the token is MASKED by default; ``--reveal`` prints it whole and\nready to open.",
+   "params": [
+    {
+     "name": "port",
+     "kind": "option",
+     "opts": [
+      "--port",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": 8080,
+     "help": "Dashboard HTTP port"
+    },
+    {
+     "name": "host",
+     "kind": "option",
+     "opts": [
+      "--host"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "127.0.0.1",
+     "help": "Dashboard bind host (default: 127.0.0.1)"
+    },
+    {
+     "name": "reveal",
+     "kind": "option",
+     "opts": [
+      "--reveal"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Print the admin URL with the dashboard API token in full (it is masked by default so the output can be pasted, screenshotted, or logged without leaking the credential)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "byo"
+   ],
+   "name": "byo",
+   "help": "Bring-your-own developer app: per-platform app id/secret, stored locally.",
+   "about": "Bring-your-own developer app: per-platform app id/secret, stored locally.\n\nThe credential is what flips Instagram/Threads/TikTok into the official\nAPI path with NO App Review (Meta Standard Access: you use your own app).\nIt is stored only in the encrypted store under the xPST config dir and is\nnever echoed back \u2014 every output shows at most a masked id tail.\n\nUsage:\n    xpst byo status                    # what has an app, what is missing\n    xpst byo set instagram             # prompts, secret input hidden\n    xpst byo set tiktok --app-id ...   # agent/CI form (secret via env)\n    xpst byo clear threads             # remove the stored pair",
+   "params": []
+  },
+  {
+   "path": [
+    "byo",
+    "clear"
+   ],
+   "name": "clear",
+   "help": "Remove a platform's stored app credential (sign-in control turns off).",
+   "about": "Remove a platform's stored app credential (sign-in control turns off).",
+   "params": [
+    {
+     "name": "platform",
+     "kind": "argument",
+     "opts": [
+      "platform"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "byo",
+    "set"
+   ],
+   "name": "set",
+   "help": "Store one platform's app credential (validated, encrypted, masked back).",
+   "about": "Store one platform's app credential (validated, encrypted, masked back).\n\nMissing values are prompted (the secret with hidden input). For\nnon-interactive runs pass --app-id and set the platform's secret env var\n(see `xpst byo status` env_vars) \u2014 the secret is never taken as a CLI\nargument on the command line, where process listings would expose it.",
+   "params": [
+    {
+     "name": "platform",
+     "kind": "argument",
+     "opts": [
+      "platform"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "app_id",
+     "kind": "option",
+     "opts": [
+      "--app-id"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "",
+     "help": "App id / client key (Meta numeric id, TikTok aw\u2026 key)"
+    },
+    {
+     "name": "app_secret",
+     "kind": "option",
+     "opts": [
+      "--app-secret"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "",
+     "help": "App secret (prefer the platform env var; never echoed)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "byo",
+    "status"
+   ],
+   "name": "status",
+   "help": "Show per-platform BYO app setup truth (masked, never a secret).",
+   "about": "Show per-platform BYO app setup truth (masked, never a secret).",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "capabilities"
+   ],
+   "name": "capabilities",
+   "help": "Show what xPST can publish, per destination, in the canonical vocabulary",
+   "about": "Show what xPST can publish, per destination, in the canonical vocabulary\n\nReads the content contract (the same document the MCP tool\n``xpst_capabilities`` and ``GET /api/capabilities`` return), so what a human\nreads here is exactly what an agent plans against. A content type listed as\nimplemented has real code behind it; a destination that cannot post a type\ndoes not declare it.",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "config"
+   ],
+   "name": "config",
+   "help": "View and manage xPST configuration",
+   "about": "View and manage xPST configuration",
+   "params": []
+  },
+  {
+   "path": [
+    "config",
+    "export"
+   ],
+   "name": "export",
+   "help": "Export current configuration to a file.",
+   "about": "Export current configuration to a file.\n\nWrites the config YAML to OUTPUT_FILE. By default masks sensitive values.",
+   "params": [
+    {
+     "name": "output_file",
+     "kind": "argument",
+     "opts": [
+      "output_file"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "path",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "raw",
+     "kind": "option",
+     "opts": [
+      "--raw"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Export raw values (no masking)"
+    },
+    {
+     "name": "config_file",
+     "kind": "option",
+     "opts": [
+      "--file"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Source config file path"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "config",
+    "fix"
+   ],
+   "name": "fix",
+   "help": "Detect and auto-fix common configuration issues.",
+   "about": "Detect and auto-fix common configuration issues.\n\nFixes: missing credentials directory, stale .crosspstr paths,\ninvalid port numbers, and missing required fields.",
+   "params": [
+    {
+     "name": "config_file",
+     "kind": "option",
+     "opts": [
+      "--file"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Config file path"
+    },
+    {
+     "name": "yes",
+     "kind": "option",
+     "opts": [
+      "--yes",
+      "-y"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Apply fixes without confirmation"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "config",
+    "import"
+   ],
+   "name": "import",
+   "help": "Import configuration from a file.",
+   "about": "Import configuration from a file.\n\nBy default merges with existing config. Use --replace to overwrite entirely.\nShows a diff of changes before applying. Use --yes to skip confirmation.\nValidates the imported config structure. Use --strict to fail on warnings.",
+   "params": [
+    {
+     "name": "input_file",
+     "kind": "argument",
+     "opts": [
+      "input_file"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "path",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "merge",
+     "kind": "option",
+     "opts": [
+      "--merge"
+     ],
+     "secondary_opts": [
+      "--replace"
+     ],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": true,
+     "help": "Merge with existing config or replace entirely"
+    },
+    {
+     "name": "yes",
+     "kind": "option",
+     "opts": [
+      "--yes",
+      "-y"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Skip confirmation prompt"
+    },
+    {
+     "name": "strict",
+     "kind": "option",
+     "opts": [
+      "--strict"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Fail on validation warnings"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "config",
+    "set"
+   ],
+   "name": "set",
+   "help": "Set a configuration value using dotted keys.",
+   "about": "Set a configuration value using dotted keys.\n\nExamples:\n    xpst config set accounts.youtube.enabled true\n    xpst config set rate_limits.youtube 10\n    xpst config set monitoring.log_level DEBUG",
+   "params": [
+    {
+     "name": "key",
+     "kind": "argument",
+     "opts": [
+      "key"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "value",
+     "kind": "argument",
+     "opts": [
+      "value"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "config_file",
+     "kind": "option",
+     "opts": [
+      "--file"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Config file path"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "config",
+    "show"
+   ],
+   "name": "show",
+   "help": "Display current configuration as YAML",
+   "about": "Display current configuration as YAML",
+   "params": [
+    {
+     "name": "raw",
+     "kind": "option",
+     "opts": [
+      "--raw"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show raw values (no masking)"
+    },
+    {
+     "name": "config_file",
+     "kind": "option",
+     "opts": [
+      "--file"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Config file path"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "config",
+    "validate"
+   ],
+   "name": "validate",
+   "help": "Validate configuration for errors.",
+   "about": "Validate configuration for errors.\n\nChecks required fields, path existence, and platform config validity.\nExit code 0 if valid, 2 (config error) if invalid.",
+   "params": [
+    {
+     "name": "config_file",
+     "kind": "option",
+     "opts": [
+      "--file"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Config file path"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "connect"
+   ],
+   "name": "connect",
+   "help": "Connect social media accounts (one platform at a time)",
+   "about": "Connect social media accounts (one platform at a time)\n\nUse when you need to link or re-link a SPECIFIC account, e.g.\n`xpst connect instagram` after a session expires. For first-time\nsetup of everything at once, use `xpst wizard` instead.\n\nPreview the setup steps without connecting anything:\n\n    xpst connect youtube --guide       # human-readable GCP checklist\n    xpst connect youtube --guide --json  # machine-readable",
+   "params": [
+    {
+     "name": "platform",
+     "kind": "argument",
+     "opts": [
+      "platform"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "tiktok",
+      "youtube",
+      "x",
+      "instagram",
+      "threads",
+      "facebook",
+      "messenger"
+     ],
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "guide",
+     "kind": "option",
+     "opts": [
+      "--guide"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Print the step-by-step setup guide for the platform (YouTube: Google Cloud OAuth) and exit"
+    },
+    {
+     "name": "open_browser",
+     "kind": "option",
+     "opts": [
+      "--open-browser"
+     ],
+     "secondary_opts": [
+      "--no-browser"
+     ],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Allow/deny browser launches during account setup (default: TTY only)"
+    },
+    {
+     "name": "test_only",
+     "kind": "option",
+     "opts": [
+      "--test"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Test existing connections only"
+    },
+    {
+     "name": "dry_run",
+     "kind": "option",
+     "opts": [
+      "--dry-run"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show what connect would do (platform, steps, config impact) without connecting or writing config"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "dashboard"
+   ],
+   "name": "dashboard",
+   "help": "Launch the web API dashboard",
+   "about": "Launch the web API dashboard",
+   "params": [
+    {
+     "name": "port",
+     "kind": "option",
+     "opts": [
+      "--port",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": 8080,
+     "help": "Dashboard HTTP port (env: XPST_DASHBOARD_PORT)"
+    },
+    {
+     "name": "host",
+     "kind": "option",
+     "opts": [
+      "--host"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "127.0.0.1",
+     "help": "Bind address (default: 127.0.0.1, loopback only)"
+    },
+    {
+     "name": "api_only",
+     "kind": "option",
+     "opts": [
+      "--api-only"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": true,
+     "help": "API-only mode (default, no NiceGUI required)"
+    }
+   ]
+  },
+  {
+   "path": [
+    "delete"
+   ],
+   "name": "delete",
+   "help": "Delete a posted video from platforms.",
+   "about": "Delete a posted video from platforms.\n\nVIDEO_ID accepts xPST's internal id, the platform-side post id, or a full\npost URL (e.g. https://youtube.com/shorts/RZ6i-0HM5dM) \u2014 the latter two are\nresolved to the internal record via stored state.\n\nRoutes every platform through the Phase-1.2 delete contract: each result\ncarries an explicit outcome (deleted / soft_hidden / pending / unsupported)\nplus a UI-facing message \u2014 no silent failures. Use --soft to unpublish\n(reversible, YouTube privacyStatus=private|unlisted) instead of hard-deleting.",
+   "params": [
+    {
+     "name": "video_id",
+     "kind": "argument",
+     "opts": [
+      "video_id"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "platform",
+     "kind": "option",
+     "opts": [
+      "--platform",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Platform to delete from (default: all)"
+    },
+    {
+     "name": "soft",
+     "kind": "option",
+     "opts": [
+      "--soft"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Unpublish instead of hard-delete (YouTube: sets privacyStatus=private)"
+    },
+    {
+     "name": "visibility",
+     "kind": "option",
+     "opts": [
+      "--visibility"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "private",
+      "unlisted"
+     ],
+     "default": null,
+     "help": "Target visibility for soft-delete/unpublish (YouTube only)"
+    },
+    {
+     "name": "yes",
+     "kind": "option",
+     "opts": [
+      "--yes",
+      "-y"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Skip confirmation"
+    },
+    {
+     "name": "dry_run",
+     "kind": "option",
+     "opts": [
+      "--dry-run"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show what would be deleted without contacting any platform"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "diagnostics"
+   ],
+   "name": "diagnostics",
+   "help": "Export a redacted local diagnostics bundle.",
+   "about": "Export a redacted local diagnostics bundle.",
+   "params": [
+    {
+     "name": "output",
+     "kind": "option",
+     "opts": [
+      "--output",
+      "-o"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "path",
+     "choices": null,
+     "default": null,
+     "help": "Output zip path"
+    },
+    {
+     "name": "log_lines",
+     "kind": "option",
+     "opts": [
+      "--log-lines"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": 200,
+     "help": "Recent log lines to include"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "disconnect"
+   ],
+   "name": "disconnect",
+   "help": "Disconnect a platform: remove stored credentials and disable it.",
+   "about": "Disconnect a platform: remove stored credentials and disable it.\n\nThe inverse of `xpst connect <platform>`: deletes the platform's stored\naccount credentials (tokens, cookies, session files) and sets\naccounts.<platform>.enabled=false. Posted content and local state are\nnever touched.\n\n    xpst disconnect x           # remove X cookies + disable\n    xpst disconnect youtube --json",
+   "params": [
+    {
+     "name": "platform",
+     "kind": "argument",
+     "opts": [
+      "platform"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "tiktok",
+      "youtube",
+      "x",
+      "instagram",
+      "threads",
+      "facebook",
+      "messenger"
+     ],
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "yes",
+     "kind": "option",
+     "opts": [
+      "--yes",
+      "-y"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Skip confirmation prompt (required in non-interactive/JSON mode)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "doctor"
+   ],
+   "name": "doctor",
+   "help": "Diagnose auth health, quotas and environment; print a fix-it checklist.",
+   "about": "Diagnose auth health, quotas and environment; print a fix-it checklist.\n\nThe one command to run when \"something doesn't post\". Checks each\nplatform's live connection, remaining API quota, and local\nprerequisites (ffmpeg, yt-dlp, config dir), then prints a prioritized\nfix-it checklist with copy-pasteable commands.\n\n    xpst doctor              # everything\n    xpst doctor youtube      # one platform\n    xpst doctor --json       # machine-readable report",
+   "params": [
+    {
+     "name": "platform",
+     "kind": "argument",
+     "opts": [
+      "platform"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "tiktok",
+      "youtube",
+      "x",
+      "instagram",
+      "threads",
+      "facebook",
+      "messenger"
+     ],
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "failures"
+   ],
+   "name": "failures",
+   "help": "Inspect and retry failed uploads (G55).",
+   "about": "Inspect and retry failed uploads (G55).\n\nThe dead-letter queue was previously invisible outside logs.",
+   "params": []
+  },
+  {
+   "path": [
+    "failures",
+    "clear"
+   ],
+   "name": "clear",
+   "help": "Clear recorded failures from the dead-letter queue.",
+   "about": "Clear recorded failures from the dead-letter queue.\n\nWithout a VIDEO_ID, every entry is cleared; with one, only that video's\nerrors. Successful-post history is never removed \u2014 a retry that later\nsucceeds leaves the post record intact, and a resolved failure stays\nvisible in ``failures list`` until it is cleared here.",
+   "params": [
+    {
+     "name": "video_id",
+     "kind": "argument",
+     "opts": [
+      "video_id"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "failures",
+    "list"
+   ],
+   "name": "list",
+   "help": "List failed uploads recorded in the dead-letter queue.",
+   "about": "List failed uploads recorded in the dead-letter queue.",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "failures",
+    "retry"
+   ],
+   "name": "retry",
+   "help": "Retry one failed upload by re-posting its source file.",
+   "about": "Retry one failed upload by re-posting its source file.\n\nThe verdict (target resolution, error code, whether the destination\naccepted the post) comes from\n:mod:`xpst.services.recovery_service`, which the MCP ``xpst_failures_retry``\ntool calls too \u2014 the two surfaces cannot disagree about what happened.",
+   "params": [
+    {
+     "name": "video_id",
+     "kind": "argument",
+     "opts": [
+      "video_id"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "platform",
+     "kind": "option",
+     "opts": [
+      "--platform",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Platform to retry"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "followers"
+   ],
+   "name": "followers",
+   "help": "Show follower counts per platform with growth history.",
+   "about": "Show follower counts per platform with growth history.\n\nFetches live follower counts from each connected platform and\ncompares against stored snapshots to show growth trends.",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "generate"
+   ],
+   "name": "generate",
+   "help": "AI content creation: captions and post ideas (works without an LLM).",
+   "about": "AI content creation: captions and post ideas (works without an LLM).",
+   "params": []
+  },
+  {
+   "path": [
+    "generate",
+    "caption"
+   ],
+   "name": "caption",
+   "help": "Generate 3 caption variants from text.",
+   "about": "Generate 3 caption variants from text.\n\nUses the KB LLM when XPST_KB_LLM_ENABLED is set, otherwise falls back to\ndeterministic extraction. Platform char limits are enforced:\nX /280, Threads /500, Instagram /2200, YouTube /5000.",
+   "params": [
+    {
+     "name": "text",
+     "kind": "option",
+     "opts": [
+      "--text",
+      "-t"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Source text (transcript, description, or seed)"
+    },
+    {
+     "name": "platform",
+     "kind": "option",
+     "opts": [
+      "--platform",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "instagram",
+     "help": "Target platform for char limits"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "generate",
+    "ideas"
+   ],
+   "name": "ideas",
+   "help": "Generate N post ideas for a topic.",
+   "about": "Generate N post ideas for a topic.\n\nUses the KB LLM when XPST_KB_LLM_ENABLED is set, otherwise falls back to\ndeterministic template generation \u2014 no LLM required.",
+   "params": [
+    {
+     "name": "topic",
+     "kind": "option",
+     "opts": [
+      "--topic",
+      "-t"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Content topic to generate ideas for"
+    },
+    {
+     "name": "count",
+     "kind": "option",
+     "opts": [
+      "--count",
+      "-n"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer range",
+     "choices": null,
+     "default": 5,
+     "help": "Number of ideas (1-10)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "health"
+   ],
+   "name": "health",
+   "help": "Test connectivity to all platforms (no uploads)",
+   "about": "Test connectivity to all platforms (no uploads)",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "kb"
+   ],
+   "name": "kb",
+   "help": "Knowledge base: ingest videos and query extracted knowledge.",
+   "about": "Knowledge base: ingest videos and query extracted knowledge.",
+   "params": []
+  },
+  {
+   "path": [
+    "kb",
+    "add"
+   ],
+   "name": "add",
+   "help": "Ingest a local file or URL into the knowledge base.",
+   "about": "Ingest a local file or URL into the knowledge base.",
+   "params": [
+    {
+     "name": "source",
+     "kind": "argument",
+     "opts": [
+      "source"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "workspace",
+     "kind": "option",
+     "opts": [
+      "--workspace",
+      "-w"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "default",
+     "help": "Workspace name"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "kb",
+    "areas"
+   ],
+   "name": "areas",
+   "help": "List discovered areas in course order (beginner -> advanced).",
+   "about": "List discovered areas in course order (beginner -> advanced).",
+   "params": [
+    {
+     "name": "workspace",
+     "kind": "option",
+     "opts": [
+      "--workspace",
+      "-w"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "default",
+     "help": "Workspace name"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "kb",
+    "course"
+   ],
+   "name": "course",
+   "help": "Emit the organized outline (areas -> ordered, cited nuggets) for an AI to write a course from.",
+   "about": "Emit the organized outline (areas -> ordered, cited nuggets) for an AI to\nwrite a course from. Pre-ordered beginner -> advanced.",
+   "params": [
+    {
+     "name": "workspace",
+     "kind": "option",
+     "opts": [
+      "--workspace",
+      "-w"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "default",
+     "help": "Workspace name"
+    },
+    {
+     "name": "area_id",
+     "kind": "option",
+     "opts": [
+      "--area",
+      "-a"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Assemble only this area (by id)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "kb",
+    "doctor"
+   ],
+   "name": "doctor",
+   "help": "Health-check the knowledge base (read-only): deps, store integrity, queue state, embedding consistency, orphaned areas/nuggets.",
+   "about": "Health-check the knowledge base (read-only): deps, store integrity,\nqueue state, embedding consistency, orphaned areas/nuggets.",
+   "params": [
+    {
+     "name": "workspace",
+     "kind": "option",
+     "opts": [
+      "--workspace",
+      "-w"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "default",
+     "help": "Workspace name"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "kb",
+    "migrate-store"
+   ],
+   "name": "migrate-store",
+   "help": "Copy the JSON store into LanceDB (requires the knowledge extra).",
+   "about": "Copy the JSON store into LanceDB (requires the knowledge extra).\n\nJSON files are left in place as a backup; queries prefer LanceDB once\nthe table exists (G32).",
+   "params": [
+    {
+     "name": "workspace",
+     "kind": "option",
+     "opts": [
+      "--workspace",
+      "-w"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "default",
+     "help": "Workspace name"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "kb",
+    "organize"
+   ],
+   "name": "organize",
+   "help": "Discover areas, tag difficulty, and assign nuggets (Phase 3).",
+   "about": "Discover areas, tag difficulty, and assign nuggets (Phase 3).",
+   "params": [
+    {
+     "name": "workspace",
+     "kind": "option",
+     "opts": [
+      "--workspace",
+      "-w"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "default",
+     "help": "Workspace name"
+    },
+    {
+     "name": "threshold",
+     "kind": "option",
+     "opts": [
+      "--threshold",
+      "-t"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "float",
+     "choices": null,
+     "default": null,
+     "help": "Cosine similarity threshold for clustering/routing"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "kb",
+    "query"
+   ],
+   "name": "query",
+   "help": "Semantic search over your content (substring fallback, cited).",
+   "about": "Semantic search over your content (substring fallback, cited).",
+   "params": [
+    {
+     "name": "text",
+     "kind": "argument",
+     "opts": [
+      "text"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "workspace",
+     "kind": "option",
+     "opts": [
+      "--workspace",
+      "-w"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "default",
+     "help": "Workspace name"
+    },
+    {
+     "name": "limit",
+     "kind": "option",
+     "opts": [
+      "--limit",
+      "-k"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": 8,
+     "help": "Max results"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "kb",
+    "reembed"
+   ],
+   "name": "reembed",
+   "help": "Re-embed all nuggets with the configured embedding model (G34).",
+   "about": "Re-embed all nuggets with the configured embedding model (G34).\n\nUse after changing XPST_KB_EMBED_MODEL; the manifest records which\nmodel produced the stored vectors.",
+   "params": [
+    {
+     "name": "workspace",
+     "kind": "option",
+     "opts": [
+      "--workspace",
+      "-w"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "default",
+     "help": "Workspace name"
+    },
+    {
+     "name": "force",
+     "kind": "option",
+     "opts": [
+      "--force"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Re-embed even if the model matches"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "logs"
+   ],
+   "name": "logs",
+   "help": "View recent logs",
+   "about": "View recent logs",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "mcp"
+   ],
+   "name": "mcp",
+   "help": "MCP (Model Context Protocol) server commands",
+   "about": "MCP (Model Context Protocol) server commands",
+   "params": []
+  },
+  {
+   "path": [
+    "mcp",
+    "list"
+   ],
+   "name": "list",
+   "help": "List all available MCP tools",
+   "about": "List all available MCP tools",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "mcp",
+    "start"
+   ],
+   "name": "start",
+   "help": "Start MCP server over stdio using the selected config.",
+   "about": "Start MCP server over stdio using the selected config.",
+   "params": []
+  },
+  {
+   "path": [
+    "media"
+   ],
+   "name": "media",
+   "help": "Local media helper binaries (ffmpeg / ffprobe).",
+   "about": "Local media helper binaries (ffmpeg / ffprobe).\n\nxPST no longer ships ffmpeg inside the desktop app (~87 MB of a 192 MB\nbundle). It uses the ffmpeg already on your machine, and only downloads a\nverified static build \u2014 once, with a checksum \u2014 when there is none.",
+   "params": []
+  },
+  {
+   "path": [
+    "media",
+    "fetch"
+   ],
+   "name": "fetch",
+   "help": "Download ffmpeg/ffprobe into ~/.xpst/bin (resumable, checksum-verified).",
+   "about": "Download ffmpeg/ffprobe into ~/.xpst/bin (resumable, checksum-verified).\n\nOnly needed on a machine with no ffmpeg of its own. Nothing is downloaded\nwhen a system ffmpeg (or XPST_FFMPEG_PATH) already resolves.",
+   "params": [
+    {
+     "name": "binaries",
+     "kind": "option",
+     "opts": [
+      "--binary"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": true,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "ffmpeg",
+      "ffprobe"
+     ],
+     "default": null,
+     "help": "Fetch only this binary (repeatable; default: both)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "media",
+    "status"
+   ],
+   "name": "status",
+   "help": "Show which ffmpeg/ffprobe xPST will use, and where it came from.",
+   "about": "Show which ffmpeg/ffprobe xPST will use, and where it came from.\n\nxpst media status\nxpst media status --json",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "messenger"
+   ],
+   "name": "messenger",
+   "help": "Messenger \u2014 IG + Facebook comment auto-reply (Content360-lite).",
+   "about": "Messenger \u2014 IG + Facebook comment auto-reply (Content360-lite).",
+   "params": []
+  },
+  {
+   "path": [
+    "messenger",
+    "check-comments"
+   ],
+   "name": "check-comments",
+   "help": "Fetch recent comments on a post and auto-reply per reply_rules.",
+   "about": "Fetch recent comments on a post and auto-reply per reply_rules.\n\nGated by accounts.messenger.comment_reply_enabled and\naccounts.messenger.comment_platforms. Replies use the same keyword \u2192\nreply map as DM auto-reply (reply_rules).",
+   "params": [
+    {
+     "name": "media_id",
+     "kind": "argument",
+     "opts": [
+      "media_id"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "platform",
+     "kind": "option",
+     "opts": [
+      "--platform",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "instagram",
+      "facebook"
+     ],
+     "default": "instagram",
+     "help": "Platform owning media_id (instagram or facebook)"
+    },
+    {
+     "name": "since_ts",
+     "kind": "option",
+     "opts": [
+      "--since"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": null,
+     "help": "Only reply to comments created after this epoch timestamp (Facebook only)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "messenger",
+    "status"
+   ],
+   "name": "status",
+   "help": "Report Messenger readiness: token, switches, webhook, quota.",
+   "about": "Report Messenger readiness: token, switches, webhook, quota.\n\nThe auth-status table shows one Messenger row; this is the per-detail\nanswer (the same fields `xpst auth status` summarises), so an operator can\nsee WHICH prerequisite is missing instead of a bare \"Not configured\".",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "onboard"
+   ],
+   "name": "onboard",
+   "help": "Guided first-run onboarding: connect every platform in one pass.",
+   "about": "Guided first-run onboarding: connect every platform in one pass.\n\nThe effortless entry point after installing xPST. For each platform\nthat is not yet connected it shows what will happen, asks for a\nconfirmation, opens the browser / collects credentials (delegating to\n`xpst connect <platform>`), verifies the connection, and remembers\nprogress so re-running resumes where you left off.\n\n    xpst onboard             # interactive first-run flow\n    xpst onboard --dry-run   # plan only, no side effects\n    xpst onboard --json      # machine-readable plan/results",
+   "params": [
+    {
+     "name": "dry_run",
+     "kind": "option",
+     "opts": [
+      "--dry-run"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show the onboarding plan (order, steps, connected state) without connecting or writing anything"
+    },
+    {
+     "name": "force",
+     "kind": "option",
+     "opts": [
+      "--force"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Re-run connect even for platforms whose health check already passes"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "plugins"
+   ],
+   "name": "plugins",
+   "help": "Manage xPST plugins",
+   "about": "Manage xPST plugins",
+   "params": []
+  },
+  {
+   "path": [
+    "plugins",
+    "docs"
+   ],
+   "name": "docs",
+   "help": "Generate markdown documentation for installed plugins.",
+   "about": "Generate markdown documentation for installed plugins.\n\nIntrospects all installed plugins and produces a markdown file\ndocumenting each plugin's name, description, capabilities, and\nconfiguration options.",
+   "params": [
+    {
+     "name": "output",
+     "kind": "option",
+     "opts": [
+      "--output",
+      "-o"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "path",
+     "choices": null,
+     "default": null,
+     "help": "Output file (default: stdout)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "plugins",
+    "list"
+   ],
+   "name": "list",
+   "help": "List installed plugins.",
+   "about": "List installed plugins.",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "post"
+   ],
+   "name": "post",
+   "help": "Manually post a video, image, carousel, or text post.",
+   "about": "Manually post a video, image, carousel, or text post.\n\nOne --video flag posts a single file; several build a carousel; --text (or\n--content-type text) posts a text-only status. A content type the chosen\ndestination cannot publish is refused before anything is uploaded.",
+   "params": [
+    {
+     "name": "video",
+     "kind": "option",
+     "opts": [
+      "--video",
+      "-v"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": true,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "path",
+     "choices": null,
+     "default": null,
+     "help": "Video/image file path (use multiple times for carousel)"
+    },
+    {
+     "name": "caption",
+     "kind": "option",
+     "opts": [
+      "--caption",
+      "-c"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Post text/caption (required with --video)"
+    },
+    {
+     "name": "caption_for",
+     "kind": "option",
+     "opts": [
+      "--caption-for"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": true,
+     "required": false,
+     "nargs": 1,
+     "metavar": "PLATFORM=TEXT",
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Different caption for one destination (repeatable), e.g. --caption-for x='short copy'. Destinations without one use --caption."
+    },
+    {
+     "name": "text",
+     "kind": "option",
+     "opts": [
+      "--text",
+      "-t"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Text of a text-only post (no media). Equivalent to --caption with --content-type text; `xpst post --text \"...\" -p x,threads` publishes a text post to every destination that has a text path."
+    },
+    {
+     "name": "content_type",
+     "kind": "option",
+     "opts": [
+      "--content-type"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "video",
+      "image",
+      "carousel",
+      "text",
+      "thread"
+     ],
+     "default": null,
+     "help": "What this post is, in the canonical vocabulary: video/image/carousel/text/thread. Defaults to what the media implies. A type the chosen destination cannot publish is refused before anything is uploaded."
+    },
+    {
+     "name": "platforms",
+     "kind": "option",
+     "opts": [
+      "--platforms",
+      "--platform",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Comma-separated platforms (default: all)"
+    },
+    {
+     "name": "visibility",
+     "kind": "option",
+     "opts": [
+      "--visibility"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "public",
+      "unlisted",
+      "private"
+     ],
+     "default": "public",
+     "help": "Post visibility (YouTube honours it; other platforms ignore it)"
+    },
+    {
+     "name": "dry_run",
+     "kind": "option",
+     "opts": [
+      "--dry-run"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show what would happen without uploading"
+    },
+    {
+     "name": "now",
+     "kind": "option",
+     "opts": [
+      "--now"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Post immediately even outside the anti-bot window (8am-11pm). Without it, a media post fired outside the window is queued to the schedule store and reported as deferred, not failed."
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "providers"
+   ],
+   "name": "providers",
+   "help": "Show supported providers and their canonical roles.",
+   "about": "Show supported providers and their canonical roles.",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "quota"
+   ],
+   "name": "quota",
+   "help": "Show API quota usage and remaining uploads per platform.",
+   "about": "Show API quota usage and remaining uploads per platform.\n\nDisplays daily upload limits, used/remaining counts, auth mode,\nand YouTube API quota units (10,000/day, 1,600 per upload).",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "readiness"
+   ],
+   "name": "readiness",
+   "help": "Show first-run readiness and next actions",
+   "about": "Show first-run readiness and next actions",
+   "params": [
+    {
+     "name": "fix_local",
+     "kind": "option",
+     "opts": [
+      "--fix"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Create missing local folders and save safe defaults"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "refresh-tokens"
+   ],
+   "name": "refresh-tokens",
+   "help": "Refresh expiring/expired access tokens (bounded retry, no prompts).",
+   "about": "Refresh expiring/expired access tokens (bounded retry, no prompts).\n\nNothing happens when no token is due, so this is safe to run from cron or\nbefore a scheduled post. Failures are bounded, recorded (0600) and never\nprint credential material.",
+   "params": [
+    {
+     "name": "platform",
+     "kind": "option",
+     "opts": [
+      "--platform"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Only this platform (default: every platform that is due)"
+    },
+    {
+     "name": "force",
+     "kind": "option",
+     "opts": [
+      "--force"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Refresh even when the token is not expired/near expiry"
+    },
+    {
+     "name": "max_attempts",
+     "kind": "option",
+     "opts": [
+      "--max-attempts"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer range",
+     "choices": null,
+     "default": 3,
+     "help": "Bounded retry attempts per platform"
+    },
+    {
+     "name": "deadline",
+     "kind": "option",
+     "opts": [
+      "--deadline"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "float",
+     "choices": null,
+     "default": 30.0,
+     "help": "Wall-clock seconds of retry budget per platform"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "run"
+   ],
+   "name": "run",
+   "help": "Check for new videos and post them",
+   "about": "Check for new videos and post them",
+   "params": [
+    {
+     "name": "source",
+     "kind": "option",
+     "opts": [
+      "--source",
+      "-s"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "tiktok",
+      "youtube",
+      "x",
+      "instagram",
+      "local",
+      "all"
+     ],
+     "default": "tiktok",
+     "help": "Video source to fetch from (default: tiktok). Use 'all' for bidirectional."
+    },
+    {
+     "name": "bidirectional",
+     "kind": "option",
+     "opts": [
+      "--bidirectional",
+      "-b"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Check ALL sources (not just TikTok) for bidirectional cross-posting"
+    },
+    {
+     "name": "dry_run",
+     "kind": "option",
+     "opts": [
+      "--dry-run"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show what would happen without uploading"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "schedule"
+   ],
+   "name": "schedule",
+   "help": "Manage scheduled posts",
+   "about": "Manage scheduled posts",
+   "params": []
+  },
+  {
+   "path": [
+    "schedule",
+    "add"
+   ],
+   "name": "add",
+   "help": "Schedule a post for later publishing.",
+   "about": "Schedule a post for later publishing.\n\nExamples:\n    xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00'\n    xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08T10:00:00' -p youtube,instagram\n    xpst schedule add video.mp4 --caption 'My video' --at '2026-06-08 10:00' --repeat daily\n    xpst schedule add video.mp4 --caption 'Long copy' --caption-for x='short copy' --at '2026-06-08 10:00'\n    xpst schedule add --text --caption 'A text-only post' --at '2026-06-08 10:00' -p x",
+   "params": [
+    {
+     "name": "file",
+     "kind": "argument",
+     "opts": [
+      "file"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "path",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "caption",
+     "kind": "option",
+     "opts": [
+      "--caption",
+      "-c"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Post caption text"
+    },
+    {
+     "name": "text_post",
+     "kind": "option",
+     "opts": [
+      "--text"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Text-only post: no media file. The --caption text IS the post; the entry is stored as content_type=text and fires through the text route (never an encoder). FILE must be omitted."
+    },
+    {
+     "name": "caption_for",
+     "kind": "option",
+     "opts": [
+      "--caption-for"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": true,
+     "required": false,
+     "nargs": 1,
+     "metavar": "PLATFORM=TEXT",
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Different caption for one destination (repeatable), e.g. --caption-for x='short copy'. Destinations without one use --caption. Stored with the entry and honoured when the schedule fires."
+    },
+    {
+     "name": "scheduled_time",
+     "kind": "option",
+     "opts": [
+      "--at"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Scheduled time (ISO or 'YYYY-MM-DD HH:MM')"
+    },
+    {
+     "name": "platforms",
+     "kind": "option",
+     "opts": [
+      "--platforms",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Comma-separated target platforms"
+    },
+    {
+     "name": "repeat_rule",
+     "kind": "option",
+     "opts": [
+      "--repeat"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "none",
+      "daily",
+      "weekly",
+      "monthly"
+     ],
+     "default": null,
+     "help": "Repeat schedule"
+    },
+    {
+     "name": "dry_run",
+     "kind": "option",
+     "opts": [
+      "--dry-run"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Validate the entry and show it without writing to the schedule store"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "schedule",
+    "install"
+   ],
+   "name": "install",
+   "help": "Install an OS-level scheduler to run 'xpst schedule run' periodically.",
+   "about": "Install an OS-level scheduler to run 'xpst schedule run' periodically.\n\nCreates a LaunchAgent on macOS, a scheduled task on Windows, or a\ncrontab entry on Linux. Use --remove to uninstall.",
+   "params": [
+    {
+     "name": "interval",
+     "kind": "option",
+     "opts": [
+      "--interval",
+      "-i"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": 15,
+     "help": "Run interval in minutes (default: 15)"
+    },
+    {
+     "name": "uninstall",
+     "kind": "option",
+     "opts": [
+      "--remove"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Remove the OS scheduler instead of installing"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "schedule",
+    "list"
+   ],
+   "name": "list",
+   "help": "List all scheduled posts",
+   "about": "List all scheduled posts",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "schedule",
+    "remove"
+   ],
+   "name": "remove",
+   "help": "Remove a scheduled post by ID",
+   "about": "Remove a scheduled post by ID\n\nRemoval is a local schedule-store operation only \u2014 it never un-posts\ncontent that has already been published. The verdict comes from\n:mod:`xpst.services.recovery_service`, which the MCP\n``xpst_schedule_cancel`` tool calls too.",
+   "params": [
+    {
+     "name": "entry_id",
+     "kind": "argument",
+     "opts": [
+      "entry_id"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "dry_run",
+     "kind": "option",
+     "opts": [
+      "--dry-run"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show which entry would be removed without modifying the schedule store"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "schedule",
+    "run"
+   ],
+   "name": "run",
+   "help": "Process all due scheduled posts.",
+   "about": "Process all due scheduled posts.\n\nFetches posts where scheduled_time <= now and status is pending,\nthen posts each one. Typically called by cron or manually.",
+   "params": [
+    {
+     "name": "dry_run",
+     "kind": "option",
+     "opts": [
+      "--dry-run"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show what would be posted without uploading"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "search"
+   ],
+   "name": "search",
+   "help": "Search the knowledge base for nuggets and topics (F1.5).",
+   "about": "Search the knowledge base for nuggets and topics (F1.5).\n\nUses semantic search when embeddings are available, falls back to\nsubstring matching.",
+   "params": [
+    {
+     "name": "query",
+     "kind": "argument",
+     "opts": [
+      "query"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "limit",
+     "kind": "option",
+     "opts": [
+      "--limit",
+      "-l"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": 10,
+     "help": "Max results"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "security-audit"
+   ],
+   "name": "security-audit",
+   "help": "Run an automated security check on the xPST installation.",
+   "about": "Run an automated security check on the xPST installation.\n\nVerifies:\n- Credential files have 0600 permissions\n- No plaintext credential storage\n- Dashboard binds to localhost\n- MCP readonly mode is available\n- FFmpeg is available\n- Provider mode is set",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "serve"
+   ],
+   "name": "serve",
+   "help": "Run the xPST supervisor daemon: scheduler loop + optional dashboard.",
+   "about": "Run the xPST supervisor daemon: scheduler loop + optional dashboard.\n\nRuns the configured scheduler loop (reusing the existing Scheduler and\nScheduleManager) under the shared engine pidfile, and optionally serves\nthe FastAPI dashboard. Designed to be run supervised by launchd,\nsystemd, or a process manager \u2014 handles SIGTERM/SIGINT gracefully,\nreleases the pidfile on shutdown, and logs health lines to stderr/log\nfile suitable for supervisor collection.\n\n\b\nExamples:\n    xpst serve                  # daemon: scheduler + dashboard (default port)\n    xpst serve --no-dashboard   # scheduler loop only (headless)\n    xpst serve --port 9000      # scheduler + dashboard on port 9000",
+   "params": [
+    {
+     "name": "no_dashboard",
+     "kind": "option",
+     "opts": [
+      "--no-dashboard"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Do not start the FastAPI dashboard server"
+    },
+    {
+     "name": "port",
+     "kind": "option",
+     "opts": [
+      "--port",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": null,
+     "help": "Dashboard HTTP port (default: config monitoring.healthcheck_port)"
+    },
+    {
+     "name": "host",
+     "kind": "option",
+     "opts": [
+      "--host"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "127.0.0.1",
+     "help": "Dashboard bind host (default: 127.0.0.1)"
+    },
+    {
+     "name": "interval",
+     "kind": "option",
+     "opts": [
+      "--interval",
+      "-i"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": null,
+     "help": "Scheduler check interval in seconds (default: config schedule.check_interval)"
+    },
+    {
+     "name": "source",
+     "kind": "option",
+     "opts": [
+      "--source",
+      "-s"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "tiktok",
+      "youtube",
+      "x",
+      "instagram",
+      "local",
+      "all"
+     ],
+     "default": null,
+     "help": "Video source for the watch check (default: tiktok)"
+    }
+   ]
+  },
+  {
+   "path": [
+    "setup"
+   ],
+   "name": "setup",
+   "help": "Start or resume the canonical, durable setup transaction.",
+   "about": "Start or resume the canonical, durable setup transaction.\n\n``setup`` is canonical. ``onboard`` and ``wizard`` are compatibility\naliases that address this same transaction; they do not own separate state.\nJSON/non-TTY mode never prompts or opens a browser and returns pending human\nactions instead.",
+   "params": [
+    {
+     "name": "show_status",
+     "kind": "option",
+     "opts": [
+      "--status"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show the active setup transaction"
+    },
+    {
+     "name": "resume_transaction",
+     "kind": "option",
+     "opts": [
+      "--resume"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Resume the active setup transaction"
+    },
+    {
+     "name": "finish_later",
+     "kind": "option",
+     "opts": [
+      "--finish-later"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Save an explicit resumable finish-later state"
+    },
+    {
+     "name": "reset_transaction",
+     "kind": "option",
+     "opts": [
+      "--reset"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Reset the active setup transaction"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "state"
+   ],
+   "name": "state",
+   "help": "Back up, export, and restore posting state (G51).",
+   "about": "Back up, export, and restore posting state (G51).\n\n~/.xpst/state.json is the single source of truth for what has been\nposted \u2014 losing it means the next watch cycle re-posts the recent\ncatalog publicly. These commands make it durable.",
+   "params": []
+  },
+  {
+   "path": [
+    "state",
+    "backup"
+   ],
+   "name": "backup",
+   "help": "Snapshot state.json into ~/.xpst/backups/ with rotation.",
+   "about": "Snapshot state.json into ~/.xpst/backups/ with rotation.",
+   "params": [
+    {
+     "name": "keep",
+     "kind": "option",
+     "opts": [
+      "--keep"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": 10,
+     "help": "Backups to retain"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "state",
+    "export"
+   ],
+   "name": "export",
+   "help": "Export state.json to OUTPUT (validated copy).",
+   "about": "Export state.json to OUTPUT (validated copy).",
+   "params": [
+    {
+     "name": "output",
+     "kind": "argument",
+     "opts": [
+      "output"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "file",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "state",
+    "import"
+   ],
+   "name": "import",
+   "help": "Restore state.json from SOURCE (current state is backed up first).",
+   "about": "Restore state.json from SOURCE (current state is backed up first).",
+   "params": [
+    {
+     "name": "source",
+     "kind": "argument",
+     "opts": [
+      "source"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "file",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "yes",
+     "kind": "option",
+     "opts": [
+      "--yes"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Skip confirmation"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "status"
+   ],
+   "name": "status",
+   "help": "Show health status",
+   "about": "Show health status",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "suggest-caption"
+   ],
+   "name": "suggest-caption",
+   "help": "Generate AI caption suggestions from a video file.",
+   "about": "Generate AI caption suggestions from a video file.\n\nUses the video's transcript (via the KB transcriber) to generate 3\ncaption variants. Falls back to deterministic extraction when no LLM\nis configured.\n\nPlatform-specific character limits are enforced:\nX /280, Threads /500, Instagram /2200, YouTube /5000",
+   "params": [
+    {
+     "name": "video_path",
+     "kind": "argument",
+     "opts": [
+      "video_path"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "path",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "platform",
+     "kind": "option",
+     "opts": [
+      "--platform",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "instagram",
+     "help": "Target platform for char limits"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "transcript"
+   ],
+   "name": "transcript",
+   "help": "Get the transcript for a video by ID or content_hash (D2/F1.4).",
+   "about": "Get the transcript for a video by ID or content_hash (D2/F1.4).\n\nTranscripts are cached by content_hash so cross-posted videos share\nthe same transcript.",
+   "params": [
+    {
+     "name": "video_id",
+     "kind": "argument",
+     "opts": [
+      "video_id"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "ui"
+   ],
+   "name": "ui",
+   "help": "Launch the local web UI (dashboard server + default browser)",
+   "about": "Launch the local web UI (dashboard server + default browser)\n\nStarts the xPST dashboard API server on 127.0.0.1 (loopback only) and\nopens the default browser to the UI once the server is accepting\nconnections. Pass --no-browser for server/agent mode: the server stays\nup until SIGINT/SIGTERM (graceful shutdown) and a readiness line with\nthe UI URL and PID is printed for scripts/MCP to parse.",
+   "params": [
+    {
+     "name": "port",
+     "kind": "option",
+     "opts": [
+      "--port",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": 8080,
+     "help": "UI server HTTP port (default: 8080)"
+    },
+    {
+     "name": "no_browser",
+     "kind": "option",
+     "opts": [
+      "--no-browser"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Do not open the default browser (server/agent mode)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "update"
+   ],
+   "name": "update",
+   "help": "Update xPST dependencies (and, with --self, xPST itself)",
+   "about": "Update xPST dependencies (and, with --self, xPST itself)",
+   "params": [
+    {
+     "name": "check_only",
+     "kind": "option",
+     "opts": [
+      "--check"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Check for updates without installing"
+    },
+    {
+     "name": "components",
+     "kind": "option",
+     "opts": [
+      "--components"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show app, helper, and provider metadata update status"
+    },
+    {
+     "name": "self_update",
+     "kind": "option",
+     "opts": [
+      "--self"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Update xPST ITSELF to the latest release (wheel installs do it in place; editable/frozen installs get the exact command for their install kind)"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "verify-media"
+   ],
+   "name": "verify-media",
+   "help": "Pre-flight: verify a media file against platform specs BEFORE upload.",
+   "about": "Pre-flight: verify a media file against platform specs BEFORE upload.\n\nReports hard errors (the platform would reject or mangle the file) and\nwarnings (the platform would re-encode / shift loudness). Exit code 1\nwhen any error was found for the selected platform(s).",
+   "params": [
+    {
+     "name": "file",
+     "kind": "argument",
+     "opts": [
+      "file"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": true,
+     "nargs": 1,
+     "metavar": null,
+     "type": "path",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "platform",
+     "kind": "option",
+     "opts": [
+      "--platform",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "all",
+      "youtube",
+      "tiktok",
+      "instagram",
+      "x",
+      "threads"
+     ],
+     "default": "all",
+     "help": "Platform spec to verify against (default: all)"
+    },
+    {
+     "name": "show_plan",
+     "kind": "option",
+     "opts": [
+      "--plan"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Also show the transformation plan (dry-run): what the pipeline would do to this file per platform"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "version"
+   ],
+   "name": "version",
+   "help": "Show xPST version and all dependency versions",
+   "about": "Show xPST version and all dependency versions",
+   "params": [
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "watch"
+   ],
+   "name": "watch",
+   "help": "Watch for new videos (runs continuously).",
+   "about": "Watch for new videos (runs continuously). Delegates to Scheduler.",
+   "params": [
+    {
+     "name": "interval",
+     "kind": "option",
+     "opts": [
+      "--interval",
+      "-i"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": null,
+     "help": "Check interval in seconds"
+    },
+    {
+     "name": "source",
+     "kind": "option",
+     "opts": [
+      "--source",
+      "-s"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "tiktok",
+      "youtube",
+      "x",
+      "instagram",
+      "local",
+      "all"
+     ],
+     "default": "tiktok",
+     "help": "Video source to watch (default: tiktok). Use 'all' for bidirectional."
+    },
+    {
+     "name": "bidirectional",
+     "kind": "option",
+     "opts": [
+      "--bidirectional",
+      "-b"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Check ALL sources for bidirectional cross-posting"
+    }
+   ]
+  },
+  {
+   "path": [
+    "wizard"
+   ],
+   "name": "wizard",
+   "help": "Compatibility view of the canonical setup transaction.",
+   "about": "Compatibility view of the canonical setup transaction.\n\n``wizard`` is a deprecated alias of ``setup``. It keeps guide export and\nplatform arguments for compatibility, but durable progress and completion\nare owned by ``xpst setup``.",
+   "params": [
+    {
+     "name": "platform",
+     "kind": "argument",
+     "opts": [
+      "platform"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "tiktok",
+      "youtube",
+      "x",
+      "instagram",
+      "threads",
+      "facebook",
+      "messenger"
+     ],
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "export_md",
+     "kind": "option",
+     "opts": [
+      "--export-md"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "path",
+     "choices": null,
+     "default": null,
+     "help": "Export the step-by-step guide as markdown and exit"
+    },
+    {
+     "name": "show_status",
+     "kind": "option",
+     "opts": [
+      "--status"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Show the active setup transaction"
+    },
+    {
+     "name": "resume_transaction",
+     "kind": "option",
+     "opts": [
+      "--resume"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Resume the active setup transaction"
+    },
+    {
+     "name": "finish_later",
+     "kind": "option",
+     "opts": [
+      "--finish-later"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Save an explicit resumable finish-later state"
+    },
+    {
+     "name": "reset_transaction",
+     "kind": "option",
+     "opts": [
+      "--reset"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Reset the active setup transaction"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": null,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  }
+ ]
+}
