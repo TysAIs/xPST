@@ -16,7 +16,8 @@ a phase lands with tests.
 The engine is 146 Python files / 69,302 lines under `src/`, plus 242 test files /
 66,420 lines. What it ships is one PyInstaller sidecar of ~95 MB inside a ~192 MB
 app, and what it costs is a Python ≥ 3.10 install, a venv, 20 runtime
-dependencies plus three extras, and 2.4 s of cold boot on the reference host.
+dependencies plus eight optional extras (anti-ban, mcp, browser, windows,
+dashboard, knowledge, full, dev), and 2.4 s of cold boot on the reference host.
 
 The behaviors that matter are already specified by tests and by the truth
 tables — capability states, post-gate limits, cooldown ownership, refusal over

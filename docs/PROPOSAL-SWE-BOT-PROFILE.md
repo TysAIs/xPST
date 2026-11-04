@@ -16,8 +16,8 @@ today:
 | Fact | Value |
 |---|---|
 | Profile id | `xpst` (model `DeepSeek-V4.1-Flash-1017`, provider `sparks`) |
-| Skills on disk | 23 skills across 11 categories: apple, autonomous-ai-agents (3), creative, email (2), media, note-taking, productivity (2), research (2), social-media (4), software-development (4), web (2) |
-| Project-specific skills | 4 (`xpst-cross-posting`, `xpst-agent-concurrency`, `xpst-release-ops`, and the lane's `dogfood`/`github` habits) |
+| Skills on disk | 13 active skills across 7 categories (autonomous-ai-agents 2, email 1, productivity 1, research 1, social-media 3, software-development 4, web 1); `apple`, `creative`, `media` and `note-taking` exist only as archived copies under `.archive/` |
+| Project-specific skills | 3 dedicated (`xpst-cross-posting`, `xpst-agent-concurrency`, `xpst-release-ops`) plus the general ones used daily (`dogfood`, `github`, `systematic-debugging`, `inspecting-hermes-desktop-dom`) |
 | MCP servers registered | 1 (`xpst`, 41 tools, `~/.venvs/xpst/bin/xpst mcp start` via the `xpst` wrapper on `PATH`) |
 | Cron jobs | none |
 | Memory | ~89% full, and dominated by xpst facts (install lineage, credential status, PyPI state) |
@@ -124,8 +124,8 @@ reused by something else, so no other profile may claim `xpst` in the interim.
 | Two engineering profiles if a new one is created instead of renamed | split memory, duplicated skills, two dispatchers | rename, do not fork |
 
 **Why not create a second profile instead**: a new `dev` profile would duplicate
-23 skills, split memory, and leave two engineering dispatchers competing for the
-same board. Rename keeps one identity with project-scoped knowledge.
+the 13 skills, split memory, and leave two engineering dispatchers competing for
+the same board. Rename keeps one identity with project-scoped knowledge.
 
 ## 5. Decisions requested
 

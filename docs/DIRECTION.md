@@ -80,8 +80,8 @@ future.
 | Engine payload | ~95 MB sidecar (PyInstaller) | ≤ 25 MB single binary, no interpreter |
 | Desktop install | ~192 MB (ffmpeg 87 + engine 95 + yt-dlp 3 + ui 1) | ≤ 120 MB with media tools, ≤ 30 MB without |
 | Cold boot to usable | 2.4 s median (Mac mini M4 baseline, `perf/boot-budget.json`) | ≤ 1.0 s median on the same host class |
-| Install path | Python ≥ 3.10, venv or pipx, 20 runtime dependencies + extras | one binary, or one installer, no interpreter, no venv |
-| Runtime dependencies | 20 (+ anti-ban / mcp / browser extras) | Rust crates compiled in; no runtime package resolution |
+| Install path | Python ≥ 3.10, venv or pipx, 20 runtime dependencies plus 8 extras | one binary, or one installer, no interpreter, no venv |
+| Runtime dependencies | 20 runtime dependencies plus 8 optional extras | Rust crates compiled in; no runtime package resolution |
 
 "Easy" means a stranger's first successful post takes one install and one
 connect step, and every failure they see names the next action.
