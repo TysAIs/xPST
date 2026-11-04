@@ -45,9 +45,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and that one destination's cooldown never blocks another or shortens a longer
   cooldown already running for a sibling on the same upstream pool. The
   Instagram instagrapi (`auth_mode: session`) path is measured in the same
-  suite: 4 provider requests / 15.98 s of sleeping for a bare 429 code 4, and
-  4 / 15.18 s for a 403 rate-limit body — against the recorded 16 requests /
-  ~91–98 s the nested retry layers used to produce.
+  suite: 4 provider requests for a bare 429 code 4 and 4 for a 403 rate-limit
+  body, sleeping about 15 s in a recorded run — the suite's ceiling for one
+  throttled post is 19.5 s, and since the uploader applies a randomised 1–3 s
+  pre-upload delay per attempt the wait total differs between runs (14.5–16.5 s
+  observed) — against the recorded 16 requests / ~91–98 s the nested retry
+  layers used to produce.
 - **Text posts survive the schedule store.** The store now has a no-media
   representation — a `content_type=text` entry with an empty media path — and
   every queue surface can create one: `xpst schedule add --text` (CLI),
@@ -108,10 +111,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `instagram.auth_mode: session` actually runs, on the platform that caused the
   2026-10-01 halt. The uploader now hands a throttle straight back and the
   service's retry layer owns the retry — 4 attempts, one request each, and
-  ≤~16 s of sleeping (measured in the suite above: 15.98 s for a bare 429 and
-  15.18 s for a 403 rate-limit body), which also matches the Instagram Graph
-  path. A recovered throttle is now visible to the cooldown state machine
-  instead of being swallowed. Ceilings are
+  about 15 s of sleeping in a recorded run with a 19.5 s ceiling (measured in
+  the suite above; the pre-upload delay is randomised, so the wait total varies
+  between runs), which also matches the Instagram Graph path. A recovered
+  throttle is now visible to the cooldown state machine instead of being
+  swallowed. Ceilings are
   pinned in `tests/test_rate_limit_failure_injection.py`, and the retry economy
   is now executable policy: `xpst.utils.request_budget` derives the worst case
   from the live uploader/service constants and
