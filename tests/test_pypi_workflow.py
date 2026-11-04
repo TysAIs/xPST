@@ -1,4 +1,4 @@
-"""Repository checks for the PyPI Trusted Publishing path."""
+"""Repository checks for the PyPI publish path (token auth, release/tag gated)."""
 
 from __future__ import annotations
 
@@ -23,17 +23,20 @@ def _load_workflow() -> tuple[dict, dict]:
     return data, triggers
 
 
-def test_pypi_workflow_uses_oidc_and_only_publishes_release_or_tag():
+def test_pypi_workflow_publishes_with_token_and_only_on_release_or_tag():
     workflow, triggers = _load_workflow()
 
     assert set(triggers) == {"release", "push", "workflow_dispatch"}
     assert triggers["release"] == {"types": ["published"]}
     assert triggers["push"] == {"tags": ["v*.*.*"]}
-    assert workflow["permissions"]["id-token"] == "write"
+    # Token auth: the run needs no GitHub OIDC identity token.
+    assert "id-token" not in workflow["permissions"]
 
     publish = workflow["jobs"]["publish"]
-    assert publish["environment"] == "pypi"
-    assert publish["permissions"]["id-token"] == "write"
+    # No environment gate: an environment with protection rules would stall the
+    # publish job on a human approval click.
+    assert "environment" not in publish
+    assert "id-token" not in publish["permissions"]
     assert "github.event_name == 'release'" in publish["if"]
     assert "github.event_name == 'push'" in publish["if"]
     assert "refs/tags/v" in publish["if"]
@@ -41,7 +44,12 @@ def test_pypi_workflow_uses_oidc_and_only_publishes_release_or_tag():
 
     publish_actions = [step.get("uses", "") for step in publish["steps"]]
     assert "pypa/gh-action-pypi-publish@release/v1" in publish_actions
-    assert all("password:" not in str(step) for step in publish["steps"])
+
+    publish_inputs = [
+        step.get("with", {}) for step in publish["steps"] if "pypa/gh-action-pypi-publish" in step.get("uses", "")
+    ]
+    assert publish_inputs, "the publish step must exist"
+    assert publish_inputs[0]["password"] == "${{ secrets.PYPI_API_TOKEN }}"
 
 
 def test_pypi_metadata_is_public_safe_and_has_required_license_classifiers():
