@@ -108,7 +108,10 @@ def test_pypi_doc_documents_the_credential_path_the_workflow_implements():
     assert "workflow_dispatch" in doc
     # The trusted-publishing alternative must name the exact claims to register.
     assert oidc_path, "docs/PYPI.md must keep the OIDC alternative documented"
-    for claim in ("TysAIs", "xPST", "publish-pypi.yml", "pypi"):
+    # The exact claims, in the same literal form docs/PYPI.md registers them
+    # (backticked values); the repository owner is product identity, which the
+    # deny list allows in this form only.
+    for claim in ("`TysAIs`", "`xPST`", "publish-pypi.yml", "pypi"):
         assert claim in oidc_path, f"OIDC section must name the {claim!r} claim"
 
 

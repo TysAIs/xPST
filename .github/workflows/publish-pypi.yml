@@ -61,7 +61,7 @@ jobs:
       # Alternative (NOT in use): PyPI trusted publishing. It stores no secret,
       # but it needs a one-time account-scoped registration on PyPI
       # (pypi.org -> Your projects -> Publishing -> Add a pending publisher with
-      # owner TysAIs, repository xPST, workflow publish-pypi.yml, environment
+      # owner `TysAIs`, repository xPST, workflow publish-pypi.yml, environment
       # "pypi"). Switching to it means: re-add `id-token: write` to the workflow
       # and publish-job permissions, re-add `environment: pypi`, and drop the
       # `password:` input below. docs/PYPI.md documents both paths.
