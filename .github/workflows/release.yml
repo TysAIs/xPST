@@ -65,13 +65,15 @@ jobs:
 
       - name: Publish to PyPI
         if: github.event_name == 'push'
-        # Two mechanisms, tried in order:
-        #   1. A PYPI_API_TOKEN secret (repo Settings > Secrets > Actions).
-        #   2. PyPI trusted publishing (requires the repo's `id-token: write`
-        #      permission, already granted, plus the owner configuring the PyPI
-        #      side for this repo).
-        # Non-blocking (continue-on-error) so the GitHub release is never held
-        # hostage by the registry step.
+        # Authenticates with the PYPI_API_TOKEN repository secret (a PyPI API
+        # token). This is the same credential path as
+        # .github/workflows/publish-pypi.yml, which is the authoritative
+        # publisher; this step is a duplicate attempt kept non-blocking. The
+        # workflow-level `id-token: write` above belongs to the `actions/attest`
+        # step, not to PyPI. Trusted publishing (OIDC) is the documented
+        # alternative and is NOT in use: it needs a one-time pending-publisher
+        # registration on PyPI plus `environment: pypi` and `id-token: write` on
+        # this job. See docs/PYPI.md.
         continue-on-error: true
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
