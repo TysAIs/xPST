@@ -185,6 +185,30 @@ pub fn flag(matches: &ArgMatches, id: &str) -> bool {
     }
 }
 
+/// Effective value of a boolean flag, including Click's on-by-default flags.
+///
+/// The manifest records two flags that default to on (`config import --merge`,
+/// `dashboard --api-only`) together with their OFF forms. Clap's `SetTrue`
+/// cannot express "true unless the paired off-flag is present", so the default
+/// is resolved here, from the same manifest that drives the tree.
+///
+/// The OFF form wins when both are given. Click uses last-wins ordering; no P0
+/// command can observe the difference because both such commands are
+/// unimplemented, and the behavior is pinned by a test.
+pub fn flag_with_default(matches: &ArgMatches, path: &[String], name: &str) -> bool {
+    if flag(matches, &format!("opt:{name}:off")) {
+        return false;
+    }
+    if flag(matches, &format!("opt:{name}")) {
+        return true;
+    }
+    parity::command_at(path)
+        .and_then(|command| command.params.iter().find(|param| param.name == name))
+        .and_then(|param| param.default.as_ref())
+        .and_then(|default| default.as_bool())
+        .unwrap_or(false)
+}
+
 /// Read a single string value by argument id.
 pub fn string_value(matches: &ArgMatches, id: &str) -> Option<String> {
     if matches.try_contains_id(id).unwrap_or(false) {

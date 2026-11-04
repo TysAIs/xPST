@@ -2,12 +2,12 @@
  "schema_version": 1,
  "captured_from": {
   "repo": "TysAIs/xPST",
-  "git_ref": "ba335d4",
+  "git_ref": "892daf3",
   "source": "src/xpst/cli.py",
   "framework": "click",
   "captured_by": "xtask/scripts/capture_python_cli.py"
  },
- "note": "Generated contract: the Rust engine must expose every command path and flag listed here. Do not hand-edit; re-run the capture script.",
+ "note": "Generated contract: the Rust engine must expose every command path and flag listed here. Do not hand-edit; re-run the capture script. `captured_from` is provenance only and is excluded from parity comparisons, which look at `commands` alone.",
  "command_count": 87,
  "commands": [
   {
@@ -49,7 +49,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Enable verbose logging"
     },
     {
@@ -67,7 +67,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Suppress decorative output"
     },
     {
@@ -84,7 +84,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Output in JSON format"
     },
     {
@@ -101,7 +101,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show the version and exit."
     }
    ]
@@ -147,7 +147,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Force refresh (ignore cache)"
     },
     {
@@ -164,7 +164,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Force a live collection now, bypassing the cache (the MCP xpst_analytics live=true equivalent)"
     },
     {
@@ -181,7 +181,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Never touch the network: report the recorded snapshots only (the MCP xpst_analytics live=false equivalent)"
     },
     {
@@ -198,7 +198,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show cross-post group correlation analytics (one video across platforms)"
     },
     {
@@ -215,7 +215,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -300,7 +300,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Force refresh (ignore cache)"
     },
     {
@@ -317,7 +317,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -370,7 +370,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Refresh due/expiring tokens first (bounded retry), then report status"
     },
     {
@@ -387,7 +387,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "With `api-token`: generate a new API token, invalidating the old one"
     },
     {
@@ -404,7 +404,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -467,7 +467,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show what would be backfilled without uploading"
     },
     {
@@ -484,7 +484,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -529,7 +529,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -591,7 +591,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Print the admin URL with the dashboard API token in full (it is masked by default so the output can be pasted, screenshotted, or logged without leaking the credential)"
     },
     {
@@ -608,7 +608,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -662,7 +662,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -741,7 +741,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -769,7 +769,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -796,7 +796,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -850,7 +850,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Export raw values (no masking)"
     },
     {
@@ -884,7 +884,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -930,7 +930,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Apply fixes without confirmation"
     },
     {
@@ -947,7 +947,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1012,7 +1012,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Skip confirmation prompt"
     },
     {
@@ -1029,7 +1029,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Fail on validation warnings"
     },
     {
@@ -1046,7 +1046,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1125,7 +1125,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1153,7 +1153,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show raw values (no masking)"
     },
     {
@@ -1187,7 +1187,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1232,7 +1232,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1284,7 +1284,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Print the step-by-step setup guide for the platform (YouTube: Google Cloud OAuth) and exit"
     },
     {
@@ -1303,7 +1303,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Allow/deny browser launches during account setup (default: TTY only)"
     },
     {
@@ -1320,7 +1320,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Test existing connections only"
     },
     {
@@ -1337,7 +1337,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show what connect would do (platform, steps, config impact) without connecting or writing config"
     },
     {
@@ -1354,7 +1354,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1478,7 +1478,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Unpublish instead of hard-delete (YouTube: sets privacyStatus=private)"
     },
     {
@@ -1516,7 +1516,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Skip confirmation"
     },
     {
@@ -1533,7 +1533,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show what would be deleted without contacting any platform"
     },
     {
@@ -1550,7 +1550,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1612,7 +1612,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1665,7 +1665,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Skip confirmation prompt (required in non-interactive/JSON mode)"
     },
     {
@@ -1682,7 +1682,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1734,7 +1734,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1788,7 +1788,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1816,7 +1816,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1879,7 +1879,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1906,7 +1906,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -1979,7 +1979,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -2043,7 +2043,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -2070,7 +2070,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -2142,7 +2142,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable output"
     }
    ]
@@ -2188,7 +2188,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable output"
     }
    ]
@@ -2252,7 +2252,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable output"
     }
    ]
@@ -2298,7 +2298,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable output"
     }
    ]
@@ -2344,7 +2344,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable output"
     }
    ]
@@ -2408,7 +2408,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable output"
     }
    ]
@@ -2489,7 +2489,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable output"
     }
    ]
@@ -2535,7 +2535,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Re-embed even if the model matches"
     },
     {
@@ -2552,7 +2552,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable output"
     }
    ]
@@ -2579,7 +2579,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -2616,7 +2616,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -2683,7 +2683,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -2711,7 +2711,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -2803,7 +2803,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -2831,7 +2831,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -2858,7 +2858,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show the onboarding plan (order, steps, connected state) without connecting or writing anything"
     },
     {
@@ -2875,7 +2875,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Re-run connect even for platforms whose health check already passes"
     },
     {
@@ -2892,7 +2892,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -2947,7 +2947,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -2975,7 +2975,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3136,7 +3136,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show what would happen without uploading"
     },
     {
@@ -3153,7 +3153,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Post immediately even outside the anti-bot window (8am-11pm). Without it, a media post fired outside the window is queued to the schedule store and reported as deferred, not failed."
     },
     {
@@ -3170,7 +3170,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3197,7 +3197,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3224,7 +3224,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3251,7 +3251,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Create missing local folders and save safe defaults"
     },
     {
@@ -3268,7 +3268,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3312,7 +3312,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Refresh even when the token is not expired/near expiry"
     },
     {
@@ -3363,7 +3363,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3416,7 +3416,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Check ALL sources (not just TikTok) for bidirectional cross-posting"
     },
     {
@@ -3433,7 +3433,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show what would happen without uploading"
     },
     {
@@ -3450,7 +3450,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3522,7 +3522,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Text-only post: no media file. The --caption text IS the post; the entry is stored as content_type=text and fires through the text route (never an encoder). FILE must be omitted."
     },
     {
@@ -3613,7 +3613,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Validate the entry and show it without writing to the schedule store"
     },
     {
@@ -3630,7 +3630,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3676,7 +3676,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Remove the OS scheduler instead of installing"
     },
     {
@@ -3693,7 +3693,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3721,7 +3721,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3766,7 +3766,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show which entry would be removed without modifying the schedule store"
     },
     {
@@ -3783,7 +3783,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3811,7 +3811,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show what would be posted without uploading"
     },
     {
@@ -3828,7 +3828,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3890,7 +3890,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3917,7 +3917,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -3944,7 +3944,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Do not start the FastAPI dashboard server"
     },
     {
@@ -4049,7 +4049,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show the active setup transaction"
     },
     {
@@ -4066,7 +4066,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Resume the active setup transaction"
     },
     {
@@ -4083,7 +4083,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Save an explicit resumable finish-later state"
     },
     {
@@ -4100,7 +4100,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Reset the active setup transaction"
     },
     {
@@ -4117,7 +4117,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -4171,7 +4171,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -4216,7 +4216,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -4261,7 +4261,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Skip confirmation"
     },
     {
@@ -4278,7 +4278,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -4305,7 +4305,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -4367,7 +4367,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -4411,7 +4411,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -4456,7 +4456,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Do not open the default browser (server/agent mode)"
     },
     {
@@ -4473,7 +4473,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -4500,7 +4500,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Check for updates without installing"
     },
     {
@@ -4517,7 +4517,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show app, helper, and provider metadata update status"
     },
     {
@@ -4534,7 +4534,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Update xPST ITSELF to the latest release (wheel installs do it in place; editable/frozen installs get the exact command for their install kind)"
     },
     {
@@ -4551,7 +4551,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -4620,7 +4620,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Also show the transformation plan (dry-run): what the pipeline would do to this file per platform"
     },
     {
@@ -4637,7 +4637,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -4664,7 +4664,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
@@ -4735,7 +4735,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Check ALL sources for bidirectional cross-posting"
     }
    ]
@@ -4804,7 +4804,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Show the active setup transaction"
     },
     {
@@ -4821,7 +4821,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Resume the active setup transaction"
     },
     {
@@ -4838,7 +4838,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Save an explicit resumable finish-later state"
     },
     {
@@ -4855,7 +4855,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Reset the active setup transaction"
     },
     {
@@ -4872,7 +4872,7 @@
      "metavar": null,
      "type": "boolean",
      "choices": null,
-     "default": null,
+     "default": false,
      "help": "Machine-readable JSON output"
     }
    ]
