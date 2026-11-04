@@ -104,14 +104,19 @@ engineering lane's job. The maintainer is never handed a manual chore.
 - Publishing state is verified by reading the index back (`pypi.org/pypi/<name>/json`,
   release assets, tag → artifact digest), not by trusting a green workflow.
 
-**Current state (verified 2026-11-03)**: `.github/workflows/publish-pypi.yml`
-publishes via OIDC trusted publishing, no trusted publisher is registered on
-PyPI, so the publish step fails with `invalid-publisher`; `pypi.org/pypi/xpst/json`
-returns 404 (the name `xpst` is unclaimed); a `PYPI_API_TOKEN` repository secret
-already exists (created 2026-09-25). Fixing this requires no maintainer action:
-switch the publish step to the existing token (or register the trusted publisher
-from the agent side, which needs an account-scoped action). Tracked as follow-up
-work, not as a note asking the maintainer to click something.
+**Current state (verified 2026-11-04)**: `.github/workflows/publish-pypi.yml` on
+`main` publishes with the existing `PYPI_API_TOKEN` repository secret (created
+2026-09-25), gated to a `v*.*.*` tag push or a published GitHub release;
+`workflow_dispatch` is build/validate only, and the publish job needs neither
+`environment:` nor `id-token: write`. The OIDC trusted-publishing form is the
+documented alternative — it needs a one-time pending-publisher registration
+(owner `TysAIs`, repo `xPST`, workflow `publish-pypi.yml`, environment `pypi`).
+Tag `v1.2.1` predates the switch and still carries the OIDC form, which is why
+run 41796222963 failed `invalid-publisher`; no tagged run has exercised the token
+path yet, and `pypi.org/pypi/xpst/json` still returns 404 (the name `xpst` is
+unclaimed), so `pip install xpst` stays unavailable until a version tag is pushed
+from a commit carrying the token path. That tag push is the one maintainer-gated
+step in this chain; everything else is agent work (D-6).
 
 ## D-7 — In force until the maintainer sets a new bar
 
