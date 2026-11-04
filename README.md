@@ -945,7 +945,7 @@ xPST is organized as a small set of cooperating layers, each with a single respo
 - **Surfaces** — The CLI (Click), the desktop shell (Tauri + the dashboard HTTP UI), and the MCP server are thin drivers over the same engine and state; nothing platform-specific lives in a surface.
 - **Knowledge base** — Transcription (faster-whisper), nugget extraction, and LanceDB embeddings, decoupled so it can be installed or omitted via the `knowledge` extra.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and [docs/adr.md](docs/adr.md) for architecture decision records.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and [docs/adr.md](docs/adr.md) for architecture decision records. The current direction (all-Rust rebuild, zero personal data, measured lightweight targets) is recorded in [docs/DIRECTION.md](docs/DIRECTION.md).
 
 ---
 
