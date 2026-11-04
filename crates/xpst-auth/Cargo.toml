@@ -1,0 +1,13 @@
+[package]
+name = "xpst-auth"
+description = "OAuth (PKCE/device), cookie sessions, token refresh, keyring (P1)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+

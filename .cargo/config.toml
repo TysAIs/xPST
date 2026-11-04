@@ -1,0 +1,4 @@
+# `cargo xtask <command>` runs the dev-automation binary in `xtask/`.
+# See crates/README.md: `cargo xtask parity` and `cargo xtask size`.
+[alias]
+xtask = "run --quiet --package xtask --"

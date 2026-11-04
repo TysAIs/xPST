@@ -1,0 +1,13 @@
+[package]
+name = "xpst-core"
+description = "Engine orchestration: pipeline, retry ownership, cooldowns (P2+)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
