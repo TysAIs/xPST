@@ -1,6 +1,6 @@
 """Failure injection: rate-limit / cooldown safety under 429, 403, 500.
 
-Tyler's un-halt condition is "the rate-limit safety fixes are verified". The
+The maintainer's un-halt condition is "the rate-limit safety fixes are verified". The
 existing hardening tests (``test_rate_limit_hardening_cooldown.py``) pin the
 cooldown state machine against a recording double and a fake clock, but they
 never let a *provider response* reach the real adapters: every one of them

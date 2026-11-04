@@ -4,7 +4,10 @@ name: Public Safety
 #
 #  * tree-and-artifacts (every push + PR) fails the build on ANY finding in the
 #    publishable working tree or in the artifacts built from it (sdist, wheel,
-#    and any desktop bundle that happens to be present).
+#    and any desktop bundle that happens to be present). The personal-identifier
+#    deny list is checked in at .public-safety-denylist and the scanner loads it
+#    by default in every mode, so no environment plumbing is involved; a step
+#    below fails the job if that file ever resolves to zero tokens.
 #  * history-scan (manual, report only) walks every commit and blob reachable
 #    from any ref and reports the categories with their commit SHAs. It never
 #    rewrites history; a full-history rewrite is a human decision.
@@ -35,6 +38,9 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
+
+      - name: Checked-in deny list is present and non-empty
+        run: python scripts/scan_public_safety.py --check-denylist
 
       - name: Scan publishable working tree
         run: python scripts/scan_public_safety.py --json --report public-safety-tree.json
