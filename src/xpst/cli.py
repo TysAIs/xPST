@@ -919,15 +919,14 @@ def _pre_upload_refusal_blockers(request: ContentRequest) -> list[ContentIssue]:
 )
 @click.option(
     "--shorts",
-    "video_mode",
-    flag_value="shorts",
-    default=None,
+    "shorts",
+    is_flag=True,
     help="Publish as short-form (YouTube: Shorts ≤ 60 s, square-or-vertical)",
 )
 @click.option(
     "--long",
-    "video_mode",
-    flag_value="long",
+    "long_form",
+    is_flag=True,
     help="Publish as long-form (YouTube: watch URL, up to 12 h; X: needs a raised cap)",
 )
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
@@ -952,7 +951,8 @@ def post(
     content_type: str | None,
     platforms: str | None,
     visibility: str,
-    video_mode: str | None,
+    shorts: bool,
+    long_form: bool,
     dry_run: bool,
     now: bool,
     as_json: bool,
@@ -969,6 +969,13 @@ def post(
         log_level=config.monitoring.log_level,
         log_file=config.monitoring.log_file,
     )
+
+    # --shorts / --long are separate flags (one parameter name each) so an
+    # accidental both-flags invocation is a usage error rather than a silent
+    # "last one wins", and so the Rust CLI's clap tree can model them.
+    if shorts and long_form:
+        raise click.UsageError("--shorts and --long are mutually exclusive; pick one.")
+    video_mode = "shorts" if shorts else "long" if long_form else None
 
     per_platform_captions = _parse_caption_for(caption_for)
     media_paths = [Path(v) for v in video]

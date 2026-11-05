@@ -385,3 +385,39 @@ async def test_rumble_health_reports_the_mode_without_a_network_call(rumble_conf
     health = await RumbleUploader(rumble_config).check_health()
     assert health.details["mode"] == "manual_handoff"
     assert health.details["integration"] == "integration_uncertain"
+
+
+# ── the CLI spelling of the mode ───────────────────────────────────────────
+
+
+def test_cli_refuses_both_format_flags(tmp_path: Path) -> None:
+    """--shorts and --long together is a usage error, not "last one wins"."""
+    from click.testing import CliRunner
+
+    from xpst.cli import main
+
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 128)
+    result = CliRunner().invoke(
+        main,
+        ["post", "-v", str(video), "-c", "hello", "--shorts", "--long", "--dry-run", "--json"],
+    )
+    assert result.exit_code == 2
+    assert "mutually exclusive" in result.output
+
+
+def test_cli_dry_run_reports_the_requested_mode(tmp_path: Path) -> None:
+    """The dry run states which format the post would use (no upload)."""
+    from click.testing import CliRunner
+
+    from xpst.cli import main
+
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00" * 128)
+    result = CliRunner().invoke(
+        main,
+        ["post", "-v", str(video), "-c", "hello", "--long", "--dry-run", "--json"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads([line for line in result.output.splitlines() if line.startswith("{")][-1])
+    assert payload["video_mode"] == "long"
