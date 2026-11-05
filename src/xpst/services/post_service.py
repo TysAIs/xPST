@@ -41,6 +41,7 @@ from xpst.content import (
     validate_content_request,
 )
 from xpst.platforms.base import UploadOutcome, UploadResult
+from xpst.services.route_plan import classify_upload_result
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -179,6 +180,9 @@ def serialize_post_attempt(
         row["platform"] = platform
         row["attempted"] = True
         row["caption"] = caption_for(platform)
+        # Canonical state (R3): skipped_unconnected is visible and non-fatal.
+        row.update(classify_upload_result(platform, upload))
+        row["caption"] = caption_for(platform)
         destinations.append(row)
 
     # A platform the engine reported that the caller did not ask for is still
@@ -190,11 +194,19 @@ def serialize_post_attempt(
         row["platform"] = platform
         row["attempted"] = True
         row["unrequested"] = True
+        row.update(classify_upload_result(platform, upload))
         row["caption"] = caption_for(platform)
         destinations.append(row)
 
     uploaded = [row for row in destinations if row["success"] is True]
-    failed = [row for row in destinations if row["success"] is False]
+    # A skipped (unconnected) destination is not a failure (R3): it was never
+    # attempted, so it must not make an otherwise-good post "partial".
+    failed = [
+        row
+        for row in destinations
+        if row["success"] is False and row.get("state") != "skipped_unconnected"
+    ]
+    skipped = [row for row in destinations if row.get("state") == "skipped_unconnected"]
     attempted = bool(requested)
     blocked = bool(blockers)
 
@@ -214,6 +226,8 @@ def serialize_post_attempt(
         "destinations": destinations,
         "uploaded_count": len(uploaded),
         "failed_count": len(failed),
+        "skipped_unconnected_count": len(skipped),
+        "skipped_unconnected": [row["platform"] for row in skipped],
         "blockers": list(blockers or []),
         # ``all_success`` keeps the engine vocabulary for CLI/MCP parity; it is
         # never True for a dry run or a refused attempt.
@@ -363,12 +377,26 @@ class PostService:
             blockers.append("Choose a video file before posting.")
 
         plan: dict[str, Any] | None = None
+        route_payload: dict[str, Any] | None = None
+        route = None
         # The copy each destination will actually receive. Without this the
         # preflight validated (and reported) the shared caption for every
         # destination, so a per-destination override was never length-checked
         # and never shown — the plan lied about what would be sent.
         per_platform_captions = request.per_platform_texts(request.platforms)
+        from xpst.services.route_plan import build_route_plan
+
         try:
+            route = build_route_plan(
+                self.config,
+                media_paths=[str(item) for item in request.media_paths],
+                caption=request.caption,
+                per_platform_captions=per_platform_captions,
+                content_type=request.effective_content_type.value,
+                requested=list(request.platforms),
+                include_transform=False,
+            )
+            route_payload = route.to_dict()
             plan = PostPreflightService(self.config).plan(
                 PostPlanRequest(
                     media_paths=list(request.media_paths),
@@ -380,7 +408,14 @@ class PostService:
                     content_type=plan_content_type(request),
                 )
             ).to_dict()
-            blockers.extend(issue["message"] for issue in plan["hard_blockers"])
+            # The route decides which destinations can actually publish: an
+            # unconnected (or format-incompatible) destination is a skip, not a
+            # blocker on the whole run (R3). Its reason is reported below.
+            if route.errors:
+                blockers.append(route.errors[0]["message"])
+            for destination in route.destinations:
+                if destination.state in {"unsupported_format", "failed"}:
+                    blockers.append(destination.reason)
         except Exception as exc:  # noqa: BLE001 - report truthfully instead of raising
             logger.warning("Post preflight could not run: %s", exc)
             blockers.append(f"Preflight could not run: {str(exc)[:200]}")
@@ -388,8 +423,18 @@ class PostService:
         return {
             "ready": not blockers,
             "blockers": blockers,
-            "error": (plan or {}).get("error"),
+            "warnings": [
+                item.reason
+                for item in (route.destinations if route is not None else ())
+                if item.state == "skipped_unconnected"
+            ],
+            "error": (
+                route.errors[0]
+                if route is not None and route.errors
+                else (plan or {}).get("error")
+            ),
             "plan": plan,
+            "route_plan": route_payload,
             "caption": request.caption,
             "captions": {
                 platform: request.text_for(platform) for platform in request.platforms
@@ -478,34 +523,59 @@ class PostService:
 
         # The per-destination copy: the engine hands each uploader its own text.
         per_platform_captions = request.per_platform_texts(request.platforms)
+        # Consume the plan: only destinations it says will publish are attempted.
+        # The rest are added to the result below with their canonical state, so
+        # the HTTP envelope never reports an unconnected destination as an
+        # upload failure (R3) and never attempts an unsupported format.
+        from xpst.services.route_plan import merge_plan_destinations
+
+        route_payload = verdict.get("route_plan") or {}
+        posting: list[str] = list(route_payload.get("posting_destinations") or [])
+        if not posting:
+            from xpst.engine import CrossPostResult
+
+            result = CrossPostResult(
+                video_id=f"{content_type.value}-plan", caption=request.caption
+            )
+            merge_plan_destinations(result, route_payload)
+            return serialize_post_attempt(
+                requested=request.platforms,
+                results=dict(result.results),
+                video_id=result.video_id,
+                caption=result.caption,
+                captions=per_platform_captions,
+                content_type=content_type.value,
+                dry_run=False,
+            ) | {"ready": True, "blocked": False, "content": verdict["content"],
+                 "route_plan": route_payload}
         try:
             if route == PUBLISH_ROUTE_CAROUSEL:
                 result: CrossPostResult = await engine.post_manual_carousel(
-                    paths, request.caption, list(request.platforms), per_platform_captions,
+                    paths, request.caption, posting, per_platform_captions,
                     force_now=force_now,
                 )
             elif route == PUBLISH_ROUTE_IMAGE:
                 # A single still image: no encoding stage, and no per-destination
                 # copy — the image adapter takes one caption.
                 result = await engine.post_manual_image(
-                    paths[0], request.caption, list(request.platforms), force_now=force_now,
+                    paths[0], request.caption, posting, force_now=force_now,
                 )
             elif route == PUBLISH_ROUTE_TEXT:
                 # The text route: one text per destination, so per-destination
                 # overrides are honoured here (they are validated for text).
                 per_destination = {
                     platform: request.text_for(platform)
-                    for platform in request.platforms
+                    for platform in posting
                     if request.override_for(platform) is not None
                 }
                 result = await engine.post_text(
                     request.caption,
-                    list(request.platforms),
+                    posting,
                     per_destination=per_destination or None,
                 )
             else:
                 result = await engine.post_manual(
-                    paths[0], request.caption, list(request.platforms), per_platform_captions,
+                    paths[0], request.caption, posting, per_platform_captions,
                     force_now=force_now,
                 )
         except Exception as exc:  # noqa: BLE001 - the caller must see the failure
@@ -522,6 +592,7 @@ class PostService:
 
         # What the engine actually handed each uploader wins over what the
         # request asked for: the envelope reports the copy that was sent.
+        merge_plan_destinations(result, route_payload)
         sent = getattr(result, "captions", None)
         captions = dict(sent) if isinstance(sent, Mapping) else {}
         for platform in request.platforms:
