@@ -29,6 +29,49 @@ jobs:
       - name: Validate distribution metadata
         run: uvx --from twine twine check dist/*
 
+      # Fail while the release identity is still cheap to fix. A PyPI filename
+      # can never be replaced, so publishing the wrong version under a tag is
+      # unrecoverable without bumping the version again.
+      - name: Check the release identity before it can publish
+        env:
+          TOKEN_PRESENT: ${{ secrets.PYPI_API_TOKEN != '' }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 -E '^version[[:space:]]*=' pyproject.toml | cut -d'"' -f2 || true)
+          {
+            echo "### PyPI release identity"
+            echo ""
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| pyproject version | \`${version:-<missing>}\` |"
+            echo "| event | \`${EVENT_NAME}\` |"
+            echo "| ref under test | \`${REF_TYPE}:${REF_NAME}\` |"
+            echo "| PYPI_API_TOKEN secret | present=\`${TOKEN_PRESENT}\` (presence only; the value is never read) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$version" ]; then
+            echo "::error::Could not read [project].version from pyproject.toml"
+            exit 1
+          fi
+          if [ "$REF_TYPE" = "tag" ] && [ "$REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $REF_NAME does not match pyproject version $version. This run would upload $version, and PyPI files are immutable."
+            exit 1
+          fi
+          if [ "$TOKEN_PRESENT" != "true" ]; then
+            echo "::error::The PYPI_API_TOKEN repository secret is not readable by this workflow, so the token publish path cannot work. Add the secret, or switch this job to trusted publishing (docs/PYPI.md)."
+            exit 1
+          fi
+          index_status=$(curl -sS -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/xpst/${version}/json" || true)
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$index_status" = "200" ]; then
+            echo "pypi.org already serves xpst ${version}: the publish step will report existing files as skipped (skip-existing)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "pypi.org status for xpst ${version}: \`${index_status}\` (project-wide status is 404 until the first publish)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+
       - name: Upload distributions
         uses: actions/upload-artifact@v4
         with:
@@ -70,3 +113,9 @@ jobs:
         with:
           packages-dir: dist/
           password: ${{ secrets.PYPI_API_TOKEN }}
+          # A version tag and a published GitHub release both reach this job, and
+          # release.yml uploads the same files on a tag push. PyPI keeps the first
+          # copy and rejects the rest with "file already exists"; without this,
+          # the loser of that race goes red even though the release is fine.
+          # It also makes a re-run of a failed publish idempotent.
+          skip-existing: true
