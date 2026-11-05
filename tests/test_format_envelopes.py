@@ -421,3 +421,28 @@ def test_cli_dry_run_reports_the_requested_mode(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     payload = json.loads([line for line in result.output.splitlines() if line.startswith("{")][-1])
     assert payload["video_mode"] == "long"
+
+
+def test_rumble_plan_reports_the_handoff_as_ready(tmp_path: Path) -> None:
+    """A rumble target plans ready: no API key means handoff, not "missing"."""
+    from xpst.services.post_preflight import PostPlanRequest, PostPreflightService
+
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.rumble.enabled = True
+    video = tmp_path / "episode.mp4"
+    video.write_bytes(b"\x00" * 128)
+
+    plan = PostPreflightService(config).plan(
+        PostPlanRequest(
+            media_paths=[str(video)],
+            target_platforms=["rumble"],
+            base_caption="episode",
+            include_transform=False,
+            check_loudness=False,
+        )
+    )
+    readiness = plan.platforms["rumble"].readiness
+    assert readiness.enabled is True
+    assert readiness.auth.ready is True
+    assert readiness.auth.auth_mode == "manual_handoff"
