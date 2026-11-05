@@ -82,8 +82,8 @@ def test_cli_port_beats_env_and_default():
 
 
 def test_cli_host_beats_env_and_default():
-    assert ee.resolve_host("0.0.0.0", {"XPST_DASHBOARD_HOST": "10.0.0.1"}) == "0.0.0.0"
-    assert ee.resolve_host(None, {"XPST_DASHBOARD_HOST": "10.0.0.1"}) == "10.0.0.1"
+    assert ee.resolve_host("0.0.0.0", {"XPST_DASHBOARD_HOST": "10.0.0.1"}) == "0.0.0.0"  # public-safety: allow-private-ip
+    assert ee.resolve_host(None, {"XPST_DASHBOARD_HOST": "10.0.0.1"}) == "10.0.0.1"  # public-safety: allow-private-ip
     assert ee.resolve_host(None, {}) == ee.DEFAULT_HOST
 
 

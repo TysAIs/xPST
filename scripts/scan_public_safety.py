@@ -21,7 +21,18 @@ Categories detected:
 ``sensitive_file``, ``private_key``, ``aws_access_key``, ``aws_secret_key``,
 ``gcp_service_account``, ``google_api_key``, ``github_token``, ``api_token``,
 ``home_path_macos``, ``home_path_linux``, ``home_path_windows``,
-``personal_email``, ``phone_number``, ``machine_name``, ``user_name``.
+``personal_email``, ``phone_number``, ``machine_name``, ``user_name``,
+``private_ip``.
+
+``private_ip`` covers host addresses in RFC1918 (10/8, 172.16/12, 192.168/16)
+and CGNAT/tailnet (100.64.0.0/10) space, which name a particular machine's
+network rather than the product. Loopback (127.0.0.0/8), ``0.0.0.0``, public
+addresses (including the well-known metadata endpoints in
+``PUBLIC_ADDRESS_ALLOWLIST``) and CIDR network literals such as
+``10.0.0.0/8`` are not findings. A line that must carry a private address --
+the SSRF guard's own fixtures are the case in point -- says so explicitly with
+the ``public-safety: allow-private-ip`` pragma comment, so the exemption is
+reviewable per line instead of exempting a whole directory.
 
 Personal identifiers that are not machine names or e-mail shapes (account
 handles, a person's name, old account ids) come from the checked-in deny list
@@ -38,6 +49,7 @@ stays clean while a real machine username is reported.
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -276,6 +288,62 @@ USER_NAME_RE = re.compile(
 )
 _USER_NAME_NON_VALUES = ("os", "environ", "getenv", "none", "null", "self", "str", "param", "arg", "env")
 
+# --- Private / internal IP addresses --------------------------------------
+# D-2 forbids LAN and tailnet addresses in public material: a bare address from
+# one of these blocks names somebody's home network, not the product, and only
+# the fixtures whose *subject* is such an address should carry one. Only
+# private IPv4 *host* addresses are reported -- RFC1918 plus the
+# CGNAT/tailnet block -- and a dotted quad immediately followed by a CIDR
+# prefix (``100.64.0.0/10``) is a network definition, not a host, so it stays
+# clean. Loopback (127.0.0.0/8), the wildcard 0.0.0.0 and public addresses are
+# never findings. This block needs no pragma of its own, which is the point.
+_PRIVATE_NETWORKS: tuple[ipaddress.IPv4Network, ...] = tuple(
+    ipaddress.IPv4Network(cidr) for cidr in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "100.64.0.0/10")
+)
+# Well-known public endpoints that sit numerically *inside* a private block.
+# 100.100.100.200 is within 100.64.0.0/10 but is the Alibaba Cloud metadata
+# service address the SSRF guard must accept; it identifies a provider, not a
+# local network.
+PUBLIC_ADDRESS_ALLOWLIST = frozenset({"100.100.100.200"})
+IPV4_RE = re.compile(r"(?<![\d.])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?![\d.])")
+_CIDR_PREFIX_RE = re.compile(r"/(?:3[0-2]|[12]?\d)(?![\d.])")
+# A fixture whose SUBJECT is a private address (the SSRF guard) marks that one
+# line so the exemption is explicit and reviewable per line, instead of
+# exempting the whole ``tests/`` directory.
+PRIVATE_IP_PRAGMA = "public-safety: allow-private-ip"
+
+
+def _ipv4_from_match(match: re.Match[str]) -> ipaddress.IPv4Address | None:
+    """Return the IPv4 address a dotted-quad match spells, or None if invalid."""
+    octets = [int(group) for group in match.groups()]
+    if any(octet > 255 for octet in octets):
+        return None
+    return ipaddress.IPv4Address(".".join(str(octet) for octet in octets))
+
+
+def is_private_ipv4(value: str) -> bool:
+    """True when *value* is an RFC1918/CGNAT host address that must not leak."""
+    try:
+        address = ipaddress.IPv4Address(value)
+    except ipaddress.AddressValueError:
+        return False
+    if str(address) in PUBLIC_ADDRESS_ALLOWLIST:
+        return False
+    return any(address in network for network in _PRIVATE_NETWORKS)
+
+
+def _pragma_line_ranges(text: str) -> list[tuple[int, int]]:
+    """Character spans of the lines carrying the private-IP pragma."""
+    ranges: list[tuple[int, int]] = []
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        end = offset + len(line)
+        if PRIVATE_IP_PRAGMA in line:
+            ranges.append((offset, end))
+        offset = end
+    return ranges
+
+
 # --- Personal-identifier deny list ----------------------------------------
 # D-2 of docs/DIRECTION.md: zero personal data. The deny list is checked in as
 # ``.public-safety-denylist`` (one token per line, ``#`` comments) so every CI
@@ -442,6 +510,20 @@ def _scan_text(
         if _is_placeholder(segment):
             continue
         findings.append(Finding(label, "user_name", "Explicit machine/user-name assignment."))
+
+    # Private IPv4 host addresses. Applies to binary members too: a bundled
+    # extension or a build stamp carries the same LAN address a source file does.
+    pragma_spans = _pragma_line_ranges(text) if PRIVATE_IP_PRAGMA in text else []
+    for match in IPV4_RE.finditer(text):
+        address = _ipv4_from_match(match)
+        if address is None or not is_private_ipv4(str(address)):
+            continue
+        if _CIDR_PREFIX_RE.match(text, match.end()):
+            # ``100.64.0.0/10`` declares a network; it names no host.
+            continue
+        if any(start <= match.start() < end for start, end in pragma_spans):
+            continue
+        findings.append(Finding(label, "private_ip", "Private (RFC1918/CGNAT) host address."))
 
     deny_haystack = _mask_products(text, product_allow)
     for pattern in denylist:
