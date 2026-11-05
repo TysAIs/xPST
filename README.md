@@ -917,7 +917,7 @@ Per-platform profiles (defaults, overridable in `video.encoding_*` config):
 | Rate control | 8 Mbps **two-pass** | CRF 20 (10M cap) | CRF 20 (10M cap) | 10 Mbps **two-pass** |
 | Audio | AAC 256k @ 48 kHz | AAC 128k @ 44.1 kHz | AAC 256k @ 44.1 kHz | AAC 256k @ 44.1 kHz |
 | Loudness target | −14 LUFS | −14 LUFS | −14 LUFS | −16 LUFS |
-| Max duration | — (Shorts 60 s) | 10 min | 15 min | 140 s |
+| Max duration | 12 h (Shorts: 60 s) | 10 min | 15 min | 140 s (account cap) |
 
 **Loudness normalization** is two-pass EBU R128 (`loudnorm` measurement pass,
 then linear-mode correction) so every platform receives audio already at its
