@@ -7,7 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-03
+
 ### Added
+- **Cooldown visibility — `xpst health`, `xpst doctor` and MCP now answer "why
+  is nothing posting?".** The durable cooldown state machine has persisted a
+  per-platform `until` instant since the 2026-10-01 rate-limit hardening, but
+  nothing rendered it: the only way to see an active pause was to open
+  `rate_cooldowns.json` by hand, and an agent had no way to ask. `xpst health`
+  and `xpst doctor` now print every active cooldown with its remaining time,
+  strike count and last recorded reason, and the MCP registry gains
+  `xpst_rate_limit_status` (registry now 42 tools) returning `state`
+  (`cooling`/`idle`/`unknown`), `active`, and per-platform `strikes`,
+  `until_iso`, `last_hit_iso`, `last_reason`, `remaining_s`,
+  `remaining_human` and the file it read. All three surfaces call one module
+  (`xpst.rate_limit_status.cooldown_report`) so the CLI, the dashboard and an
+  agent cannot disagree. Read-only by construction: one state-file read, no
+  writes, no sleeps, no platform API call — safe in dry runs and safe to poll.
+  A missing or corrupt file reports `idle`/`unknown` instead of raising, because
+  a health answer must never be a traceback. Every surface also repeats the
+  same sentence: a cooldown defers posts to that platform, it does not fail
+  them, and xPST resumes when the pause expires.
+- **Failure-injection suite: the rate-limit path is proven end to end, not
+  assumed.** The earlier hardening tests handed the service a pre-baked
+  `UploadResult`, so the transport → token → cooldown chain was never exercised
+  by a provider *response*. `tests/test_rate_limit_failure_injection.py` drives
+  scripted fake transports at each provider SDK boundary — an
+  `httpx.MockTransport` for the Facebook Graph client, a fake async client for
+  the Instagram Graph path, a fake twikit client for X and a fake
+  `videos().insert()` request for YouTube — across four fault shapes (429,
+  429 + Retry-After, a 403 rate-limit body, 500) with no socket opened and no
+  live post possible. It asserts that a throttle pauses the destination, that
+  the pause is the provider's own `Retry-After` when one was sent, that one
+  logical post stays bounded (≤ 4 provider requests and ≤ 10 s of sleeping in
+  the generic shapes), that a rate-limited post is never recorded as posted,
+  that the pause survives a process restart and is honoured by the next post,
+  and that one destination's cooldown never blocks another or shortens a longer
+  cooldown already running for a sibling on the same upstream pool. The
+  Instagram instagrapi (`auth_mode: session`) path is measured in the same
+  suite: 4 provider requests for a bare 429 code 4 and 4 for a 403 rate-limit
+  body, sleeping about 15 s in a recorded run — the suite's ceiling for one
+  throttled post is 19.5 s, and since the uploader applies a randomised 1–3 s
+  pre-upload delay per attempt the wait total differs between runs (14.5–16.5 s
+  observed) — against the recorded 16 requests / ~91–98 s the nested retry
+  layers used to produce.
 - **Text posts survive the schedule store.** The store now has a no-media
   representation — a `content_type=text` entry with an empty media path — and
   every queue surface can create one: `xpst schedule add --text` (CLI),
@@ -77,14 +120,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls and slept ~96 s before giving up — on the mode
   `instagram.auth_mode: session` actually runs, on the platform that caused the
   2026-10-01 halt. The uploader now hands a throttle straight back and the
-  service's retry layer owns the retry (4 attempts, ~14 s, one request each),
-  which also matches the Instagram Graph path. A recovered throttle is now
-  visible to the cooldown state machine instead of being swallowed. Ceilings are
+  service's retry layer owns the retry — 4 attempts, one request each, and
+  about 15 s of sleeping in a recorded run with a 19.5 s ceiling (measured in
+  the suite above; the pre-upload delay is randomised, so the wait total varies
+  between runs), which also matches the Instagram Graph path. A recovered
+  throttle is now visible to the cooldown state machine instead of being
+  swallowed. Ceilings are
   pinned in `tests/test_rate_limit_failure_injection.py`, and the retry economy
   is now executable policy: `xpst.utils.request_budget` derives the worst case
   from the live uploader/service constants and
   `tests/test_retry_economy_budget.py` fails loudly if a nested retry layer
   comes back.
+- **Retry ownership: an adapter that says "this failure is over" is now
+  believed.** `UploadResult.retryable` was recorded and exported to
+  `health`/`failures` but the retry layer ignored it — it re-ran a failed
+  upload whenever the *error text* looked retryable, so an adapter that had
+  already exhausted its own attempts still got three more requests at a
+  provider that had just asked for less traffic. `retryable=False` is now
+  authoritative: one call, no retry, no sleeping, while the cooldown still
+  learns about the throttle through `on_rate_limit`, and an unknown outcome is
+  still reconciled by a read-back before it is called terminal — stopping a
+  retry must never skip the check that proves a post landed. A
+  provider-declared `Retry-After` longer than the retry layer's whole remaining
+  backoff budget also ends the retry instead of re-asking inside a window the
+  provider itself named: a 429 carrying `Retry-After: 900` now costs **one**
+  provider request, and the 900 s cooldown holds the platform. A hint the
+  budget can still cover keeps retrying — a 1 s wait still spends 4 attempts,
+  because a short throttle is what in-call recovery is for. `retryable=None`
+  keeps the previous keyword heuristic untouched for every adapter that
+  declares no opinion. The contract is executable
+  (`tests/test_retry_ownership_contract.py`), which also fails if a new site
+  ships retryable-looking error text next to `retryable=False`;
+  `scripts/audit_retryable_sites.py` prints every declaration as a table for
+  humans.
 - **A first TikTok publish from an unaudited dev app no longer dies with a
   403.** Direct Post hardcoded `privacy_level: PUBLIC_TO_EVERYONE`, but TikTok
   forces an unaudited Content Posting API client to private privacy — the
