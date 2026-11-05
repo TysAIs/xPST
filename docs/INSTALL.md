@@ -271,3 +271,23 @@ account-dependent; use the non-mutating health check after your own setup.
 The repository also contains setup guides for integrations that are not in the
 live-verified state above. Their existence documents code paths, not current
 availability.
+
+### Opt-in targets and format routing (contract)
+
+No platform is connected by default and no post targets an implied "all":
+
+- `xpst post` / `xpst_post` target an explicit destination set, or — when none is
+  given — the **format route ∩ connected accounts**. `--all` (MCP `all: true`)
+  exists and means every connected account that accepts this format; it is never
+  the default.
+- `xpst preflight --format auto` (MCP `xpst_preflight`, `POST /api/preflight`)
+  prints the resolved plan before anything publishes: `posted`,
+  `skipped_unconnected` (with the `xpst connect` command), `unsupported_format`,
+  `refused_by_community` or `failed` per destination, plus that destination's
+  envelope (duration, container, codec, byte and caption ceilings).
+- `skipped_unconnected` is **not** a failure. Zero connected accounts is one
+  actionable error naming `xpst connect`.
+- Content that does not fit is **refused, never truncated**; the refusal message
+  carries the envelope.
+- The envelope and format routes come from the same registry `xpst capabilities`
+  emits (`GET /api/capabilities`). Do not hand-maintain a second table.

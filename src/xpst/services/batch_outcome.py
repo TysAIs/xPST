@@ -92,6 +92,9 @@ BATCH_PUBLISHED = "published"
 BATCH_PARTIAL = "partial"
 BATCH_FAILED = "failed"
 BATCH_NOTHING_TO_DO = "nothing_to_do"
+#: Every destination was requested but not connected. Nothing was attempted and
+#: nothing failed (R3: unconnected is not a failure).
+BATCH_SKIPPED = "skipped"
 
 
 def post_failure_exit_code(error: str | None) -> int:
@@ -125,6 +128,10 @@ def attempted(rows: dict[str, Any]) -> dict[str, Any]:
     A row carrying ``deferred`` is G11 scheduling, not failure (D2): the
     anti-bot window will post it later, and counting it as a failure made a
     deferred run exit 1 with a bare error string.
+    A row carrying ``state: skipped_unconnected`` is R3 opt-in routing: the
+    account is not connected, nothing was attempted there, and it is not a
+    failure. Counting it as an attempt would turn "you haven't connected
+    Threads" into a failed run.
     """
 
     return {
@@ -132,6 +139,16 @@ def attempted(rows: dict[str, Any]) -> dict[str, Any]:
         for platform, upload in rows.items()
         if "already_posted" not in (upload.metadata or {})
         and not (upload.metadata or {}).get("deferred")
+        and (upload.metadata or {}).get("state") != "skipped_unconnected"
+    }
+
+
+def skipped_unconnected(rows: dict[str, Any]) -> dict[str, Any]:
+    """The rows that were skipped because their destination is not connected."""
+    return {
+        platform: upload
+        for platform, upload in rows.items()
+        if (upload.metadata or {}).get("state") == "skipped_unconnected"
     }
 
 
@@ -224,12 +241,25 @@ def batch_outcome(results: list[CrossPostResult]) -> dict[str, Any]:
     failed_destinations: list[dict[str, Any]] = []
     attempted_count = 0
     published_count = 0
+    skipped_count = 0
+    skipped_destinations: list[dict[str, Any]] = []
     outcomes: list[int] = []
 
     for result in results:
         rows = attempted(result.results)
         attempted_count += len(rows)
         published_count += sum(1 for upload in rows.values() if upload.success)
+        skipped_rows = skipped_unconnected(result.results)
+        skipped_count += len(skipped_rows)
+        for platform, upload in skipped_rows.items():
+            skipped_destinations.append(
+                {
+                    "video_id": result.video_id,
+                    "platform": platform,
+                    "state": "skipped_unconnected",
+                    "reason": upload.error,
+                }
+            )
         for platform, upload in rows.items():
             if upload.success:
                 continue
@@ -268,7 +298,14 @@ def batch_outcome(results: list[CrossPostResult]) -> dict[str, Any]:
         failed_codes = {code for code in outcomes if code != EXIT_SUCCESS}
         exit_code = failed_codes.pop() if len(failed_codes) == 1 else EXIT_GENERAL
 
-    if not results or (exit_code == EXIT_SUCCESS and not attempted_count):
+    if not results:
+        status = BATCH_NOTHING_TO_DO
+    elif exit_code == EXIT_SUCCESS and not attempted_count and skipped_count:
+        # Every destination was requested but not connected: nothing attempted,
+        # nothing failed (R3). Not "nothing to do" — the caller asked, and the
+        # skips name the connect command.
+        status = BATCH_SKIPPED
+    elif exit_code == EXIT_SUCCESS and not attempted_count:
         status = BATCH_NOTHING_TO_DO
     elif exit_code != EXIT_SUCCESS:
         status = BATCH_FAILED
@@ -283,6 +320,8 @@ def batch_outcome(results: list[CrossPostResult]) -> dict[str, Any]:
         "results": len(results),
         "attempted": attempted_count,
         "published": published_count,
+        "skipped_unconnected": skipped_count,
         "failed": len(failed_destinations),
         "failed_destinations": failed_destinations,
+        "skipped_destinations": skipped_destinations,
     }

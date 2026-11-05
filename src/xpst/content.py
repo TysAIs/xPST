@@ -759,6 +759,95 @@ def capability_matrix() -> dict[str, Any]:
     }
 
 
+def format_route(content_type: ContentType | str) -> tuple[str, ...]:
+    """Destinations whose *implemented* capability accepts ``content_type``.
+
+    This is the format half of the R4 route (``format route ∩ connected
+    accounts``). It is derived from :data:`DESTINATION_CONTENT_PROFILES` — never
+    a second capability table — so a platform that gains (or loses) a content
+    type changes the route and ``xpst capabilities`` in the same edit.
+
+    Order follows :data:`PUBLISH_DESTINATIONS`, so a plan reads the same way on
+    every surface. A messaging-only destination is never a publish route.
+    """
+    try:
+        wanted = coerce_content_type(content_type)
+    except UnknownContentTypeError:
+        return ()
+    return tuple(
+        platform
+        for platform in PUBLISH_DESTINATIONS
+        if (profile := content_profile(platform)) is not None and profile.supports(wanted)
+    )
+
+
+def format_routes() -> dict[str, list[str]]:
+    """The whole format→destinations map, derived on demand (no stored copy)."""
+    return {item.value: list(format_route(item)) for item in CONTENT_TYPES}
+
+
+def destination_envelope(platform: str) -> dict[str, Any] | None:
+    """The publishing envelope for one destination, or ``None`` if unknown.
+
+    One object carries everything a route decision needs — accepted content
+    types, caption ceiling, media transport, and (from
+    :data:`xpst.media.specs.PLATFORM_SPECS`, the ingest matrix the uploader
+    already enforces) video duration/container/codec/byte limits and image
+    limits. It is emitted by ``xpst capabilities`` and consumed by the route
+    resolver, so a plan can never advertise an envelope the uploader ignores.
+
+    ``media.specs`` imports this module, so the spec import is function-local
+    to avoid an import cycle.
+    """
+    name = str(platform).strip().lower()
+    profile = content_profile(name)
+    if profile is None:
+        return None
+    from xpst.media.specs import PLATFORM_SPECS
+
+    spec = PLATFORM_SPECS.get(name)
+    implemented = sorted(item.value for item in profile.implemented)
+    envelope: dict[str, Any] = {
+        "platform": name,
+        "display_name": profile.display_name,
+        "publishing": profile.is_publishing,
+        "content_types": {
+            "implemented": implemented,
+            "declared": sorted(item.value for item in profile.declared),
+        },
+        "caption": {"max_characters": text_limit(name)},
+        "media_transport": profile.media_transport.value,
+        "media_transport_requirement": profile.media_transport_requirement or None,
+        "video": None,
+        "image": None,
+    }
+    if spec is not None:
+        if ContentType.VIDEO.value in implemented:
+            video_bytes: int | None = (
+                spec.file_size_cap_mb * 1024 * 1024 if spec.file_size_cap_mb is not None else None
+            )
+            envelope["video"] = {
+                "max_duration_seconds": spec.duration_cap_s,
+                "containers": list(spec.containers),
+                "video_codec": spec.video_codec,
+                "pix_fmt": spec.pix_fmt,
+                "max_bytes": video_bytes,
+                "max_long_edge": spec.long_edge,
+                "fps_cap": spec.fps_cap,
+                "audio_codec": spec.audio_codec,
+            }
+        if ContentType.IMAGE.value in implemented:
+            image_mb = spec.image_size_cap_mb()
+            image_bytes: int | None = image_mb * 1024 * 1024 if image_mb is not None else None
+            envelope["image"] = {
+                "containers": list(spec.image_containers),
+                "max_bytes": image_bytes,
+                "aspect_min": spec.image_aspect_min,
+                "aspect_max": spec.image_aspect_max,
+            }
+    return envelope
+
+
 def capability_document() -> dict[str, Any]:
     """THE capability document, from one source, for every surface.
 
@@ -769,10 +858,19 @@ def capability_document() -> dict[str, Any]:
     """
     matrix = capability_matrix()
     return {
-        "contract_version": 1,
+        "contract_version": 2,
         "content_types": matrix["content_types"],
         "publish_destinations": matrix["publish_destinations"],
         "platforms": matrix["platforms"],
+        # The format→destination route (R4) and the per-destination envelope
+        # (duration/aspect/codec/bytes/caption) are emitted here so the CLI, the
+        # MCP tool, the UI and the route resolver read the same numbers. The
+        # resolver imports this module; nothing re-declares an envelope.
+        "format_routes": format_routes(),
+        "envelopes": {
+            platform: destination_envelope(platform)
+            for platform in DESTINATION_CONTENT_PROFILES
+        },
         # The publishing path each content type takes once its media requirement
         # is met. A type that is absent here has no path yet, which is why it is
         # absent from every destination's ``implemented`` list too.

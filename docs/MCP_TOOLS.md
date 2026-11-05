@@ -65,7 +65,7 @@ Read-only metadata tools (`xpst_capabilities`, `xpst_readiness`, `xpst_providers
 | `xpst_byo_app` | Bring-your-own developer app setup: report (masked) which platforms have a lo… | No | — |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… | No | — |
 | `xpst_capabilities` | Return the canonical role-aware provider catalog AND the content contract wit… | No | — |
-| `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets… | No | — |
+| `xpst_preflight` | Resolve the per-destination plan BEFORE anything is published: for each desti… | No | — |
 | `xpst_readiness` | Return local setup readiness and actionable blockers without starting the pos… | No | — |
 | `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or acce… | No | — |
 | `xpst_providers` | List supported content sources and posting destinations with capabilities | No | — |

@@ -633,7 +633,11 @@ async def test_mcp_post_passes_the_overrides_to_the_engine(tmp_path: Path, monke
 
     monkeypatch.setenv("XPST_MCP_ALLOW_MUTATIONS", "1")
     engine = _mcp_engine(tmp_path)
+    # The plan is built from config: mark X connected so it is attempted.
+    engine.config.x.enabled = True
     engine._platforms["x"] = MagicMock()
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"\x00" * 64)
     from xpst.engine import CrossPostResult
 
     engine.post_manual.return_value = CrossPostResult(
@@ -646,7 +650,7 @@ async def test_mcp_post_passes_the_overrides_to_the_engine(tmp_path: Path, monke
     result = await _handle_post(
         engine,
         {
-            "video_path": str(tmp_path / "clip.mp4"),
+            "video_path": str(clip),
             "caption": "shared caption",
             "platforms": ["x"],
             "overrides": {"x": "x-only"},

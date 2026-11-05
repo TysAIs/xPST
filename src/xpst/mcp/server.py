@@ -395,7 +395,18 @@ TOOLS: list[Tool] = [
                 "platforms": {
                     "type": "array",
                     "items": {"type": "string", "enum": _PLATFORM_ENUM},
-                    "description": "Target platforms (default: all configured)",
+                    "description": (
+                        "Explicit target platforms. Omit (and omit `all`) to use the "
+                        "format route ∩ connected accounts — never an implied 'all'."
+                    ),
+                },
+                "all": {
+                    "type": "boolean",
+                    "description": (
+                        "Explicitly post to every connected account that accepts this "
+                        "format. Never implied."
+                    ),
+                    "default": False,
                 },
                 "carousel_paths": {
                     "type": "array",
@@ -870,15 +881,35 @@ TOOLS: list[Tool] = [
     Tool(
         name="xpst_preflight",
         description=(
-            "Run the canonical side-effect-free post preflight for local media and targets "
-            "(media, caption, per-destination caption, destination readiness, content type); "
-            "never uploads and never touches the network"
+            "Resolve the per-destination plan BEFORE anything is published: for each "
+            "destination, whether it will publish (`posted`), is not connected "
+            "(`skipped_unconnected`, with the connect command), or cannot take this "
+            "format (`unsupported_format`, with the envelope). Targets an explicit "
+            "`platforms` list, or `all: true` for every connected account that accepts "
+            "the format, or the format route ∩ connected accounts. Never uploads and "
+            "never touches the network"
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "media_path": {"type": "string"},
+                "media_paths": {"type": "array", "items": {"type": "string"}},
                 "platforms": {"type": "array", "items": {"type": "string"}},
+                "all": {
+                    "type": "boolean",
+                    "description": (
+                        "Explicitly target every connected account that accepts this "
+                        "format. Never implied: omitting it uses the format route ∩ "
+                        "connected accounts."
+                    ),
+                    "default": False,
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["auto", *[item.value for item in CONTENT_TYPES]],
+                    "description": "Format to route; `auto` classifies the media.",
+                    "default": "auto",
+                },
                 "caption": {"type": "string", "default": ""},
                 "overrides": {
                     "type": "object",
@@ -907,7 +938,7 @@ TOOLS: list[Tool] = [
                     ),
                 },
             },
-            "required": ["platforms"],
+            "required": [],
             "additionalProperties": False,
         },
     ),
@@ -1553,15 +1584,18 @@ def _engine_can_publish(engine: Any, targets: list[str]) -> bool:
     return any(name in uploaders for name in targets)
 
 
-def _no_destinations_result() -> CallToolResult:
+def _no_destinations_result(error: dict[str, Any] | None = None) -> CallToolResult:
     """The canonical zero-destination refusal shared by every surface.
 
-    Same code and message as the CLI (``NO_DESTINATIONS`` / "Choose at least
-    one destination platform.") so an agent, a script and the desktop UI all
-    branch on one value instead of parsing three different sentences.
+    Same code and message as the CLI so an agent, a script and the desktop UI
+    all branch on one value instead of parsing three different sentences. When
+    the route resolver has a more specific answer (``NO_CONNECTED_ACCOUNTS``
+    names the connect command; ``NO_ROUTE_FOR_FORMAT`` names the format), that
+    object is returned instead — it is still the one canonical refusal.
     """
     from xpst.services.post_preflight import NO_DESTINATIONS_CODE, NO_DESTINATIONS_MESSAGE
 
+    payload_error = dict(error or {"code": NO_DESTINATIONS_CODE, "message": NO_DESTINATIONS_MESSAGE})
     return CallToolResult(
         isError=True,
         content=[TextContent(
@@ -1569,8 +1603,8 @@ def _no_destinations_result() -> CallToolResult:
             text=json.dumps({
                 "ok": False,
                 "status": "refused",
-                "error": {"code": NO_DESTINATIONS_CODE, "message": NO_DESTINATIONS_MESSAGE},
-                "blockers": [NO_DESTINATIONS_MESSAGE],
+                "error": payload_error,
+                "blockers": [payload_error["message"]],
             }, indent=2),
         )],
     )
@@ -1589,7 +1623,13 @@ async def _handle_run(engine: CrossPostEngine, args: dict[str, Any]) -> CallTool
     # left alone (the caller owns that stand-in).
     uploaders = _engine_uploaders(engine)
     if uploaders is not None and not uploaders:
-        return _no_destinations_result()
+        # No uploader at all: report the route resolver's own error (it names
+        # the connect command) instead of a generic "choose a destination",
+        # which `run` has no argument for.
+        from xpst.services.route_plan import resolve_targets
+
+        resolution = resolve_targets(engine.config, None, content_type="video")
+        return _no_destinations_result(resolution.errors[0] if resolution.errors else None)
 
     if dry_run:
         actual_max = 20 if catch_up else max_posts
@@ -1708,8 +1748,44 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
         }
         return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
 
-    targets = list(args.get("platforms") or list(engine._platforms.keys()))
+    from pathlib import Path
+
+    from xpst.services.route_plan import (
+        build_route_plan,
+        classify_upload_result,
+        detect_content_type,
+        merge_plan_destinations,
+        outcome_state,
+        resolve_targets,
+    )
+
     media_paths = (([video_path] if video_path else []) + carousel_paths)
+    # R3: an explicit platform list wins; `--all` (MCP "all": true) is explicit;
+    # otherwise the format route ∩ connected accounts. Never "all enabled".
+    resolution = resolve_targets(
+        engine.config,
+        args.get("platforms") or None,
+        all_connected=bool(args.get("all", False)),
+        content_type=detect_content_type(
+            [str(item) for item in media_paths], content_type=content_type
+        ),
+    )
+    resolution_error = dict(resolution.errors[0]) if resolution.errors else None
+    if not resolution.targets and not dry_run:
+        error = resolution_error or {
+            "code": "NO_DESTINATIONS",
+            "message": "Choose at least one destination platform.",
+        }
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "error": error,
+                "blockers": [error["message"]],
+                "network_calls": False,
+            }, indent=2))],
+        )
+    targets = list(resolution.targets)
 
     # Per-destination copy, parsed by the shared contract parser so MCP accepts
     # exactly the shape the HTTP API and the CLI accept. Parsed BEFORE the
@@ -1743,6 +1819,8 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
 
         plan_payload: dict[str, Any] | None = None
         blockers: list[str] = list(verdict["blockers"])
+        if resolution_error is not None:
+            blockers.insert(0, resolution_error["message"])
         try:
             plan_payload = PostPreflightService(engine.config).plan(
                 PostPlanRequest(
@@ -1758,6 +1836,24 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
             blockers.extend(issue["message"] for issue in plan_payload["hard_blockers"])
         except Exception as exc:  # noqa: BLE001 - report truthfully instead of failing the tool
             blockers.append(f"Preflight could not run: {str(exc)[:200]}")
+        if resolution_error is not None and plan_payload is not None:
+            # One canonical refusal: the resolver's own error wins over the
+            # generic empty-target blocker, on every surface.
+            plan_payload["error"] = resolution_error
+
+        # The resolved plan (R4), same object the live path consumes.
+        route_payload = build_route_plan(
+            engine.config,
+            media_paths=[str(item) for item in media_paths],
+            caption=caption,
+            per_platform_captions=overrides,
+            content_type=detect_content_type(
+                [str(item) for item in media_paths], content_type=content_type
+            ),
+            requested=args.get("platforms") or None,
+            all_connected=bool(args.get("all", False)),
+            include_transform=False,
+        ).to_dict()
 
         return CallToolResult(
             content=[TextContent(
@@ -1781,12 +1877,13 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                     "ready": not blockers and bool(plan_payload and plan_payload["ready"]),
                     "blockers": blockers,
                     "plan": plan_payload,
+                    "route_plan": route_payload,
                     # Refusal shape parity with the non-dry path and the other
                     # surfaces: the first hard blocker as the top-level
                     # ``{code, message}`` error object (the plan also carries it
                     # under plan.error; this makes the dry-run envelope match
                     # refusal_envelope instead of burying the code one level in).
-                    "error": (plan_payload or {}).get("error") if blockers else None,
+                    "error": resolution_error or ((plan_payload or {}).get("error") if blockers else None),
                     "network_calls": False,
                 }, indent=2),
             )],
@@ -1809,22 +1906,35 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
             content=[TextContent(type="text", text=json.dumps(envelope, indent=2, default=str))],
         )
 
-    from pathlib import Path
-
-    from xpst.services.post_preflight import resolve_destinations
-
-    # Same canonical guard as the CLI: a manual post with no destination that
-    # has a live uploader is refused instead of reporting an empty success.
-    targets = resolve_destinations(engine.config, args.get("platforms"))
-    if not _engine_can_publish(engine, targets):
+    # Same canonical guard as the CLI: a request that resolved to no destination
+    # at all is refused instead of reporting an empty success. A resolved but
+    # unconnected destination is NOT refused — the engine records
+    # ``skipped_unconnected`` for it (R3).
+    if not targets:
         return _no_destinations_result()
+
+    # The plan this run consumes (R4): only destinations it says will publish
+    # are attempted; the rest are reported with their canonical state.
+    execution_plan = build_route_plan(
+        engine.config,
+        media_paths=[str(item) for item in media_paths],
+        caption=caption,
+        per_platform_captions=overrides,
+        content_type=detect_content_type(
+            [str(item) for item in media_paths], content_type=content_type
+        ),
+        requested=args.get("platforms") or None,
+        all_connected=bool(args.get("all", False)),
+        include_transform=False,
+    )
+    posting_targets = list(execution_plan.posting_destinations)
 
     # G11 at the manual surface (D2), same rule as the CLI: an agent's media
     # post fired outside the anti-bot window is QUEUED (durable, visible,
     # cancellable via xpst_schedule_cancel) and reported as deferred — not a
     # failure, and never a silent drop. "force": true bypasses the window;
     # dry_run reports the verdict without mutating the store.
-    if not args.get("force", False) and not args.get("dry_run", False):
+    if not args.get("force", False) and not args.get("dry_run", False) and posting_targets:
         from xpst.services.manual_defer import defer_manual_post_to_schedule
 
         deferral = defer_manual_post_to_schedule(engine.config, request, verdict["route"])
@@ -1842,7 +1952,13 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
                 }, indent=2, default=str),
             )])
 
-    if verdict["route"] == PUBLISH_ROUTE_TEXT:
+    if not posting_targets:
+        # Every destination is unconnected or cannot take this format: nothing
+        # is attempted and nothing failed (R3). The plan rows are reported below.
+        from xpst.engine import CrossPostResult
+
+        result = CrossPostResult(video_id=f"{verdict['effective_content_type']}-plan", caption=caption)
+    elif verdict["route"] == PUBLISH_ROUTE_TEXT:
         # The text route carries one text per destination, so the
         # per-destination copy is honoured (and validated) here too.
         per_destination = {
@@ -1852,7 +1968,7 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
         }
         result = await engine.post_text(
             caption,
-            args.get("platforms"),
+            posting_targets,
             per_destination=per_destination or None,
         )
     elif verdict["route"] == PUBLISH_ROUTE_IMAGE:
@@ -1860,14 +1976,14 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
         # This handler used to branch on media count and post every single
         # file through the VIDEO path, the same misroute as the CLI.
         result = await engine.post_manual_image(
-            Path(media_paths[0]), caption, args.get("platforms"),
+            Path(media_paths[0]), caption, posting_targets,
             force_now=bool(args.get("force", False)),
         )
     elif verdict["route"] == PUBLISH_ROUTE_CAROUSEL:
         result = await engine.post_manual_carousel(
             media_paths=[Path(p) for p in media_paths],
             caption=caption,
-            platforms=args.get("platforms"),
+            platforms=posting_targets,
             per_platform_captions=overrides,
             force_now=bool(args.get("force", False)),
         )
@@ -1875,11 +1991,24 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
         result = await engine.post_manual(
             video_path=Path(video_path),
             caption=caption,
-            platforms=args.get("platforms"),
+            platforms=posting_targets,
             per_platform_captions=overrides,
             force_now=bool(args.get("force", False)),
         )
+    merge_plan_destinations(result, execution_plan)
     payload = _serialize_result(result)
+    # Canonical destination states (R3): requested-but-unconnected is a visible
+    # skip, never a failure; unsupported format names the capability.
+    states = {
+        platform: classify_upload_result(platform, upload)
+        for platform, upload in result.results.items()
+    }
+    payload["destinations"] = [states[platform] for platform in targets if platform in states]
+    payload["skipped_unconnected"] = [
+        platform for platform, state in states.items() if state["state"] == "skipped_unconnected"
+    ]
+    payload["status"] = outcome_state(states)
+    payload["target_source"] = resolution.source
     # Report the copy each destination actually received, so an override is
     # visible in the outcome rather than only in the request.
     sent = getattr(result, "captions", None)
@@ -2069,15 +2198,48 @@ async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) ->
             }))],
         )
     manager = ScheduleManager(config.config_dir)
+    # No implied destination set in the queue (R3 rule 3): resolve the route at
+    # add time and persist exactly what was shown, so a later connect cannot
+    # silently join this entry.
+    from xpst.services.route_plan import build_route_plan, detect_content_type
+
+    entry_content_type = None if video_path else "text"
+    route = build_route_plan(
+        config,
+        media_paths=[str(video_path)] if video_path else [],
+        caption=arguments["caption"],
+        per_platform_captions=overrides,
+        content_type=entry_content_type
+        or (detect_content_type([str(video_path)]) if video_path else "text"),
+        requested=arguments.get("platforms"),
+        # A future publish: a credential missing now may be connected before the
+        # entry fires; the format/envelope verdict still applies.
+        include_readiness=False,
+        include_transform=False,
+    )
+    if not route.posting_destinations:
+        error = route.actionable_error or {
+            "code": "NO_DESTINATIONS",
+            "message": "No destination would publish this entry.",
+        }
+        return CallToolResult(
+            isError=True,
+            content=[TextContent(type="text", text=json.dumps({
+                "ok": False,
+                "error": error,
+                "route_plan": route.to_dict(),
+            }, default=str))],
+        )
+    targets = list(route.posting_destinations)
     try:
         entry = manager.add(
             video_path=str(video_path) if video_path else "",
             caption=arguments["caption"],
             scheduled_time=when,
-            platforms=arguments.get("platforms"),
+            platforms=targets,
             repeat_rule=arguments.get("repeat_rule"),
             per_platform_captions=overrides,
-            content_type=None if video_path else "text",
+            content_type=entry_content_type,
         )
     except ValueError as exc:
         # Oversized/unusable caption payloads: a typed error, not a traceback.
@@ -2086,7 +2248,9 @@ async def _handle_schedule_add(config: XPSTConfig, arguments: dict[str, Any]) ->
             content=[TextContent(type="text", text=json.dumps({"ok": False, "error": str(exc)}))],
         )
     return CallToolResult(
-        content=[TextContent(type="text", text=json.dumps({"scheduled": entry}, default=str))],
+        content=[TextContent(type="text", text=json.dumps(
+            {"scheduled": entry, "route_plan": route.to_dict()}, default=str
+        ))],
     )
 
 
@@ -2595,8 +2759,35 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
     """Run the same side-effect-free preflight the CLI and dashboard use."""
     from xpst.content import ContentContractError, parse_destination_texts
     from xpst.services.post_preflight import PostPlanRequest, PostPreflightService, plan_content_type
+    from xpst.services.route_plan import (
+        build_route_plan,
+        detect_content_type,
+        resolve_targets,
+    )
 
-    platforms = [str(item).lower() for item in (arguments.get("platforms") or []) if str(item).strip()]
+    # R3: no implied set. An explicit list wins; "all": true is the explicit
+    # "every connected account that accepts this format"; otherwise the format
+    # route ∩ connected accounts. A request with nothing connected gets ONE
+    # actionable error naming `xpst connect`.
+    raw_media = arguments.get("media_paths")
+    if raw_media is None:
+        single = str(arguments.get("media_path") or "").strip()
+        raw_media = [single] if single else []
+    if isinstance(raw_media, str):
+        raw_media = [raw_media]
+    media_items = [str(item) for item in raw_media if str(item).strip()]
+    detected = detect_content_type(
+        media_items,
+        content_type=str(arguments.get("format") or arguments.get("content_type") or "auto"),
+    )
+    resolution = resolve_targets(
+        config,
+        arguments.get("platforms") or None,
+        all_connected=bool(arguments.get("all", False)),
+        content_type=detected,
+    )
+    platforms = list(resolution.targets)
+    resolution_error = dict(resolution.errors[0]) if resolution.errors else None
 
     # The zero-destination wording and code are the canonical ones (the plan
     # carries them): an empty target list must reach the service so MCP reports
@@ -2639,12 +2830,26 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
     # carries them), so the MCP answer, the dashboard answer and the CLI
     # refusal are the same error.
     blockers = [issue["message"] for issue in plan["hard_blockers"]] + verdict["blockers"]
+    if resolution_error is not None:
+        blockers = [resolution_error["message"]] + blockers
+    # The resolved route plan (R4): per destination state, envelope and reason,
+    # the same object `xpst preflight`, the CLI dry run and the HTTP API return.
+    route_payload = build_route_plan(
+        config,
+        media_paths=media_items,
+        caption=request.caption,
+        per_platform_captions=overrides,
+        content_type=detected,
+        requested=arguments.get("platforms") or None,
+        all_connected=bool(arguments.get("all", False)),
+        include_transform=False,
+    ).to_dict()
     payload = {
         "ok": not blockers,
-        "ready": not blockers,
+        "ready": not blockers and bool(route_payload["posting_destinations"]),
         "blockers": blockers,
         "warnings": [issue["message"] for issue in plan["warnings"]],
-        "error": plan["error"],
+        "error": resolution_error or plan["error"],
         "caption": request.caption,
         "captions": {platform: overrides.get(platform, request.caption) for platform in platforms},
         "content_type": verdict["content_type"] or verdict["effective_content_type"],
@@ -2652,6 +2857,8 @@ async def _handle_preflight(config: XPSTConfig, arguments: dict[str, Any]) -> Ca
         "route": verdict["route"],
         "content": verdict,
         "plan": plan,
+        "route_plan": route_payload,
+        "target_source": resolution.source,
         "network_calls": False,
     }
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, indent=2))])
