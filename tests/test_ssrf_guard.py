@@ -23,13 +23,13 @@ class TestIsBlockedIp:
         [
             "127.0.0.1",
             "127.1.2.3",
-            "10.0.0.5",
-            "172.16.4.4",
-            "192.168.1.1",
+            "10.0.0.5",  # public-safety: allow-private-ip
+            "172.16.4.4",  # public-safety: allow-private-ip
+            "192.168.1.1",  # public-safety: allow-private-ip
             "169.254.169.254",  # cloud metadata (IMDS)
             "169.254.1.1",  # link-local
             "0.0.0.0",
-            "100.64.0.1",  # CGNAT
+            "100.64.0.1",  # CGNAT -- public-safety: allow-private-ip
             "224.0.0.1",  # multicast
             "240.0.0.1",  # reserved
             "::1",
@@ -38,7 +38,7 @@ class TestIsBlockedIp:
             "fd00:ec2::254",
             "::ffff:127.0.0.1",  # IPv4-mapped loopback
             "::ffff:169.254.169.254",
-            "::ffff:10.0.0.1",
+            "::ffff:10.0.0.1",  # public-safety: allow-private-ip
             "not-an-ip",
         ],
     )
@@ -93,8 +93,8 @@ class TestAddressBlocking:
             "http://localhost:8080/state",
             "http://[::1]:8080/state",
             "http://169.254.169.254/latest/meta-data/",
-            "http://10.0.0.1/admin",
-            "http://192.168.0.1/",
+            "http://10.0.0.1/admin",  # public-safety: allow-private-ip
+            "http://192.168.0.1/",  # public-safety: allow-private-ip
             "http://[fe80::1]/",
             "http://0.0.0.0/",
             "http://100.100.100.200/latest/meta-data/",
@@ -120,7 +120,7 @@ class TestAddressBlocking:
     def test_hostname_resolving_to_private_rejected(self, monkeypatch):
         monkeypatch.setattr(
             "xpst.utils.net_guard.socket.getaddrinfo",
-            lambda *a, **k: [(2, 1, 6, "", ("192.168.1.50", 0))],
+            lambda *a, **k: [(2, 1, 6, "", ("192.168.1.50", 0))],  # public-safety: allow-private-ip
         )
         with pytest.raises(BlockedURLError):
             validate_public_url("https://evil.test/x")

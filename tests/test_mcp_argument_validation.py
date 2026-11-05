@@ -103,8 +103,8 @@ class TestURLArguments:
             "http://127.0.0.1:8080/state",
             "http://localhost:8080/api/summary",
             "http://[::1]:8080/state",
-            "http://10.0.0.1/hook",
-            "http://192.168.1.1/hook",
+            "http://10.0.0.1/hook",  # public-safety: allow-private-ip
+            "http://192.168.1.1/hook",  # public-safety: allow-private-ip
             "file:///etc/passwd",
             "gopher://example.test/x",
         ],
