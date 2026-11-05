@@ -636,11 +636,11 @@ def format_seconds(seconds: float | int | None) -> str:
 
 
 def _compact_seconds(seconds: float | int | None) -> str:
-    """Compact duration for prose (``140 s`` / ``12 h`` / ``2.3 min``)."""
+    """Compact duration for prose: exact seconds under ten minutes, then h/min."""
     if seconds is None:
         return "unknown"
     value = int(round(float(seconds)))
-    if value < 60:
+    if value < 600:
         return f"{value} s"
     if value >= 3600:
         hours = value / 3600
@@ -714,11 +714,15 @@ class VideoEnvelope:
         return coerce_video_mode(mode) in self.modes
 
     def describe(self, mode: VideoMode | str | None = None) -> str:
-        """One-sentence envelope, with the numbers, for refusal messages."""
-        cap = self.duration_cap(mode)
-        parts = [f"max duration {_compact_seconds(cap)}"]
-        if self.shorts_max_duration_seconds and coerce_video_mode(mode) is not VideoMode.SHORTS:
-            parts.append(f"(short-form mode {_compact_seconds(self.shorts_max_duration_seconds)})")
+        """One-sentence envelope, with the numbers, for refusal messages.
+
+        The absolute ceiling is always stated, and the short-form ceiling is
+        named separately when the destination has one — so a Shorts refusal
+        cannot read as if YouTube's overall limit were one minute.
+        """
+        parts = [f"max duration {_compact_seconds(self.max_duration_seconds)}"]
+        if self.shorts_max_duration_seconds is not None:
+            parts.append(f"short-form mode {_compact_seconds(self.shorts_max_duration_seconds)}")
         parts.append(f"max size {format_bytes(self.max_bytes)}")
         if self.aspect_min is not None and self.aspect_max is not None:
             parts.append(f"aspect {self.aspect_min:.2f}-{self.aspect_max:.2f} (width/height)")

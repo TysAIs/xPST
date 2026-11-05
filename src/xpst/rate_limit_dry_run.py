@@ -727,7 +727,11 @@ def build_uploader(transport: Any, tmp_path: Any, patcher: Any):
         uploader._page_token = "test-token"
         return uploader, None
     if transport.platform == "youtube":
-        uploader = YouTubeUploader(config)
+        # The matrix exists to exercise throttling, not format routing, and its
+        # fixture is not a probeable video: state the format explicitly so the
+        # adapter's mode derivation cannot refuse the fixture before the
+        # scripted transport is asked anything.
+        uploader = YouTubeUploader(config, mode="shorts")
         uploader._service = transport
         return uploader, None
     if transport.platform == "tiktok":
@@ -1567,7 +1571,12 @@ def _silence_xpst_logging() -> Callable[[], None]:
 
     silence = logging.CRITICAL + 1
     saved: list[tuple[logging.Logger, int]] = []
-    for name in list(logging.Logger.manager.loggerDict) + ["xpst"]:
+    # Deduplicate: when "xpst" is already in loggerDict, appending it again saved
+    # it twice and restore() then ended on the silenced level — leaving the whole
+    # xpst tree at CRITICAL+1 for the rest of the process (which silently broke
+    # caplog assertions in later tests).
+    names = list(dict.fromkeys([*logging.Logger.manager.loggerDict, "xpst"]))
+    for name in names:
         if name == "xpst" or name.startswith("xpst."):
             logger = logging.getLogger(name)
             if isinstance(logger, logging.Logger):
