@@ -10,6 +10,9 @@ plans that follow from it:
 - [PROPOSAL-RUST-REBUILD.md](PROPOSAL-RUST-REBUILD.md) — how the engine becomes Rust.
 - [PROPOSAL-SWE-BOT-PROFILE.md](PROPOSAL-SWE-BOT-PROFILE.md) — how the agent that
   works on this repo stops being an "xpst bot" and becomes a general engineering bot.
+- [PROPOSAL-PRODUCT-RESET.md](PROPOSAL-PRODUCT-RESET.md) — product shape: distribution
+  (binary / hosted / hybrid), opt-in platforms, format-aware routing, Reddit, live-stream
+  phase 2. **Proposal only**; its D-9…D-13 are not binding until accepted here.
 
 ---
 
