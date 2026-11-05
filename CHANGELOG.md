@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The public-safety gate now catches LAN/tailnet IP addresses.** The
+  scanner gained a `private_ip` category covering RFC1918 (`10/8`,
+  `172.16/12`, `192.168/16`) and CGNAT/tailnet (`100.64.0.0/10`) host
+  addresses. It gates the tree and built-artifact scans like every other
+  category and is report-only in the history scan; loopback, `0.0.0.0`, CIDR
+  network literals and public addresses (including the Alibaba metadata
+  endpoint that sits inside the CGNAT block) are not findings. Fixtures whose
+  subject really is a private address opt out per line with
+  `# public-safety: allow-private-ip`, so the exemption is reviewable instead
+  of exempting a whole directory.
 - **A counted dry run is now the exit condition for the rate-limit pause.**
   `python -m xpst.rate_limit_dry_run` drives the real upload pipeline
   (`UploadService` → `retry_operation` → the real adapters → `CooldownStore`)
