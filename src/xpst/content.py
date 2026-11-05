@@ -315,6 +315,25 @@ class MediaTransport(str, Enum):
 MEDIA_TRANSPORT_ERROR_CODE = "content_type.media_transport"
 
 
+class IntegrationStatus(str, Enum):
+    """How far a destination's integration can be trusted today.
+
+    ``READY``
+        Publishing is implemented and has been exercised against the provider.
+    ``INTEGRATION_UNCERTAIN``
+        Code exists, but access is gated by the provider (a partner API with no
+        self-serve developer console) and no live upload has succeeded yet, so
+        the capability is advertised as uncertain, never as ready.
+    ``MANUAL_HANDOFF``
+        The only reliable path today is exporting the rendition and handing the
+        human a link; nothing is uploaded on their behalf.
+    """
+
+    READY = "ready"
+    INTEGRATION_UNCERTAIN = "integration_uncertain"
+    MANUAL_HANDOFF = "manual_handoff"
+
+
 @dataclass(frozen=True)
 class ContentSupport:
     """One destination's support state for one content type."""
@@ -363,6 +382,13 @@ class DestinationContentProfile:
     #: validation, uploader). Kept stable so a client can branch on it without
     #: parsing prose.
     media_transport_error_code: str = MEDIA_TRANSPORT_ERROR_CODE
+    #: The declared video format envelope (duration/size/aspect/codec), from
+    #: :data:`VIDEO_ENVELOPES`. ``None`` for a destination that publishes no
+    #: video, so "no numbers" and "no video" stay distinguishable.
+    video_envelope: VideoEnvelope | None = None
+    #: How far this destination's integration can be trusted today. Anything
+    #: other than ``READY`` is stated to the user, never smoothed over.
+    integration: IntegrationStatus = IntegrationStatus.READY
 
     def _types(self, *, implemented: bool) -> frozenset[ContentType]:
         return frozenset(item.content_type for item in self.support if (item.implemented if implemented else item.declared))
@@ -427,6 +453,8 @@ class DestinationContentProfile:
             "accepts_local_media": self.accepts_local_media,
             "media_transport_requirement": self.media_transport_requirement,
             "media_transport_error_code": None if self.accepts_local_media else self.media_transport_error_code,
+            "video_envelope": self.video_envelope.to_dict() if self.video_envelope else None,
+            "integration": self.integration.value,
             "content": [item.to_dict() for item in self.support],
             "note": self.note,
         }
@@ -497,6 +525,7 @@ def _publish_profile(
     media_transport: MediaTransport = MediaTransport.LOCAL_UPLOAD,
     media_transport_requirement: str = "",
     media_transport_error_code: str = MEDIA_TRANSPORT_ERROR_CODE,
+    integration: IntegrationStatus = IntegrationStatus.READY,
 ) -> DestinationContentProfile:
     return DestinationContentProfile(
         platform=platform,
@@ -508,6 +537,8 @@ def _publish_profile(
         media_transport=media_transport,
         media_transport_requirement=media_transport_requirement,
         media_transport_error_code=media_transport_error_code,
+        video_envelope=VIDEO_ENVELOPES.get(platform),
+        integration=integration,
     )
 
 
@@ -527,17 +558,476 @@ THREADS_PUBLIC_URL_REQUIREMENT = (
     "cannot deliver a media URL either yet — post this content from the Threads app instead."
 )
 
+# ── Video format envelopes: ONE registry, consumed by every surface ────────
+#
+# A destination's *content* capability ("can it publish video?") and its
+# *format* envelope ("how much video?") used to live in three unrelated places:
+# the uploader's ``manifest.extra["max_video_duration_seconds"]`` (the upload
+# guard), ``xpst.media.specs.PLATFORM_SPECS[...].duration_cap_s`` (the media
+# preflight) and prose in the notes. Nothing kept them equal, so changing one
+# number left the other two lying — exactly how "YouTube is always a Short"
+# survived in three files at once.
+#
+# This section is the single home for the envelope. Adapters, the media
+# preflight and the capability document all read it here:
+#
+# * ``video_envelope(platform)`` — the declared envelope (numbers + provenance).
+# * ``video_duration_limit(platform, mode=...)`` — the number a sender enforces.
+# * ``video_envelope_violation(...)`` — the ONE refusal, carrying the envelope
+#   and the measured value, so over-envelope input is never truncated silently.
+# * ``classify_video_mode(...)`` — the stated short/long threshold.
+#
+# ``source`` records where each number comes from. A number nobody verified is
+# ``None`` (nothing is checked) rather than an invented ceiling.
+
+#: Product classification thresholds (explicit by design — a routing decision,
+#: not a hidden heuristic). ≤ 60 s and square-or-taller is short-form;
+#: ≥ 180 s or wider-than-tall is long-form; anything between is ambiguous and
+#: must be asked about, never guessed.
+SHORTS_CLASSIFICATION_MAX_SECONDS = 60
+LONG_FORM_CLASSIFICATION_MIN_SECONDS = 180
+
+
+class VideoMode(str, Enum):
+    """The publishing format a video is routed as."""
+
+    SHORTS = "shorts"
+    LONG = "long"
+
+
+def coerce_video_mode(value: VideoMode | str | None) -> VideoMode | None:
+    """Return the canonical :class:`VideoMode` (``None`` stays ``None``)."""
+    if value is None or isinstance(value, VideoMode):
+        return value
+    key = str(value).strip().lower()
+    for mode in VideoMode:
+        if key == mode.value:
+            return mode
+    raise ContentContractError(f"Unknown video mode {value!r}: choose one of {', '.join(m.value for m in VideoMode)}.")
+
+
+#: Stable codes an envelope refusal reports, so a client branches on the code
+#: instead of parsing prose.
+VIDEO_ENVELOPE_DURATION_CODE = "video_envelope.duration"
+VIDEO_ENVELOPE_SIZE_CODE = "video_envelope.size"
+VIDEO_ENVELOPE_ASPECT_CODE = "video_envelope.aspect"
+VIDEO_ENVELOPE_MODE_CODE = "video_envelope.mode"
+
+
+def format_seconds(seconds: float | int | None) -> str:
+    """Exact duration text for a refusal: the number in seconds plus a human form.
+
+    A refusal must carry the number a user can act on, so 140 s is never
+    rounded to "2.3 min" (``140 s (2 min 20 s)``), while an unverifiable ceiling
+    stays ``unknown`` instead of becoming an invented number.
+    """
+    if seconds is None:
+        return "unknown"
+    value = int(round(float(seconds)))
+    if value < 60:
+        return f"{value} s"
+    if value >= 3600:
+        hours, remainder = divmod(value, 3600)
+        human = f"{hours} h" + (f" {remainder // 60} min" if remainder else "")
+    else:
+        minutes, remainder = divmod(value, 60)
+        human = f"{minutes} min" + (f" {remainder} s" if remainder else "")
+    return f"{value} s ({human})"
+
+
+def _compact_seconds(seconds: float | int | None) -> str:
+    """Compact duration for prose (``140 s`` / ``12 h`` / ``2.3 min``)."""
+    if seconds is None:
+        return "unknown"
+    value = int(round(float(seconds)))
+    if value < 60:
+        return f"{value} s"
+    if value >= 3600:
+        hours = value / 3600
+        return f"{hours:g} h" if hours == int(hours) else f"{hours:.1f} h"
+    minutes = value / 60
+    return f"{minutes:g} min" if minutes == int(minutes) else f"{minutes:.1f} min"
+
+
+def format_bytes(size: int | None) -> str:
+    """Human byte ceiling (``256 GB``), binary units; ``unknown`` if None."""
+    if size is None:
+        return "unknown"
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            return f"{value:g} {unit}" if unit == "B" else f"{value:.0f} {unit}"
+        value /= 1024
+    return f"{value:.0f} TB"
+
+
+@dataclass(frozen=True)
+class VideoEnvelope:
+    """One destination's declared video format envelope.
+
+    Every field is the number a sender enforces, not a suggestion: see
+    :func:`video_envelope_violation` for the refusal built from it.
+    """
+
+    platform: str
+    display_name: str
+    #: Absolute ceiling for any video this destination accepts (``None`` =
+    #: nothing verified, so nothing is refused on duration).
+    max_duration_seconds: int | None = None
+    #: Ceiling when the video is published in its short-form mode (Shorts,
+    #: Reels, ...). ``None`` for a destination with no separate short mode.
+    shorts_max_duration_seconds: int | None = None
+    max_bytes: int | None = None
+    containers: tuple[str, ...] = ()
+    video_codec: str = ""
+    #: Allowed width/height bounds (``None`` = any aspect ratio accepted).
+    aspect_min: float | None = None
+    aspect_max: float | None = None
+    #: Maximum width/height ratio for the short-form mode (``1.0`` = square or
+    #: taller than wide, which is what YouTube treats as a Short). ``None`` when
+    #: the destination has no short-form aspect rule.
+    shorts_max_aspect_ratio: float | None = None
+    #: Modes this destination can publish. ``LONG`` only when there is a real
+    #: long-form path — not when a short path merely "also works".
+    modes: tuple[VideoMode, ...] = (VideoMode.SHORTS,)
+    long_form: bool = False
+    #: Where the numbers come from (provider docs / measured behaviour).
+    source: str = ""
+    note: str = ""
+
+    def duration_cap(self, mode: VideoMode | str | None = None) -> int | None:
+        """The duration ceiling this destination enforces for ``mode``."""
+        resolved = coerce_video_mode(mode)
+        if resolved is VideoMode.SHORTS and self.shorts_max_duration_seconds:
+            return self.shorts_max_duration_seconds
+        return self.max_duration_seconds
+
+    def accepts_duration(self, seconds: float | None, mode: VideoMode | str | None = None) -> bool:
+        """Whether ``seconds`` fits; an unmeasurable duration is not refused."""
+        cap = self.duration_cap(mode)
+        if seconds is None or cap is None:
+            return True
+        return float(seconds) <= cap
+
+    def supports_mode(self, mode: VideoMode | str) -> bool:
+        """Whether this destination has a real path for ``mode``."""
+        return coerce_video_mode(mode) in self.modes
+
+    def describe(self, mode: VideoMode | str | None = None) -> str:
+        """One-sentence envelope, with the numbers, for refusal messages."""
+        cap = self.duration_cap(mode)
+        parts = [f"max duration {_compact_seconds(cap)}"]
+        if self.shorts_max_duration_seconds and coerce_video_mode(mode) is not VideoMode.SHORTS:
+            parts.append(f"(short-form mode {_compact_seconds(self.shorts_max_duration_seconds)})")
+        parts.append(f"max size {format_bytes(self.max_bytes)}")
+        if self.aspect_min is not None and self.aspect_max is not None:
+            parts.append(f"aspect {self.aspect_min:.2f}-{self.aspect_max:.2f} (width/height)")
+        if self.shorts_max_aspect_ratio is not None:
+            parts.append(
+                f"short-form needs width/height ≤ {self.shorts_max_aspect_ratio:.2f} (square or vertical)"
+            )
+        if self.containers:
+            parts.append(f"containers {', '.join(self.containers)}")
+        if self.video_codec:
+            parts.append(f"codec {self.video_codec}")
+        parts.append(f"modes {', '.join(m.value for m in self.modes) or 'none'}")
+        return f"{self.display_name} video envelope: " + "; ".join(parts) + "."
+
+    def to_dict(self) -> dict[str, Any]:
+        """Stable JSON shape (capability document / plan / preflight)."""
+        return {
+            "platform": self.platform,
+            "display_name": self.display_name,
+            "max_duration_seconds": self.max_duration_seconds,
+            "shorts_max_duration_seconds": self.shorts_max_duration_seconds,
+            "max_bytes": self.max_bytes,
+            "containers": list(self.containers),
+            "video_codec": self.video_codec,
+            "aspect_min": self.aspect_min,
+            "aspect_max": self.aspect_max,
+            "shorts_max_aspect_ratio": self.shorts_max_aspect_ratio,
+            "modes": [mode.value for mode in self.modes],
+            "long_form": self.long_form,
+            "source": self.source,
+            "note": self.note,
+        }
+
+
+#: Per-destination video envelopes. The ONLY home for these numbers: the media
+#: preflight (``xpst.media.specs``) derives its duration caps from here and
+#: every uploader reads its manifest limit from here, so a surface cannot
+#: enforce a different number than the registry declares.
+VIDEO_ENVELOPES: dict[str, VideoEnvelope] = {
+    "youtube": VideoEnvelope(
+        platform="youtube",
+        display_name="YouTube",
+        # YouTube's upload ceiling is 12 hours or 256 GB, whichever comes first.
+        max_duration_seconds=43_200,
+        shorts_max_duration_seconds=60,
+        max_bytes=256 * 1024**3,
+        containers=(".mp4", ".mov"),
+        video_codec="h264",
+        modes=(VideoMode.SHORTS, VideoMode.LONG),
+        long_form=True,
+        # YouTube only treats a video as a Short when it is square or taller
+        # than wide; a landscape upload tagged #Shorts is an ordinary video.
+        shorts_max_aspect_ratio=1.0,
+        source=(
+            "YouTube Data API v3 videos.insert (resumable upload); YouTube upload limits: "
+            "12 hours / 256 GB; Shorts: ≤ 60 s, square or taller than wide"
+        ),
+        note=(
+            "Both modes use the same resumable videos.insert call; the mode decides the "
+            "title tag, the returned URL, and which ceiling is enforced."
+        ),
+    ),
+    "x": VideoEnvelope(
+        platform="x",
+        display_name="X",
+        # Standard accounts: 2 min 20 s (140 s) of video. X Premium accounts
+        # allow longer, which is why the adapter lets config raise the cap.
+        max_duration_seconds=140,
+        max_bytes=512 * 1024**2,
+        containers=(".mp4", ".mov"),
+        video_codec="h264",
+        aspect_min=1 / 2.39,
+        aspect_max=2.39,
+        modes=(VideoMode.SHORTS,),
+        long_form=False,
+        source=(
+            "X media upload limits: 140 s of video for standard accounts, 512 MB, "
+            "1:2.39-2.39:1; Premium accounts allow longer videos (raise it with "
+            "x.max_video_duration_seconds)"
+        ),
+        note="No long-form path until the account's real cap is raised; over 140 s is refused, never truncated.",
+    ),
+    "instagram": VideoEnvelope(
+        platform="instagram",
+        display_name="Instagram Reels",
+        max_duration_seconds=900,
+        max_bytes=4 * 1024**3,
+        containers=(".mp4", ".mov"),
+        video_codec="h264",
+        modes=(VideoMode.SHORTS,),
+        source="Meta Reels API: Reels up to 15 minutes, 4 GB",
+    ),
+    "tiktok": VideoEnvelope(
+        platform="tiktok",
+        display_name="TikTok",
+        max_duration_seconds=600,
+        max_bytes=1024**3,
+        containers=(".mp4", ".mov"),
+        video_codec="h264",
+        modes=(VideoMode.SHORTS,),
+        source="TikTok Content Posting API: video up to 10 minutes, 1 GB",
+    ),
+    "threads": VideoEnvelope(
+        platform="threads",
+        display_name="Threads",
+        max_duration_seconds=300,
+        max_bytes=1024**3,
+        containers=(".mp4", ".mov"),
+        video_codec="h264",
+        modes=(VideoMode.SHORTS,),
+        source="Threads API: video up to 5 minutes (the container fetches it from a public URL)",
+    ),
+    "facebook": VideoEnvelope(
+        platform="facebook",
+        display_name="Facebook Page",
+        max_duration_seconds=14_400,
+        max_bytes=10 * 1024**3,
+        containers=(".mp4", ".mov"),
+        video_codec="h264",
+        modes=(VideoMode.SHORTS,),
+        source="Graph API /{page-id}/videos: up to 4 hours, 10 GB",
+    ),
+    "rumble": VideoEnvelope(
+        platform="rumble",
+        display_name="Rumble",
+        # Rumble's documented upload limits are per-plan and the API is
+        # partner-gated, so xPST refuses nothing it cannot verify.
+        max_duration_seconds=None,
+        max_bytes=None,
+        containers=(".mp4", ".mov"),
+        video_codec="h264",
+        modes=(VideoMode.LONG,),
+        long_form=True,
+        source="Rumble video upload API is partner-gated; limits are reported by the service per plan",
+        note="Integration-uncertain: no self-serve developer console, so the manual handoff is the reliable path.",
+    ),
+}
+
+
+def video_envelope(platform: str) -> VideoEnvelope | None:
+    """Return the declared video envelope for a destination, or ``None``."""
+    return VIDEO_ENVELOPES.get(str(platform).strip().lower())
+
+
+def video_duration_limit(platform: str, mode: VideoMode | str | None = None) -> int | None:
+    """The duration ceiling a sender must enforce for ``platform``.
+
+    This is the number every adapter's manifest reports and the media preflight
+    compares against — one source, so ``xpst capabilities``, the preflight and
+    the upload guard can never disagree.
+    """
+    envelope = video_envelope(platform)
+    return None if envelope is None else envelope.duration_cap(mode)
+
+
+def video_envelope_violation(
+    platform: str,
+    *,
+    duration_s: float | None = None,
+    size_bytes: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    mode: VideoMode | str | None = None,
+) -> ContentIssue | None:
+    """The one refusal for input outside a destination's video envelope.
+
+    Pure and side-effect free (no ffprobe, no network), so the preflight, the
+    uploader and a route plan can all call it before anything is published.
+    Returns ``None`` when the destination is unknown or the input fits; ``None``
+    is never "assume it fits" for a value that was actually measured.
+    """
+    return envelope_violation(
+        video_envelope(platform),
+        duration_s=duration_s,
+        size_bytes=size_bytes,
+        width=width,
+        height=height,
+        mode=mode,
+    )
+
+
+def envelope_violation(
+    envelope: VideoEnvelope | None,
+    *,
+    duration_s: float | None = None,
+    size_bytes: int | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    mode: VideoMode | str | None = None,
+) -> ContentIssue | None:
+    """The refusal for one concrete envelope (``None`` envelope = no refusal).
+
+    Split from :func:`video_envelope_violation` so an adapter that knows its
+    account's REAL ceiling (a Premium X account, say) can enforce a
+    ``dataclasses.replace``-adjusted envelope and still speak one vocabulary.
+    """
+    if envelope is None:
+        return None
+    resolved_mode = coerce_video_mode(mode)
+    if resolved_mode is not None and not envelope.supports_mode(resolved_mode):
+        return ContentIssue(
+            code=VIDEO_ENVELOPE_MODE_CODE,
+            message=(
+                f"{envelope.display_name} has no {resolved_mode.value}-form path "
+                f"(modes: {', '.join(m.value for m in envelope.modes) or 'none'}). "
+                f"{envelope.describe()}"
+            ),
+            severity="error",
+            platform=envelope.platform,
+        )
+    cap = envelope.duration_cap(resolved_mode)
+    if duration_s is not None and cap is not None and float(duration_s) > cap:
+        label = "Short-form" if resolved_mode is VideoMode.SHORTS else "Video"
+        return ContentIssue(
+            code=VIDEO_ENVELOPE_DURATION_CODE,
+            message=(
+                f"{label} is {format_seconds(duration_s)} — over {envelope.display_name}'s "
+                f"{format_seconds(cap)} limit. {envelope.describe(resolved_mode)} "
+                f"Refused rather than truncated."
+            ),
+            severity="error",
+            platform=envelope.platform,
+        )
+    if size_bytes is not None and envelope.max_bytes is not None and int(size_bytes) > envelope.max_bytes:
+        return ContentIssue(
+            code=VIDEO_ENVELOPE_SIZE_CODE,
+            message=(
+                f"File is {format_bytes(int(size_bytes))} — over {envelope.display_name}'s "
+                f"{format_bytes(envelope.max_bytes)} limit. {envelope.describe(resolved_mode)}"
+            ),
+            severity="error",
+            platform=envelope.platform,
+        )
+    measured_aspect = float(width) / float(height) if (width and height) else None
+    if (
+        measured_aspect is not None
+        and resolved_mode is VideoMode.SHORTS
+        and envelope.shorts_max_aspect_ratio is not None
+        and measured_aspect > envelope.shorts_max_aspect_ratio
+    ):
+        return ContentIssue(
+            code=VIDEO_ENVELOPE_ASPECT_CODE,
+            message=(
+                f"{width}x{height} is aspect {measured_aspect:.2f} — a {envelope.display_name} "
+                f"short must be square or vertical (width/height ≤ "
+                f"{envelope.shorts_max_aspect_ratio:.2f}). Publish it as long-form, or export a "
+                f"vertical rendition. {envelope.describe(resolved_mode)}"
+            ),
+            severity="error",
+            platform=envelope.platform,
+        )
+    if (
+        measured_aspect is not None
+        and envelope.aspect_min is not None
+        and envelope.aspect_max is not None
+    ):
+        if measured_aspect < envelope.aspect_min or measured_aspect > envelope.aspect_max:
+            return ContentIssue(
+                code=VIDEO_ENVELOPE_ASPECT_CODE,
+                message=(
+                    f"{width}x{height} is aspect {measured_aspect:.2f} — outside {envelope.display_name}'s "
+                    f"{envelope.aspect_min:.2f}-{envelope.aspect_max:.2f} range. "
+                    f"{envelope.describe(resolved_mode)}"
+                ),
+                severity="error",
+                platform=envelope.platform,
+            )
+    return None
+
+
+def classify_video_mode(
+    duration_s: float | None,
+    width: int | None = None,
+    height: int | None = None,
+) -> VideoMode | None:
+    """Classify a measured video as short-form, long-form, or ambiguous.
+
+    The thresholds are the product decision stated at the top of this section
+    (:data:`SHORTS_CLASSIFICATION_MAX_SECONDS`,
+    :data:`LONG_FORM_CLASSIFICATION_MIN_SECONDS`). ``None`` means "cannot tell"
+    — the caller must ask, never guess.
+    """
+    if duration_s is None:
+        return None
+    duration = float(duration_s)
+    vertical = None if not width or not height else height >= width
+    if duration <= SHORTS_CLASSIFICATION_MAX_SECONDS and vertical is not False:
+        return VideoMode.SHORTS
+    if duration >= LONG_FORM_CLASSIFICATION_MIN_SECONDS or vertical is False:
+        return VideoMode.LONG
+    return None
+
+
 #: THE capability table. ``declared_labels`` mirror each provider manifest's
 #: ``extra["content"]`` exactly (tests/test_content_contract.py fails if a
 #: manifest drifts); ``implemented`` is what the engine can really do today.
 DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
     "youtube": _publish_profile(
         "youtube",
-        "YouTube Shorts",
+        "YouTube",
         declared_labels=("video",),
         implemented=(ContentType.VIDEO,),
         notes={
-            ContentType.VIDEO: "always forced to Shorts (#shorts appended); no long-form path",
+            ContentType.VIDEO: (
+                "two real modes: short-form (Shorts, ≤ 60 s, square-or-vertical, '#Shorts' tag, "
+                "/shorts/ URL) and long-form (resumable videos.insert, watch URL, up to 12 h / 256 GB). "
+                "The mode is explicit (--shorts/--long) or derived from the media probe; a video that "
+                "fits neither is refused with both ceilings in the message."
+            ),
             ContentType.CAROUSEL: "no carousel path: a carousel request is refused by name, and nothing is stitched into a video",
         },
     ),
@@ -624,6 +1114,26 @@ DESTINATION_CONTENT_PROFILES: dict[str, DestinationContentProfile] = {
             "(there is no API for that). Feed video today; Reels / photo / text are "
             "the follow-up that extends this row."
         ),
+    ),
+    "rumble": _publish_profile(
+        "rumble",
+        "Rumble",
+        declared_labels=("video",),
+        implemented=(ContentType.VIDEO,),
+        notes={
+            ContentType.VIDEO: (
+                "long-form only (Rumble is a video platform, not a Shorts surface). Two paths: "
+                "the partner upload API when an API key is configured, and a MANUAL HANDOFF "
+                "otherwise — the rendition and a caption file are written to a directory you "
+                "choose, and the adapter reports the handoff instead of pretending it uploaded."
+            )
+        },
+        note=(
+            "integration-uncertain: Rumble's upload API is partner-gated with no self-serve "
+            "developer console comparable to Meta/Google. xPST declares the capability and both "
+            "paths, but does not advertise Rumble as ready until one live upload succeeds."
+        ),
+        integration=IntegrationStatus.INTEGRATION_UNCERTAIN,
     ),
     "messenger": DestinationContentProfile(
         platform="messenger",

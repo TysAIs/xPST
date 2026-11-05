@@ -301,7 +301,7 @@ class TestImageContainerVersusDestinationCapability:
         """
         assert modality_unsupported_message(MODALITY_VIDEO, suffix=".mp4") == (
             "A video file (.mp4) can be posted to YouTube, TikTok, Instagram Reels, X (Twitter),"
-            " Threads, Facebook Page. Choose a different file."
+            " Threads, Facebook Page, Rumble. Choose a different file."
         )
         assert modality_unsupported_message(MODALITY_IMAGE, suffix=".png") == (
             "An image file (.png) can be posted to Instagram Reels, X (Twitter)."

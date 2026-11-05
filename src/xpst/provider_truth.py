@@ -140,6 +140,14 @@ SUPPORTED_PROVIDERS: tuple[ProviderDefinition, ...] = (
         official_api=True,
         docs_url="https://developers.facebook.com/docs/pages-api",
     ),
+    ProviderDefinition(
+        "rumble",
+        "Rumble",
+        (ProviderRole.VIDEO_DESTINATION,),
+        "api_key",
+        official_api=True,
+        docs_url="https://rumble.com/",
+    ),
     ProviderDefinition("local", "Local files", (ProviderRole.SOURCE,), "local"),
 )
 

@@ -53,9 +53,15 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
-from xpst.content import ContentType, implemented_content_types
+from xpst.content import (
+    ContentType,
+    implemented_content_types,
+    video_duration_limit,
+    video_envelope_violation,
+)
 from xpst.media.image_header import read_image_dimensions
 from xpst.media.modality import (
     MODALITY_IMAGE,
@@ -68,9 +74,6 @@ from xpst.utils.video import (
     _pick_video_stream,
     get_video_info_standalone,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +178,10 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         lufs=-14.0,
         max_video_bitrate_bps=10_000_000,
         file_size_cap_mb=256 * 1024,
-        duration_cap_s=None,
+        # 12 h / 256 GB is the YouTube upload ceiling either way; Shorts add the
+        # 60 s short-form ceiling, which the adapter (not this ingest spec)
+        # enforces because it depends on the chosen mode.
+        duration_cap_s=video_duration_limit("youtube"),
     ),
     "tiktok": _spec(
         "tiktok",
@@ -190,7 +196,7 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         lufs=-14.0,
         max_video_bitrate_bps=10_000_000,
         file_size_cap_mb=1024,
-        duration_cap_s=600,
+        duration_cap_s=video_duration_limit("tiktok"),
     ),
     "instagram": _spec(
         "instagram",
@@ -205,7 +211,7 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         lufs=-14.0,
         max_video_bitrate_bps=10_000_000,
         file_size_cap_mb=4 * 1024,
-        duration_cap_s=900,
+        duration_cap_s=video_duration_limit("instagram"),
         # Feed photo (single image). Meta publishes JPEG only, 8 MB maximum,
         # aspect ratio within 4:5–1.91:1.
         image_containers=(".jpg", ".jpeg"),
@@ -226,7 +232,7 @@ PLATFORM_SPECS: dict[str, PlatformSpec] = {
         lufs=-16.0,
         max_video_bitrate_bps=12_000_000,
         file_size_cap_mb=512,
-        duration_cap_s=140,
+        duration_cap_s=video_duration_limit("x"),
         # Single image post: ≤ 5 MB, JPG/PNG/WEBP, aspect ratio 1:3–3:1.
         image_containers=(".jpg", ".jpeg", ".png", ".webp"),
         image_file_size_cap_mb=5,
@@ -247,6 +253,9 @@ PLATFORM_SPECS["threads"] = replace(
     image_file_size_cap_mb=None,
     image_aspect_min=None,
     image_aspect_max=None,
+    # Same ingest profile, its own declared ceiling: the registry holds 5 min
+    # for Threads rather than inheriting Instagram's 15.
+    duration_cap_s=video_duration_limit("threads"),
 )
 # Facebook Page video (Page-scoped publishing via ``/{page-id}/videos``). Like
 # Threads it publishes video only, so it declares no image modality. Without an
@@ -265,7 +274,25 @@ PLATFORM_SPECS["facebook"] = PlatformSpec(
     lufs=-14.0,
     max_video_bitrate_bps=10_000_000,
     file_size_cap_mb=10 * 1024,
-    duration_cap_s=14_400,
+    duration_cap_s=video_duration_limit("facebook"),
+)
+# Rumble: long-form video only, and its documented limits are per-plan behind a
+# partner-gated API, so the ingest spec refuses nothing it cannot verify
+# (``None`` duration/size cap) while still enforcing container/codec/fps.
+PLATFORM_SPECS["rumble"] = PlatformSpec(
+    display_name="Rumble",
+    containers=(".mp4", ".mov"),
+    video_codec="h264",
+    pix_fmt="yuv420p",
+    long_edge=1920,
+    fps_cap=60,
+    audio_codec="aac",
+    audio_rate=44100,
+    lufs=-14.0,
+    max_video_bitrate_bps=10_000_000,
+    file_size_cap_mb=None,
+    duration_cap_s=video_duration_limit("rumble"),
+    modalities=(MODALITY_VIDEO,),
 )
 
 
@@ -503,6 +530,59 @@ def _verify_image(path: Path, platform: str, spec: PlatformSpec, checks: list[Ch
         checks.append(Check(name="aspect_ratio", status="error", detail=aspect_error))
     _check_image_file_size(path, platform, spec, checks)
     return report
+
+
+def measured_video_format(path: Path) -> dict[str, Any]:
+    """Measured ``duration_s`` / ``width`` / ``height`` / ``size_bytes``.
+
+    Best effort on purpose: anything the probe cannot establish stays ``None``
+    (never 0, never a guess), because an envelope refusal must rest on a
+    measured value. ffprobe is the documented external tool D-3 permits.
+    """
+    measured: dict[str, Any] = {
+        "duration_s": None,
+        "width": None,
+        "height": None,
+        "size_bytes": None,
+    }
+    try:
+        measured["size_bytes"] = Path(path).stat().st_size
+    except OSError:
+        pass
+    try:
+        info = get_video_info_standalone(Path(path))
+    except Exception as exc:  # noqa: BLE001 - an unprobeable file is not a rejection
+        logger.debug("Envelope probe failed for %s: %s", path, exc)
+        return measured
+    try:
+        measured["duration_s"] = float(info.get("format", {}).get("duration", 0)) or None
+    except (TypeError, ValueError):
+        measured["duration_s"] = None
+    stream = _pick_video_stream(info.get("streams", []))
+    if stream:
+        measured["width"] = int(stream.get("width") or 0) or None
+        measured["height"] = int(stream.get("height") or 0) or None
+    return measured
+
+
+def video_format_violation(path: Path, platform: str, *, mode: str | None = None):
+    """The declared-envelope refusal for a file, in the registry's own words.
+
+    One call for every sender: it measures the file and asks the capability
+    registry (``xpst.content.video_envelope_violation``) whether the file fits
+    — so an adapter cannot enforce a different number than ``xpst
+    capabilities`` declares. ``None`` means the file fits (or the destination
+    declares no envelope).
+    """
+    measured = measured_video_format(path)
+    return video_envelope_violation(
+        platform,
+        duration_s=measured["duration_s"],
+        size_bytes=measured["size_bytes"],
+        width=measured["width"],
+        height=measured["height"],
+        mode=mode,
+    )
 
 
 def image_rejection_reasons(path: Path, platform: str) -> tuple[str, ...]:

@@ -33,10 +33,23 @@ def service() -> UploadService:
 
 
 class TestDurationLimitIsLive:
-    def test_youtube_declares_60s_cap_and_guard_sees_it(self, service):
-        """YouTube Shorts' declared 60 s limit must reach the guard."""
-        assert YouTubeUploader(XPSTConfig()).manifest.extra["max_duration_seconds"] == 60
-        assert service._duration_limit(YouTubeUploader(XPSTConfig())) == 60
+    def test_youtube_shorts_cap_is_live_and_long_form_is_not_capped_at_60s(self, service):
+        """YouTube's ceiling is mode-aware, and it comes from the registry.
+
+        The old test pinned a flat 60 s for every YouTube upload, which is the
+        same assumption that shipped every video as a Short. In an explicit
+        shorts configuration the guard sees the Shorts ceiling; otherwise it
+        sees YouTube's real upload ceiling (12 h) and the adapter — the only
+        place that can probe the media — resolves and enforces the mode.
+        """
+        auto = YouTubeUploader(XPSTConfig())
+        assert auto.manifest.extra["shorts_max_duration_seconds"] == 60
+        assert auto.manifest.extra["video_mode"] == "auto"
+        assert service._duration_limit(auto) == 43_200
+
+        shorts = YouTubeUploader(XPSTConfig(), mode="shorts")
+        assert shorts.manifest.extra["max_duration_seconds"] == 60
+        assert service._duration_limit(shorts) == 60
 
     def test_x_declares_140s_cap_and_guard_sees_it(self, service):
         assert service._duration_limit(XUploader(XPSTConfig())) == 140

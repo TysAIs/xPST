@@ -14,22 +14,34 @@ accounts:
     # Or specify explicit cookies file (Netscape format)
     # cookies_file: "~/.xpst/credentials/tiktok_cookies.txt"
   
-  # YouTube Shorts
+  # YouTube (Shorts and long-form)
   youtube:
     enabled: true
-    
+
     # Path to OAuth client secrets (download from Google Cloud Console)
     client_secrets: "~/.xpst/credentials/youtube_client_secrets.json"
-    
+
     # Path to store OAuth tokens (auto-generated)
     token_file: "~/.xpst/credentials/youtube_token.json"
-  
+
+    # How a video is published: "auto" (derive from the media probe), "shorts"
+    # or "long". "auto" refuses an ambiguous video (>60s and <180s, portrait)
+    # with both ceilings in the message instead of guessing. `xpst post
+    # --shorts/--long` overrides this per post.
+    video_mode: "auto"
+
   # X/Twitter
   x:
     enabled: true
-    
+
     # Path to cookies file (JSON format from twikit or browser export)
     cookies_file: "~/.xpst/credentials/x_cookies.json"
+
+    # Verified per-account video ceiling in seconds. 0 keeps the documented
+    # standard-account envelope (140 s). Set a higher number only if X really
+    # allows it for this account (Premium); xPST refuses over the limit rather
+    # than truncating.
+    max_video_duration_seconds: 0
   
   # Instagram Reels
   instagram:
@@ -37,6 +49,18 @@ accounts:
     
     # Path to session file (JSON with sessionid)
     session_file: "~/.xpst/credentials/instagram_session.json"
+
+  # Rumble (OPT-IN) — integration-uncertain: Rumble's upload API is partner-gated
+  # with no self-serve developer console. With an api_key the adapter posts
+  # through the partner API; without one it exports the rendition and a caption
+  # file to manual_handoff_dir and reports a handoff (never a fake success).
+  # Not advertised as ready until one live upload succeeds.
+  rumble:
+    enabled: false
+    api_key: ""
+    api_url: "https://rumble.com/-/api/v1/media"
+    manual_handoff_dir: "~/.xpst/rumble-handoff"
+    upload_page_url: "https://rumble.com/upload.php"
 
 # Video processing
 video:

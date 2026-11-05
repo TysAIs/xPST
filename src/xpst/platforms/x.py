@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from xpst.anti_bot import AntiBotProtection
-from xpst.content import TEXT_LIMITS
+from xpst.content import TEXT_LIMITS, video_duration_limit, video_envelope
+from xpst.media.specs import measured_video_format
 from xpst.platforms.base import (
     DeleteOutcome,
     DeleteResult,
@@ -78,6 +79,65 @@ class XUploader(PlatformUploader):
         """Initialize X/Twitter uploader with lazy client caching."""
         super().__init__(config)
         self._client = None  # Cached twikit Client
+
+    @property
+    def video_duration_cap(self) -> int | None:
+        """This account's real video ceiling, in seconds.
+
+        Read from config when the account owner has verified it (a Premium
+        account X lets upload longer), otherwise from the capability registry
+        (``xpst.content.VIDEO_ENVELOPES["x"]``: 140 s standard tier). One
+        function decides, so the manifest the upload guard reads and the
+        refusal this adapter raises cannot disagree.
+        """
+        configured = getattr(self.config.x, "max_video_duration_seconds", 0)
+        if isinstance(configured, int) and configured > 0:
+            return configured
+        return video_duration_limit("x")
+
+    def _effective_envelope(self):
+        """The registry envelope with this account's real ceiling applied."""
+        from dataclasses import replace
+
+        envelope = video_envelope("x")
+        cap = self.video_duration_cap
+        if envelope is None or cap is None or cap == envelope.max_duration_seconds:
+            return envelope
+        return replace(envelope, max_duration_seconds=cap)
+
+    def _video_envelope_violation(self, video_path: Path) -> UploadResult | None:
+        """Refuse a video outside the account's envelope, with the number.
+
+        The upload guard in ``UploadService`` refuses the same file with the
+        same number before encoding; this keeps the *sender* honest when it is
+        called directly (adapter probes, plugins, tests). Refused, never
+        truncated.
+        """
+        from xpst.content import envelope_violation
+
+        measured = measured_video_format(video_path)
+        issue = envelope_violation(
+            self._effective_envelope(),
+            duration_s=measured["duration_s"],
+            size_bytes=measured["size_bytes"],
+            width=measured["width"],
+            height=measured["height"],
+        )
+        if issue is None:
+            return None
+        logger.warning("Refusing X upload: %s", issue.message)
+        return UploadResult(
+            success=False,
+            error=f"X_VIDEO_ENVELOPE: {issue.message}",
+            platform="x",
+            retryable=False,
+            metadata={
+                "capability": "video_envelope",
+                "code": issue.code,
+                "duration_s": measured["duration_s"],
+                "limit": self.video_duration_cap,
+            },
+        )
 
     def _caption_limit_violation(self, caption: str) -> UploadResult | None:
         """Refuse a media caption past X's limit instead of truncating it.
@@ -154,7 +214,9 @@ class XUploader(PlatformUploader):
                 # table for this destination.
                 "content": ("video", "carousel", "text", "image"),
                 "max_caption_length": self.MAX_TEXT_LENGTH,
-                "max_video_duration_seconds": 140,
+                # The account's real ceiling, not a copy of it: config override
+                # when verified, else the capability registry's 140 s.
+                "max_video_duration_seconds": self.video_duration_cap,
             },
         )
 
@@ -252,6 +314,13 @@ class XUploader(PlatformUploader):
         violation = self._caption_limit_violation(caption)
         if violation is not None:
             return violation
+
+        # Same contract for the video itself: over the account's duration/size/
+        # aspect envelope is refused with the number, never trimmed or
+        # silently shipped for the platform to reject.
+        envelope_violation = self._video_envelope_violation(video_path)
+        if envelope_violation is not None:
+            return envelope_violation
 
         try:
             async with AsyncOAuth1Client(
@@ -383,6 +452,11 @@ class XUploader(PlatformUploader):
         violation = self._caption_limit_violation(caption)
         if violation is not None:
             return violation
+
+        # The account's video envelope, enforced before any network call.
+        envelope_violation = self._video_envelope_violation(video_path)
+        if envelope_violation is not None:
+            return envelope_violation
 
         try:
             client = await self._get_client()
