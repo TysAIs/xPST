@@ -333,10 +333,15 @@ def test_cli_now_flag_reaches_the_engine_video_route(config_dir: str, night, tmp
     assert seen.get("force_now") is True, seen
 
 
-def test_mcp_force_reaches_the_engine(config: XPSTConfig, night) -> None:
+def test_mcp_force_reaches_the_engine(config: XPSTConfig, night, tmp_path: Path) -> None:
     engine = MagicMock()
     engine.config = config
+    # R3: an explicit target is attempted when the account is connected; the
+    # plan is built from config, so say so here (the engine double is not it).
+    config.x.enabled = True
     engine._platforms = {"x": MagicMock()}
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"\x00" * 64)
     engine.post_manual = AsyncMock(
         return_value=CrossPostResult(
             video_id="v", caption="c",
@@ -345,7 +350,7 @@ def test_mcp_force_reaches_the_engine(config: XPSTConfig, night) -> None:
     )
 
     payload = asyncio.run(_handle_post(
-        engine, {"video_path": "/tmp/clip.mp4", "caption": "c", "platforms": ["x"], "force": True}
+        engine, {"video_path": str(clip), "caption": "c", "platforms": ["x"], "force": True}
     ))
     assert not result_is_error(payload), payload
     assert engine.post_manual.await_args.kwargs.get("force_now") is True

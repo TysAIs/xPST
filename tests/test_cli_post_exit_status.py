@@ -111,17 +111,34 @@ def runner_ctx(monkeypatch):
 
 @pytest.fixture
 def config_file(tmp_path):
-    """A minimal valid config next to a private config dir."""
+    """A minimal valid config next to a private config dir.
+
+    Every destination is connected with a local credential file, so the route
+    resolver treats them as publishable (R3: connected is opt-in and explicit;
+    an enabled account without a credential is ``skipped_unconnected``).
+    """
 
     config_dir = tmp_path / "xpst-config"
     config_dir.mkdir()
+    creds = tmp_path / "creds"
+    creds.mkdir()
+    youtube_token = creds / "youtube-token.json"
+    youtube_token.write_text("{}")
+    x_cookies = creds / "x-cookies.json"
+    x_cookies.write_text("{}")
+    ig_session = creds / "instagram-session.json"
+    ig_session.write_text("{}")
     config = {
         "accounts": {
-            "youtube": {"enabled": True},
-            "x": {"enabled": True},
-            "instagram": {"enabled": True},
-            "tiktok": {"enabled": True},
-            "threads": {"enabled": True},
+            "youtube": {"enabled": True, "token_file": str(youtube_token)},
+            "x": {"enabled": True, "cookies_file": str(x_cookies)},
+            "instagram": {"enabled": True, "session_file": str(ig_session)},
+            "tiktok": {"enabled": True, "access_token": "test-token"},
+            "threads": {
+                "enabled": True,
+                "graph_access_token": "test-token",
+                "threads_user_id": "123",
+            },
         },
         "video": {"download_dir": str(tmp_path / "downloads")},
         "monitoring": {"log_level": "CRITICAL", "log_file": str(tmp_path / "logs" / "xpst.log")},
@@ -340,6 +357,11 @@ class TestJsonPayloadUnchanged:
             "exit_code",
             "content",
             "content_type",
+            # R3/R4 state propagation: per-destination canonical state, the
+            # skipped list and the aggregate status are part of the contract now.
+            "destinations",
+            "skipped_unconnected",
+            "status",
         }
         assert out["content_type"] == "video"
         assert out["content"]["effective_content_type"] == "video"

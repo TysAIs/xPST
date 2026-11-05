@@ -44,12 +44,18 @@ def test_post_preflight_reports_media_and_target_blockers_without_network(tmp_pa
         assert issue["message"] in data["blockers"]
 
 
-def test_post_preflight_requires_explicit_targets(tmp_path: Path) -> None:
+def test_post_preflight_derives_the_route_when_no_targets_are_given(tmp_path: Path) -> None:
+    """No platforms is a resolved route, not a refusal (R3)."""
     app = FastAPI()
     app.include_router(create_api_router(str(tmp_path)))
     with TestClient(app) as client:
         data = client.post(
             "/api/preflight", json={"media_path": "", "caption": ""}, headers=API_HEADERS
         ).json()
-    assert data["ready"] is False
-    assert "Choose at least one destination platform." in data["blockers"]
+    assert data["route_plan"]["source"] == "format_route"
+    assert "Choose at least one destination platform." not in data["blockers"]
+    # Every resolved destination carries one canonical state.
+    assert all(
+        item["state"] in {"posted", "skipped_unconnected", "unsupported_format", "failed"}
+        for item in data["route_plan"]["destinations"]
+    )

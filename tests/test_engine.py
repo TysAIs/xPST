@@ -233,7 +233,7 @@ class TestPostManual:
 
     @pytest.mark.asyncio
     async def test_post_manual_no_platforms(self, tmp_path):
-        """post_manual with no available platforms returns empty result."""
+        """A requested but unavailable platform is a skip row, not a silent drop."""
         config = _make_config(tmp_path)
         (Path(config.video.download_dir)).mkdir(parents=True, exist_ok=True)
 
@@ -243,7 +243,13 @@ class TestPostManual:
 
         result = await engine.post_manual(video_path, "Test caption", ["youtube"])
         assert result.all_success is False
-        assert "youtube" not in result.results  # Platform not available, skipped
+        # R3: the caller asked for YouTube and it is not connected — the row is
+        # `skipped_unconnected` (visible, with the connect command), and it is
+        # not a failure.
+        row = result.results["youtube"]
+        assert row.success is False
+        assert row.metadata["state"] == "skipped_unconnected"
+        assert row.metadata["connect_command"] == "xpst connect youtube"
 
     @pytest.mark.asyncio
     async def test_post_manual_with_mock_platform(self, tmp_path):
