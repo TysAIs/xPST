@@ -274,6 +274,11 @@ xpst run --bidirectional
 # Dry run (show what would happen)
 xpst run --dry-run --json
 
+# Counted rate-limit dry run: no credentials, no network, reproducible counts.
+# This is the evidence that gates un-pausing live posting —
+# see docs/RATE-LIMIT-DRY-RUN.md
+python -m xpst.rate_limit_dry_run --json /tmp/xpst-dry-run.json
+
 # Custom config
 xpst --config /path/to/config.yaml run
 ```

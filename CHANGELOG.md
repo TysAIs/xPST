@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A counted dry run is now the exit condition for the rate-limit pause.**
+  `python -m xpst.rate_limit_dry_run` drives the real upload pipeline
+  (`UploadService` → `retry_operation` → the real adapters → `CooldownStore`)
+  across every destination and fault shape — healthy, 429 with no hint, 429
+  with `Retry-After: 900`, a 403 rate-limit body, a 500 — plus a restart with
+  persisted cooldown state, a 24-hour hard pause and cross-destination
+  isolation, with the provider wire replaced by scripted fakes under a socket
+  guard. It emits a machine-readable summary (posts that would have gone out,
+  rate-limit responses, every cooldown decision with the `Retry-After` value
+  used, dropped requests, unaccounted posts) and runs the matrix twice to prove
+  the counts repeat. Every scenario runs in a fresh isolated config dir, so a
+  persisted `rate_cooldowns.json` cannot be measured as the next run's own
+  result. No credentials, no network, no real post. The failure-injection test
+  doubles moved into `xpst.rate_limit_dry_run` so the suite and the command
+  exercise one definition. See `docs/RATE-LIMIT-DRY-RUN.md`.
 - **Text posts survive the schedule store.** The store now has a no-media
   representation — a `content_type=text` entry with an empty media path — and
   every queue surface can create one: `xpst schedule add --text` (CLI),
