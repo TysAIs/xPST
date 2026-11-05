@@ -405,6 +405,30 @@ def test_denylist_allow_lines_exempt_product_identifiers(tmp_path):
     assert scan_public_safety(tmp_path, [source])["ok"] is False
 
 
+def test_release_notes_mention_of_the_public_handle_is_not_personal_data(tmp_path):
+    """`updates/latest.json` carries release notes verbatim, mentions included.
+
+    GitHub writes them as "by @TysAIs in https://github.com/TysAIs/xPST/pull/248".
+    The checked-in deny list exempts the mention form as a product identifier, or
+    every CI-generated manifest would fail the public-safety gate (run
+    42118923086) and the manifest PR could never be green.
+    """
+    (tmp_path / ".public-safety-denylist").write_text(
+        (scanner.ROOT / ".public-safety-denylist").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "latest.json"
+    manifest.write_text(
+        '{"notes": "test by @TysAIs in https://github.com/TysAIs/xPST/pull/248"}\n',
+        encoding="utf-8",
+    )
+    assert scan_public_safety(tmp_path, [manifest])["ok"] is True
+
+    # The person's name is still a finding outside the allowed identifiers.
+    manifest.write_text('{"notes": "maintained by Tyler"}\n', encoding="utf-8")
+    assert scan_public_safety(tmp_path, [manifest])["ok"] is False
+
+
 def test_check_denylist_fails_when_list_is_empty(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(scanner, "ROOT", tmp_path)
     monkeypatch.delenv("XPST_PUBLIC_SAFETY_DENYLIST", raising=False)
