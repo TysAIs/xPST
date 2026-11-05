@@ -884,6 +884,20 @@ def _local_auth_readiness(platform: str, config: XPSTConfig) -> AuthReadiness:
         return AuthReadiness(ready, "ready" if ready else "missing", detail, "oauth")
     if platform == "facebook":
         return _facebook_auth_readiness(account, config)
+    if platform == "rumble":
+        # Rumble needs no credential for the honest path: without an API key the
+        # adapter exports the rendition for a manual handoff and says so. A key
+        # only upgrades that to the partner upload API, so "no key" is ready,
+        # not missing.
+        has_key = bool(getattr(account, "api_key", ""))
+        return AuthReadiness(
+            True,
+            "ready",
+            "Rumble partner API key is configured."
+            if has_key
+            else "No Rumble API key: posting uses the manual handoff (rendition + upload link).",
+            "api_key" if has_key else "manual_handoff",
+        )
     return AuthReadiness(False, "unsupported", f"No local auth readiness rule exists for {platform}.")
 
 
