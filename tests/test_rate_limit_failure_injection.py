@@ -30,12 +30,14 @@ FI-7  one destination's cooldown never silently unblocks (shortens) a longer
 TikTok was the one destination this harness used to omit (gate G3 in the
 un-halt packet, "cannot prove"). It is now covered on the route that has a
 provider status surface at all — the Content Posting API (``publish_mode:
-auto``). Two TikTok-specific facts are pinned rather than hidden:
+auto``). One TikTok-specific fact still bounds the proof:
 
-* the uploader maps a 429 to ``TIKTOK_RATE_LIMITED`` and never reads the
-  response's ``Retry-After``, so the cooldown runs at the 60s escalation floor
-  even when the provider asked for 900s
-  (``test_tiktok_429_drops_the_provider_retry_after_hint``);
+* the uploader maps a 429 to ``TIKTOK_RATE_LIMITED`` and carries the provider's
+  own ``Retry-After`` (header, else the JSON envelope) into that text, which is
+  the only place the cooldown machine reads a declared window from — pinned at
+  the adapter boundary by
+  ``test_tiktok_429_carries_the_provider_retry_after_hint`` and end to end by
+  ``test_tiktok_429_honours_the_provider_retry_after``;
 * ``publish_mode: browser`` (what this host runs) has no HTTP status surface
   at all — Playwright drives TikTok Studio and failures are typed stage codes,
   so no 429 can reach the cooldown machine on that route
@@ -668,17 +670,6 @@ TRANSPORTS = {
     "tiktok": TikTokTransport,
 }
 
-#: Whether the uploader carries a provider-declared ``Retry-After`` into its
-#: error text (the only place the cooldown machine reads it from). Every Meta
-#: path and YouTube do; TikTok does NOT — ``TikTokUploader._handle_http_error``
-#: returns a static ``TIKTOK_RATE_LIMITED`` string and never touches the
-#: response headers, so its cooldown runs at the 60s escalation floor. That is
-#: a real gap, pinned by
-#: ``test_tiktok_429_drops_the_provider_retry_after_hint``; the shared
-#: Retry-After cases below skip this destination with that reason instead of
-#: quietly asserting a property TikTok cannot yet satisfy.
-HONOURS_PROVIDER_RETRY_AFTER = {"tiktok": False}
-
 
 async def post(service, uploader, platform, video, video_id):
     return await service.upload_to_platform(
@@ -745,19 +736,9 @@ def test_throttle_honours_the_provider_retry_after(platform, tmp_path, monkeypat
     asyncio.run(post(service, uploader, platform, make_video(tmp_path), "vid-1"))
 
     remaining = service.rate_cooldowns.remaining_s(platform)
-    if HONOURS_PROVIDER_RETRY_AFTER.get(platform, True):
-        assert remaining == pytest.approx(900), (
-            f"{platform}: Retry-After 900 was not honoured (remaining={remaining})"
-        )
-    else:
-        # The hint reached the wire (TikTokTransport sends the header) and the
-        # uploader dropped it: only the base escalation floor applies. This is
-        # the defect, asserted rather than skipped — see
-        # test_tiktok_429_drops_the_provider_retry_after_hint.
-        assert remaining == pytest.approx(60), (
-            f"{platform}: expected the documented 60s floor while Retry-After "
-            f"is unread, got {remaining}"
-        )
+    assert remaining == pytest.approx(900), (
+        f"{platform}: Retry-After 900 was not honoured (remaining={remaining})"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -776,12 +757,6 @@ def test_provider_wait_beyond_the_retry_budget_costs_one_request(
     is the honest cost; the post stays unpublished and the destination stays
     cooling.
     """
-    if not HONOURS_PROVIDER_RETRY_AFTER.get(platform, True):
-        pytest.skip(
-            f"{platform} drops the provider's Retry-After, so the 900s window is "
-            "invisible to this layer and all attempts are spent "
-            "(pinned by test_tiktok_429_drops_the_provider_retry_after_hint)"
-        )
     transport = TRANSPORTS[platform](FAULT_META_CODE_THROTTLE_RA)
     uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
     clock = Clock()
@@ -1143,23 +1118,14 @@ def test_instagram_session_throttle_that_clears_is_published_by_the_service_retr
 # TikTok (gate G3): the route the harness used to omit
 # ---------------------------------------------------------------------------
 
-def test_tiktok_429_drops_the_provider_retry_after_hint(
-    tmp_path, monkeypatch, sleeps
-):
-    """The 429 pauses TikTok, but its ``Retry-After`` header is never read.
+def test_tiktok_429_honours_the_provider_retry_after(tmp_path, monkeypatch, sleeps):
+    """A TikTok 429 with ``Retry-After: 900`` pauses TikTok for the provider's 900s.
 
-    DEFECT, pinned deliberately (not hidden): ``TikTokUploader._handle_http_error``
-    maps 429 to a static ``TIKTOK_RATE_LIMITED`` string and never looks at the
-    response headers, so a provider that asked for 900s is only believed for
-    the 60s escalation floor. Every Meta path and YouTube carry the hint into
-    the error text (that is the cooldown machine's only input), so this is a
-    TikTok gap, not a harness limitation.
-
-    The safety consequence is *late, not wrong*: the destination still cools,
-    the post is still not counted posted, and the next attempt is deferred —
-    it just re-asks far earlier than the provider permitted. When the uploader
-    learns to append ``Retry-After: <n>`` this test fails on the floor
-    assertion and should be inverted to the 900s expectation.
+    The uploader must carry the provider's own window into its error text:
+    that text is the only input the cooldown machine takes for a declared
+    wait. A 900s ask also exceeds the whole retry budget, so the retry layer
+    answers once instead of spending four requests inside a window TikTok
+    already said would last 15 minutes.
     """
     transport = TikTokTransport(FAULT_META_CODE_THROTTLE_RA)
     uploader, _ = build_uploader(transport, tmp_path, monkeypatch)
@@ -1172,20 +1138,69 @@ def test_tiktok_429_drops_the_provider_retry_after_hint(
 
     assert result.success is False
     assert "TIKTOK_RATE_LIMITED" in (result.error or ""), result.error
-    assert "Retry-After" not in (result.error or ""), (
-        "the uploader started surfacing the provider hint — invert this "
-        f"assertion and expect 900s, got {result.error!r}"
+    assert "Retry-After: 900" in (result.error or ""), (
+        "the provider's window did not reach the cooldown machine's only "
+        f"input: {result.error!r}"
     )
-    # Retry-After 900 is invisible here, so all four service attempts are spent
-    # inside the window the provider already said would last 15 minutes.
-    assert transport.calls == MAX_ATTEMPTS_PER_POST, (
-        f"one throttled TikTok post cost {transport.calls} publish attempts"
+    assert transport.calls == 1, (
+        f"a 900s provider wait cost {transport.calls} publish attempts; the "
+        "later ones run inside a window it cannot wait out"
     )
-    assert sum(sleeps) <= MAX_WAIT_S_PER_POST
-    assert service.rate_cooldowns.remaining_s("tiktok") == pytest.approx(60), (
-        "TikTok must still cool at the escalation floor"
+    assert sleeps == [], f"slept {sleeps} inside a window it cannot wait out"
+    assert service.rate_cooldowns.remaining_s("tiktok") == pytest.approx(900), (
+        "TikTok must cool for the window the provider declared, not the floor"
     )
     assert service.state.is_video_posted("vid-tt-hint", "tiktok") is False
+
+
+_HINT_BODY = json.dumps(
+    {
+        "error": {
+            "code": "rate_limit_exceeded",
+            "message": "Too many requests. Please try again later.",
+            "log_id": "2026110412000000000000",
+        }
+    }
+)
+
+
+@pytest.mark.parametrize(
+    ("headers", "body", "expected"),
+    [
+        ({"Retry-After": "900"}, _HINT_BODY, "Retry-After: 900"),
+        ({}, '{"error": {"code": "rate_limit_exceeded", "retry_after": 900}}',
+         "Retry-After: 900"),
+        ({}, _HINT_BODY, None),
+    ],
+    ids=["header", "json-body", "no-hint"],
+)
+def test_tiktok_429_carries_the_provider_retry_after_hint(headers, body, expected):
+    """The 429 mapping reads the provider hint at the adapter boundary itself.
+
+    Pinned without the service layer so the error-text contract cannot drift:
+    ``TIKTOK_RATE_LIMITED`` stays the prefix other diagnostics match on, the
+    numeric ``Retry-After`` is appended when TikTok declared one (header, or
+    the JSON envelope), and the static text is unchanged when it did not.
+    """
+    uploader = TikTokUploader(XPSTConfig())
+    response = httpx.Response(
+        429,
+        headers=headers,
+        content=body.encode(),
+        request=httpx.Request("POST", "https://open.tiktokapis.com/v2/post/publish/video/init/"),
+    )
+    with pytest.raises(httpx.HTTPStatusError) as excinfo:
+        response.raise_for_status()
+
+    result = uploader._handle_http_error(excinfo.value, response.text)
+
+    error = result.error or ""
+    assert result.success is False
+    assert error.startswith("TIKTOK_RATE_LIMITED:"), error
+    if expected is None:
+        assert "Retry-After" not in error, f"a hint was invented where TikTok declared none: {error!r}"
+    else:
+        assert expected in error, error
 
 
 class _FailingBrowserPublisher:

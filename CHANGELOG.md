@@ -61,6 +61,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deadlines.
 
 ### Fixed
+- **A TikTok API throttle is believed for the window TikTok asked for, not the
+  60 s floor.** `TikTokUploader._handle_http_error` mapped a 429 to a static
+  `TIKTOK_RATE_LIMITED` string and never read the response, so the persistent
+  cooldown — which takes a provider-declared wait only from that error text —
+  engaged at the escalation floor while the provider had asked for 900 s, and
+  the retry layer spent all four attempts inside a window it could not wait
+  out. The 429 text now carries `Retry-After: <n>` (header, else a hint in the
+  JSON envelope), which also lets the retry layer answer a beyond-budget wait
+  exactly once. The prefix stays intact for diagnostics, and the browser route
+  is untouched: Playwright sees no HTTP status at all.
 - **One throttled Instagram (instagrapi session mode) post no longer costs 16
   provider requests.** The uploader retried a rate limit 4× internally and the
   service retried that whole upload 4× more, so a single throttled post made 16
