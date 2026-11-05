@@ -37,7 +37,10 @@ The `build` job fails the run — before any upload — when:
 - `pyproject.toml`'s `[project].version` cannot be read;
 - the ref is a `v*.*.*` tag whose name is not exactly `v<version>`, which
   would otherwise publish a version the tag does not name;
-- the `PYPI_API_TOKEN` secret is not readable by the workflow.
+- the publish step carries a `password:` input (the token path) and the
+  `PYPI_API_TOKEN` secret is not readable by the workflow. The check reads this
+  workflow file, so the trusted-publishing form — no `password:` input — does not
+  demand a secret.
 
 It also writes the version, the triggering event, the ref and the secret's
 presence (never its value) to the job summary, together with what pypi.org
