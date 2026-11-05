@@ -69,6 +69,21 @@ def main(argv: list[str]) -> int:
             )
             verdict = "ACCEPT" if issue is None else f"REFUSE[{issue.code}]"
             why = "" if issue is None else " :: " + issue.message.split(". ", 1)[0]
+            if platform == "youtube" and mode is None:
+                # The adapter (not the envelope check) derives the mode from the
+                # probe and refuses an ambiguous video; say which way it went so
+                # this line cannot be mistaken for "anything goes".
+                derived = classify_video_mode(
+                    measured["duration_s"], measured["width"], measured["height"]
+                )
+                if derived is None:
+                    verdict = "REFUSE[youtube.mode_ambiguous]"
+                    why = (
+                        " :: neither clearly short-form (≤60 s, square-or-vertical) nor "
+                        "clearly long-form (≥180 s or landscape) — ask with --shorts/--long"
+                    )
+                else:
+                    verdict = f"{verdict}(derived={derived.value})"
             print(f"  {platform:<10} mode={str(mode):<7} {verdict}{why}")
     return 0
 

@@ -66,7 +66,9 @@ async def test_youtube_missing_video_id_is_failure_without_malformed_url(tmp_pat
     uploader = YouTubeUploader(_config(tmp_path))
     uploader._service = service
     with patch("googleapiclient.http.MediaFileUpload", return_value=MagicMock()):
-        result = await uploader.upload(video, "caption")
+        # Format routing has its own tests; state the mode so an unprobeable
+        # fixture cannot turn this into a mode refusal instead of a missing id.
+        result = await uploader.upload(video, "caption", mode="shorts")
 
     assert result.success is False
     assert result.outcome == UploadOutcome.FAILED

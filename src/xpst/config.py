@@ -583,6 +583,9 @@ class RumbleAccountConfig(AccountConfig):
       upload page URL. Nothing is claimed to have been published.
     """
 
+    #: Opt-in: an existing install keeps posting to exactly the platforms it
+    #: already had until ``accounts.rumble.enabled: true`` is written.
+    enabled: bool = False
     api_key: str = ""
     api_url: str = "https://rumble.com/-/api/v1/media"
     manual_handoff_dir: str = "~/.xpst/rumble-handoff"
