@@ -20,13 +20,33 @@ authoritative publisher:
   release is never held hostage by the registry. It authenticates with the same
   repository secret. If both workflows upload the same version, PyPI accepts the
   first and rejects the second with `file already exists` (PyPI files are
-  immutable); the release lane ignores that, so the release still completes.
+  immutable). The publisher passes `skip-existing: true`, so whoever loses that
+  race reports the existing files as skipped instead of failing, and the release
+  lane ignores its own copy too — the release completes either way.
 
 When you diagnose a failed publish, read the workflow **at the tag you are
 diagnosing**, not the copy on `main`. Tag `v1.2.1` still carries the older
 OIDC-only form, and its run (41796222963) failed with `invalid-publisher` while
 `main` had already switched to the token. Diagnosing a tagged run against `main`
 points at the wrong credential.
+
+## Guards that run before anything is uploaded
+
+The `build` job fails the run — before any upload — when:
+
+- `pyproject.toml`'s `[project].version` cannot be read;
+- the ref is a `v*.*.*` tag whose name is not exactly `v<version>`, which
+  would otherwise publish a version the tag does not name;
+- the publish step carries a `password:` input (the token path) and the
+  `PYPI_API_TOKEN` secret is not readable by the workflow. The check reads this
+  workflow file, so the trusted-publishing form — no `password:` input — does not
+  demand a secret.
+
+It also writes the version, the triggering event, the ref and the secret's
+presence (never its value) to the job summary, together with what pypi.org
+currently serves for that version. That step runs on `workflow_dispatch` too, so
+a dispatch is a real preflight of the release identity even though it never
+publishes.
 
 ## Credential: the PYPI_API_TOKEN secret
 
