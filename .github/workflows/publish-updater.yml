@@ -221,6 +221,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
           PLATFORMS: ${{ steps.select.outputs.platforms }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
