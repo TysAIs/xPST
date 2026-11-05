@@ -16,6 +16,7 @@ Upload specs:
 Docs: https://developers.tiktok.com/doc/content-posting-api
 """
 
+import contextlib
 import time
 from pathlib import Path
 
@@ -764,9 +765,17 @@ class TikTokUploader(PlatformUploader):
                 platform="tiktok",
             )
         if status_code == 429:
+            message = "TIKTOK_RATE_LIMITED: Rate limit exceeded (6 req/min). Try again later."
+            # The provider's own wait is the only signal the cooldown machine
+            # can act on, and it reads that signal out of this error text.
+            # Dropping it made a 900s ask run at the 60s escalation floor, with
+            # every retry attempt spent inside the window TikTok had named.
+            hint = self._declared_retry_after(e, error_body)
+            if hint:
+                message = f"{message} (Retry-After: {hint})"
             return UploadResult(
                 success=False,
-                error="TIKTOK_RATE_LIMITED: Rate limit exceeded (6 req/min). Try again later.",
+                error=message,
                 platform="tiktok",
             )
         return UploadResult(
@@ -774,6 +783,26 @@ class TikTokUploader(PlatformUploader):
             error=f"TIKTOK_HTTP_ERROR: {error_body}",
             platform="tiktok",
         )
+
+    @staticmethod
+    def _declared_retry_after(e: httpx.HTTPStatusError, error_body: str) -> str:
+        """The wait TikTok declared, as a bare integer string (``""`` if none).
+
+        Reads ``Retry-After`` from the response headers first, then falls back
+        to a hint inside the JSON error envelope (TikTok sometimes reports the
+        window there instead). Only a numeric value is carried: the cooldown
+        parser reads digits, so the HTTP-date header form would be misread.
+        """
+        response = getattr(e, "response", None)
+        if response is not None:
+            with contextlib.suppress(Exception):
+                header = str(response.headers.get("retry-after") or "").strip()
+                if header.isdigit():
+                    return header
+        from xpst.utils.retry import parse_declared_retry_after_s
+
+        declared = parse_declared_retry_after_s(error_body)
+        return str(int(declared)) if declared else ""
 
     def _is_sandbox(self) -> bool:
         """Return whether TikTok sandbox mode is active (no real posts)."""
