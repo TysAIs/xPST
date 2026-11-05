@@ -210,3 +210,32 @@ def test_pr_fallback_keeps_the_job_green_and_states_the_checks_caveat() -> None:
     # The release asset must not disagree with the served file on the PR route.
     attach = next(step for step in steps if step.get("name") == "Attach latest.json to the release")
     assert "steps.publish.outputs.status == 'pr'" in str(attach["if"])
+
+
+def test_publish_step_declares_every_variable_its_script_reads() -> None:
+    """`set -u` turns a forgotten `env:` entry into a red run.
+
+    Run 42117287055 failed on `VERSION: unbound variable` after the manifest PR
+    push had already succeeded: the step body read a variable the step never
+    declared. GitHub only injects `GITHUB_*` / `RUNNER_*`, so every other
+    uppercase name a step's script expands has to come from its own `env:` block.
+    """
+    steps = load_workflow()["jobs"]["publish"]["steps"]
+    injected_prefixes = ("GITHUB_", "RUNNER_", "CI", "HOME", "PATH", "TMPDIR", "LANG")
+    offenders: dict[str, list[str]] = {}
+
+    for step in steps:
+        run = str(step.get("run", ""))
+        if not run:
+            continue
+        declared = set((step.get("env") or {}).keys())
+        used = {
+            name
+            for name in re.findall(r"\$\{?([A-Z][A-Z0-9_]{2,})\b", run)
+            if not name.startswith(injected_prefixes) and name != "HEAD"
+        }
+        missing = sorted(used - declared)
+        if missing:
+            offenders[str(step.get("name"))] = missing
+
+    assert offenders == {}, f"steps read undeclared variables (set -u -> red run): {offenders}"
