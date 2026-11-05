@@ -54,7 +54,7 @@ class _CannedEngine:
 
     async def post_manual(  # noqa: ANN001
         self, video_path, caption, platforms=None, per_platform_captions=None, visibility=None,
-        force_now=False,
+        force_now=False, video_mode=None,
     ):
         return self._result
 

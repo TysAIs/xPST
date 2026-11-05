@@ -114,6 +114,24 @@ class YouTubeUploader(PlatformUploader):
         height = measured["height"]
 
         if explicit is None:
+            if duration is None:
+                # No measured duration at all (probe unavailable or an
+                # unreadable container). Guessing "short" here is exactly the
+                # bug this mode exists to kill, so refuse and say what to do.
+                logger.warning("Refusing YouTube upload: could not measure %s", video_path)
+                return UploadResult(
+                    success=False,
+                    error=(
+                        f"YOUTUBE_MODE_UNMEASURABLE: the media probe reported no duration for "
+                        f"{video_path.name}, so xPST cannot tell a Short (≤ "
+                        f"{SHORTS_CLASSIFICATION_MAX_SECONDS} s) from long-form. "
+                        f"Pick one: --shorts or --long (MCP: video_mode), or set "
+                        f"youtube.video_mode. Check that ffprobe can read the file."
+                    ),
+                    platform="youtube",
+                    retryable=False,
+                    metadata={"duration_s": None, "width": width, "height": height},
+                )
             classified = classify_video_mode(duration, width, height)
             if classified is None:
                 logger.warning(
