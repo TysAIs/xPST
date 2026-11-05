@@ -125,7 +125,11 @@ next to `privacy/` and `terms/`.
 5. `scripts/publish-updater.sh` validates the manifest and stages it at
    `updates/latest.json` in the checkout.
 6. The job commits that file to `main` (Pages rebuilds from the branch) and also
-   attaches `latest.json` to the release.
+   attaches `latest.json` to the release. When `main` rejects the commit (the
+   normal case, see the branch-protection invariant below) the same validated
+   manifest is pushed to `updater/latest-json` and opened/refreshed as a pull
+   request, and the release asset is refreshed on that route too so the two
+   never disagree.
 
 Manual run, including a build-only rehearsal:
 
@@ -150,6 +154,24 @@ Invariants worth keeping:
   branch and opening/refreshing a pull request, and stays green. Fully automatic
   publishing needs a bypass: a token stored as a secret whose actor may push to
   `main`, or a repository ruleset with a bypass for the GitHub Actions app.
+- **The pull request route has two preconditions outside this repository's
+  files, both measured.**
+  - `gh pr create` with `GITHUB_TOKEN` requires the repository setting "Allow
+    GitHub Actions to create and approve pull requests"
+    (`gh api repos/TysAIs/xPST/actions/permissions/workflow` →
+    `can_approve_pull_request_reviews`). It was `false` until 2026-11-05, and
+    that — not the protected-branch push itself — is why run 41796222965 (the
+    v1.2.1 release) ended red: the branch push succeeded and `gh pr create`
+    failed with `GitHub Actions is not permitted to create or approve pull
+    requests`. Enabled 2026-11-05; `default_workflow_permissions` stays `read`
+    because every workflow here asks for its own permissions.
+  - A `GITHUB_TOKEN`-authored pull request does not trigger `pull_request`
+    workflows, so the 13 required checks never run on it. The manifest PR is
+    therefore **never green on its own**; the job says so in its step summary and
+    writes it into the PR body. A maintainer merge is the gate, and closing and
+    reopening the PR as a human makes CI run if the checks are wanted first.
+    Do not add auto-merge to this job: it would wait forever on checks that no
+    event will start.
 
 Current gap for a real update round-trip (tracked outside this workflow): a
 release only contains signed updater artifacts if the Tauri build ran with
