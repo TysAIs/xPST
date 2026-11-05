@@ -40,17 +40,18 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
+          # Every line goes to the log as well as the job summary, so the
+          # evidence is readable from `gh run view --log`, not only in the UI.
+          say() { printf '%s\n' "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
           version=$(grep -m1 -E '^version[[:space:]]*=' pyproject.toml | cut -d'"' -f2 || true)
-          {
-            echo "### PyPI release identity"
-            echo ""
-            echo "| field | value |"
-            echo "| --- | --- |"
-            echo "| pyproject version | \`${version:-<missing>}\` |"
-            echo "| event | \`${EVENT_NAME}\` |"
-            echo "| ref under test | \`${REF_TYPE}:${REF_NAME}\` |"
-            echo "| PYPI_API_TOKEN secret | present=\`${TOKEN_PRESENT}\` (presence only; the value is never read) |"
-          } >> "$GITHUB_STEP_SUMMARY"
+          say "### PyPI release identity"
+          say ""
+          say "| field | value |"
+          say "| --- | --- |"
+          say "| pyproject version | \`${version:-<missing>}\` |"
+          say "| event | \`${EVENT_NAME}\` |"
+          say "| ref under test | \`${REF_TYPE}:${REF_NAME}\` |"
+          say "| PYPI_API_TOKEN secret | present=\`${TOKEN_PRESENT}\` (presence only; the value is never read) |"
           if [ -z "$version" ]; then
             echo "::error::Could not read [project].version from pyproject.toml"
             exit 1
@@ -64,20 +65,21 @@ jobs:
           # here rather than after the build. Without that input the publish step
           # is on trusted publishing (docs/PYPI.md), which needs no secret.
           if grep -qE '^[[:space:]]*password:[[:space:]]*[$][{][{] secrets[.]' .github/workflows/publish-pypi.yml; then
+            say "credential path: stored token (this workflow passes a \`password:\` input)."
             if [ "$TOKEN_PRESENT" != "true" ]; then
               echo "::error::This workflow publishes with a stored password, but the PYPI_API_TOKEN repository secret is not readable, so the token path cannot work. Add the secret, or switch the publish step to trusted publishing (docs/PYPI.md)."
               exit 1
             fi
           else
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "credential path: trusted publishing (no \`password:\` input in this workflow); it needs a registered publisher on PyPI and \`id-token: write\`." >> "$GITHUB_STEP_SUMMARY"
+            say ""
+            say "credential path: trusted publishing (no \`password:\` input in this workflow); it needs a registered publisher on PyPI and \`id-token: write\`."
           fi
           index_status=$(curl -sS -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/xpst/${version}/json" || true)
-          echo "" >> "$GITHUB_STEP_SUMMARY"
+          say ""
           if [ "$index_status" = "200" ]; then
-            echo "pypi.org already serves xpst ${version}: the publish step will report existing files as skipped (skip-existing)." >> "$GITHUB_STEP_SUMMARY"
+            say "pypi.org already serves xpst ${version}: the publish step will report existing files as skipped (skip-existing)."
           else
-            echo "pypi.org status for xpst ${version}: \`${index_status}\` (project-wide status is 404 until the first publish)." >> "$GITHUB_STEP_SUMMARY"
+            say "pypi.org status for xpst ${version}: \`${index_status}\` (project-wide status is 404 until the first publish)."
           fi
 
 
