@@ -21,6 +21,11 @@ def _engine(tmp_path: Path):
 
     config = XPSTConfig()
     config.config_dir = str(tmp_path)
+    # Only YouTube is connected: R3 derives the route from the connected set,
+    # not from a default "all", so the derived targets are exactly this account.
+    for name in ("youtube", "x", "instagram", "tiktok", "threads", "facebook"):
+        if hasattr(config, name):
+            getattr(config, name).enabled = name == "youtube"
     engine.config = config
     return engine
 
@@ -87,6 +92,9 @@ async def test_dry_run_refusal_carries_top_level_error_like_the_real_path(tmp_pa
     monkeypatch.setenv("XPST_MCP_ALLOW_MUTATIONS", "1")
     engine = _engine(tmp_path)
     engine._platforms = {}  # the real zero-destinations state
+    for name in ("youtube", "x", "instagram", "tiktok", "threads", "facebook"):
+        if hasattr(engine.config, name):
+            getattr(engine.config, name).enabled = False
 
     result = await _handle_post(
         engine,
@@ -96,10 +104,11 @@ async def test_dry_run_refusal_carries_top_level_error_like_the_real_path(tmp_pa
 
     assert payload["ready"] is False
     assert payload["error"] is not None
-    assert payload["error"]["code"] == "NO_DESTINATIONS"
-    assert payload["error"]["message"] == "Choose at least one destination platform."
+    # Nothing connected is its own actionable refusal (R3), naming the command.
+    assert payload["error"]["code"] == "NO_CONNECTED_ACCOUNTS"
+    assert "xpst connect" in payload["error"]["message"]
     # The nested shape is kept for existing clients that already read it.
-    assert payload["plan"]["error"]["code"] == "NO_DESTINATIONS"
+    assert payload["plan"]["error"]["code"] == "NO_CONNECTED_ACCOUNTS"
 
 
 @pytest.mark.asyncio

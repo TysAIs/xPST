@@ -457,15 +457,29 @@ def test_post_dry_run_plans_without_uploading(tmp_path: Path) -> None:
     assert engine.calls == [], "a dry run must not touch the engine"
 
 
-def test_post_refuses_without_targets_or_media(tmp_path: Path) -> None:
-    config_dir = _post_config(tmp_path)
-    with _open_app(tmp_path, config_dir, engine_factory=_engine_factory(FakeEngine())) as client:
+def test_post_without_targets_uses_the_route_and_refuses_without_media(tmp_path: Path) -> None:
+    # Only YouTube is connected: the derived route targets it, and every other
+    # account (not opted in) is not implied.
+    config_dir = _post_config(
+        tmp_path,
+        **{
+            name: {"enabled": False}
+            for name in ("x", "instagram", "tiktok", "threads", "facebook")
+        },
+    )
+    with _open_app(tmp_path, config_dir, engine_factory=_engine_factory(FakeEngine(succeeds=["youtube"]))) as client:
         no_targets = client.post("/api/post", json={"media_paths": [_media_file(tmp_path)], "caption": "x"})
         no_media = client.post("/api/post", json={"caption": "x", "platforms": ["youtube"]})
 
-    assert no_targets.status_code == 409
-    assert "Choose at least one destination platform." in no_targets.json()["blockers"]
-    assert no_targets.json()["ok"] is False
+    # No targets is no longer a refusal: it targets the resolved route (R3).
+    # The connected account publishes; nothing else is implied.
+    assert no_targets.status_code == 200
+    data = no_targets.json()
+    assert data["ok"] is True
+    states = {row["platform"]: row["state"] for row in data["destinations"]}
+    assert states == {"youtube": "posted"}
+    assert data["failed_count"] == 0
+    # A request with no media at all is still refused.
     assert no_media.status_code == 409
     assert any("video file" in blocker.lower() for blocker in no_media.json()["blockers"])
 
