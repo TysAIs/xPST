@@ -420,6 +420,17 @@ class CrossPostEngine:
             except Exception as e:
                 logger.error(f"Failed to initialize Facebook Page uploader: {e}")
 
+        # Rumble (OPT-IN, integration-uncertain: partner API when a key exists,
+        # manual handoff otherwise). Disabled by default so nothing changes for
+        # an existing install.
+        if getattr(self.config, "rumble", None) is not None and self.config.rumble.enabled:
+            try:
+                from xpst.platforms.rumble import RumbleUploader
+                self._platforms["rumble"] = RumbleUploader(self.config)
+                logger.info("Rumble uploader initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Rumble uploader: {e}")
+
         # NOTE: Messenger is intentionally NOT registered here. It is a
         # webhook-driven auto-reply adapter (ManyChat-lite), not a video-posting
         # destination — adding it to `_platforms` would make `check_and_post`
@@ -649,6 +660,7 @@ class CrossPostEngine:
         per_platform_captions: Mapping[str, str] | None = None,
         visibility: str | None = None,
         force_now: bool = False,
+        video_mode: str | None = None,
     ) -> CrossPostResult:
         """Manually post a single video to specified platforms.
 
@@ -664,6 +676,9 @@ class CrossPostEngine:
                 destination absent from the mapping keeps ``caption``.
             visibility: Optional target visibility (YouTube: ``public``,
                 ``unlisted``, ``private``). Honoured by YouTube only.
+            video_mode: Optional short/long form choice (``--shorts`` /
+                ``--long``). Honoured by the YouTube uploader; every other
+                destination enforces its own declared envelope.
 
         Returns:
             CrossPostResult with per-platform outcomes.
@@ -710,6 +725,7 @@ class CrossPostEngine:
                 video_id=video_id,
                 source_platform="local",
                 visibility=visibility,
+                video_mode=video_mode,
                 ignore_window=force_now,
             )
 

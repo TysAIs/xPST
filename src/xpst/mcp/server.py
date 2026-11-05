@@ -417,6 +417,17 @@ TOOLS: list[Tool] = [
                     ),
                     "default": False,
                 },
+                "video_mode": {
+                    "type": "string",
+                    "enum": ["shorts", "long"],
+                    "description": (
+                        "Publish a video as short-form or long-form. Defaults to "
+                        "deriving it from the media probe (shorts: <=60s and "
+                        "square-or-vertical; long: >=180s or landscape); an "
+                        "ambiguous video is refused rather than guessed. YouTube "
+                        "honours it (Shorts vs long-form upload)."
+                    ),
+                },
             },
             "required": ["caption"],
             "additionalProperties": False,
@@ -1877,6 +1888,7 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
             caption=caption,
             platforms=args.get("platforms"),
             per_platform_captions=overrides,
+            video_mode=args.get("video_mode"),
             force_now=bool(args.get("force", False)),
         )
     payload = _serialize_result(result)

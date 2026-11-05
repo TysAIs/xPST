@@ -917,6 +917,19 @@ def _pre_upload_refusal_blockers(request: ContentRequest) -> list[ContentIssue]:
     show_default=True,
     help="Post visibility (YouTube honours it; other platforms ignore it)",
 )
+@click.option(
+    "--shorts",
+    "video_mode",
+    flag_value="shorts",
+    default=None,
+    help="Publish as short-form (YouTube: Shorts ≤ 60 s, square-or-vertical)",
+)
+@click.option(
+    "--long",
+    "video_mode",
+    flag_value="long",
+    help="Publish as long-form (YouTube: watch URL, up to 12 h; X: needs a raised cap)",
+)
 @click.option("--dry-run", "dry_run", is_flag=True, help="Show what would happen without uploading")
 @click.option(
     "--now",
@@ -939,6 +952,7 @@ def post(
     content_type: str | None,
     platforms: str | None,
     visibility: str,
+    video_mode: str | None,
     dry_run: bool,
     now: bool,
     as_json: bool,
@@ -1056,6 +1070,7 @@ def post(
             "items": len(media_paths),
             "targets": targets,
             "visibility": visibility,
+            "video_mode": video_mode,
             "content_type": verdict["content_type"] or verdict["effective_content_type"],
             "effective_content_type": verdict["effective_content_type"],
             "route": verdict["route"],
@@ -1218,6 +1233,7 @@ def post(
                 platform_list,
                 per_platform_captions,
                 visibility=visibility,
+                video_mode=video_mode,
                 force_now=now,
             )
         )
