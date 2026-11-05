@@ -59,9 +59,18 @@ jobs:
             echo "::error::Tag $REF_NAME does not match pyproject version $version. This run would upload $version, and PyPI files are immutable."
             exit 1
           fi
-          if [ "$TOKEN_PRESENT" != "true" ]; then
-            echo "::error::The PYPI_API_TOKEN repository secret is not readable by this workflow, so the token publish path cannot work. Add the secret, or switch this job to trusted publishing (docs/PYPI.md)."
-            exit 1
+          # The credential check follows the workflow itself: a `password:` input in
+          # this file means the token path, and then a missing secret must fail
+          # here rather than after the build. Without that input the publish step
+          # is on trusted publishing (docs/PYPI.md), which needs no secret.
+          if grep -qE '^[[:space:]]*password:[[:space:]]*[$][{][{] secrets[.]' .github/workflows/publish-pypi.yml; then
+            if [ "$TOKEN_PRESENT" != "true" ]; then
+              echo "::error::This workflow publishes with a stored password, but the PYPI_API_TOKEN repository secret is not readable, so the token path cannot work. Add the secret, or switch the publish step to trusted publishing (docs/PYPI.md)."
+              exit 1
+            fi
+          else
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "credential path: trusted publishing (no \`password:\` input in this workflow); it needs a registered publisher on PyPI and \`id-token: write\`." >> "$GITHUB_STEP_SUMMARY"
           fi
           index_status=$(curl -sS -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/xpst/${version}/json" || true)
           echo "" >> "$GITHUB_STEP_SUMMARY"
