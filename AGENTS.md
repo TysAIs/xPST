@@ -113,6 +113,7 @@ python -m xpst readiness           # first-run readiness and next actions
 python -m xpst auth status --json  # per-platform auth state, machine-readable
 python -m xpst health              # connectivity check, no uploads
 python -m xpst run --dry-run       # full pipeline without publishing
+python -m xpst.rate_limit_dry_run  # counted rate-limit dry run (docs/RATE-LIMIT-DRY-RUN.md)
 python -m xpst mcp                 # start the MCP server on stdio
 python -m xpst ui                  # run the web UI + its API server locally
 ```
