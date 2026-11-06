@@ -42,3 +42,8 @@ allow: com.tysais.xpst
 # The GitHub account name quoted in backticks, as documentation writes it
 # (the PyPI trusted-publisher form needs the exact spelling; see docs/PYPI.md).
 allow: `tysais`
+
+# The GitHub handle as release notes write it ("by @TysAIs"): the public
+# account that owns the project, not the person. Same reasoning as the
+# product identifiers above.
+allow: @tysais
