@@ -1,6 +1,6 @@
 {
   "version": "1.2.1",
-  "notes": "xPST v1.2.1 desktop release - see the GitHub release notes.",
+  "notes": "## What's Changed\n* ci: one-off stored-credential PyPI publish test by @TysAIs in https://github.com/TysAIs/xPST/pull/248\n* fix(updater): rotate the updater signing key to a keypair whose private half exists by @TysAIs in https://github.com/TysAIs/xPST/pull/249\n* chore(release): bump the release version to 1.2.1 by @TysAIs in https://github.com/TysAIs/xPST/pull/250\n\n\n**Full Changelog**: https://github.com/TysAIs/xPST/compare/v1.2.0...v1.2.1\n\n## What's Changed\n* ci: one-off stored-credential PyPI publish test by @TysAIs in https://github.com/TysAIs/xPST/pull/248\n* fix(updater): rotate the updater signing key to a keypair whose private half exists by @TysAIs in https://github.com/TysAIs/xPST/pull/249\n* chore(release): bump the release version to 1.2.1 by @TysAIs in https://github.com/TysAIs/xPST/pull/250\n\n\n**Full Changelog**: https://github.com/TysAIs/xPST/compare/v1.2.0...v1.2.1",
   "platforms": {
     "darwin-aarch64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSMEwvcWxNTGtjSVFVakhHN2lvbTRSSlljUXZJZUpNMTJyUCtNeExjL3l3L1JTZVpsNzd3YVZHa3pXVUQ2VTRKUnl6NFhHMDlSbitPNyswRysrZVZ5dGtMUHVrbjdtdUE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwMzM4MDcwCWZpbGU6eFBTVC5hcHAudGFyLmd6CnRVTG82WWpNSytuUDA3WFpUd2tOTFJCVVFLZlR2MklVa3JhMllSQ1l6ZktVTS9ObnNZUTlrajJ2bDFVS1MxK3FUTTdrYlhwOFhwazRiTlhTMHZOWkFnPT0K",
@@ -13,5 +13,5 @@
       "url": "https://github.com/TysAIs/xPST/releases/download/v1.2.1/xPST.app.tar.gz"
     }
   },
-  "pub_date": "2026-09-25T12:50:34Z"
+  "pub_date": "2026-11-06T00:54:09Z"
 }
