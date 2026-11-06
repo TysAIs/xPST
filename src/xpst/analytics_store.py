@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from xpst.utils.logger import get_logger
+from xpst.utils.platform import get_config_dir
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -28,6 +29,31 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _CORE_FIELDS = ("views", "likes", "comments", "shares", "reposts", "saves")
+
+
+def default_analytics_db_path() -> Path:
+    """Return the analytics database for the active config directory.
+
+    This is the *only* correct zero-argument location for ``analytics.db``: it
+    routes through :func:`xpst.utils.platform.get_config_dir`, the documented
+    single source of truth that honours the ``XPST_CONFIG_DIR`` sandbox hook.
+
+    Why this exists (two real defects, one fix):
+
+    * A hardcoded ``~/.xpst/analytics.db`` default meant every caller that
+      built ``AnalyticsStore()`` with no path — four sites in
+      ``engine.py`` and ``mcp/server.py`` — wrote into the *operator's* live
+      ledger even when the config dir had been relocated. The pytest suite
+      sandboxes ``XPST_CONFIG_DIR`` per test, so engine tests recorded
+      cross-post groups straight into the real ``~/.xpst/analytics.db``
+      (measured 2026-11-04: 7 fixture rows in a 23-row production
+      ``cross_post_groups`` table, rewritten on every suite run).
+    * With a relocated config dir the engine wrote its ledger to a database
+      the dashboard and MCP analytics tools never read (they already resolve
+      ``config.config_dir / "analytics.db"``).
+    """
+    return get_config_dir() / "analytics.db"
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS metric_snapshots (
@@ -101,7 +127,7 @@ class AnalyticsStore:
 
     def __init__(self, db_path: Path | str | None = None) -> None:
         if db_path is None:
-            db_path = Path("~/.xpst/analytics.db").expanduser()
+            db_path = default_analytics_db_path()
         self.db_path = Path(db_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
