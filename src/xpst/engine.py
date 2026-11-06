@@ -630,6 +630,19 @@ class CrossPostEngine:
         result.update_status()
         return result
 
+    def _analytics_store(self) -> Any:
+        """Return the analytics store bound to THIS engine's config dir.
+
+        Never the no-argument ``AnalyticsStore()``: that resolves the
+        process-wide default, which is how a test run — or any relocated
+        ``config_dir`` — recorded cross-post groups into the operator's real
+        ``~/.xpst/analytics.db`` while the dashboard and MCP analytics tools
+        read ``config.config_dir / "analytics.db"``. One ledger, one path.
+        """
+        from xpst.analytics_store import AnalyticsStore
+
+        return AnalyticsStore(Path(self.config.config_dir).expanduser() / "analytics.db")
+
     def _cleanup_encoded_files(self, video_path: Path) -> None:
         """Remove platform-specific encoded copies of a video."""
         for suffix in _ENCODED_SUFFIXES:
@@ -751,9 +764,7 @@ class CrossPostEngine:
                 })
         if platforms_data:
             try:
-                from xpst.analytics_store import AnalyticsStore
-
-                store = AnalyticsStore()
+                store = self._analytics_store()
                 store.record_cross_post_group(
                     content_hash=video_id,
                     video_id=video_id,
@@ -976,9 +987,7 @@ class CrossPostEngine:
         ]
         if platforms_data:
             try:
-                from xpst.analytics_store import AnalyticsStore
-
-                store = AnalyticsStore()
+                store = self._analytics_store()
                 store.record_cross_post_group(
                     content_hash=video_id,
                     video_id=video_id,
@@ -1081,9 +1090,7 @@ class CrossPostEngine:
         ]
         if platforms_data:
             try:
-                from xpst.analytics_store import AnalyticsStore
-
-                AnalyticsStore().record_cross_post_group(
+                self._analytics_store().record_cross_post_group(
                     content_hash=text_id,
                     video_id=text_id,
                     caption=text,
@@ -1667,9 +1674,7 @@ class CrossPostEngine:
                 })
         if platforms_data:
             try:
-                from xpst.analytics_store import AnalyticsStore
-
-                store = AnalyticsStore()
+                store = self._analytics_store()
                 store.record_cross_post_group(
                     content_hash=post.content_hash or "",
                     video_id=result.video_id,

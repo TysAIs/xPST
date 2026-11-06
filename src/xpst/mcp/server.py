@@ -1461,7 +1461,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> CallToolResu
         elif name == "xpst_followers":
             result = await _handle_followers(server.config)
         elif name == "xpst_best_time":
-            result = await _handle_best_time(arguments)
+            result = await _handle_best_time(server.config, arguments)
         elif name == "xpst_security_audit":
             result = await _handle_security_audit(server.config)
         elif name == "xpst_suggest_caption":
@@ -2240,15 +2240,20 @@ async def _handle_followers(config: XPSTConfig) -> CallToolResult:
     )
 
 
-async def _handle_best_time(arguments: dict[str, Any]) -> CallToolResult:
+async def _handle_best_time(config: XPSTConfig, arguments: dict[str, Any]) -> CallToolResult:
     """Handle xpst_best_time (B3).
 
     Returns recommended posting times per platform based on engagement history.
+    Reads ``config.config_dir / "analytics.db"`` — the same ledger every other
+    surface reads — never the no-argument default (see
+    :func:`xpst.analytics_store.default_analytics_db_path`).
     """
+    from pathlib import Path
+
     from xpst.best_time import BestTimeAnalyzer
 
     platform = arguments.get("platform")
-    analyzer = BestTimeAnalyzer()
+    analyzer = BestTimeAnalyzer(Path(config.config_dir).expanduser() / "analytics.db")
 
     if platform:
         best = analyzer.best_for_platform(platform)
