@@ -366,6 +366,15 @@ So the routing promise is currently **partially impossible** for the exact forma
    user-supplied public URL.
 4. **Rumble** is not in the codebase at all (no occurrence in `src/` or `docs/`).
 
+**This table is a snapshot at `fc2eadd` and three of its four findings have since moved**
+(gaps 1, 2 and 4; gap 3 has not). PR #339 added real long-form YouTube (explicit
+`--shorts`/`--long`, resumable `videos.insert`, watch URL), a configurable
+`x.max_video_duration_seconds` for the X envelope, and a Rumble destination whose honest
+path without a partner key is a manual handoff (`integration_uncertain`).
+[PLATFORM-CAPABILITY-MATRIX.md](PLATFORM-CAPABILITY-MATRIX.md) §3 is the generated,
+test-pinned per-destination table and it wins wherever the two differ; read that before
+quoting this snapshot.
+
 ### 5.2 The routing contract this proposal adopts
 
 A route is data, resolved by code, printed before execution:
@@ -466,8 +475,12 @@ relay exists to fix. That is the second product argument for §2.4.
    versus BYO. Either way the subreddit list is per-user.
 4. **YouTube long-form**: add an explicit mode (recommended) or keep Shorts-only and declare
    long-form unsupported until later? Shorts-only makes the "long-form → YouTube" requirement false.
+   *Settled by #339 in the recommended direction: explicit `--shorts`/`--long` with a real long-form
+   upload path.*
 5. **Rumble appetite**: is "API path when it works, manual handoff otherwise" acceptable for v1, or
-   should Rumble wait until a live upload can be proven?
+   should Rumble wait until a live upload can be proven? *#339 shipped exactly that split, flagged
+   `integration_uncertain`; the manual handoff is the default until a live upload proves the key
+   path.*
 
 ---
 
