@@ -298,11 +298,26 @@ def test_first_run_flow_reports_a_failed_upload_as_failed(e2e_env: dict[str, Any
 def test_post_is_refused_before_the_engine_when_no_destination_is_configured(
     tmp_path: Path, isolated_home: Path
 ) -> None:
-    """A brand-new install cannot post: 409 with the engine's own blockers."""
+    """A brand-new install can post to nothing: the requested destination is a skip."""
     config_dir = tmp_path / "empty"
     config_dir.mkdir()
+    # A brand-new install: no account is connected (R3 — connection is opt-in).
     (config_dir / "config.yaml").write_text(
-        yaml.safe_dump({"version": 4, "accounts": {"local": {"path": ""}}}), encoding="utf-8"
+        yaml.safe_dump(
+            {
+                "version": 4,
+                "accounts": {
+                    "local": {"path": ""},
+                    "youtube": {"enabled": False},
+                    "x": {"enabled": False},
+                    "instagram": {"enabled": False},
+                    "tiktok": {"enabled": False},
+                    "threads": {"enabled": False},
+                    "facebook": {"enabled": False},
+                },
+            }
+        ),
+        encoding="utf-8",
     )
     media = tmp_path / "clip.mp4"
     media.write_bytes(b"\x00" * 1024)
@@ -315,13 +330,15 @@ def test_post_is_refused_before_the_engine_when_no_destination_is_configured(
             timeout=30,
         )
 
-    assert response.status_code == 409
+    assert response.status_code == 200
     result = response.json()
+    # Nothing published and nothing failed: YouTube was requested but is not
+    # connected in this install, so it is a skip with the connect command (R3).
     assert result["ok"] is False
     assert result["uploaded"] is False
-    assert result["blockers"], "a refusal must carry the reason"
-    assert result["destinations"][0]["success"] is False
-    assert "nothing was uploaded" in result["destinations"][0]["error"]
+    row = result["destinations"][0]
+    assert row["state"] == "skipped_unconnected"
+    assert row["connect_command"] == "xpst connect youtube"
 
 
 def test_mutating_routes_refuse_an_unauthenticated_desktop_request(e2e_env: dict[str, Any]) -> None:

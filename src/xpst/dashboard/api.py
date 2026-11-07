@@ -927,6 +927,46 @@ def create_api_router(
         from xpst.services.post_service import PostRequest, PostService, serialize_post_attempt
 
         data = payload or {}
+        # No implied set (R3): an explicit `platforms` list wins; `all: true` is
+        # the explicit "every connected account that accepts this format";
+        # otherwise the format route ∩ connected accounts. Resolved before the
+        # request is built so the plan, the engine call and the reported
+        # destinations are the same set.
+        from xpst.services.route_plan import detect_content_type, resolve_targets
+
+        if not data.get("platforms"):
+            try:
+                route_config = _load_ui_config()
+            except Exception:  # noqa: BLE001 - defaults are the documented fallback
+                from xpst.config import XPSTConfig as _RouteConfig
+
+                route_config = _RouteConfig()
+            media_for_route = list(data.get("media_paths") or [])
+            if data.get("media_path") and not media_for_route:
+                media_for_route = [str(data["media_path"])]
+            media_for_route += list(data.get("carousel_paths") or [])
+            resolution = resolve_targets(
+                route_config,
+                None,
+                all_connected=bool(data.get("all", False)),
+                content_type=detect_content_type(
+                    [str(item) for item in media_for_route],
+                    content_type=str(data.get("format") or data.get("content_type") or "auto"),
+                ),
+            )
+            if resolution.errors:
+                envelope = {
+                    "ok": False,
+                    "ready": False,
+                    "blocked": True,
+                    "error": dict(resolution.errors[0]),
+                    "blockers": [resolution.errors[0]["message"]],
+                    "requested": [],
+                    "destinations": [],
+                    "network_calls": False,
+                }
+                return JSONResponse(envelope, status_code=409)
+            data = {**data, "platforms": list(resolution.targets)}
         request = PostRequest.from_payload(data)
         dry_run = bool(data.get("dry_run", False))
         # HTTP twin of CLI --now / MCP force: publish outside the anti-bot
@@ -1503,6 +1543,7 @@ def create_api_router(
             parse_destination_texts,
         )
         from xpst.services.post_preflight import PostPlanRequest, PostPreflightService, plan_content_type
+        from xpst.services.route_plan import build_route_plan, detect_content_type, resolve_targets
 
         raw_paths = payload.get("media_paths")
         if raw_paths is None:
@@ -1521,10 +1562,32 @@ def create_api_router(
         ]
 
         request_blockers: list[str] = []
+        resolution_error: dict[str, Any] | None = None
         if not platforms:
-            # An empty target list would produce an empty plan that reports
-            # "ready", so the request-shape precondition is decided here.
-            request_blockers.append("Choose at least one destination platform.")
+            # No implied set (R3): resolve the format route ∩ connected accounts
+            # (or the explicit "all": true). A request with nothing connected
+            # gets ONE actionable error naming the connect command.
+            try:
+                config_for_route = XPSTConfig.load(str(Path(config_dir).expanduser() / "config.yaml"))
+            except Exception:  # noqa: BLE001 - defaults are the documented fallback
+                config_for_route = XPSTConfig()
+            resolution = resolve_targets(
+                config_for_route,
+                None,
+                all_connected=bool(payload.get("all", False)),
+                content_type=detect_content_type(
+                    media_paths,
+                    content_type=str(payload.get("format") or payload.get("content_type") or "auto"),
+                ),
+            )
+            platforms = list(resolution.targets)
+            if resolution.errors:
+                resolution_error = dict(resolution.errors[0])
+                request_blockers.append(resolution_error["message"])
+            if not platforms and resolution_error is None:
+                # An empty target list would produce an empty plan that reports
+                # "ready", so the request-shape precondition is decided here.
+                request_blockers.append("Choose at least one destination platform.")
 
         # Per-destination copy. Parsed before the plan runs so a malformed
         # payload is reported instead of silently posting the shared caption.
@@ -1574,6 +1637,22 @@ def create_api_router(
             canonical_blockers = [f"Preflight could not run: {str(exc)[:200]}"]
 
         media = Path(media_path).expanduser() if media_path else None
+        # The resolved route plan (R4) — per destination state, envelope and
+        # reason — is the same object `xpst preflight` and `xpst_preflight`
+        # return.
+        route_payload = build_route_plan(
+            config,
+            media_paths=media_paths,
+            caption=caption,
+            per_platform_captions=overrides,
+            content_type=detect_content_type(
+                media_paths,
+                content_type=str(payload.get("format") or payload.get("content_type") or "auto"),
+            ),
+            requested=payload.get("platforms") or None,
+            all_connected=bool(payload.get("all", False)),
+            include_transform=False,
+        ).to_dict()
         # What each destination would actually receive — the override when the
         # user wrote one, else the shared caption. Reporting the shared caption
         # for every destination here was a lie as soon as overrides existed.
@@ -1600,8 +1679,9 @@ def create_api_router(
             "content": verdict,
             "blockers": blockers,
             "warnings": canonical_warnings,
-            "error": (plan or {}).get("error"),
+            "error": resolution_error or (plan or {}).get("error"),
             "plan": plan,
+            "route_plan": route_payload,
             "network_calls": False,
         }
 

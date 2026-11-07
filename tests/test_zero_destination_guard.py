@@ -30,19 +30,30 @@ from xpst.dashboard.api import create_api_router
 from xpst.mcp.server import _handle_post, _handle_preflight, _handle_run, result_is_error
 from xpst.services.post_preflight import (
     NO_DESTINATIONS_CODE,
-    NO_DESTINATIONS_MESSAGE,
     PostPlanRequest,
     PostPreflightService,
     destinations_blocker,
     resolve_destinations,
 )
+from xpst.services.route_plan import (
+    NO_CONNECTED_ACCOUNTS_CODE,
+    no_connected_accounts_message,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-# The canonical message is asserted by hand (not imported) so a change to the
+# The canonical messages are asserted by hand (not imported) so a change to the
 # wording has to be a deliberate change to this contract, not a silent edit.
 MESSAGE = "Choose at least one destination platform."
+# Zero connected accounts is a different fact from "you passed no destinations":
+# it names the connect command, because that is the action that fixes it (R3).
+CONNECT_MESSAGE = (
+    "No platform account is connected, so there is nowhere to publish. "
+    "Connect one with `xpst connect youtube`, `xpst connect x`, … — nothing is "
+    "connected by default."
+)
+assert no_connected_accounts_message() == CONNECT_MESSAGE
 
 # Every mutating ``/api`` route carries the dashboard auth guard, so the HTTP
 # cases below authenticate exactly like a desktop client (the token the engine
@@ -130,6 +141,7 @@ def test_plan_refuses_zero_destinations_instead_of_reporting_ready(tmp_path: Pat
 
 
 def test_cli_post_refuses_without_a_destination(tmp_path: Path) -> None:
+    """Nothing connected: ONE actionable refusal naming the connect command."""
     config = _disabled_config_file(tmp_path)
     media = _media(tmp_path)
     runner = CliRunner()
@@ -142,14 +154,35 @@ def test_cli_post_refuses_without_a_destination(tmp_path: Path) -> None:
         assert result.exit_code == EXIT_CONFIG_ERROR, result.output
         payload = json.loads(result.stdout)
         assert payload["ok"] is False
-        assert payload["error"]["code"] == NO_DESTINATIONS_CODE, result.output
-        assert payload["error"]["message"] == MESSAGE
-        assert payload["blockers"] == [MESSAGE]
+        assert payload["error"]["code"] == NO_CONNECTED_ACCOUNTS_CODE, result.output
+        assert payload["error"]["message"] == CONNECT_MESSAGE
+        assert payload["blockers"] == [CONNECT_MESSAGE]
         assert "Traceback" not in result.output
 
 
-def test_cli_post_refuses_an_explicit_request_with_no_live_uploader(tmp_path: Path) -> None:
-    """``--platforms youtube`` on a disabled destination is still nothing to post to."""
+def test_cli_post_refuses_an_empty_platform_list(tmp_path: Path) -> None:
+    """``--platforms ","`` parsed to no names: the request-shape refusal."""
+    config = _disabled_config_file(tmp_path)
+    media = _media(tmp_path)
+
+    result = CliRunner().invoke(
+        main,
+        ["--config", str(config), "post", "--video", str(media), "--caption", "hi", "--platforms", ",", "--json"],
+    )
+
+    assert result.exit_code == EXIT_CONFIG_ERROR, result.output
+    payload = json.loads(result.stdout)
+    assert payload["error"]["code"] == NO_DESTINATIONS_CODE
+    assert payload["error"]["message"] == MESSAGE
+
+
+def test_cli_post_to_an_unconnected_destination_is_skipped_not_failed(tmp_path: Path) -> None:
+    """``--platforms youtube`` on a disabled destination is a neutral skip (R3).
+
+    Nothing is published — but nothing failed either: the account was never
+    connected. Exit 0 with ``skipped_unconnected`` and the connect command, so a
+    script does not read "you did not connect YouTube" as a broken upload.
+    """
     config = _disabled_config_file(tmp_path)
     media = _media(tmp_path)
 
@@ -158,9 +191,13 @@ def test_cli_post_refuses_an_explicit_request_with_no_live_uploader(tmp_path: Pa
         ["--config", str(config), "post", "--video", str(media), "--caption", "hi", "--platforms", "youtube", "--json"],
     )
 
-    assert result.exit_code == EXIT_CONFIG_ERROR, result.output
+    assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["error"]["code"] == NO_DESTINATIONS_CODE
+    assert payload["status"] == "skipped"
+    assert payload["skipped_unconnected"] == ["youtube"]
+    states = {item["platform"]: item["state"] for item in payload["destinations"]}
+    assert states == {"youtube": "skipped_unconnected"}
+    assert payload["destinations"][0]["connect_command"] == "xpst connect youtube"
 
 
 def test_cli_run_refuses_without_a_destination(tmp_path: Path) -> None:
@@ -171,8 +208,8 @@ def test_cli_run_refuses_without_a_destination(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_CONFIG_ERROR, result.output
     payload = json.loads(result.stdout)
     assert payload["ok"] is False
-    assert payload["error"]["code"] == NO_DESTINATIONS_CODE
-    assert payload["error"]["message"] == MESSAGE
+    assert payload["error"]["code"] == NO_CONNECTED_ACCOUNTS_CODE
+    assert payload["error"]["message"] == CONNECT_MESSAGE
     # A refused run must not look like "nothing to do".
     assert payload.get("status") != "no_new_videos"
 
@@ -187,8 +224,8 @@ def test_mcp_run_refuses_without_a_destination(tmp_path: Path) -> None:
 
     assert result_is_error(result) is True
     payload = json.loads(result.content[0].text)
-    assert payload["error"]["code"] == NO_DESTINATIONS_CODE
-    assert payload["error"]["message"] == MESSAGE
+    assert payload["error"]["code"] == NO_CONNECTED_ACCOUNTS_CODE
+    assert payload["error"]["message"] == CONNECT_MESSAGE
     assert payload["ok"] is False
 
 
@@ -202,8 +239,8 @@ def test_mcp_post_refuses_without_a_destination(tmp_path: Path) -> None:
 
     assert result_is_error(result) is True
     payload = json.loads(result.content[0].text)
-    assert payload["error"]["code"] == NO_DESTINATIONS_CODE
-    assert payload["error"]["message"] == MESSAGE
+    assert payload["error"]["code"] == NO_CONNECTED_ACCOUNTS_CODE
+    assert payload["error"]["message"] == CONNECT_MESSAGE
 
 
 def test_mcp_preflight_reports_the_canonical_error(tmp_path: Path) -> None:
@@ -215,14 +252,18 @@ def test_mcp_preflight_reports_the_canonical_error(tmp_path: Path) -> None:
 
     payload = json.loads(result.content[0].text)
     assert payload["ready"] is False
-    assert payload["error"] == {"code": NO_DESTINATIONS_CODE, "message": MESSAGE}
-    assert MESSAGE in payload["blockers"]
+    assert payload["error"] == {
+        "code": NO_CONNECTED_ACCOUNTS_CODE,
+        "message": CONNECT_MESSAGE,
+    }
+    assert CONNECT_MESSAGE in payload["blockers"]
 
 
 # ── HTTP ──────────────────────────────────────────────────────────────────
 
 
 def test_http_post_and_preflight_report_the_canonical_error(tmp_path: Path) -> None:
+    _disabled_config_file(tmp_path)  # the router reads this dir's config.yaml
     app = FastAPI()
     app.include_router(create_api_router(str(tmp_path)))
     media = _media(tmp_path)
@@ -232,10 +273,13 @@ def test_http_post_and_preflight_report_the_canonical_error(tmp_path: Path) -> N
         planned = client.post("/api/preflight", json={"media_path": str(media), "caption": "hi"})
 
     assert posted.status_code == 409
-    assert posted.json()["error"]["code"] == NO_DESTINATIONS_CODE
-    assert posted.json()["blockers"] == [MESSAGE]
+    assert posted.json()["error"]["code"] == NO_CONNECTED_ACCOUNTS_CODE
+    assert posted.json()["blockers"] == [CONNECT_MESSAGE]
     assert planned.status_code == 200
-    assert planned.json()["error"] == {"code": NO_DESTINATIONS_CODE, "message": MESSAGE}
+    assert planned.json()["error"] == {
+        "code": NO_CONNECTED_ACCOUNTS_CODE,
+        "message": CONNECT_MESSAGE,
+    }
 
 
 # ── the acceptance criterion: one error, every surface ────────────────────
@@ -262,6 +306,5 @@ def test_every_surface_refuses_with_one_identical_error(tmp_path: Path) -> None:
             "/api/preflight", json={"media_path": str(media), "caption": "hi"}
         ).json()["error"]
 
-    assert cli_error["code"] == mcp_error["code"] == http_error["code"] == NO_DESTINATIONS_CODE
-    assert cli_error["message"] == mcp_error["message"] == http_error["message"] == NO_DESTINATIONS_MESSAGE
-    assert cli_error["message"] == MESSAGE
+    assert cli_error["code"] == mcp_error["code"] == http_error["code"] == NO_CONNECTED_ACCOUNTS_CODE
+    assert cli_error["message"] == mcp_error["message"] == http_error["message"] == CONNECT_MESSAGE

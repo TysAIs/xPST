@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Platforms are opt-in targets, never an implied "all" (R3).** `--platforms`
+  no longer defaults to every enabled platform: an explicit set wins, `--all`
+  is the explicit "every connected account that accepts this format", and the
+  default is the format route ∩ connected accounts. `xpst post --json`, the MCP
+  `xpst_post` result, `POST /api/post` and the schedule store now report and
+  persist that resolved set; the scheduler persists the resolved destinations at
+  add time instead of re-targeting an entry when a new account is connected.
+- **Distinct destination states, including non-failures (R3 rule 4).**
+  `posted`, `skipped_unconnected`, `unsupported_format`,
+  `refused_by_community` and `failed` are one vocabulary across the CLI, MCP,
+  the HTTP API and batch outcomes. A requested-but-unconnected destination is
+  `skipped_unconnected` — visible, exit 0, not a failure — and zero connected
+  accounts is one actionable error naming `xpst connect`.
+- **Refuse rather than truncate, with the envelope in the message (R4 rule 4).**
+  Over-limit captions and out-of-envelope video are refused with the
+  destination's duration / container / codec / byte / caption limits named.
+
 ### Added
 - **The public-safety gate now catches LAN/tailnet IP addresses.** The
   scanner gained a `private_ip` category covering RFC1918 (`10/8`,
@@ -33,6 +51,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result. No credentials, no network, no real post. The failure-injection test
   doubles moved into `xpst.rate_limit_dry_run` so the suite and the command
   exercise one definition. See `docs/RATE-LIMIT-DRY-RUN.md`.
+- **`xpst preflight --format auto` and the capability-driven route resolver.**
+  One plan object (`xpst.services.route_plan`) resolves format, destination
+  state and envelope from the single registry `xpst capabilities` emits —
+  `format_routes` and per-destination `envelopes` are now part of that document
+  (contract version 2), so the CLI, MCP, HTTP API, UI and resolver cannot drift.
+  The MCP `xpst_preflight` / `xpst_post` tools accept `format` and `all`;
+  `POST /api/preflight` returns the same `route_plan`. Everything is resolved
+  before any network call, and `skipped_unconnected` is reported per
+  destination instead of a silent drop.
 - **Text posts survive the schedule store.** The store now has a no-media
   representation — a `content_type=text` entry with an empty media path — and
   every queue surface can create one: `xpst schedule add --text` (CLI),
