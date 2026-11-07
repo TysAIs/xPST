@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import plistlib
+import shutil
 import stat
 import sys
 import zipfile
@@ -20,25 +21,33 @@ from pathlib import Path
 
 import pytest
 
+from scripts import e2e_install_from_artifact as e2e_install_module
 from scripts.e2e_install_from_artifact import (
     DEFAULT_WORK_BASE,
     E2EError,
     WorkDir,
     architecture_match_score,
     artifact_type,
+    asset_preference_score,
     checksum_source_candidates,
+    deb_install_record,
     default_platform,
     derive_checksum_source,
     emit_summary,
     engine_processes,
     gatekeeper_report,
+    headless_display_prefix,
     host_arch,
+    install_artifact,
+    install_deb,
     installer_candidates,
+    is_nsis_installer,
     load_first_checksum_source,
     local_urls_from_log,
     main,
     parse_checksums,
     platform_key,
+    product_executable,
     release_assets,
     release_assets_from_html,
     safe_extract_zip,
@@ -990,3 +999,267 @@ def test_default_work_dir_is_canonical_and_removable():
     finally:
         assert work.cleanup(False) is True
     assert not work.path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Regression coverage for the v1.2.1 published-artifact red run: the Linux
+# artifact is a GTK desktop bundle that needs an installer and a display, the
+# Windows artifact is an NSIS installer that has to be installed before there
+# is an app at all, and an app that dies instantly must report its exit code
+# instead of "no /health in 90s".
+# ---------------------------------------------------------------------------
+
+CRASH_APP_SOURCE = '''#!/usr/bin/env python3
+"""Stand-in for a packaged app that cannot start: fails like a missing .so."""
+import sys
+
+print(
+    "xPST: error while loading shared libraries: libfontconfig.so.1: "
+    "cannot open shared object file: No such file or directory",
+    file=sys.stderr,
+    flush=True,
+)
+sys.exit(127)
+'''
+
+
+def _tar_bytes(members):
+    import io
+    import tarfile
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name, payload, mode in members:
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            info.mode = mode
+            archive.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def _ar_bytes(members) -> bytes:
+    body = b"!<arch>\n"
+    for name, payload in members:
+        header = (
+            f"{name.decode():<16}{0:<12}{0:<6}{0:<6}{'100644':<8}{len(payload):<10}`\n".encode()
+        )
+        assert len(header) == 60
+        body += header + payload + (b"\n" if len(payload) % 2 else b"")
+    return body
+
+
+def build_fake_deb(path: Path, *, executable: str = "usr/bin/xPST") -> Path:
+    """Build a minimal but real .deb: an ar archive of a control and data tar."""
+    control = (
+        b"Package: x-pst\nVersion: 1.2.1\nArchitecture: amd64\nMaintainer: x\n"
+        b"Depends: libwebkit2gtk-4.1-0, libgtk-3-0\nDescription: xPST\n"
+    )
+    control_tar = _tar_bytes([("./control", control, 0o644)])
+    data_tar = _tar_bytes([(f"./{executable}", b"#!/bin/sh\ntrue\n", 0o755)])
+    path.write_bytes(
+        _ar_bytes(
+            [
+                (b"debian-binary", b"2.0\n"),
+                (b"control.tar.gz", control_tar),
+                (b"data.tar.gz", data_tar),
+            ]
+        )
+    )
+    return path
+
+
+def test_deb_install_record_reads_the_published_package(tmp_path):
+    """The .deb is the Linux artifact a stranger installs, so read it for real."""
+
+    deb = build_fake_deb(tmp_path / "xPST_1.2.1_amd64.deb")
+
+    record = deb_install_record(deb)
+
+    assert record["package"] == "x-pst"
+    assert record["version"] == "1.2.1"
+    assert record["executable"] == "/usr/bin/xPST"
+    assert record["depends"] == ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+
+
+def test_deb_install_record_rejects_a_file_that_is_not_an_ar_archive(tmp_path):
+    not_a_deb = tmp_path / "xPST.deb"
+    not_a_deb.write_bytes(b"MZ not an ar archive")
+
+    with pytest.raises(E2EError, match="not an ar archive"):
+        deb_install_record(not_a_deb)
+
+
+def test_install_deb_extracts_when_apt_cannot_install_it(tmp_path, monkeypatch):
+    """Without apt the payload is still unpacked, and the skip is disclosed."""
+
+    deb = build_fake_deb(tmp_path / "xPST_1.2.1_amd64.deb")
+    work = tmp_path / "work"
+    work.mkdir()
+
+    def fake_which(name):
+        return None if name == "apt-get" else f"/usr/bin/{name}"
+
+    def fake_command_result(command, **_kwargs):
+        if command[0] == "dpkg-deb":
+            root = Path(command[3])
+            exe = root / "usr" / "bin" / "xPST"
+            exe.parent.mkdir(parents=True, exist_ok=True)
+            exe.write_text("#!/bin/sh\ntrue\n", encoding="utf-8")
+        return {"returncode": 0, "stdout": "", "stderr": "", "command": command}
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+    monkeypatch.setattr(e2e_install_module, "command_result", fake_command_result)
+
+    installed, record = install_deb(deb, work)
+
+    assert record["method"] == "dpkg-deb -x extraction"
+    assert installed == work / "install" / "deb-root" / "usr" / "bin" / "xPST"
+    assert installed.exists()
+    assert record["uninstall"] == {"kind": "dir", "path": str(work / "install" / "deb-root")}
+
+
+def test_install_artifact_routes_a_deb_and_an_msi_to_their_installers(tmp_path, monkeypatch):
+    deb = build_fake_deb(tmp_path / "xPST_1.2.1_amd64.deb")
+    msi = tmp_path / "xPST_1.2.1_x64_en-US.msi"
+    msi.write_bytes(b"\xd0\xcf\x11\xe0")
+    calls = []
+
+    def fake_deb(path, work):
+        calls.append(("deb", path.name))
+        return Path("/usr/bin/xPST"), {"method": "apt-get install"}
+
+    def fake_windows(path, work):
+        calls.append(("windows", path.name))
+        return tmp_path / "app" / "xPST.exe", {"method": "silent NSIS install (/S)"}
+
+    monkeypatch.setattr(e2e_install_module, "install_deb", fake_deb)
+    monkeypatch.setattr(e2e_install_module, "install_windows_installer", fake_windows)
+
+    install_artifact(deb, "deb", tmp_path)
+    install_artifact(msi, "msi", tmp_path)
+
+    assert calls == [("deb", "xPST_1.2.1_amd64.deb"), ("windows", "xPST_1.2.1_x64_en-US.msi")]
+
+
+def test_artifact_type_recognizes_the_msi_and_deb_installers(tmp_path):
+    msi = tmp_path / "xPST_1.2.1_x64_en-US.msi"
+    msi.write_bytes(b"\xd0\xcf\x11\xe0")
+    deb = tmp_path / "xPST_1.2.1_amd64.deb"
+    deb.write_bytes(b"!<arch>\n")
+
+    assert artifact_type(msi.name, msi) == "msi"
+    assert artifact_type(deb.name, deb) == "deb"
+
+
+def test_select_release_asset_prefers_the_installable_package():
+    """A .deb installs; the AppImage is a portable copy that needs FUSE + GTK."""
+
+    assert select_release_asset(V121_ASSETS, "linux")["name"] == "xPST_1.2.1_amd64.deb"
+    assert select_release_asset(V121_ASSETS, "windows")["name"] == "xPST_1.2.1_x64-setup.exe"
+    assert asset_preference_score("xPST_1.2.1_amd64.deb", "linux") > asset_preference_score(
+        "xPST_1.2.1_amd64.AppImage", "linux"
+    )
+
+
+def test_is_nsis_installer_recognizes_the_nullsoft_header(tmp_path):
+    setup = tmp_path / "xPST_1.2.1_x64-setup.exe"
+    setup.write_bytes(b"MZ" + b"\x00" * 512 + b"NullsoftInst" + b"\x00" * 64)
+    portable = tmp_path / "portable.exe"
+    portable.write_bytes(b"MZ" + b"\x00" * 512)
+
+    assert is_nsis_installer(setup) is True
+    assert is_nsis_installer(portable) is False
+
+
+def test_product_executable_prefers_the_app_over_the_uninstaller(tmp_path):
+    """After a silent install the product .exe is the app, not uninstall.exe."""
+
+    (tmp_path / "xPST.exe").write_bytes(b"MZ" + b"\x00" * 16)
+    (tmp_path / "uninstall.exe").write_bytes(b"MZ" + b"\x00" * 4096)
+
+    chosen = product_executable(tmp_path)
+
+    assert chosen is not None
+    assert chosen.name == "xPST.exe"
+
+
+def test_headless_display_prefix_only_fires_on_linux_without_a_display(monkeypatch):
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(
+        shutil, "which", lambda name: "/usr/bin/xvfb-run" if name == "xvfb-run" else None
+    )
+
+    assert headless_display_prefix() == ["/usr/bin/xvfb-run", "-a", "--"]
+
+    monkeypatch.setenv("DISPLAY", ":99")
+
+    assert headless_display_prefix() == []
+
+
+def test_headless_display_prefix_is_a_no_op_when_xvfb_is_absent(monkeypatch):
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(shutil, "which", lambda _name: None)
+
+    assert headless_display_prefix() == []
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the synthetic app is a shebang script; Windows cannot exec it (WinError 193)",
+)
+def test_a_crashing_artifact_reports_its_exit_code_instead_of_a_timeout(tmp_path, capsys):
+    """The v1.2.1 linux/windows red run: the app died, not the health poll."""
+
+    payload = tmp_path / "payload-crash"
+    app = payload / "xPST.app"
+    _write_script(app / "Contents" / "MacOS" / "xPST", CRASH_APP_SOURCE)
+    _bundle_info_plist(app)
+    artifact = tmp_path / "xPST_1.2.1_amd64.zip"
+    _zip_dir(payload, artifact)
+    checksums = tmp_path / "SHA256SUMS"
+    checksums.write_text(f"{_sha256(artifact)}  {artifact.name}\n", encoding="utf-8")
+    evidence = tmp_path / "evidence.json"
+
+    code = main(
+        [
+            str(artifact),
+            "--platform",
+            "linux",
+            "--checksums",
+            str(checksums),
+            "--no-require-visible-window",
+            "--health-timeout-seconds",
+            "5",
+            "--evidence-out",
+            str(evidence),
+        ]
+    )
+    capsys.readouterr()
+    summary = json.loads(evidence.read_text(encoding="utf-8"))
+    joined = " ".join(summary["failures"])
+
+    assert code == 1
+    assert summary["status"] == "failed"
+    assert "exited with code 127" in joined
+    assert "libfontconfig" in joined
+    assert "did not return HTTP 200 within" not in joined
+    assert summary["launch"]["exit_code_before_boot"] == 127
+    assert summary["launch"]["command"]
+
+
+def test_ci_workflow_gives_the_linux_gui_bundle_a_display():
+    """A headless runner cannot start a GTK app; the workflow must say so."""
+
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "published-artifact-install-e2e.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "apt-get install -y -qq xvfb" in workflow
+    assert "matrix.platform == 'linux'" in workflow

@@ -4,8 +4,8 @@
 
 `scripts/e2e_install_from_artifact.sh` exercises one desktop artifact from the
 same perspective as a new user. It accepts a local `.dmg`, `.zip`, `.exe`,
-`.AppImage` or extensionless executable, a GitHub release asset URL, or the
-release tag itself:
+`.msi`, `.deb`, `.AppImage` or extensionless executable, a GitHub release asset
+URL, or the release tag itself:
 
 ```bash
 # Published release: the platform installer is resolved from the release listing
@@ -28,7 +28,11 @@ the run cannot silently test a local build while claiming to test a published on
 It prefers the flat historical names (`xPST.dmg`, `xPST.exe`, …) and otherwise
 recognises the Tauri naming the current lanes publish
 (`xPST_<version>_<arch>.dmg|.exe|.msi|.AppImage|.deb`), preferring the asset for
-the host architecture. The listing comes from the GitHub API when a
+the host architecture and, when a release publishes several, the installable
+package (`.deb`, NSIS `.exe`) over the portable copy (`.AppImage`, `.msi`): an
+AppImage needs FUSE *and* the distro's GTK/WebKit stack, so on a headless runner
+it fails before it can say anything about the product.
+The listing comes from the GitHub API when a
 `GH_TOKEN`/`GITHUB_TOKEN` is present or the unauthenticated quota allows, and
 otherwise from the public `/releases/expanded_assets/<tag>` page — a stranger
 with no token must not be blocked by the 60-requests/hour limit. When a release
@@ -53,13 +57,24 @@ On macOS it is created under the canonical `/private/tmp` rather than `$TMPDIR`
 shell cannot resolve its bundle resource directory when the `.app` is launched
 through a symlinked path component (`/tmp` → `/private/tmp`, `/var` →
 `/private/var`) and dies with
-`FATAL: no resource dir` before starting the engine (see the gap list below). A
-macOS DMG is mounted
-read-only with `hdiutil`, its `.app` is copied into that directory, and the
-mount is detached. Zip files are extracted with path-traversal protection and
-their entry permission bits restored (an `.app` whose executable bit was lost
-cannot be launched); executables are copied into the same throwaway install
-root. The launched process receives:
+`FATAL: no resource dir` before starting the engine (see the gap list below).
+Zip files are extracted with path-traversal protection and their entry
+permission bits restored (an `.app` whose executable bit was lost cannot be
+launched).
+
+Each platform is installed the way a stranger installs it, never by exec'ing the
+installer:
+
+| platform | what the harness does |
+| --- | --- |
+| macOS | mounts the `.dmg` read-only with `hdiutil`, copies the `.app` into the throwaway root, detaches the mount |
+| linux `.deb` (preferred) | reads the package with a stdlib ar/tar reader, then `apt-get install ./<deb>` so the package's own declared `Depends` (`libwebkit2gtk-4.1-0`, `libgtk-3-0`) resolve exactly as apt would for a stranger; falls back to `dpkg-deb -x` plus a finding that dependencies were not resolved, and uninstalls with `apt-get remove` |
+| linux `.AppImage` | copies the AppImage into the throwaway root and runs it — portable, so it needs FUSE and the distro's GTK/WebKit stack already present |
+| windows `.exe` (NSIS) | silent installs into the throwaway root (`/S /D=<dir>`), boots the installed `xPST.exe`, and runs the bundled uninstaller |
+| windows `.msi` (WiX) | unpacks administratively with `msiexec /a` (no elevation, no system side effects) and boots the extracted product |
+| linux, no display | wraps the launch in `xvfb-run`: a GTK/Tauri shell aborts on a headless host with `Failed to initialize GTK`, which is an environment gap, not a product verdict |
+
+The installed app is launched with:
 
 - `XPST_CONFIG_DIR=<temporary config directory>`;
 - a temporary `HOME`/`USERPROFILE` and XDG/AppData directories;
@@ -126,6 +141,22 @@ Hosted runners have no logged-in window server, so the workflow also passes
 `--no-require-visible-window`: that run is engine/process/cleanup evidence and
 explicitly not the full clean-profile pass, which still has to be taken on a real
 desktop. A red workflow run is a real finding about the published artifact.
+
+**Measured on the v1.2.1 artifacts (2026-11-05 run 41988829053, red on linux and
+windows, green on macOS).** None of those three verdicts was about the product:
+windows exec'd the NSIS *installer* (`xPST_1.2.1_x64-setup.exe`), so no app, no
+engine sidecar and no `/health` ever existed; linux exec'd the AppImage on a
+headless `ubuntu-26.04` runner that has neither libfuse2/fusermount nor the
+GTK/WebKit stack, so the payload died in the dynamic loader with exit code 127;
+and both were reported as "engine /health did not return HTTP 200 within 90.0s",
+which reads like a timeout although the child had been dead for milliseconds and
+its own output was captured to `launch.log` and then never shown. With the
+installer and display fixes above the same v1.2.1 assets pass on all three
+platforms (dispatch 42404147361): linux via `apt-get install` of the `.deb` and
+`xvfb-run /usr/bin/xPST`, windows via `/S` install of the NSIS package, each with
+`/health` 200, the packaged UI served (`xPST Dashboard`), one live `xpst-engine`
+sidecar, a real read-back command line, and a clean uninstall. A red run from now
+on is a real finding about the published artifact.
 
 ### Stack detection
 
