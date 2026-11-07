@@ -1,6 +1,6 @@
 //! Builds the `xpst` command tree from the checked-in parity manifest.
 //!
-//! The tree is data-driven on purpose (see `crate::parity`): 86 command paths
+//! The tree is data-driven on purpose (see `crate::parity`): 87 command paths
 //! come from the Python engine's Click tree, and the Rust binary has to answer
 //! to all of them from P0 onwards so scripts can point at either engine.
 
