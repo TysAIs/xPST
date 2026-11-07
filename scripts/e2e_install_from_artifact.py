@@ -813,10 +813,294 @@ def terminate_process(process: subprocess.Popen[Any]) -> dict[str, Any]:
     return {"pid": process.pid, "exit_code": returncode}
 
 
+# ---------------------------------------------------------------------------
+# Real installer payloads.
+#
+# A .deb and a Windows NSIS/WiX installer are *installers*: there is no product
+# to boot until one has run. Copying either file and exec'ing it launches the
+# installer, not the app — the v1.2.1 windows run did exactly that, watched the
+# setup wizard's window, and never saw an engine sidecar or a /health answer.
+# The readers below are stdlib-only so the harness stays dependency-free.
+# ---------------------------------------------------------------------------
+
+AR_MAGIC = b"!<arch>\n"
+NSIS_MARKER = b"Nullsoft"
+
+
+def ar_members(path: Path) -> dict[str, bytes]:
+    """Return the members of a GNU/BSD ``ar`` archive (the outer .deb container)."""
+    raw = path.read_bytes()
+    if not raw.startswith(AR_MAGIC):
+        raise E2EError(f"{path.name} is not an ar archive, so it is not a .deb")
+    members: dict[str, bytes] = {}
+    offset = len(AR_MAGIC)
+    while offset + 60 <= len(raw):
+        header = raw[offset : offset + 60]
+        name = header[:16].decode("utf-8", "replace").strip()
+        try:
+            size = int(header[48:58].decode("ascii", "replace").strip() or "0")
+        except ValueError:
+            break
+        offset += 60
+        members[name.rstrip("/")] = raw[offset : offset + size]
+        offset += size + (size % 2)
+    return members
+
+
+def tar_entries(payload: bytes) -> list[tuple[str, int, bool]]:
+    """List ``(path, mode, is_file)`` for a (possibly compressed) tar payload."""
+    import io
+    import tarfile
+
+    entries: list[tuple[str, int, bool]] = []
+    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:*") as archive:
+        for member in archive.getmembers():
+            name = member.name
+            while name.startswith("./"):
+                name = name[2:]
+            entries.append((name, member.mode, member.isfile()))
+    return entries
+
+
+def deb_install_record(deb: Path) -> dict[str, Any]:
+    """Read a .deb's package identity and the executable it installs.
+
+    Returns ``package``, ``version``, ``depends`` and ``executable`` (the
+    absolute path the package installs, for example ``/usr/bin/xPST``).
+    """
+    members = ar_members(deb)
+    control_name = next((name for name in members if name.startswith("control.tar")), None)
+    data_name = next((name for name in members if name.startswith("data.tar")), None)
+    if control_name is None or data_name is None:
+        raise E2EError(f"{deb.name} has no control.tar*/data.tar* member (not a .deb)")
+    import io
+    import tarfile
+
+    with tarfile.open(fileobj=io.BytesIO(members[control_name]), mode="r:*") as archive:
+        handle = None
+        for member_name in ("control", "./control"):
+            try:
+                handle = archive.extractfile(member_name)
+            except KeyError:
+                continue
+            if handle is not None:
+                break
+        control = handle.read().decode("utf-8", "replace") if handle else ""
+    data_entries = tar_entries(members[data_name])
+    fields: dict[str, str] = {}
+    for line in control.splitlines():
+        if ":" in line and not line.startswith(" "):
+            key, value = line.split(":", 1)
+            fields[key.strip().lower()] = value.strip()
+    executables = [
+        "/" + name
+        for name, mode, is_file in data_entries
+        if is_file and mode & 0o111 and name.startswith("usr/bin/")
+    ]
+    if not executables:
+        raise E2EError(f"{deb.name} installs no executable under usr/bin")
+    preferred = [path for path in executables if path.lower().endswith(("/xpst", "/xpst.exe"))]
+    record = {
+        "package": fields.get("package", ""),
+        "version": fields.get("version", ""),
+        "depends": [part.strip() for part in fields.get("depends", "").split(",") if part.strip()],
+        "executable": (preferred or sorted(executables))[0],
+        "files": len([entry for entry in data_entries if entry[2]]),
+        "control_member": control_name,
+        "data_member": data_name,
+    }
+    print(
+        f"[e2e] .deb identity: package={record['package']!r} version={record['version']!r} "
+        f"executable={record['executable']} depends={record['depends']}",
+        flush=True,
+    )
+    return record
+
+
+def elevated_prefix() -> list[str]:
+    """Return the prefix needed to install a system package, or [] if unusable."""
+    if os.name == "nt":
+        return []
+    try:
+        if os.geteuid() == 0:
+            return []
+    except AttributeError:  # pragma: no cover - non-POSIX hosts
+        return []
+    return ["sudo", "-n"] if shutil.which("sudo") else []
+
+
+def install_deb(deb: Path, work: Path) -> tuple[Path, dict[str, Any]]:
+    """Install a published .deb the way a stranger on Debian/Ubuntu would.
+
+    ``apt-get install ./package.deb`` resolves the package's own declared
+    ``Depends`` (the GTK/WebKit stack a Tauri bundle needs), which is exactly
+    what a headless runner lacks. If apt cannot be used the payload is
+    unpacked into the throwaway root with ``dpkg-deb -x`` and the skipped
+    dependency resolution is reported as a finding instead of being silently
+    assumed.
+    """
+    record = deb_install_record(deb)
+    prefix = elevated_prefix()
+    findings: list[str] = []
+    method = "apt-get install"
+    attempts: list[dict[str, Any]] = []
+    if shutil.which("apt-get") is None:
+        method = "dpkg-deb -x extraction"
+    else:
+        command = [*prefix, "apt-get", "install", "-y", str(deb)]
+        result = command_result(command, timeout=1800)
+        attempts.append({"command": command, "returncode": result["returncode"]})
+        detail = short_command_error(result)
+        if result["returncode"] != 0 and (
+            "Unable to locate package" in detail or "no installation candidate" in detail
+        ):
+            refresh = [*prefix, "apt-get", "update", "-qq"]
+            refreshed = command_result(refresh, timeout=1800)
+            attempts.append({"command": refresh, "returncode": refreshed["returncode"]})
+            if refreshed["returncode"] == 0:
+                result = command_result(command, timeout=1800)
+                attempts.append({"command": command, "returncode": result["returncode"]})
+        if result["returncode"] != 0:
+            method = "dpkg-deb -x extraction"
+            findings.append(
+                "apt-get could not install the published .deb "
+                f"({short_command_error(result)}); the payload was unpacked with dpkg-deb -x, so "
+                "the package's declared Depends were NOT resolved and a missing desktop library "
+                "will surface as a launch failure rather than as an install step."
+            )
+    if method == "apt-get install":
+        installed = Path(record["executable"])
+        if not installed.exists():
+            raise E2EError(
+                f"apt-get reported success but the package executable {installed} is missing"
+            )
+        uninstall: dict[str, Any] = {
+            "kind": "apt",
+            "package": record["package"],
+            "command": [*prefix, "apt-get", "remove", "-y", record["package"]],
+        }
+    else:
+        if shutil.which("dpkg-deb") is None:
+            raise E2EError("neither apt-get nor dpkg-deb is available to install a .deb")
+        root = work / "install" / "deb-root"
+        root.mkdir(parents=True, exist_ok=True)
+        extracted = command_result(["dpkg-deb", "-x", str(deb), str(root)], timeout=1200)
+        if extracted["returncode"] != 0:
+            raise E2EError(f"dpkg-deb -x failed: {short_command_error(extracted)}")
+        installed = root / record["executable"].lstrip("/")
+        if not installed.exists():
+            raise E2EError(f"dpkg-deb -x did not produce {installed}")
+        installed.chmod(installed.stat().st_mode | stat.S_IXUSR)
+        uninstall = {"kind": "dir", "path": str(root)}
+    return installed, {
+        "method": method,
+        "path": str(installed),
+        "package": record,
+        "attempts": attempts,
+        "uninstall": uninstall,
+        "findings": findings,
+    }
+
+
+def is_nsis_installer(path: Path) -> bool:
+    """True when the installer is an NSIS package (Tauri's Windows .exe bundle)."""
+    try:
+        with path.open("rb") as handle:
+            return NSIS_MARKER in handle.read(1024 * 1024)
+    except OSError:
+        return False
+
+
+def product_executable(root: Path) -> Path | None:
+    """Find the bootable product executable inside an installed Windows tree."""
+    if not root.is_dir():
+        return None
+    candidates = [
+        path
+        for path in root.rglob("*.exe")
+        if path.is_file() and not path.name.lower().startswith("uninstall")
+    ]
+    if not candidates:
+        return None
+    preferred = [path for path in candidates if path.stem.lower().startswith("xpst")]
+    pool = preferred or candidates
+    return sorted(pool, key=lambda path: (len(path.parts), -path.stat().st_size, str(path)))[0]
+
+
+def install_windows_installer(installer: Path, work: Path) -> tuple[Path, dict[str, Any]]:
+    """Silently install a published Windows installer and return the product exe.
+
+    NSIS takes ``/S`` (silent) and ``/D=<dir>`` (default install directory,
+    unquoted and last). WiX packages are unpacked administratively with
+    ``msiexec /a``, which needs no elevation and leaves a runnable tree.
+    """
+    target = work / "install" / "app"
+    target.mkdir(parents=True, exist_ok=True)
+    if installer.suffix.lower() == ".msi":
+        command = ["msiexec", "/a", str(installer), "/qn", f"TARGETDIR={target}"]
+        method = "msiexec /a administrative extraction"
+    else:
+        command = [str(installer), "/S", f"/D={target}"]
+        method = "silent NSIS install (/S)"
+    print(f"[e2e] installer command: {' '.join(command)}", flush=True)
+    result = command_result(command, timeout=1800)
+    if result["returncode"] != 0:
+        raise E2EError(f"installer failed: {short_command_error(result)}")
+    executable = product_executable(target)
+    if executable is None:
+        raise E2EError(f"the installer exited 0 but no product .exe exists under {target}")
+    uninstaller = next(
+        (path for path in target.rglob("uninstall*.exe")),
+        None,
+    )
+    return executable, {
+        "method": method,
+        "path": str(executable),
+        "install_root": str(target),
+        "installer_command": command,
+        "installer_stdout_tail": str(result.get("stdout", ""))[-1000:],
+        "uninstall": {
+            "kind": "dir",
+            "path": str(target),
+            "uninstaller": str(uninstaller) if uninstaller else None,
+        },
+        "findings": [],
+    }
+
+
+def display_available() -> bool:
+    """True when this host has an X11 or Wayland display for a GUI app to use."""
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def headless_display_prefix() -> list[str]:
+    """Wrap a GTK/Tauri launch in ``xvfb-run`` on a Linux host with no display.
+
+    A Tauri/GTK app aborts on a headless host with "Failed to initialize GTK",
+    which the v1.2.1 linux run reported only as "no /health in 90s". CI gets a
+    display from xvfb; a developer machine already has one and needs nothing.
+    """
+    if not sys.platform.startswith("linux") or display_available():
+        return []
+    runner = shutil.which("xvfb-run")
+    return [runner, "-a", "--"] if runner else []
+
+
 def install_artifact(artifact: Path, artifact_type: str, work: Path) -> tuple[Path, dict[str, Any]]:
-    """Mount/extract/copy an artifact into the throwaway install root."""
+    """Mount/extract/install an artifact into the throwaway install root."""
     install_root = work / "install"
     install_root.mkdir(parents=True, exist_ok=True)
+    if artifact_type == "deb":
+        return install_deb(artifact, work)
+    if artifact_type == "msi":
+        return install_windows_installer(artifact, work)
+    if artifact_type == "exe" and os.name == "nt":
+        if is_nsis_installer(artifact):
+            return install_windows_installer(artifact, work)
+        print(
+            "[e2e] the .exe is not an NSIS installer; launching it as the product itself",
+            flush=True,
+        )
     if artifact_type == "dmg":
         if sys.platform != "darwin":
             raise E2EError(".dmg installation requires macOS (hdiutil is unavailable)")
@@ -894,6 +1178,10 @@ def artifact_type(name: str, artifact: Path | None = None) -> str:
         return "zip"
     if lower.endswith(".exe"):
         return "exe"
+    if lower.endswith(".msi"):
+        return "msi"
+    if lower.endswith(".deb"):
+        return "deb"
     if lower.endswith(".appimage"):
         return "appimage"
     if artifact is not None:
@@ -1071,6 +1359,27 @@ PLATFORM_ASSET_SUFFIXES = {
     "linux": (".appimage", ".deb", ".rpm"),
 }
 
+#: Rank order when a release publishes more than one installer for a platform.
+#: The installable package (`.deb`, NSIS `.exe`) outranks the portable copy:
+#: an AppImage needs FUSE *and* the distro's GTK/WebKit stack, so on a headless
+#: runner it fails before it can boot, which says nothing about the product.
+ASSET_SUFFIX_PREFERENCE = {
+    "macos": (".dmg", ".pkg", ".zip"),
+    "windows": (".exe", ".msi"),
+    "linux": (".deb", ".rpm", ".appimage"),
+}
+
+
+def asset_preference_score(name: str, platform: str) -> int:
+    """Rank an installer asset by how well it represents a stranger install."""
+    suffixes = ASSET_SUFFIX_PREFERENCE.get(platform, ())
+    lower = name.lower()
+    for rank, suffix in enumerate(suffixes):
+        if lower.endswith(suffix):
+            return len(suffixes) - rank
+    return 0
+
+
 #: Architecture tokens, most specific first, so a host prefers its own build.
 ARCH_ALIASES = {
     "arm64": ("aarch64", "arm64"),
@@ -1183,6 +1492,7 @@ def select_release_asset(
             installers,
             key=lambda asset: (
                 -architecture_match_score(str(asset.get("name", "")), arch),
+                -asset_preference_score(str(asset.get("name", "")), platform),
                 str(asset.get("name", "")).lower(),
             ),
         )
@@ -1244,34 +1554,85 @@ def sniff_artifact_kind(path: Path) -> str | None:
 def process_command_line(pid: int) -> str | None:
     """Read back the real command line of a launched PID, or None if unreadable."""
     if os.name == "nt":
-        result = command_result(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], timeout=10)
-        text = str(result.get("stdout", "")).strip()
-        return text or None
+        # `tasklist /FO CSV` prints name,pid,session,sess#,memory — never a
+        # command line, so the old implementation always "read back" a CSV row
+        # (or, worse, the name of a process that was not the app at all).
+        powershell = shutil.which("powershell") or "powershell"
+        result = command_result(
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"(Get-CimInstance Win32_Process -Filter \"ProcessId = {pid}\").CommandLine",
+            ],
+            timeout=30,
+        )
+        if result["returncode"] != 0:
+            return None
+        return str(result["stdout"]).strip() or None
     result = command_result(["ps", "-o", "command=", "-p", str(pid)], timeout=10)
     if result["returncode"] != 0:
         return None
     return str(result["stdout"]).strip() or None
 
 
-def uninstall_artifact(installed: Path, config_dir: Path, home_dir: Path) -> dict[str, Any]:
-    """Remove the throwaway install, isolated config dir and isolated HOME."""
-    removed: dict[str, bool] = {}
-    for label, target in (
-        ("installed_artifact_removed", installed),
-        ("config_dir_removed", config_dir),
-        ("home_profile_removed", home_dir),
-    ):
-        if target.is_symlink() or (target.exists() and not target.is_dir()):
-            try:
-                target.unlink()
-            except OSError:
-                pass
-        elif target.exists():
-            shutil.rmtree(target, ignore_errors=True)
-        removed[label] = not target.exists()
+def remove_path(target: Path) -> bool:
+    """Delete a file, symlink or directory tree if it exists."""
+    if target.is_symlink() or (target.exists() and not target.is_dir()):
+        try:
+            target.unlink()
+        except OSError:
+            pass
+    elif target.exists():
+        shutil.rmtree(target, ignore_errors=True)
+    return not target.exists()
+
+
+def uninstall_artifact(
+    installed: Path,
+    config_dir: Path,
+    home_dir: Path,
+    strategy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Uninstall the product and remove the isolated config dir and HOME.
+
+    ``strategy`` carries how the artifact was installed, so the undo is the
+    real one: ``apt-get remove`` for a .deb, the bundled uninstaller for a
+    Windows installer, and a directory delete for a portable copy.
+    """
+    strategy = strategy or {}
+    kind = str(strategy.get("kind") or "")
+    steps: list[dict[str, Any]] = []
+    if kind == "apt":
+        command = [str(part) for part in strategy.get("command") or []]
+        if command:
+            result = command_result(command, timeout=900)
+            steps.append({"command": command, "returncode": result["returncode"]})
+    elif kind == "dir" and strategy.get("uninstaller") and os.name == "nt":
+        command = [str(strategy["uninstaller"]), "/S"]
+        result = command_result(command, timeout=900)
+        steps.append({"command": command, "returncode": result["returncode"]})
+    targets: list[tuple[str, Path]] = []
+    if kind == "dir" and strategy.get("path"):
+        targets.append(("install_root_removed", Path(str(strategy["path"]))))
+    targets.extend(
+        [
+            ("installed_artifact_removed", installed),
+            ("config_dir_removed", config_dir),
+            ("home_profile_removed", home_dir),
+        ]
+    )
+    removed = {label: remove_path(target) for label, target in targets}
     return {
-        "method": "delete the throwaway install root, isolated config dir and isolated HOME",
+        "method": (
+            "apt-get remove the installed package, delete the throwaway install root, "
+            "isolated config dir and isolated HOME"
+            if kind == "apt"
+            else "delete the throwaway install root, isolated config dir and isolated HOME"
+        ),
         **removed,
+        "commands": steps,
     }
 
 
@@ -1519,6 +1880,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"({published_digest} vs {checksum['actual_sha256']})"
             )
         installed, install = install_artifact(artifact, kind, work_path)
+        early_findings.extend(str(item) for item in install.pop("findings", []))
         app = installed if installed.suffix == ".app" else find_app(installed.parent)
         if app and app != installed and installed.is_dir():
             app = installed
@@ -1563,9 +1925,17 @@ def main(argv: list[str] | None = None) -> int:
             )
         with log_path.open("w", encoding="utf-8") as log_handle:
             start = time.monotonic()
+            launch_prefix = headless_display_prefix()
+            launch_command = [*launch_prefix, str(executable)]
+            if launch_prefix:
+                print(
+                    f"[e2e] no DISPLAY on this Linux host: launching under "
+                    f"{Path(launch_prefix[0]).name} so the GTK/Tauri shell can start",
+                    flush=True,
+                )
             try:
                 process = subprocess.Popen(
-                    [str(executable)],
+                    launch_command,
                     cwd=str(work_path),
                     env=env,
                     stdin=subprocess.DEVNULL,
@@ -1590,6 +1960,13 @@ def main(argv: list[str] | None = None) -> int:
                 "app_pid": process.pid,
                 "app_command_line": process_command_line(process.pid),
                 "engine_sidecar_processes": engine_processes(),
+            }
+            launch_record = {
+                "command": launch_command,
+                "headless_display_prefix": launch_prefix,
+                "log_path": str(log_path),
+                "log_tail": read_log(log_path)[-4000:],
+                "exit_code_before_boot": process.poll(),
             }
         stop = terminate_process(process)
         print(
@@ -1636,6 +2013,22 @@ def main(argv: list[str] | None = None) -> int:
         if stack == "tauri" and not running["engine_sidecar_processes"]:
             real_process_ok = False
         failures = list(early_failures) + list(poll_failures)
+        if launch_record["exit_code_before_boot"] is not None:
+            # The app died before any /health answer: say *that*, with the code
+            # and its own output, instead of "no HTTP 200 in 90s" (which reads
+            # like a timeout and hid the v1.2.1 linux/windows cause entirely).
+            detail = " | ".join(
+                line.strip() for line in launch_record["log_tail"].splitlines() if line.strip()
+            )[-1200:]
+            diagnosis = (
+                f"the launched app exited with code {launch_record['exit_code_before_boot']} "
+                f"before serving /health (launch command: {' '.join(launch_record['command'])}); "
+                f"last launch output: {detail or '<the app wrote nothing to its log>'}"
+            )
+            failures = [
+                diagnosis if failure.startswith("engine /health did not return HTTP 200") else failure
+                for failure in failures
+            ]
         if not running["app_process_alive_after_boot"]:
             failures.append(
                 "the launched application process was not running at the end of the boot poll "
@@ -1660,7 +2053,9 @@ def main(argv: list[str] | None = None) -> int:
         ):
             failures.append("--require-gatekeeper-accepted was set but spctl rejected the app")
 
-        uninstall = uninstall_artifact(installed, config_dir, home_dir)
+        uninstall = uninstall_artifact(
+            installed, config_dir, home_dir, install.get("uninstall")
+        )
         if not args.keep_work:
             cleanup_ok = work.cleanup(False)
         else:
@@ -1717,6 +2112,7 @@ def main(argv: list[str] | None = None) -> int:
                 "health": health,
                 "ui": ui,
                 "running_process": running,
+                "launch": launch_record,
                 "shutdown": stop,
                 "engine_processes_after_shutdown": leftovers,
                 "preexisting_engine_processes": preexisting_engines,

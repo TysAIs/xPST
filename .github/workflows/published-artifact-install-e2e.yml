@@ -67,6 +67,18 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "install-testing published release $TAG on ${{ matrix.platform }}"
 
+      - name: Install the headless display a Linux GUI bundle needs
+        # The published Linux artifact is a GTK/WebKit desktop app. A hosted
+        # runner has no display, and GTK aborts without one ("Failed to
+        # initialize GTK"), which used to surface only as "no /health in 90s".
+        # xvfb gives the bundled app the display a stranger's desktop has; the
+        # harness launches under xvfb-run automatically when DISPLAY is unset.
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb
+
       - name: Install a published artifact in a clean profile and smoke it
         id: e2e
         shell: bash
