@@ -109,7 +109,7 @@ will look publishable on a phone that cannot serve a public URL yet.
 | Class B, gate unsatisfied | "Needs app review" / "Needs a professional account" | Silent hiding, or a generic failure |
 | Class A/B, not connected | "Not connected — connect it" (`skipped_unconnected`) | Counting it as a failure, or dropping it from the report |
 | TikTok unaudited direct post | "Published privately (app not audited)" | "Posted" |
-| TikTok inbox upload | "Draft delivered to TikTok — finish in the app" | "Posted" |
+| TikTok inbox upload | "Draft delivered to TikTok — finish in the app" (inbox route, pending review) | "Posted" |
 | Pinterest trial | "Saved to your board (sandbox)" | "Live on Pinterest" |
 | Class C | "Published via your browser session (unofficial)" | "Official API" |
 | Class D | "Prepared — finish in the app" | "Posted" |
