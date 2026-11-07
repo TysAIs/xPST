@@ -1688,7 +1688,10 @@ def emit_summary(summary: dict[str, Any], evidence_out: str | None) -> None:
         except OSError as exc:
             print(f"[e2e] WARNING: cannot write evidence to {path}: {exc}", file=sys.stderr, flush=True)
             summary["evidence_written_to"] = None
-    print(json.dumps(summary, sort_keys=True, ensure_ascii=False))
+    # ASCII-escaped on stdout only: the summary can carry a child process's own
+    # output, and a Windows console is cp1252 — an unescaped U+FFFD from that
+    # output killed the whole run *after* the app had booted healthy.
+    print(json.dumps(summary, sort_keys=True, ensure_ascii=True))
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
