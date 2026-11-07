@@ -25,7 +25,8 @@ and all of the onboarding tax.
 ## What the teardown actually shows
 
 1. **"15+ platforms" is a count of buttons, not of public posts.** Every product in
-   this table that posts to Instagram, Threads, Facebook, TikTok or Pinterest is
+   this table that lists Instagram, Threads, Facebook, TikTok or Pinterest as a
+   destination is
    operating a Class B integration: professional account, business page, app review,
    compliance audit, or a sandbox that only the author can see (see
    [PLATFORM-CAPABILITY-MATRIX.md](PLATFORM-CAPABILITY-MATRIX.md) §2). What differs is
