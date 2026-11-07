@@ -276,7 +276,16 @@ def _probe_uploader_for(config: XPSTConfig, platform: str) -> Any | None:
 
 
 async def _check_via_uploader(uploader: Any) -> dict[str, Any]:
-    """Run one uploader's check_health() with a hard timeout."""
+    """Run one uploader's check_health() with a hard timeout.
+
+    ``live_checked`` is reported for every outcome because every outcome is
+    the result of a live probe: a probe that ran and rejected the credential
+    is proof the credential is unusable, and a probe that crashed is a
+    verdict of "probed, not usable". Leaving the key out let role-level
+    callers (TikTok's ``destination_check``) fall back to
+    ``live_checked: false``, which ``provider_truth._state_for`` reads as
+    "not probed" and then reports READY for a logged-out browser session.
+    """
     try:
         health = await asyncio.wait_for(
             uploader.check_health(), timeout=LIVE_CHECK_TIMEOUT_SECONDS
@@ -284,6 +293,7 @@ async def _check_via_uploader(uploader: Any) -> dict[str, Any]:
         return {
             "authenticated": bool(health.authenticated),
             "session_valid": bool(health.session_valid),
+            "live_checked": True,
             "error": health.error,
             "details": dict(health.details or {}),
         }
@@ -291,6 +301,7 @@ async def _check_via_uploader(uploader: Any) -> dict[str, Any]:
         return {
             "authenticated": False,
             "session_valid": False,
+            "live_checked": True,
             "error": f"Live check timed out after {LIVE_CHECK_TIMEOUT_SECONDS}s",
             "details": {},
         }
@@ -298,6 +309,7 @@ async def _check_via_uploader(uploader: Any) -> dict[str, Any]:
         return {
             "authenticated": False,
             "session_valid": False,
+            "live_checked": True,
             "error": f"Live check failed: {str(exc)[:200]}",
             "details": {},
         }
@@ -397,6 +409,10 @@ async def collect_live_auth_status_async(
 
     # TikTok is intentionally two independent capabilities.  A source check
     # must not be replaced by a failed Content Posting API check and vice versa.
+    tiktok_publish_mode = str(
+        getattr(config.tiktok, "publish_mode", "auto") or "auto"
+    ).lower()
+    browser_publish = tiktok_publish_mode in ("browser", "browser_only")
     tiktok_base: dict[str, Any] = {
         "auth_mode": _auth_mode_for(config, "tiktok"),
         "session_age_days": _age_days(_credential_file_for(config, "tiktok")),
@@ -404,10 +420,7 @@ async def collect_live_auth_status_async(
         "error": None,
         "details": {},
     }
-    if str(getattr(config.tiktok, "publish_mode", "auto") or "auto").lower() in (
-        "browser",
-        "browser_only",
-    ):
+    if browser_publish:
         # The web session is the credential on this route; say so in the
         # payload instead of the source_only/content_posting_api dichotomy.
         tiktok_base["auth_mode"] = "session"
@@ -430,7 +443,33 @@ async def collect_live_auth_status_async(
             "error": source_error,
             "details": source_details,
         }
-        if tiktok_base["auth_mode"] == "content_posting_api":
+        if browser_publish:
+            # Browser-native publish mode: the logged-in web session IS the
+            # credential, so probe the uploader (which dispatches to the
+            # browser probe) even when no Content Posting API OAuth
+            # credentials exist.  The probe is the publishability answer, so
+            # it also carries the provider-level verdict below.
+            uploader = uploaders.get("tiktok")
+            if uploader is None:
+                destination_check = {
+                    "authenticated": False,
+                    "session_valid": False,
+                    "auth_mode": "session",
+                    # Not a "no probe ran" unknown: the route is positively
+                    # unusable because its publisher could not be built.
+                    "live_checked": True,
+                    "error": (
+                        "TIKTOK_BROWSER_DEPENDENCY_MISSING — the browser "
+                        "publisher could not be built (install the browser "
+                        'extras: pip install "xpst[browser]" then '
+                        "`python -m playwright install chromium`)"
+                    ),
+                    "details": {"route": "tiktok_browser", "probe_ran": False},
+                }
+            else:
+                destination_check = await _check_via_uploader(uploader)
+            destination_check["auth_mode"] = "session"
+        elif tiktok_base["auth_mode"] == "content_posting_api":
             uploader = uploaders.get("tiktok")
             destination_check = (
                 await _check_via_uploader(uploader)
@@ -444,17 +483,6 @@ async def collect_live_auth_status_async(
                     "details": {},
                 }
             )
-        elif uploader_for_browser_mode := (
-            uploaders.get("tiktok")
-            if str(getattr(config.tiktok, "publish_mode", "auto") or "auto").lower()
-            in ("browser", "browser_only")
-            else None
-        ):
-            # Browser-native publish mode: the web session IS the credential,
-            # so probe the uploader (which dispatches to the browser probe)
-            # even when no Content Posting API OAuth credentials exist.
-            destination_check = await _check_via_uploader(uploader_for_browser_mode)
-            destination_check["auth_mode"] = "session"
         else:
             destination_check = {
                 "authenticated": False,
@@ -464,7 +492,16 @@ async def collect_live_auth_status_async(
                 "error": "TikTok Content Posting API is not configured",
                 "details": {"auth_mode": "source_only"},
             }
-    compat = destination_check if tiktok_base["auth_mode"] == "content_posting_api" else source_check
+    # Which verdict speaks for the provider: on a publish route (Content
+    # Posting API or browser session) the posting destination is the promise,
+    # so its check wins; only a source-only route is described by the source
+    # check.  Keying this off the compat auth_mode and then calling
+    # ``update(source_check)`` is what made browser mode report
+    # ``auth_mode: source_only`` plus a "no posting credentials" badge while
+    # its destination role said session/ready, and made ``can_post`` answer a
+    # download question.
+    publish_route = tiktok_base["auth_mode"] in ("content_posting_api", "session")
+    compat = destination_check if publish_route else source_check
     tiktok_base.update(compat)
     tiktok_base["source_check"] = source_check
     tiktok_base["destination_check"] = destination_check

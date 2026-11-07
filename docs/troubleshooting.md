@@ -115,3 +115,10 @@ carried side by side, so no surface can promise a post the engine cannot make.
 * `xpst connect --test --json` and `xpst onboard` list those platforms under
   `source_only` / `ready_sources` and never count them as posting
   destinations.
+* These fields describe the route that is actually configured, not the
+  platform's name. TikTok with `publish_mode: browser` posts through the
+  logged-in TikTok Studio web session, so its provider row and
+  `video_destination` role carry `auth_mode: session` and `can_post` comes from
+  that session's live probe; only the `source` role keeps
+  `auth_mode: source_only`. Read `source_only` on the provider row, never
+  infer it from the platform being TikTok.

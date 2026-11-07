@@ -344,6 +344,47 @@ def test_tiktok_source_only_metadata_has_no_refresh_path(tmp_path):
     assert meta.has_refresh_token is False
 
 
+def test_tiktok_browser_publish_mode_metadata_is_a_session_not_source_only(tmp_path):
+    """Browser publish mode's credential is the web session (card t_b375782b).
+
+    An offline read (no live entry) must not badge the platform "source only —
+    no posting credentials configured" when the browser session is what posts.
+    """
+    config = XPSTConfig()
+    config.config_dir = str(tmp_path)
+    config.tiktok.publish_mode = "browser"
+    config.tiktok.cookies_file = str(tmp_path / "tiktok_cookies.txt")
+    Path(config.tiktok.cookies_file).write_text("{}", encoding="utf-8")
+    meta = token_metadata(config, "tiktok")
+    assert meta.auth_mode == "session"
+    assert meta.configured is True
+    assert meta.has_refresh_token is False
+    assert any("web session" in note for note in meta.notes)
+
+    badge = derive_token_state(
+        "tiktok",
+        {"configured": True, "live_checked": False},
+        meta,
+        now=NOW,
+    )
+    assert badge["token_state"] != "source_only"
+
+    live = derive_token_state(
+        "tiktok",
+        {
+            "auth_mode": "session",
+            "authenticated": True,
+            "session_valid": True,
+            "live_checked": True,
+            "details": {"route": "tiktok_browser", "logged_in": True},
+        },
+        meta,
+        now=NOW,
+    )
+    assert live["token_state"] == "valid"
+    assert "session is the credential" in live["badge_reason"]
+
+
 def test_enrich_marks_every_platform_and_never_invents_green(tmp_path):
     config = XPSTConfig()
     config.config_dir = str(tmp_path)
