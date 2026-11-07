@@ -117,24 +117,35 @@ def platform_disabled_blocker(platform: str) -> PreflightIssue:
 
 
 def resolve_destinations(
-    config: XPSTConfig, requested: Sequence[str] | None = None
+    config: XPSTConfig,
+    requested: Sequence[str] | None = None,
+    *,
+    content_type: str | None = None,
+    all_connected: bool = False,
 ) -> list[str]:
     """Resolve the destination list a post will run against.
 
-    An explicit request wins (normalized, deduped, request order preserved);
-    ``None`` means "every destination enabled in configuration", the same
-    contract the engine's ``platforms=None`` carries — but resolved here so the
-    CLI, MCP and HTTP surfaces cannot disagree about what "all" is, and so an
-    empty result is detectable *before* an engine run is started.
+    An explicit request wins (normalized, deduped, request order preserved) —
+    including destinations that are not connected, which the plan reports as
+    ``skipped_unconnected`` rather than dropping. Otherwise the set is
+    ``format route ∩ connected accounts`` (R3): a destination is never added
+    because it is merely configured if it cannot take this format, and ``--all``
+    (``all_connected=True``) is the explicit "every connected account that
+    accepts this format" request.
+
+    Resolution lives in :mod:`xpst.services.route_plan` so the CLI, MCP, HTTP
+    and scheduler share one answer; this function is the compatibility name.
     """
-    if requested is None:
-        return enabled_destinations(config)
-    seen: dict[str, None] = {}
-    for platform in requested:
-        name = str(platform).strip().lower()
-        if name:
-            seen.setdefault(name, None)
-    return list(seen)
+    from xpst.services.route_plan import resolve_targets
+
+    return list(
+        resolve_targets(
+            config,
+            requested,
+            all_connected=all_connected,
+            content_type=content_type,
+        ).targets
+    )
 
 #: Content types that carry no media, so "at least one media path is required"
 #: does not apply to them.
