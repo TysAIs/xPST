@@ -26,6 +26,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from xpst.config import EncodingConfig, XPSTConfig
+from xpst.content import video_duration_limit
 from xpst.media.loudness import (
     LOUDNESS_TARGETS_LUFS,
     build_loudnorm_filter,
@@ -191,7 +192,12 @@ class TestPlatformMatrix:
         assert threads is not instagram
         assert threads.containers == instagram.containers
         assert threads.file_size_cap_mb == instagram.file_size_cap_mb
-        assert threads.duration_cap_s == instagram.duration_cap_s
+        # One ingest profile, its OWN declared duration ceiling: both numbers
+        # come from the capability registry (xpst.content.VIDEO_ENVELOPES), and
+        # they differ because the providers do (Threads 5 min, Reels 15 min).
+        assert threads.duration_cap_s == video_duration_limit("threads")
+        assert instagram.duration_cap_s == video_duration_limit("instagram")
+        assert threads.duration_cap_s != instagram.duration_cap_s
         assert threads.display_name == "Threads"
         assert threads.supports("video") and not threads.supports("image")
         assert threads.image_containers == ()

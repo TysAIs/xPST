@@ -122,6 +122,7 @@ class _RecordingUploadService:
     async def upload_to_platform(
         self, *, uploader: Any, video_path: Any, caption: str, platform_name: str, video_id: str,
         source_platform: str = "", visibility: str | None = None, ignore_window: bool = False,
+        video_mode: str | None = None,
     ) -> UploadResult:
         # `visibility` arrives from post_manual (YouTube-only option); the
         # double records it so a test can prove it reached the upload layer.
@@ -479,7 +480,7 @@ class _FakeEngine:
 
     async def post_manual(
         self, video_path: Any, caption: str, platforms: list[str] | None = None, per_platform_captions: Any = None,
-        force_now: bool = False,
+        force_now: bool = False, video_mode: str | None = None,
     ) -> Any:
         overrides = dict(per_platform_captions or {})
         self.calls.append({"caption": caption, "overrides": overrides})

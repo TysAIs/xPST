@@ -290,6 +290,13 @@ DEFAULT_CONFIG = {
             "graph_user_token": "",
             "login_config_id": "",
         },
+        "rumble": {
+            "enabled": False,
+            "api_key": "",
+            "api_url": "https://rumble.com/-/api/v1/media",
+            "manual_handoff_dir": "~/.xpst/rumble-handoff",
+            "upload_page_url": "https://rumble.com/upload.php",
+        },
         "local": {
             "path": "",
         },
@@ -451,6 +458,11 @@ class YouTubeAccountConfig(AccountConfig):
     token_file: str = ""
     channel_id: str = ""
     username: str = ""
+    #: How a video is published: "auto" (derive from the media probe using the
+    #: stated thresholds), "shorts" or "long". "auto" refuses an ambiguous video
+    #: (between 60 s and 180 s, portrait) rather than guessing; the CLI's
+    #: ``--shorts`` / ``--long`` override this per post.
+    video_mode: str = "auto"
 
 
 @dataclass
@@ -467,6 +479,12 @@ class XAccountConfig(AccountConfig):
     access_token: str = ""
     access_token_secret: str = ""
     bearer_token: str = ""
+    #: Verified per-account video ceiling in seconds. 0 keeps the documented
+    #: standard-account envelope from ``xpst.content.VIDEO_ENVELOPES`` (140 s);
+    #: a Premium account that X lets upload longer sets its real limit here.
+    #: Only a number the account owner has confirmed belongs here — xPST never
+    #: guesses a higher ceiling and never truncates to fit a lower one.
+    max_video_duration_seconds: int = 0
 
 
 @dataclass
@@ -547,6 +565,31 @@ class MessengerAccountConfig(AccountConfig):
     reply_rules: dict = field(default_factory=dict)
     comment_reply_enabled: bool = False
     comment_platforms: list = field(default_factory=lambda: ["instagram", "facebook"])
+
+
+@dataclass
+class RumbleAccountConfig(AccountConfig):
+    """Rumble account config — OPT-IN, and deliberately integration-uncertain.
+
+    Rumble's upload API is partner-gated: an API key is issued to partners and
+    there is no self-serve developer console comparable to Meta's or Google's.
+    Two honest paths therefore exist, and neither is guessed:
+
+    * ``api_key`` set — the adapter POSTs the rendition to ``api_url`` (the
+      partner-specific endpoint, configurable because Rumble issues it per
+      partner) through an injectable transport.
+    * otherwise — a MANUAL HANDOFF: the rendition and a caption sidecar are
+      written into ``manual_handoff_dir`` and the result says so, with the
+      upload page URL. Nothing is claimed to have been published.
+    """
+
+    #: Opt-in: an existing install keeps posting to exactly the platforms it
+    #: already had until ``accounts.rumble.enabled: true`` is written.
+    enabled: bool = False
+    api_key: str = ""
+    api_url: str = "https://rumble.com/-/api/v1/media"
+    manual_handoff_dir: str = "~/.xpst/rumble-handoff"
+    upload_page_url: str = "https://rumble.com/upload.php"
 
 
 @dataclass
@@ -734,6 +777,7 @@ class XPSTConfig:
     threads: ThreadsAccountConfig = field(default_factory=ThreadsAccountConfig)
     messenger: MessengerAccountConfig = field(default_factory=MessengerAccountConfig)
     facebook: FacebookPageAccountConfig = field(default_factory=FacebookPageAccountConfig)
+    rumble: RumbleAccountConfig = field(default_factory=RumbleAccountConfig)
     local: LocalAccountConfig = field(default_factory=LocalAccountConfig)
 
     # Video processing
@@ -984,6 +1028,7 @@ class XPSTConfig:
                 config.youtube.channel_id = yt.get("channel_id", config.youtube.channel_id)
                 config.youtube.username = yt.get("username", config.youtube.username)
                 config.youtube.proxy = yt.get("proxy", config.youtube.proxy)
+                config.youtube.video_mode = yt.get("video_mode", config.youtube.video_mode)
 
         # X
         if "accounts" in file_config and "x" in file_config["accounts"]:
@@ -995,6 +1040,9 @@ class XPSTConfig:
                 config.x.password = x_cfg.get("password", config.x.password)
                 config.x.proxy = x_cfg.get("proxy", config.x.proxy)
                 config.x.auth_mode = x_cfg.get("auth_mode", config.x.auth_mode)
+                config.x.max_video_duration_seconds = x_cfg.get(
+                    "max_video_duration_seconds", config.x.max_video_duration_seconds
+                )
                 config.x.api_key = x_cfg.get("api_key", config.x.api_key)
                 config.x.api_secret = x_cfg.get("api_secret", config.x.api_secret)
                 config.x.access_token = x_cfg.get("access_token", config.x.access_token)
@@ -1078,6 +1126,19 @@ class XPSTConfig:
                     "login_config_id", config.facebook.login_config_id
                 )
                 config.facebook.proxy = fb.get("proxy", config.facebook.proxy)
+
+        # Rumble (OPT-IN, integration-uncertain: partner-gated upload API)
+        if "accounts" in file_config and "rumble" in file_config["accounts"]:
+            rb = file_config["accounts"]["rumble"]
+            if rb and isinstance(rb, dict):
+                config.rumble.enabled = rb.get("enabled", config.rumble.enabled)
+                config.rumble.api_key = rb.get("api_key", config.rumble.api_key)
+                config.rumble.api_url = rb.get("api_url", config.rumble.api_url)
+                config.rumble.manual_handoff_dir = rb.get(
+                    "manual_handoff_dir", config.rumble.manual_handoff_dir
+                )
+                config.rumble.upload_page_url = rb.get("upload_page_url", config.rumble.upload_page_url)
+                config.rumble.proxy = rb.get("proxy", config.rumble.proxy)
 
         # Local
         if "accounts" in file_config and "local" in file_config["accounts"]:

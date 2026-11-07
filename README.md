@@ -10,7 +10,7 @@
   <a href="https://www.python.org"><img alt="Python" src="https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13-blue"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green"></a>
   <a href="https://github.com/TysAIs/xPST/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/TysAIs/xPST/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-8-blue"></a>
+  <a href="#"><img alt="Platforms" src="https://img.shields.io/badge/platforms-9-blue"></a>
   <a href="#"><img alt="Platform" src="https://img.shields.io/badge/os-Linux%20|%20macOS%20|%20Windows-lightgrey"></a>
   <a href="#"><img alt="MCP Server" src="https://img.shields.io/badge/MCP-42%20tools-orange"></a>
   <a href="#"><img alt="Desktop" src="https://img.shields.io/badge/desktop-Tauri%202-blueviolet"></a>
@@ -113,7 +113,7 @@ These numbers are generated from the shipped code, not maintained by hand. `pyth
 | CLI top-level commands | **47** | `xpst.cli.main.commands` |
 | CLI commands including subcommands | **74** | recursive walk of the Click command tree |
 | HTTP routes (dashboard app) | **48** | FastAPI route table (44 xPST routes + 4 framework docs routes) |
-| Supported providers | **8** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
+| Supported providers | **9** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
 
 Regenerate and verify with `python scripts/generate_counts.py --write` / `--check`; the check runs in CI, so these numbers cannot drift silently.
 <!-- END GENERATED SURFACE COUNTS -->
@@ -917,7 +917,7 @@ Per-platform profiles (defaults, overridable in `video.encoding_*` config):
 | Rate control | 8 Mbps **two-pass** | CRF 20 (10M cap) | CRF 20 (10M cap) | 10 Mbps **two-pass** |
 | Audio | AAC 256k @ 48 kHz | AAC 128k @ 44.1 kHz | AAC 256k @ 44.1 kHz | AAC 256k @ 44.1 kHz |
 | Loudness target | −14 LUFS | −14 LUFS | −14 LUFS | −16 LUFS |
-| Max duration | — (Shorts 60 s) | 10 min | 15 min | 140 s |
+| Max duration | 12 h (Shorts: 60 s) | 10 min | 15 min | 140 s (account cap) |
 
 **Loudness normalization** is two-pass EBU R128 (`loudnorm` measurement pass,
 then linear-mode correction) so every platform receives audio already at its

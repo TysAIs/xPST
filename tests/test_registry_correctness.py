@@ -8,7 +8,7 @@ entries for 6 platforms).
 
 Post-fix contract:
 - Each physical platform appears exactly once, under its canonical name:
-  youtube, x, instagram, tiktok, threads, facebook, messenger.
+  youtube, x, instagram, tiktok, threads, facebook, messenger, rumble.
 - auto-discovery never produces duplicate keys and is idempotent.
 - The legacy name ``messengeradapter`` remains resolvable as a backward-compat
   alias (no data migration needed) but is never listed as a separate key.
@@ -24,6 +24,9 @@ from xpst.platforms.messenger import MessengerAdapter
 # once, under its canonical key.
 CANONICAL_PLATFORMS = {
     "youtube", "x", "instagram", "tiktok", "threads", "facebook", "messenger",
+    # Rumble is a real registered destination (opt-in and integration-uncertain,
+    # but a first-class adapter class, so auto-discovery must expose it once).
+    "rumble",
 }
 
 

@@ -90,7 +90,7 @@ Registry size: **42 tools**.
 
 ## xpst_providers
 
-Lists all discovered content sources and posting destinations with auth modes and capabilities. Call this first so the agent adapts to the installed provider set instead of assuming a fixed platform list. The provider registry includes YouTube Shorts, Instagram Reels, X, TikTok, Threads, and Messenger (messaging/auto-reply), while the current live state is documented in [INSTALL.md](INSTALL.md#capability-truth-table). TikTok is currently source-only; destination publishing awaits external review.
+Lists all discovered content sources and posting destinations with auth modes and capabilities. Call this first so the agent adapts to the installed provider set instead of assuming a fixed platform list. The provider registry includes YouTube, Instagram Reels, X, TikTok, Threads, Facebook Page, Rumble (integration-uncertain) and Messenger (messaging/auto-reply), while the current live state is documented in [INSTALL.md](INSTALL.md#capability-truth-table). TikTok is currently source-only; destination publishing awaits external review.
 
 Arguments: none.
 
@@ -118,7 +118,7 @@ Example response shape:
   "destinations": [
     {
       "name": "youtube",
-      "display_name": "YouTube Shorts",
+      "display_name": "YouTube",
       "roles": ["destination"],
       "capabilities": ["upload", "delete", "health", "official_api", "oauth", "rate_limits"],
       "auth_mode": "oauth",

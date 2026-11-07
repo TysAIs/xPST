@@ -18,6 +18,19 @@ import contextlib
 from pathlib import Path
 
 from xpst.config import XPSTConfig
+from xpst.content import (
+    LONG_FORM_CLASSIFICATION_MIN_SECONDS,
+    SHORTS_CLASSIFICATION_MAX_SECONDS,
+    ContentContractError,
+    VideoMode,
+    classify_video_mode,
+    coerce_video_mode,
+    envelope_violation,
+    format_seconds,
+    video_duration_limit,
+    video_envelope,
+)
+from xpst.media.specs import measured_video_format
 from xpst.platforms.base import (
     DeleteOutcome,
     DeleteResult,
@@ -46,18 +59,159 @@ class YouTubeUploader(PlatformUploader):
     # Default video metadata
     DEFAULT_CATEGORY = "28"  # Science & Technology
     DEFAULT_TAGS = ["Shorts", "AI", "tech", "video"]
+    #: Tags for a long-form upload: no "Shorts", which would invite YouTube to
+    #: treat a landscape video as short-form.
+    LONG_FORM_TAGS = ["AI", "tech", "video"]
+    #: Resumable chunk sizes. A 256 KB chunk on a 40-minute upload is thousands
+    #: of round trips; YouTube accepts 8 MB chunks for large files.
+    SHORTS_CHUNK_BYTES = 256 * 1024
+    LONG_FORM_CHUNK_BYTES = 8 * 1024 * 1024
 
-    def __init__(self, config: XPSTConfig) -> None:
-        """Initialize YouTube uploader with lazy service caching."""
+    def __init__(
+        self,
+        config: XPSTConfig,
+        *,
+        mode: VideoMode | str | None = None,
+    ) -> None:
+        """Initialize YouTube uploader with lazy service caching.
+
+        ``mode`` is the per-instance default (``xpst post --shorts/--long``);
+        when omitted, ``config.youtube.video_mode`` decides, and ``auto`` means
+        "derive from the media probe".
+        """
         super().__init__(config)
         self._service = None  # Cached YouTube API service
+        self.requested_mode = coerce_video_mode(mode)
+
+    def configured_mode(self) -> VideoMode | None:
+        """The explicit mode this uploader should use, if any.
+
+        Per-instance (CLI) first, then ``youtube.video_mode`` from config.
+        ``auto`` — and any unknown spelling — means "derive from the probe".
+        """
+        if self.requested_mode is not None:
+            return self.requested_mode
+        configured = str(getattr(self.config.youtube, "video_mode", "auto") or "auto").strip().lower()
+        if configured == "auto":
+            return None
+        try:
+            return coerce_video_mode(configured)
+        except ContentContractError:
+            logger.warning("Unknown youtube.video_mode %r; deriving the mode from the media probe", configured)
+            return None
+
+    def _resolve_mode(self, video_path: Path, mode: str | None) -> VideoMode | UploadResult:
+        """Decide the publish mode, or return the refusal that stops the upload.
+
+        Explicit mode wins; otherwise the probe decides. An ambiguous video is
+        refused rather than guessed, because guessing is how a landscape
+        long-form video used to ship as a Short.
+        """
+        explicit = coerce_video_mode(mode) if mode is not None else self.configured_mode()
+        measured = measured_video_format(video_path)
+        duration = measured["duration_s"]
+        width = measured["width"]
+        height = measured["height"]
+
+        if explicit is None:
+            if duration is None:
+                # No measured duration at all (probe unavailable or an
+                # unreadable container). Guessing "short" here is exactly the
+                # bug this mode exists to kill, so refuse and say what to do.
+                logger.warning("Refusing YouTube upload: could not measure %s", video_path)
+                return UploadResult(
+                    success=False,
+                    error=(
+                        f"YOUTUBE_MODE_UNMEASURABLE: the media probe reported no duration for "
+                        f"{video_path.name}, so xPST cannot tell a Short (≤ "
+                        f"{SHORTS_CLASSIFICATION_MAX_SECONDS} s) from long-form. "
+                        f"Pick one: --shorts or --long (MCP: video_mode), or set "
+                        f"youtube.video_mode. Check that ffprobe can read the file."
+                    ),
+                    platform="youtube",
+                    retryable=False,
+                    metadata={"duration_s": None, "width": width, "height": height},
+                )
+            classified = classify_video_mode(duration, width, height)
+            if classified is None:
+                logger.warning(
+                    "Refusing YouTube upload: cannot classify %s (%s, %sx%s) as short or long form",
+                    video_path,
+                    format_seconds(duration),
+                    width,
+                    height,
+                )
+                return UploadResult(
+                    success=False,
+                    error=(
+                        f"YOUTUBE_MODE_AMBIGUOUS: {format_seconds(duration)} at {width}x{height} is "
+                        f"neither clearly short-form (≤ {SHORTS_CLASSIFICATION_MAX_SECONDS} s, "
+                        f"square-or-vertical) nor clearly long-form "
+                        f"(≥ {LONG_FORM_CLASSIFICATION_MIN_SECONDS} s or landscape). "
+                        f"Pick one: --shorts or --long (MCP: video_mode), or set "
+                        f"youtube.video_mode. xPST will not guess."
+                    ),
+                    platform="youtube",
+                    retryable=False,
+                    metadata={"duration_s": duration, "width": width, "height": height},
+                )
+            explicit = classified
+
+        envelope = self._effective_envelope(explicit)
+        issue = envelope_violation(
+            envelope,
+            duration_s=duration,
+            size_bytes=measured["size_bytes"],
+            width=width,
+            height=height,
+            mode=explicit,
+        )
+        if issue is not None:
+            logger.warning("Refusing YouTube upload: %s", issue.message)
+            return UploadResult(
+                success=False,
+                error=f"YOUTUBE_VIDEO_ENVELOPE: {issue.message}",
+                platform="youtube",
+                retryable=False,
+                metadata={
+                    "capability": "video_envelope",
+                    "code": issue.code,
+                    "video_mode": explicit.value,
+                    "duration_s": duration,
+                },
+            )
+
+        return explicit
+
+    def _effective_envelope(self, mode: VideoMode):
+        """The registry envelope for YouTube, narrowed to the chosen mode."""
+        envelope = video_envelope("youtube")
+        if envelope is None:  # pragma: no cover - the registry always has YouTube
+            raise ContentContractError("the capability registry has no YouTube video envelope")
+        return envelope
+
+    def _tags_for(self, mode: VideoMode, hashtags: list[str]) -> list[str]:
+        base = self.DEFAULT_TAGS if mode is VideoMode.SHORTS else self.LONG_FORM_TAGS
+        return list(dict.fromkeys(hashtags + base))[:15]  # Max 15 tags, stable order
+
+    def _chunk_size(self, mode: VideoMode) -> int:
+        return self.SHORTS_CHUNK_BYTES if mode is VideoMode.SHORTS else self.LONG_FORM_CHUNK_BYTES
+
+    @staticmethod
+    def _post_url(video_id: str, mode: VideoMode) -> str:
+        return (
+            f"https://youtube.com/shorts/{video_id}"
+            if mode is VideoMode.SHORTS
+            else f"https://www.youtube.com/watch?v={video_id}"
+        )
 
     @property
     def manifest(self) -> ProviderManifest:
         """Return YouTube destination capabilities."""
+        mode = self.configured_mode()
         return ProviderManifest(
             name="youtube",
-            display_name="YouTube Shorts",
+            display_name="YouTube",
             roles=(ProviderRole.VIDEO_DESTINATION, ProviderRole.DESTINATION),
             capabilities=(
                 ProviderCapability.UPLOAD,
@@ -70,10 +224,23 @@ class YouTubeUploader(PlatformUploader):
             auth_mode=AuthMode.OAUTH,
             is_official_api=True,
             docs_url="https://developers.google.com/youtube/v3",
-            notes="Uploads and deletes Shorts through the YouTube Data API v3.",
+            notes=(
+                "Uploads and deletes through the YouTube Data API v3: Shorts (≤ 60 s, square-or-vertical) "
+                "and long-form (resumable videos.insert, up to 12 h / 256 GB)."
+            ),
             extra={
                 "content": ("video",),
-                "max_duration_seconds": 60,
+                # The ceiling the upload guard reads. In an explicit shorts
+                # configuration it is the Shorts ceiling; otherwise it is the
+                # real upload ceiling, because the adapter (which can probe the
+                # media) is the only place that knows the mode before upload.
+                "max_duration_seconds": (
+                    video_duration_limit("youtube", VideoMode.SHORTS)
+                    if mode is VideoMode.SHORTS
+                    else video_duration_limit("youtube")
+                ),
+                "shorts_max_duration_seconds": video_duration_limit("youtube", VideoMode.SHORTS),
+                "video_mode": mode.value if mode else "auto",
                 "auth_scopes": self.SCOPES,
             },
         )
@@ -179,17 +346,30 @@ class YouTubeUploader(PlatformUploader):
         caption: str,
         *,
         visibility: str | None = None,
+        mode: str | None = None,
     ) -> UploadResult:
-        """Upload a video to YouTube Shorts.
+        """Publish a video to YouTube in an explicit format mode.
+
+        ``mode`` is ``"shorts"`` or ``"long"``; ``None`` means "decide from the
+        media probe" using the thresholds the capability registry states
+        (``xpst.content.classify_video_mode``). An ambiguous video (over 60 s
+        but under 180 s and portrait) is REFUSED with both ceilings in the
+        message — never silently published as a Short, which is what the old
+        unconditional ``#Shorts`` path did.
+
+        Both modes use the same resumable ``videos.insert`` call (that is what
+        YouTube accepts for any size); the mode decides the title tag, the URL
+        returned, the chunk size, and which ceiling is enforced.
 
         Args:
-            video_path: Path to video file
-            caption: Video caption (used as title + description)
+            video_path: Path to the video file.
+            caption: Video caption (used as title + description).
             visibility: YouTube ``privacyStatus`` — ``public`` (default),
                 ``unlisted``, or ``private``.
+            mode: ``"shorts"`` / ``"long"``; overrides config per post.
 
         Returns:
-            UploadResult with video ID and URL
+            UploadResult with video ID and URL.
         """
         from googleapiclient.http import MediaFileUpload
 
@@ -208,22 +388,30 @@ class YouTubeUploader(PlatformUploader):
 
         self._validate_video(video_path)
 
+        resolved = self._resolve_mode(video_path, mode)
+        if isinstance(resolved, UploadResult):
+            return resolved
+        target_mode = resolved
+
         try:
             service = await self._get_service()
 
             # Extract title and description from caption
             lines = caption.split("\n", 1)
-            title = lines[0][:100] if lines[0] else "New Short"
+            title = lines[0][:100] if lines[0] else "New video"
             description = lines[1] if len(lines) > 1 else caption
-
-            # Add #Shorts if not present
-            if "#shorts" not in title.lower():
-                title = f"{title} #Shorts"
 
             # Extract hashtags for tags
             import re
+
             hashtags = re.findall(r"#(\w+)", caption)
-            tags = list(set(hashtags + self.DEFAULT_TAGS))[:15]  # Max 15 tags
+            tags = self._tags_for(target_mode, hashtags)
+
+            if target_mode is VideoMode.SHORTS:
+                # Shorts are identified by the tag; long-form must not carry it,
+                # or YouTube classifies a landscape upload as a Short.
+                if "#shorts" not in title.lower():
+                    title = f"{title} #Shorts"
 
             # Video metadata
             body = {
@@ -239,10 +427,11 @@ class YouTubeUploader(PlatformUploader):
                 },
             }
 
-            # Upload with resumable upload for large files
+            # Resumable upload for both modes. Shorts are small; a long-form
+            # file needs a chunk size that does not mean thousands of requests.
             media = MediaFileUpload(
                 str(video_path),
-                chunksize=256 * 1024,  # 256 KB chunks
+                chunksize=self._chunk_size(target_mode),
                 resumable=True,
                 mimetype="video/mp4",
             )
@@ -272,13 +461,14 @@ class YouTubeUploader(PlatformUploader):
                     metadata={
                         "title": title,
                         "tags": tags,
+                        "video_mode": target_mode.value,
                     },
                     retryable=False,
                 )
             video_id = video_id.strip()
-            video_url = f"https://youtube.com/shorts/{video_id}"
+            video_url = self._post_url(video_id, target_mode)
 
-            logger.info(f"Uploaded to YouTube: {video_url}")
+            logger.info(f"Uploaded to YouTube ({target_mode.value}): {video_url}")
 
             return UploadResult(
                 success=True,
@@ -288,6 +478,7 @@ class YouTubeUploader(PlatformUploader):
                 metadata={
                     "title": title,
                     "tags": tags,
+                    "video_mode": target_mode.value,
                 },
             )
 
