@@ -13,6 +13,12 @@ plans that follow from it:
 - [PROPOSAL-PRODUCT-RESET.md](PROPOSAL-PRODUCT-RESET.md) — product shape: distribution
   (binary / hosted / hybrid), opt-in platforms, format-aware routing, Reddit, live-stream
   phase 2. **Proposal only**; its D-9…D-13 are not binding until accepted here.
+- [PHONE-FIRST-UX.md](PHONE-FIRST-UX.md) — the operator-controlled flow on a phone
+  (compose once, route by explicit criteria, confirm, honest per-platform readback) and
+  the client architecture.
+- [PLATFORM-CAPABILITY-MATRIX.md](PLATFORM-CAPABILITY-MATRIX.md) — what each platform
+  actually allows, what xPST ships, and the only promises the product may make.
+- [MVP-CUT.md](MVP-CUT.md) — the slices that must work end-to-end before breadth.
 
 ---
 
