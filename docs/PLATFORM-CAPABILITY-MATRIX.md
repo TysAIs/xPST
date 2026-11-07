@@ -62,7 +62,7 @@ instead of picking a flattering average.
 | Pinterest | **B** | `POST /pins` | Trial access = pins visible only to the creator; Standard access needs review + demo video | Pinterest access tiers, fetched 2026-11-04 |
 | Snapchat (Public Profile) | **B** | Marketing API Public Profile Content Management | Business Manager, Public Profile, partner access | Snap developer docs, fetched 2026-11-04 |
 | Snapchat (regular account) | **D** | Creative Kit share sheet | No server-side post API for normal accounts | Snap developer docs |
-| Rumble | **D/C** | No documented public upload API found | Manual handoff until a key path is proved; the engine's own verdict is `integration_uncertain` | `docs/INSTALL.md`, `xpst.media.specs` |
+| Rumble | **D, shipped as handoff** (a **B/C** partner path exists when a key is configured) | Partner upload API, or the engine's manual-handoff path (rendition + caption file written for you) | Partner-gated key with no self-serve developer console; the engine's own verdict is `integration_uncertain` until one live upload succeeds | `docs/INSTALL.md`, `xpst.media.specs`, `xpst capabilities` §3 |
 | Substack | **D** | No documented public write API | Manual handoff | *Unverified* |
 | Nostr | **A (open)** | Signed events to relays | Keypair per identity | *Candidate, not yet verified* |
 | Google Business Profile | **B** | Posts API | Business account + approval | *Candidate, not yet verified* |
@@ -81,16 +81,17 @@ two differ, this section wins because it is generated and pinned.
 
 | Destination | Shipped content types | Media transport | Account gate in the shipped engine | Notes |
 |---|---|---|---|---|
-| YouTube | video | local upload | OAuth client + token; `enabled` | Always forced to Shorts (`#shorts` appended); no long-form path |
+| YouTube | video | local upload | OAuth client + token; `enabled` | Two explicit modes, never guessed: short-form (Shorts, ≤ 60 s, square/vertical, `#shorts`) and long-form (resumable `videos.insert`, watch URL, ≤ 12 h / 256 GB) |
 | X | video, image, carousel, text | local upload | `auth_mode: cookies` (twikit session) or API v2 | Carousel = one media item per tweet, in order; text capped at 280 chars |
 | Instagram | video, image, carousel | local upload | Graph token + professional account; `enabled` | The image path needs a public image URL and refuses a local file explicitly |
 | Threads | text, video | **public URL** | Graph token; `enabled` | Video must already be hosted at a public URL; a local file is refused before any network call |
 | Facebook Page | video | local upload | Page token; `enabled` | Page only |
 | TikTok | video | local upload | Content Posting API app **or** browser profile (`publish_mode: browser`) | No carousel path; unaudited apps publish privately |
 | Messenger | text (messaging role, not a public post) | local upload | Page token; `enabled=false` by default | Sends DMs, does not publish |
+| Rumble | video | local upload | Partner upload API key when configured; **manual handoff otherwise** (`integration_uncertain`) | Long-form only. The handoff writes the rendition plus a caption file to a chosen directory and reports `handoff`, never a fake upload. Declared, but not advertised as ready until one live upload succeeds |
 
 Not in the catalog at all: Bluesky, Mastodon, Telegram, Discord, Reddit, LinkedIn,
-Pinterest, Snapchat, Rumble, Substack, Nostr, Google Business Profile. Their rows in
+Pinterest, Snapchat, Substack, Nostr, Google Business Profile. Their rows in
 §2 are the *design*; nothing in the product may imply they exist until they appear
 in this section.
 
