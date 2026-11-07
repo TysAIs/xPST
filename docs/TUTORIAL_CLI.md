@@ -1123,10 +1123,11 @@ Vocabulary: video, image, carousel, text, thread
 
 | Destination            | Declared | Implemented | Notes |
 |------------------------|----------|-------------|-------|
-| YouTube Shorts (youtube) | video  | video       | always forced to Shorts … |
-| X (x)                  | video, carousel, text | video, carousel, text | carousel is a tweet thread, one media per tweet; text is one post (280 chars, no media) |
+| YouTube (youtube)      | video  | video       | two modes: Shorts (≤60 s, square-or-vertical) or long-form (resumable upload, 12 h); `--shorts/--long` or derived from the probe; ambiguous is refused |
+| X (x)                  | video, carousel, text | video, carousel, text | carousel is a tweet thread, one media per tweet; text is one post (280 chars, no media); video over the account's 140 s cap is refused |
 | Instagram Reels (instagram) | video, carousel | video, carousel | native album upload (2-10 items) |
 | Threads (threads)      | video, text | video, text | video needs a public URL; text is a media_type TEXT container (500 chars) |
+| Rumble (rumble)        | video  | video       | long-form; integration-uncertain (partner-gated API): API key → upload, otherwise a manual handoff |
 ```
 
 The JSON form also carries `publish_routes` (the publishing path per content type) and
