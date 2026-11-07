@@ -15,7 +15,7 @@ and all of the onboarding tax.
 
 | Product | Price (2026-08-24) | Open source? | Platforms claimed | Access reality | Agent/API surface |
 |---|---|---|---|---|---|
-| **xPST** | **Free, MIT OR Apache-2.0** | **Yes** | 6 publish destinations shipped (YouTube, X, Instagram, Threads, Facebook, TikTok) + Messenger; 12 more designed in the matrix | Mixed, per destination and **stated**: public API, gated API, browser-assisted or manual handoff | **CLI + MCP (42 tools) + HTTP API + desktop (optional)** |
+| **xPST** | **Free, MIT OR Apache-2.0** | **Yes** | 6 publish destinations in code (YouTube, X, Instagram, Threads, Facebook Page, TikTok — official-API path pending review, browser-assist path live) + Messenger; 12 more designed in the matrix | Mixed, per destination and **stated**: public API, gated API, browser-assisted or manual handoff | **CLI + MCP (42 tools) + HTTP API + desktop (optional)** |
 | Content360 | $67 lifetime / "$47/mo soon" | No | ~15, mostly via Zapier-style relays | Closed SaaS OAuth through their apps | None (web app only) |
 | Postiz | Free self-host / cloud | AGPL | 9–15 | Their app, their review | Web UI, API |
 | Repurpose.io | $35/mo | No | 4–5 | Their app | None |
