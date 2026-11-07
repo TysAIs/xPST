@@ -215,6 +215,12 @@ the live check that was just run, plus the timestamp of that check:
 | `disabled` | switched off in config |
 | `unknown` | no live check ran (or it is older than the freshness window) — deliberately not green |
 
+`source_only` describes the *route*, not the platform name: TikTok configured
+with `publish_mode: browser` posts through the logged-in TikTok Studio web
+session, so its credential is reported as `auth_mode: session` and it badges
+`connected`/`needs_reauth` from that session's live probe. The download side
+keeps its own separate `source_only` verdict on the `source` role.
+
 An automatic refresh path keeps the badge green for tokens xPST renews itself
 (YouTube refresh tokens, Threads/Meta long-lived tokens); a failed refresh is
 recorded and downgrades the badge to `needs_reauth` instead of promising a
@@ -235,8 +241,13 @@ An instagrapi session (`auth_mode: "session"`) is available as a fallback; it us
 the unofficial private API and carries account-ban risk.
 
 **TikTok auth.** TikTok source authentication/configuration uses yt-dlp and
-optional browser cookies. Destination publishing is pending external developer
-review and approved app credentials; do not treat the destination path as ready.
+optional browser cookies. On the Content Posting API route, destination
+publishing is pending external developer review and approved app credentials;
+do not treat that destination path as ready. With `publish_mode: browser`
+(or `browser_only`) publishing goes through the logged-in TikTok Studio web
+session instead, and the platform's credential is reported as
+`auth_mode: session` — its provider row, `video_destination` role and badge all
+describe that session (and say `needs_reauth` when it is logged out).
 
 ### `xpst auth status`
 
