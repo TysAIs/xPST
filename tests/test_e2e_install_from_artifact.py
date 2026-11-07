@@ -1207,6 +1207,10 @@ def test_headless_display_prefix_is_a_no_op_when_xvfb_is_absent(monkeypatch):
     assert headless_display_prefix() == []
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the synthetic app is a shebang script; Windows cannot exec it (WinError 193)",
+)
 def test_a_crashing_artifact_reports_its_exit_code_instead_of_a_timeout(tmp_path, capsys):
     """The v1.2.1 linux/windows red run: the app died, not the health poll."""
 
