@@ -7,9 +7,12 @@ issue to propose or upvote an item.
 **Direction (2026-11-03):** the engine is moving to an all-Rust rebuild with a
 zero-personal-data rule and measured lightweight targets. The decision record is
 [docs/DIRECTION.md](docs/DIRECTION.md); the plan is
-[docs/PROPOSAL-RUST-REBUILD.md](docs/PROPOSAL-RUST-REBUILD.md). Items below that
-conflict with that direction are read as "Python-engine work that either lands
-before the rebuild or is carried as a parity behavior."
+[docs/PROPOSAL-RUST-REBUILD.md](docs/PROPOSAL-RUST-REBUILD.md). The product itself is
+phone-first and operator-controlled: [docs/PHONE-FIRST-UX.md](docs/PHONE-FIRST-UX.md),
+[docs/PLATFORM-CAPABILITY-MATRIX.md](docs/PLATFORM-CAPABILITY-MATRIX.md) and the build
+order in [docs/MVP-CUT.md](docs/MVP-CUT.md). Items below that conflict with that
+direction are read as "Python-engine work that either lands before the rebuild or is
+carried as a parity behavior."
 
 ## Unreleased
 
