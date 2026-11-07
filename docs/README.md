@@ -464,7 +464,7 @@ xPST exposes 42 MCP tools. See [MCP_TOOLS.md](MCP_TOOLS.md) for full schemas.
 | `xpst_byo_app` | Bring-your-own developer app setup: report (masked) which platforms have a lo… |
 | `xpst_bio_get` | Get the link-in-bio page URL and its current configuration. Returns the publi… |
 | `xpst_capabilities` | Return the canonical role-aware provider catalog AND the content contract wit… |
-| `xpst_preflight` | Run the canonical side-effect-free post preflight for local media and targets… |
+| `xpst_preflight` | Resolve the per-destination plan BEFORE anything is published: for each desti… |
 | `xpst_readiness` | Return local setup readiness and actionable blockers without starting the pos… |
 | `xpst_auth_start` | Return a human-only authentication action plan; never opens a browser or acce… |
 | `xpst_providers` | List supported content sources and posting destinations with capabilities |

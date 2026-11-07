@@ -7,7 +7,7 @@
 //! `xpst --help` cannot drift from the checked-in list at runtime, and
 //! `tests/parity.rs` asserts the rendered help covers it.
 //!
-//! Unimplemented commands are data on purpose: 81 of the 86 command paths are
+//! Unimplemented commands are data on purpose: 82 of the 87 command paths are
 //! still served by the Python engine, and inventing a typed struct for each
 //! one before its behavior is decided would be exactly the kind of premature
 //! structure the proposal warns against. A command that gains real behavior

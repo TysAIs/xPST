@@ -2,7 +2,7 @@
 
 > **In-depth tutorial for every xPST CLI command with examples.**
 >
- xPST provides 47 top-level commands covering the entire cross-posting workflow.
+ xPST provides 48 top-level commands covering the entire cross-posting workflow.
 > This guide explains each one with real examples, flags, and expected output.
 
 ---
@@ -17,6 +17,7 @@
   - [`xpst run`](#xpst-run)
   - [`xpst watch`](#xpst-watch)
   - [`xpst post`](#xpst-post)
+  - [`xpst preflight`](#xpst-preflight)
   - [`xpst backfill`](#xpst-backfill)
   - [`xpst delete`](#xpst-delete)
 - [Scheduling](#scheduling)
@@ -438,8 +439,11 @@ refuse (disabled in configuration, credentials missing, quota exhausted) already
 the dry run with a message naming it.
 
 ```bash
-# Single video to all platforms
+# Single video to the format route ∩ connected accounts (never an implied "all")
 xpst post -v ./my-video.mp4 -c "My awesome video!"
+
+# Be explicit about every connected account that accepts this format
+xpst post -v ./my-video.mp4 -c "My awesome video!" --all
 
 # Single video to specific platforms
 xpst post -v ./my-video.mp4 -c "Check this out!" -p youtube,x
@@ -516,6 +520,14 @@ Posting carousel (3 items) to: x
 carousel123 - ✅ Success
 ```
 
+**Targets are opt-in and never implied.** `-p/--platforms` takes an explicit set;
+`--all` explicitly means every connected account that accepts this format; with
+neither, the target set is the **format route ∩ connected accounts** — a
+destination is never added just because an account exists. A destination you
+name that is not connected is reported as `skipped_unconnected` with the
+`xpst connect` command: visible, and **not** a failure. With no connected
+account at all, the run refuses with one actionable error naming that command.
+
 **Exit status.** `xpst post` exits non-zero when nothing was published, so
 `xpst post … && echo ok` (and every cron job or agent wrapper that branches on
 the exit status) cannot read a failed post as success:
@@ -527,15 +539,50 @@ the exit status) cannot read a failed post as success:
 | `3` | Every attempted destination failed to authenticate |
 | `10` | No destination was attempted at all, or every attempted destination is unavailable or refused the media (e.g. `THREADS_NEEDS_URL`) |
 | `1` | Every attempted destination failed for any other reason, or for a mix of reasons |
+| `0` with `status: "skipped"` | Every named destination is unconnected — nothing was attempted, nothing failed |
 
-The `--json` payload is unchanged (`all_success`, `partial_success`, and the
-per-platform `success` / `outcome` / `error` fields); a non-zero run also
-carries an `exit_code` field, so a JSON caller never has to guess.
+The `--json` payload carries the legacy keys (`all_success`, `partial_success`,
+and the per-platform `success` / `outcome` / `error` fields) plus the canonical
+route outcome: `destinations` (one `state` per destination: `posted`,
+`skipped_unconnected`, `unsupported_format`, `refused_by_community`, `failed`),
+`skipped_unconnected` and `status`. A non-zero run also carries `exit_code`, so
+a JSON caller never has to guess.
 
 ```bash
 xpst post -v ./clip.mp4 -c "…" -p youtube,x --json
 if [ $? -ne 0 ]; then echo "post failed (see per-platform error)"; fi
 ```
+
+---
+
+### `xpst preflight`
+
+Resolve and print the per-destination plan **before** anything is published.
+It makes no network call and uploads nothing. The output is the same plan object
+`xpst post` and `xpst schedule add` consume, so what you see is what will run.
+
+```bash
+# Auto-classify the format, target the format route ∩ connected accounts
+xpst preflight ./clip.mp4 --caption "Launch day"
+
+# Plan for an explicit destination and include the rendition decision
+xpst preflight ./clip.mp4 --caption "Launch day" -p youtube,x --transform
+
+# Plan a text post; --all is explicit
+xpst preflight --text "Shipping today" --all --json
+```
+
+Each destination is reported with one canonical state: `posted` (will publish),
+`skipped_unconnected` (with the `xpst connect <platform>` command),
+`unsupported_format` (with that destination's envelope: duration, container,
+codec, byte and caption ceilings) or `failed`. A caption or video outside the
+envelope is **refused, not truncated**, and the message carries the envelope so
+you can fix it once.
+
+Exit codes: `0` when at least one destination will publish, `2` when no
+destination resolved (nothing connected / nothing accepts the format — the
+error names the connect command), `1` when the plan resolved but nothing will
+publish.
 
 ---
 

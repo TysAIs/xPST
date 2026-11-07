@@ -198,6 +198,18 @@ class SchedulingEngine:
 
                 caption = entry.get("caption") or ""
                 platforms = entry.get("platforms") or None
+                if platforms is None and getattr(self.engine, "config", None) is not None:
+                    # Legacy/paused entry stored without a target list: resolve
+                    # the route now instead of letting the engine mean "every
+                    # enabled platform" (R3: no implied set, including here).
+                    from xpst.services.route_plan import resolve_targets
+
+                    platforms = list(
+                        resolve_targets(
+                            self.engine.config,
+                            content_type=str(entry.get("content_type") or "auto"),
+                        ).targets
+                    ) or None
                 # Per-destination copy persisted at add time (same semantics
                 # as `xpst post --caption-for`); {} = shared caption everywhere.
                 per_platform_captions = stored_per_platform_captions(entry)

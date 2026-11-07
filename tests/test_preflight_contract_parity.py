@@ -108,21 +108,25 @@ def test_surfaces_never_claim_network_activity(tmp_path: Path) -> None:
     assert _mcp_preflight(config, payload)["network_calls"] is False
 
 
-def test_both_surfaces_require_explicit_targets(tmp_path: Path) -> None:
+def test_both_surfaces_derive_the_route_when_no_targets_are_given(tmp_path: Path) -> None:
+    """Omitting platforms is no longer a refusal: it resolves the format route (R3)."""
     payload = {"media_path": "/nonexistent/clip.mp4", "platforms": [], "caption": "hi"}
 
     api = _api_preflight(tmp_path, payload)
     assert api["ready"] is False
-    assert "Choose at least one destination platform." in api["blockers"]
+    assert api["route_plan"]["source"] == "format_route"
+    # The route is the video-capable destinations ∩ the connected (enabled)
+    # accounts — not an arbitrary "all", and every destination carries its own
+    # verdict instead of one generic "choose a destination" sentence.
+    assert api["route_plan"]["posting_destinations"] or api["route_plan"]["destinations"]
+    assert "Choose at least one destination platform." not in api["blockers"]
 
     config = XPSTConfig()
     config.config_dir = str(tmp_path)
     mcp = _mcp_preflight(config, payload)
     assert mcp["ready"] is False
-    # The zero-destination refusal is one error across surfaces: same message
-    # and the same stable code, not a surface-specific rewording.
-    assert "Choose at least one destination platform." in mcp["blockers"]
-    assert api["error"] == mcp["error"] == {
-        "code": "NO_DESTINATIONS",
-        "message": "Choose at least one destination platform.",
-    }
+    # One resolver: the MCP and HTTP plans agree on the set and its order.
+    assert mcp["route_plan"]["posting_destinations"] == api["route_plan"]["posting_destinations"]
+    assert [item["state"] for item in mcp["route_plan"]["destinations"]] == [
+        item["state"] for item in api["route_plan"]["destinations"]
+    ]

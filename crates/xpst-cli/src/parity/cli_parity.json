@@ -2,13 +2,13 @@
  "schema_version": 1,
  "captured_from": {
   "repo": "TysAIs/xPST",
-  "git_ref": "2686ab1",
+  "git_ref": "f3cf8f8",
   "source": "src/xpst/cli.py",
   "framework": "click",
   "captured_by": "xtask/scripts/capture_python_cli.py"
  },
  "note": "Generated contract: the Rust engine must expose every command path and flag listed here. Do not hand-edit; re-run the capture script. `captured_from` is provenance only and is excluded from parity comparisons, which look at `commands` alone.",
- "command_count": 87,
+ "command_count": 88,
  "commands": [
   {
    "path": [],
@@ -3099,7 +3099,24 @@
      "type": "text",
      "choices": null,
      "default": null,
-     "help": "Comma-separated platforms (default: all)"
+     "help": "Comma-separated destination platforms. Without it the post targets the format route \u2229 connected accounts (never an implied 'all')."
+    },
+    {
+     "name": "all_connected",
+     "kind": "option",
+     "opts": [
+      "--all"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": false,
+     "help": "Explicitly target every connected account that accepts this format. This is the only way to mean 'all' \u2014 it is never the default."
     },
     {
      "name": "visibility",
@@ -3189,6 +3206,163 @@
      "choices": null,
      "default": false,
      "help": "Post immediately even outside the anti-bot window (8am-11pm). Without it, a media post fired outside the window is queued to the schedule store and reported as deferred, not failed."
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": false,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "preflight"
+   ],
+   "name": "preflight",
+   "help": "Resolve the per-destination plan BEFORE anything is published.",
+   "about": "Resolve the per-destination plan BEFORE anything is published.\n\nPrints the capability-driven route (R4): for each destination, whether it\nwill publish (posted), is not connected (skipped_unconnected, with the\nconnect command), or cannot take this format (unsupported_format, with the\nenvelope). Makes no network call and uploads nothing.",
+   "params": [
+    {
+     "name": "media",
+     "kind": "argument",
+     "opts": [
+      "media"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": -1,
+     "metavar": null,
+     "type": "path",
+     "choices": null,
+     "default": null,
+     "help": ""
+    },
+    {
+     "name": "caption",
+     "kind": "option",
+     "opts": [
+      "--caption",
+      "-c"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "",
+     "help": "Caption/body the post would carry"
+    },
+    {
+     "name": "text",
+     "kind": "option",
+     "opts": [
+      "--text",
+      "-t"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Text body of a text-only post"
+    },
+    {
+     "name": "format_",
+     "kind": "option",
+     "opts": [
+      "--format"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "choice",
+     "choices": [
+      "auto",
+      "video",
+      "image",
+      "carousel",
+      "text",
+      "thread"
+     ],
+     "default": "auto",
+     "help": "Format to route. 'auto' classifies the media the same way a post would."
+    },
+    {
+     "name": "platforms",
+     "kind": "option",
+     "opts": [
+      "--platforms",
+      "--platform",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Explicit destinations. Without it: format route \u2229 connected accounts."
+    },
+    {
+     "name": "all_connected",
+     "kind": "option",
+     "opts": [
+      "--all"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": false,
+     "help": "Explicitly plan for every connected account that accepts this format."
+    },
+    {
+     "name": "show_transform",
+     "kind": "option",
+     "opts": [
+      "--transform"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": false,
+     "help": "Include the per-destination rendition plan (needs ffmpeg)"
     },
     {
      "name": "as_json",

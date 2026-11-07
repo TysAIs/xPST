@@ -68,6 +68,80 @@ from xpst.utils.video import VideoProcessor
 
 logger = get_logger(__name__)
 
+
+# ── Opt-in destinations: skipped is a state, not a failure (R3) ─────────────
+
+def skipped_unconnected_result(platform: str) -> UploadResult:
+    """One result row for a requested destination that is not connected.
+
+    Before this row existed the engine logged "not available" and dropped the
+    platform, so a post to an unconnected account looked like a successful run
+    with one fewer destination. ``skipped_unconnected`` is neutral: it is not a
+    failure and it never turns a run's exit code non-zero on its own.
+    """
+    return UploadResult(
+        success=False,
+        error=(
+            f"SKIPPED_UNCONNECTED: {platform} is not connected, so nothing was "
+            f"published there. Connect it with `xpst connect {platform}`."
+        ),
+        platform=platform,
+        retryable=False,
+        metadata={
+            "state": "skipped_unconnected",
+            "skipped_unconnected": True,
+            "connect_command": f"xpst connect {platform}",
+        },
+    )
+
+
+def unsupported_format_result(platform: str, content_type: str, detail: str = "") -> UploadResult:
+    """One result row for a destination that cannot publish this content type."""
+    message = detail or (
+        f"UNSUPPORTED_FORMAT: {platform} cannot publish {content_type} posts; "
+        "nothing was uploaded."
+    )
+    return UploadResult(
+        success=False,
+        error=message,
+        platform=platform,
+        retryable=False,
+        metadata={
+            "state": "unsupported_format",
+            "unsupported_format": True,
+            "content_type": content_type,
+        },
+    )
+
+
+def _content_refusal(platform: str, content_type: str) -> UploadResult | None:
+    """Refuse a content type the destination does not implement.
+
+    The capability answer comes from :mod:`xpst.content` (the registry
+    ``xpst capabilities`` emits), so a destination that cannot publish this
+    format is refused *before* its uploader is called and the row says
+    ``unsupported_format`` — not a generic upload failure.
+    """
+    from xpst.content import coerce_content_type, content_profile
+
+    try:
+        wanted = coerce_content_type(content_type)
+    except Exception:  # noqa: BLE001 - an unknown spelling is not a capability answer
+        return None
+    profile = content_profile(platform)
+    if profile is None or profile.supports(wanted):
+        return None
+    supported = ", ".join(sorted(item.value for item in profile.implemented)) or "nothing"
+    return unsupported_format_result(
+        platform,
+        wanted.value,
+        (
+            f"UNSUPPORTED_FORMAT: {platform} cannot publish {wanted.value} posts "
+            f"(supports: {supported}); nothing was uploaded."
+        ),
+    )
+
+
 # Platform-encoded temp-file suffixes (single source, ISC-92)
 _ENCODED_SUFFIXES = ("_youtube", "_instagram", "_x", "_tiktok", "_threads", "_facebook")
 
@@ -720,7 +794,13 @@ class CrossPostEngine:
 
             uploader = self._platforms.get(platform_name)
             if not uploader:
-                logger.warning(f"Platform {platform_name} not available")
+                # Requested but not connected: a row, not a silent drop (R3).
+                logger.info("Platform %s is not connected; recording a skip", platform_name)
+                result.results[platform_name] = skipped_unconnected_result(platform_name)
+                continue
+            refusal = _content_refusal(platform_name, "video")
+            if refusal is not None:
+                result.results[platform_name] = refusal
                 continue
 
             # The copy this destination gets: its own override when the user
@@ -844,7 +924,8 @@ class CrossPostEngine:
 
             uploader = self._platforms.get(platform_name)
             if not uploader:
-                logger.warning(f"Platform {platform_name} not available")
+                logger.info("Platform %s is not connected; recording a skip", platform_name)
+                result.results[platform_name] = skipped_unconnected_result(platform_name)
                 continue
 
             platform_caption = caption_for_destination(platform_name, caption, per_platform_captions)
@@ -865,6 +946,7 @@ class CrossPostEngine:
                         "content_type": "carousel",
                         "items": len(media_paths),
                         "unsupported": True,
+                        "state": "unsupported_format",
                     },
                 )
                 continue
@@ -963,7 +1045,12 @@ class CrossPostEngine:
 
             uploader = self._platforms.get(platform_name)
             if not uploader:
-                logger.warning(f"Platform {platform_name} not available")
+                logger.info("Platform %s is not connected; recording a skip", platform_name)
+                result.results[platform_name] = skipped_unconnected_result(platform_name)
+                continue
+            refusal = _content_refusal(platform_name, "image")
+            if refusal is not None:
+                result.results[platform_name] = refusal
                 continue
 
             upload_result = await self.upload_service.upload_image_to_platform(
@@ -1066,7 +1153,12 @@ class CrossPostEngine:
 
             uploader = self._platforms.get(platform_name)
             if not uploader:
-                logger.warning(f"Platform {platform_name} not available")
+                logger.info("Platform %s is not connected; recording a skip", platform_name)
+                result.results[platform_name] = skipped_unconnected_result(platform_name)
+                continue
+            refusal = _content_refusal(platform_name, "text")
+            if refusal is not None:
+                result.results[platform_name] = refusal
                 continue
 
             body = overrides.get(str(platform_name).strip().lower(), text)
