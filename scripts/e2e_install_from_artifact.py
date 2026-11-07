@@ -1604,6 +1604,7 @@ def uninstall_artifact(
     strategy = strategy or {}
     kind = str(strategy.get("kind") or "")
     steps: list[dict[str, Any]] = []
+    ran_uninstaller = False
     if kind == "apt":
         command = [str(part) for part in strategy.get("command") or []]
         if command:
@@ -1613,6 +1614,7 @@ def uninstall_artifact(
         command = [str(strategy["uninstaller"]), "/S"]
         result = command_result(command, timeout=900)
         steps.append({"command": command, "returncode": result["returncode"]})
+        ran_uninstaller = True
     targets: list[tuple[str, Path]] = []
     if kind == "dir" and strategy.get("path"):
         targets.append(("install_root_removed", Path(str(strategy["path"]))))
@@ -1624,13 +1626,20 @@ def uninstall_artifact(
         ]
     )
     removed = {label: remove_path(target) for label, target in targets}
-    return {
-        "method": (
+    if kind == "apt":
+        method = (
             "apt-get remove the installed package, delete the throwaway install root, "
             "isolated config dir and isolated HOME"
-            if kind == "apt"
-            else "delete the throwaway install root, isolated config dir and isolated HOME"
-        ),
+        )
+    elif ran_uninstaller:
+        method = (
+            "run the bundled uninstaller, delete the throwaway install root, isolated "
+            "config dir and isolated HOME"
+        )
+    else:
+        method = "delete the throwaway install root, isolated config dir and isolated HOME"
+    return {
+        "method": method,
         **removed,
         "commands": steps,
     }
