@@ -110,7 +110,9 @@ path and a fake-transport test in the failure-injection harness.
 
 ## 6. M5 — manual handoff, done properly
 
-Snapchat (regular accounts), Substack, Rumble and anything else without a write API:
+Snapchat (regular accounts), Substack and anything else without a write API. Rumble
+already implements this pattern in the engine (rendition + caption file in a directory
+you choose, reported as `handoff`), so it is the template, not a new build:
 
 - export a rendition that matches the destination (aspect, duration, bytes),
 - prepare the caption in a copyable form,
