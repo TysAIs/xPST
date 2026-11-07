@@ -3062,8 +3062,16 @@ def doctor(ctx: click.Context, platform: str | None, as_json: bool):
                 or f"xpst connect {p}"
             )
         else:
-            problem = "Not connected."
-            fix = f"xpst connect {p}"
+            # No stored credential file for this provider (TikTok's browser
+            # publish route has none at all — its credential is the web
+            # session).  A destination-probe error is still the most
+            # actionable sentence available, so carry it verbatim instead of
+            # collapsing it into "Not connected."
+            problem = str(destination_error) if destination_error else "Not connected."
+            fix = (
+                describe_remediation(p, str(destination_error or ""))
+                or f"xpst connect {p}"
+            )
 
         qinfo = quota_status.get(p, {})
         platforms_report[p] = {
