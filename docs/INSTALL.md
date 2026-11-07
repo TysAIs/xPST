@@ -256,6 +256,12 @@ This is an honest status snapshot, not a guarantee that a platform will keep
 its API or session behavior unchanged. Platform authentication and health are
 account-dependent; use the non-mutating health check after your own setup.
 
+Scope note: this table answers *"is it authenticated on this account today?"*.
+What the platform itself allows (public API, gated API, browser-assisted, manual
+handoff) and what the engine actually ships per destination are in
+[PLATFORM-CAPABILITY-MATRIX.md](PLATFORM-CAPABILITY-MATRIX.md) — generated from
+`xpst capabilities` and enforced by `tests/test_platform_capability_matrix.py`.
+
 | Capability | Status | What that means today |
 |---|---|---|
 | YouTube | **Live-verified** | Current account authentication and live health were verified. Publishing still requires your own Google OAuth project/account and remains subject to YouTube limits. |

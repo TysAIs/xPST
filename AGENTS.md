@@ -154,9 +154,13 @@ file does quote (MCP tools, CLI commands) are machine-checked: the MCP registry 
 ## Capability truth
 
 Do not describe a platform capability this code cannot perform. Threads, TikTok
-destination, Messenger and per-modality support all have real limits; the maintained
-table is `docs/INSTALL.md#capability-truth-table`. When you change what a platform can
-actually do, update that table in the same PR.
+destination, Messenger and per-modality support all have real limits. Two tables split
+the job and neither may drift from the other:
+`docs/INSTALL.md#capability-truth-table` is the per-account live status, and
+`docs/PLATFORM-CAPABILITY-MATRIX.md` is the vendor access classification plus what the
+engine ships per destination (generated from `xpst capabilities`, enforced by
+`tests/test_platform_capability_matrix.py`). When you change what a platform can
+actually do, update both in the same PR.
 
 ## State and storage
 

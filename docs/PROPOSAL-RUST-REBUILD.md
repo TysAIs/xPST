@@ -157,7 +157,44 @@ deliberately last.
 6. Public-safety tree+artifact scan is clean *with* the checked-in deny list
    active, and history scan has no unexpected categories.
 
-## 8. Open questions for the maintainer
+## 8. Clients and the MVP cut
+
+The rebuild's acceptance criteria are about *engine identity*; they say nothing about
+what the product surface is. That is defined in two companion specs and must be read
+with this one:
+
+- [PHONE-FIRST-UX.md](PHONE-FIRST-UX.md) — the operator-controlled flow (compose once,
+  route by explicit criteria, confirm, read back honestly) and the client
+  architecture: one responsive web app served by the engine, PWA packaging next, a
+  Tauri shell for desktop, and an iOS wrapper evaluated only after the service works.
+- [MVP-CUT.md](MVP-CUT.md) — the slices that must work end-to-end before breadth, and
+  the honest statement of what is missing today (no media upload endpoint, no shipped
+  preview contract, no PWA manifest, no device pairing).
+
+Three consequences for the crate map, none of which change phase order:
+
+1. **`xpst-api` is a product surface, not an internal one.** It serves the phone, the
+   desktop shell and the future iOS wrapper, so its JSON shapes are a contract like
+   the CLI's exit codes. The rebuild keeps them route-for-route (§3) and the MVP's
+   new routes (media ingest, preview, confirm, readback) land with CLI and MCP twins
+   — a capability only reachable over HTTP is invisible to agents, which is the
+   opposite of D-6.
+2. **`xpst-provider` carries the platform capability matrix as data.** Each provider
+   declares its access class, its gate, its media transport per content type and its
+   readback path. `docs/PLATFORM-CAPABILITY-MATRIX.md` §3 is generated from the
+   current engine's `capability_document()` and pinned by a test; the Rust side must
+   produce the same document so "never promise what the platform does not allow"
+   survives the port.
+3. **Public media hosting is a protocol requirement, not a convenience.** Threads
+   video (and Instagram's image path on Graph) take a URL the platform fetches. A
+   loopback-only binary cannot satisfy them, which is why the distribution proposal's
+   relay has a media-hosting job as well as a remote-access job.
+
+The MVP cut ships on the current engine. The rebuild must neither wait for it nor be
+allowed to invalidate it: the preview and readback payloads become parity fixtures
+(§4) the day they exist.
+
+## 9. Open questions for the maintainer
 
 1. Keep the Python package installable for one release after the Rust release
    (escape hatch), or remove it immediately?
@@ -168,7 +205,15 @@ deliberately last.
    one more failure mode)?
 5. Phase order P2 (posting) before P4 (surfaces) — confirm, since the desktop
    app cannot use the Rust engine until P4.
+6. Phone transport first: the operator's tailnet, or a public relay with its own TLS
+   and auth? The tailnet is cheaper and private; the relay is the only path that also
+   gives a stranger a URL and satisfies `public_url` destinations.
+7. iOS wrapper shape when it is evaluated: a WKWebView shell over the same bundle
+   (needs Xcode + store review, gains share-target and background upload) or a native
+   client over the HTTP contract (more code, no web limits)? The MVP deliberately does
+   not answer this.
 
 Default answers assumed if nobody objects: keep the escape hatch for one release,
-keep the PyPI name, retire unofficial Instagram, fetch media tools on demand, and
-do P2 before P4.
+keep the PyPI name, retire unofficial Instagram, fetch media tools on demand, do P2
+before P4, tailnet first with the relay designed but not required, and evaluate the
+WKWebView shell before writing any SwiftUI.
