@@ -202,6 +202,7 @@ class UploadService:
         visibility: str | None = None,
         ignore_window: bool = False,
         dry_run: bool = False,
+        video_mode: str | None = None,
     ) -> UploadResult:
         """Single method that handles the full upload pipeline.
 
@@ -472,6 +473,13 @@ class UploadService:
             if visibility is not None and self._accepts_visibility(uploader):
                 retry_kwargs["visibility"] = visibility
 
+            # The per-post format choice (``--shorts`` / ``--long``) reaches only
+            # uploaders that take a ``mode`` keyword; every other destination
+            # enforces its own declared envelope instead of being told a mode it
+            # does not have.
+            if video_mode is not None and self._accepts_keyword(uploader, "mode"):
+                retry_kwargs["mode"] = video_mode
+
             raw_upload_result = await retry_operation(
                 uploader.upload,
                 encoded_path,
@@ -638,12 +646,13 @@ class UploadService:
         }
 
     @staticmethod
-    def _accepts_visibility(uploader: PlatformUploader) -> bool:
-        """Whether an uploader's ``upload`` accepts a ``visibility`` keyword.
+    def _accepts_keyword(uploader: PlatformUploader, keyword: str) -> bool:
+        """Whether an uploader's ``upload`` accepts ``keyword``.
 
-        YouTube honours it; the other platform uploaders deliberately do not,
-        so this is how the shared service forwards the option without breaking
-        their signatures.
+        Shared by the optional pass-throughs (``visibility`` for YouTube,
+        ``mode`` for the short/long choice) so the service forwards an option
+        only to an adapter that declares it, instead of breaking every other
+        sender's signature.
         """
         import inspect
 
@@ -651,9 +660,19 @@ class UploadService:
             params = inspect.signature(uploader.upload).parameters
         except (TypeError, ValueError):
             return False
-        if "visibility" in params:
+        if keyword in params:
             return True
         return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
+
+    @staticmethod
+    def _accepts_visibility(uploader: PlatformUploader) -> bool:
+        """Whether an uploader's ``upload`` accepts a ``visibility`` keyword.
+
+        YouTube honours it; the other platform uploaders deliberately do not,
+        so this is how the shared service forwards the option without breaking
+        their signatures.
+        """
+        return UploadService._accepts_keyword(uploader, "visibility")
 
     def _is_auth_expired(self, error: str | None) -> bool:
         """Check if an error indicates authentication expiry.

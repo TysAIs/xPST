@@ -77,7 +77,9 @@ async def test_youtube_upload_honours_unlisted_visibility(tmp_path: Path) -> Non
     uploader._service = service
 
     with patch("googleapiclient.http.MediaFileUpload", return_value=MagicMock()):
-        result = await uploader.upload(video, "hello", visibility="unlisted")
+        # These two tests are about visibility plumbing, not format routing: the
+        # fixture is not a probeable video, so state the mode explicitly.
+        result = await uploader.upload(video, "hello", visibility="unlisted", mode="shorts")
 
     assert result.success is True
     body = service.videos.return_value.insert.call_args.kwargs["body"]
@@ -96,7 +98,7 @@ async def test_youtube_upload_default_stays_public(tmp_path: Path) -> None:
     uploader._service = service
 
     with patch("googleapiclient.http.MediaFileUpload", return_value=MagicMock()):
-        result = await uploader.upload(video, "hello")
+        result = await uploader.upload(video, "hello", mode="shorts")
 
     assert result.success is True
     body = service.videos.return_value.insert.call_args.kwargs["body"]

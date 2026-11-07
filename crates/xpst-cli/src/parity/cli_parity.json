@@ -2,7 +2,7 @@
  "schema_version": 1,
  "captured_from": {
   "repo": "TysAIs/xPST",
-  "git_ref": "892daf3",
+  "git_ref": "2686ab1",
   "source": "src/xpst/cli.py",
   "framework": "click",
   "captured_by": "xtask/scripts/capture_python_cli.py"
@@ -3121,6 +3121,40 @@
      ],
      "default": "public",
      "help": "Post visibility (YouTube honours it; other platforms ignore it)"
+    },
+    {
+     "name": "shorts",
+     "kind": "option",
+     "opts": [
+      "--shorts"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": false,
+     "help": "Publish as short-form (YouTube: Shorts \u2264 60 s, square-or-vertical)"
+    },
+    {
+     "name": "long_form",
+     "kind": "option",
+     "opts": [
+      "--long"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": false,
+     "help": "Publish as long-form (YouTube: watch URL, up to 12 h; X: needs a raised cap)"
     },
     {
      "name": "dry_run",
