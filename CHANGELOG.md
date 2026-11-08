@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A pip/wheel install can serve the web UI, so `#/phone` is reachable from
+  PyPI.** The wheel shipped no UI at all: `/` served the string placeholder and
+  only the JSON API worked, so `xpst pair` handed a phone a code for a screen
+  that did not exist. `packaging/hatch_ui.py` is now a hatch build hook that maps
+  a built `ui/dist` (or `XPST_UI_DIST`) into the wheel as
+  `xpst/dashboard/webui`, and `xpst.dashboard.server._ui_dist_dir()` finds it
+  before the checkout path. The release, PyPI, public-safety and Docker lanes
+  build the UI and set `XPST_REQUIRE_UI=1`, so a released wheel can never ship
+  UI-less; `scripts/clean_install_smoke.py` fails a wheel with no bundle. When no
+  bundle exists the placeholder page says so, `xpst ui` prints the fix, and the
+  `--json` readiness line reports `"ui_built": false`. The sdist stays
+  engine-only by design.
+
 ### Changed
 - **Every Meta Graph API call now uses one pinned, supported version (v26.0).**
   Instagram (container create/publish, media + container status, permalink,

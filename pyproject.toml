@@ -117,6 +117,9 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "pytest-timeout>=2.3.0",  # Enforces @pytest.mark.timeout in tests/test_integration.py; silences PytestUnknownMarkWarning
     "tomli>=2.0.1; python_version < '3.11'",
+    # Build-hook tests import packaging/hatch_ui.py directly; hatchling is a
+    # build-time dep, so the test env needs it explicitly.
+    "hatchling>=1.27.0,<2.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
     "types-PyYAML>=6.0.0",
@@ -137,6 +140,13 @@ Changelog = "https://github.com/TysAIs/xPST/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/xpst"]
+
+# Ship the built web UI inside the wheel (xpst/dashboard/webui). A pip install
+# without it serves the placeholder page and #/phone is unreachable; see
+# packaging/hatch_ui.py. Build it first: cd ui && npm install && npm run build.
+# Release lanes set XPST_REQUIRE_UI=1 so a wheel can never ship UI-less.
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "packaging/hatch_ui.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
