@@ -125,6 +125,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deadlines.
 
 ### Fixed
+- **`xpst post --dry-run` can no longer report `"ready": true` while listing a
+  hard blocker.** Readiness was derived from the destination plan alone, so a
+  request the content contract refused — a text post to TikTok, which publishes
+  video only — printed `ready: true` next to the blocker that refused it (and
+  next to a sibling destination that would post) while the same invocation
+  exited 1. Any gate reading the field passed a request the command itself would
+  not publish. Readiness now requires an empty blocker list, which is the answer
+  the MCP dry run and the HTTP preflight already gave; the exit-status contract
+  (a pre-upload content refusal exits 1, a per-destination blocker is reported
+  per destination and does not abort the run) is unchanged.
 - **A TikTok API throttle is believed for the window TikTok asked for, not the
   60 s floor.** `TikTokUploader._handle_http_error` mapped a 429 to a static
   `TIKTOK_RATE_LIMITED` string and never read the response, so the persistent

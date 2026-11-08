@@ -1194,7 +1194,19 @@ def post(
             plan_blockers = [f"Preflight could not run: {str(exc)[:200]}"]
 
         merged_blockers = list(verdict["blockers"]) + plan_blockers
-        ready = bool(plan_payload and plan_payload["ready"]) and not plan_blockers
+        # One invariant, the one HTTP preflight ("ready": not blockers) and the
+        # MCP dry run ("ready": not blockers and plan ready) already keep: a
+        # payload may not call a request publishable while it lists a hard
+        # blocker. ``ready`` used to be derived from the plan alone, so a
+        # request the content contract refused — a text post to a video-only
+        # destination — reported "ready": true, listed that blocker in the same
+        # object and then exited 1 (card t_b3ab7439). A gate reading the field
+        # passed a request the command itself would not publish.
+        ready = (
+            bool(plan_payload and plan_payload["ready"])
+            and not merged_blockers
+            and bool(route_payload["posting_destinations"])
+        )
         info = {
             "dry_run": True,
             "video": str(media_paths[0]) if media_paths else None,
@@ -1214,7 +1226,7 @@ def post(
             "effective_content_type": verdict["effective_content_type"],
             "route": verdict["route"],
             "content": verdict,
-            "ready": ready and bool(route_payload["posting_destinations"]),
+            "ready": ready,
             "blockers": merged_blockers,
         }
         if as_json:
