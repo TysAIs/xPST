@@ -36,6 +36,11 @@ from xpst.platforms.base import (
     UploadResult,
 )
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
+from xpst.utils.graph_api import (
+    GRAPH_API_HOST,
+    GRAPH_API_VERSION,
+    graph_api_url,
+)
 from xpst.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -45,12 +50,14 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Meta Graph API base + version pin (matches the design doc / IG Graph pin policy).
-MESSENGER_API_BASE = "https://graph.facebook.com"
-MESSENGER_API_VERSION = "v22.0"
-# Version pin for IG/FB *comment* automation (per the Content360-lite plan; the
-# comments/replies endpoints are stable on v21.0 and the Page token scopes it).
-COMMENT_API_VERSION = "v21.0"
+# Meta Graph API host + version — both come from the shared pin in
+# ``xpst.utils.graph_api`` so Messenger/IG/FB cannot drift apart.
+MESSENGER_API_BASE = GRAPH_API_HOST
+MESSENGER_API_VERSION = GRAPH_API_VERSION
+# One version for every Meta surface xPST calls: the comment/reply endpoints are
+# stable on the current version and the Page token scopes them, so there is no
+# reason to keep a second pin.
+COMMENT_API_VERSION = GRAPH_API_VERSION
 # Hard text limit per Messenger message.
 MESSENGER_MAX_TEXT_LENGTH = 640
 
@@ -181,7 +188,7 @@ class MessengerAdapter(PlatformUploader):
         *,
         params: dict[str, Any],
         data: dict[str, Any] | None = None,
-        version: str = MESSENGER_API_VERSION,
+        version: str = "",
     ) -> dict[str, Any]:
         """POST to the Graph API with token + appsecret_proof attached.
 
@@ -202,7 +209,7 @@ class MessengerAdapter(PlatformUploader):
         if proof:
             payload["appsecret_proof"] = proof
 
-        url = f"{MESSENGER_API_BASE}/{version}/{path}"
+        url = graph_api_url(path, version=version)
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(url, params=payload, json=data)
@@ -228,7 +235,7 @@ class MessengerAdapter(PlatformUploader):
         path: str,
         *,
         params: dict[str, Any],
-        version: str = MESSENGER_API_VERSION,
+        version: str = "",
     ) -> dict[str, Any]:
         """GET the Graph API with token + appsecret_proof attached.
 
@@ -248,7 +255,7 @@ class MessengerAdapter(PlatformUploader):
         if proof:
             payload["appsecret_proof"] = proof
 
-        url = f"{MESSENGER_API_BASE}/{version}/{path}"
+        url = graph_api_url(path, version=version)
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.get(url, params=payload)
@@ -417,7 +424,7 @@ class MessengerAdapter(PlatformUploader):
                 params["appsecret_proof"] = proof
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.get(
-                    f"{MESSENGER_API_BASE}/{MESSENGER_API_VERSION}/me", params=params
+                    graph_api_url("me"), params=params
                 )
                 resp.raise_for_status()
                 data = resp.json()
