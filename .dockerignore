@@ -20,6 +20,8 @@ htmlcov
 # Runtime data and user state (never ship into the image)
 .xpst
 release-smoke
+ui/node_modules
+ui/dist
 
 # Secrets and credentials (never ship into the build context)
 .env

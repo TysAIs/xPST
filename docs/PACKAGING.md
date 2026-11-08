@@ -84,6 +84,27 @@ asserts the expected installer really exists, enforces the installer size budget
 `.github/workflows/release.yml` is the Python lane only: wheel + sdist + SBOM +
 the GitHub release and its aggregate checksums.
 
+### The wheel embeds the web UI
+
+`packaging/hatch_ui.py` is a hatch build hook that maps a built `ui/dist`
+(or `XPST_UI_DIST`) into the wheel as `xpst/dashboard/webui`, so
+`pip install xpst` serves the real UI (`#/phone` included) instead of the
+placeholder page. Consequences to keep in mind:
+
+- a wheel built in a tree with no `ui/dist` is engine-only and *says so*
+  (`xpst ui` and the placeholder page both explain it);
+- `XPST_REQUIRE_UI=1` turns that into a build failure — `release.yml`,
+  `publish-pypi.yml` and `public-safety.yml` set it, and each builds the UI
+  first, so a released artifact can never ship UI-less;
+- the **sdist carries `ui/dist` too** (`[tool.hatch.build.targets.sdist]
+  artifacts = ["ui/dist/**"]`), because `python -m build` and pip build the
+  wheel *from the sdist*: an sdist without the bundle silently yields an
+  engine-only wheel. Use `artifacts`, never `include`, in that table — `include`
+  replaces the VCS-based file selection and drops `packaging/` (the hook
+  itself), which fails the build with "Build script does not exist";
+- the Docker image builds the UI in a `node:22-slim` stage and installs with
+  `XPST_REQUIRE_UI=1`.
+
 ## App identity
 
 `productName` is `xPST` and the bundle identifier is `com.tysais.xpst`
