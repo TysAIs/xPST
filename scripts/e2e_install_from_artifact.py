@@ -27,7 +27,10 @@ import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class E2EError(RuntimeError):
@@ -45,6 +48,22 @@ class E2EError(RuntimeError):
 DEFAULT_WORK_BASE = (
     str(Path("/tmp").resolve()) if sys.platform == "darwin" else None  # nosec B108 - deliberate canonical location
 )
+
+#: The packaged-UI and sidecar observations are retried over a SHORT, BOUNDED
+#: window before the harness records a failure, because a single sample races
+#: the shell's own startup.  Measured on run 42508682981 (macOS leg): the launch
+#: log showed ``Uvicorn running on http://127.0.0.1:<port>`` and ``GET / 200``
+#: while the one-shot sample read a non-HTML root and an empty sidecar list;
+#: the identical commit passed on a re-run.  Retrying never weakens the
+#: assertion — it must still be status 200 + ``<html`` + an xPST marker, and a
+#: tauri stack still needs an ``xpst-engine`` sidecar — it only stops the
+#: harness from calling a healthy app dead in the instant before its shell
+#: finishes re-exec'ing.  Both the window and the attempt count are recorded in
+#: the evidence (``ui.attempts``, ``running_process.engine_sidecar_attempts``)
+#: so a slow-but-passing boot stays visible instead of silent.
+PACKAGED_UI_RETRY_WINDOW_SECONDS = 8.0
+SIDECAR_RETRY_WINDOW_SECONDS = 8.0
+OBSERVATION_POLL_INTERVAL_SECONDS = 0.25
 
 
 class WorkDir:
@@ -626,6 +645,78 @@ def http_get(url: str, timeout: float = 2.0) -> tuple[int | None, bytes, str | N
         return None, b"", str(exc)
 
 
+def packaged_ui_sample(url: str, timeout: float = 2.0) -> dict[str, Any]:
+    """Take one packaged-HTML sample of a loopback root.
+
+    The assertion is deliberately strict and unchanged: HTTP 200, an ``<html``
+    document and an xPST marker.  Anything else is a miss, which the caller is
+    allowed to retry a bounded number of times.
+    """
+    status, body, error = http_get(url, timeout=timeout)
+    decoded = body.decode("utf-8", errors="replace")
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", decoded, re.IGNORECASE | re.DOTALL)
+    title = re.sub(r"\s+", " ", title_match.group(1)).strip() if title_match else ""
+    ok = (
+        status == 200
+        and "<html" in decoded.lower()
+        and ("xPST" in decoded or "xpst" in decoded.lower())
+    )
+    return {
+        "ok": ok,
+        "status": status,
+        "title": title,
+        "reason": (
+            "packaged HTML served at the healthy loopback root"
+            if ok
+            else f"root response was not the packaged HTML UI (status={status}, error={error})"
+        ),
+    }
+
+
+def observe_packaged_ui(
+    url: str,
+    *,
+    window_seconds: float = PACKAGED_UI_RETRY_WINDOW_SECONDS,
+    poll_interval: float = OBSERVATION_POLL_INTERVAL_SECONDS,
+    sampler: Callable[[str], dict[str, Any]] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    clock: Callable[[], float] | None = None,
+) -> dict[str, Any]:
+    """Re-sample the packaged UI over a bounded window before declaring a miss.
+
+    A macOS Tauri shell re-execs during startup, and its engine can answer
+    ``/health`` plus a root request before the packaged index is what the shell
+    serves.  One sample taken in that instant reads a healthy app as broken.
+    The window is short and bounded (``PACKAGED_UI_RETRY_WINDOW_SECONDS``) and
+    the sample is still the same strict check; only exhaustion fails.
+    """
+    sample_once = sampler or packaged_ui_sample
+    pause = sleep or time.sleep
+    now = clock or time.monotonic
+    deadline = now() + max(0.0, window_seconds)
+    attempts = 0
+    last: dict[str, Any] = {"ok": False, "status": None, "title": "", "reason": "not sampled"}
+    while True:
+        attempts += 1
+        last = sample_once(url)
+        if last.get("ok") or now() >= deadline:
+            break
+        pause(poll_interval)
+    ok = bool(last.get("ok"))
+    reason = str(last.get("reason") or "not sampled")
+    if not ok:
+        reason = f"{reason} (retried {attempts} time(s) over {window_seconds:.1f}s)"
+    return {
+        "ok": ok,
+        "status": last.get("status"),
+        "title": str(last.get("title") or ""),
+        "reason": reason,
+        "attempts": attempts,
+        "retry_window_seconds": window_seconds,
+        "attempts_exhausted": not ok,
+    }
+
+
 def health_and_ui(
     log_path: Path,
     process: subprocess.Popen[Any],
@@ -670,22 +761,17 @@ def health_and_ui(
     ui_status: int | None = None
     ui_title = ""
     ui_ok = False
+    ui_attempts = 0
+    ui_window = 0.0
     ui_reason = "health endpoint did not return HTTP 200"
     if health_url:
-        ui_status, body, error = http_get(health_url)
-        decoded = body.decode("utf-8", errors="replace")
-        title_match = re.search(r"<title[^>]*>(.*?)</title>", decoded, re.IGNORECASE | re.DOTALL)
-        ui_title = re.sub(r"\s+", " ", title_match.group(1)).strip() if title_match else ""
-        ui_ok = (
-            ui_status == 200
-            and "<html" in decoded.lower()
-            and ("xPST" in decoded or "xpst" in decoded.lower())
-        )
-        ui_reason = (
-            "packaged HTML served at the healthy loopback root"
-            if ui_ok
-            else f"root response was not the packaged HTML UI (status={ui_status}, error={error})"
-        )
+        observation = observe_packaged_ui(health_url)
+        ui_ok = bool(observation["ok"])
+        ui_status = observation["status"]
+        ui_title = str(observation["title"])
+        ui_attempts = int(observation["attempts"])
+        ui_window = float(observation["retry_window_seconds"])
+        ui_reason = str(observation["reason"])
 
     window_ok = visible and visible_seconds is not None and visible_seconds <= visible_budget
     if require_visible:
@@ -724,6 +810,8 @@ def health_and_ui(
         "title": ui_title,
         "url": health_url,
         "reason": ui_reason,
+        "attempts": ui_attempts,
+        "retry_window_seconds": ui_window,
     }
     failures: list[str] = []
     if not visible_ok:
@@ -793,6 +881,48 @@ def engine_processes() -> list[dict[str, str]]:
             if pattern.search(command):
                 processes.append({"pid": pid, "command": command})
     return processes
+
+
+def observe_engine_sidecar(
+    *,
+    exclude_pids: set[str] | None = None,
+    window_seconds: float = SIDECAR_RETRY_WINDOW_SECONDS,
+    poll_interval: float = OBSERVATION_POLL_INTERVAL_SECONDS,
+    enumerate_processes: Callable[[], list[dict[str, str]]] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    clock: Callable[[], float] | None = None,
+) -> dict[str, Any]:
+    """Re-enumerate ``xpst-engine`` processes over a bounded window.
+
+    On macOS the Tauri shell re-execs and the engine is a short-lived child
+    during that window; a single ``ps`` taken right after the first ``/health``
+    200 can list the app as ``(xPST)`` and no sidecar at all (run 42508682981).
+    The requirement is unchanged — a tauri stack still needs a real
+    ``xpst-engine`` process — but the harness re-enumerates for a short bounded
+    window (``SIDECAR_RETRY_WINDOW_SECONDS``) and fails only on exhaustion.
+    Processes that were already running before launch (``exclude_pids``) belong
+    to a foreign install and are not evidence for this run.
+    """
+    list_processes = enumerate_processes or engine_processes
+    pause = sleep or time.sleep
+    now = clock or time.monotonic
+    excluded = exclude_pids or set()
+    deadline = now() + max(0.0, window_seconds)
+    attempts = 0
+    observed: list[dict[str, str]] = []
+    while True:
+        attempts += 1
+        observed = [entry for entry in list_processes() if entry.get("pid") not in excluded]
+        if observed or now() >= deadline:
+            break
+        pause(poll_interval)
+    return {
+        "processes": observed,
+        "observed": bool(observed),
+        "attempts": attempts,
+        "retry_window_seconds": window_seconds,
+        "attempts_exhausted": not observed,
+    }
 
 
 def terminate_process(process: subprocess.Popen[Any]) -> dict[str, Any]:
@@ -1992,6 +2122,7 @@ def main(argv: list[str] | None = None) -> int:
         # developer's own app). Record it now so the leftover assertion only
         # blames a sidecar this run actually started.
         preexisting_engines = engine_processes()
+        preexisting_pids = {process["pid"] for process in preexisting_engines}
         if preexisting_engines:
             early_findings.append(
                 f"{len(preexisting_engines)} xpst-engine process(es) were already running before "
@@ -2029,11 +2160,28 @@ def main(argv: list[str] | None = None) -> int:
                 probe,
                 require_visible=not args.no_require_visible_window,
             )
+            # A single ps sample races the macOS shell's re-exec: the sidecar
+            # can be missing from the process table in the instant right after
+            # the first /health 200 (run 42508682981).  Only the tauri stack
+            # requires a sidecar, so only it pays for the bounded re-check.
+            if stack == "tauri":
+                sidecar = observe_engine_sidecar(exclude_pids=preexisting_pids)
+            else:
+                observed_processes = engine_processes()
+                sidecar = {
+                    "processes": observed_processes,
+                    "attempts": 1,
+                    "retry_window_seconds": 0.0,
+                    "attempts_exhausted": False,
+                }
             running = {
                 "app_process_alive_after_boot": process.poll() is None,
                 "app_pid": process.pid,
                 "app_command_line": process_command_line(process.pid),
-                "engine_sidecar_processes": engine_processes(),
+                "engine_sidecar_processes": sidecar["processes"],
+                "engine_sidecar_attempts": sidecar["attempts"],
+                "engine_sidecar_retry_window_seconds": sidecar["retry_window_seconds"],
+                "engine_sidecar_attempts_exhausted": sidecar["attempts_exhausted"],
             }
             launch_record = {
                 "command": launch_command,
@@ -2045,12 +2193,13 @@ def main(argv: list[str] | None = None) -> int:
         stop = terminate_process(process)
         print(
             f"[e2e] boot_to_visible={boot['boot_to_visible_seconds']!r}s "
-            f"health={health['status']!r} ui={ui['status']!r}",
+            f"health={health['status']!r} ui={ui['status']!r} "
+            f"ui_attempts={ui['attempts']!r} "
+            f"sidecar_attempts={running['engine_sidecar_attempts']!r}",
             flush=True,
         )
         time.sleep(1)
         still_running = engine_processes()
-        preexisting_pids = {process["pid"] for process in preexisting_engines}
         leftovers = [process for process in still_running if process["pid"] not in preexisting_pids]
         # Whatever the process-group kill missed (an AppImage's self-extracted
         # shell, WebKit helpers) still holds this run's work dir. Stop it before
@@ -2125,7 +2274,11 @@ def main(argv: list[str] | None = None) -> int:
                 f"could not read back a real command line for the launched PID {running['app_pid']}"
             )
         if stack == "tauri" and not running["engine_sidecar_processes"]:
-            failures.append("no xpst-engine sidecar process was observed while the packaged app ran")
+            failures.append(
+                "no xpst-engine sidecar process was observed while the packaged app ran "
+                f"({running['engine_sidecar_attempts']} ps sample(s) over "
+                f"{running['engine_sidecar_retry_window_seconds']:.1f}s)"
+            )
         if leftovers:
             failures.append(
                 f"leftover xpst-engine process(es) started by this run: {leftovers}"
