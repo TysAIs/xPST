@@ -11,6 +11,9 @@ COPY ui/package.json ui/package-lock.json ./
 RUN npm ci
 
 COPY ui/ ./
+# BrandMark.svelte imports ../../../../assets/icon.png, i.e. the repo-root
+# brand asset; mirror that path in the stage so the Vite build can resolve it.
+COPY assets/ /assets/
 RUN npm run build
 
 # Stage 1: Build
