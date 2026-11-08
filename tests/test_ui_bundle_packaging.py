@@ -134,14 +134,26 @@ def test_hook_fails_the_build_when_a_ui_build_is_required(tmp_path, monkeypatch)
     assert "npm run build" in hook_module.MISSING_UI_MESSAGE
 
 
-def test_hook_leaves_the_sdist_alone(tmp_path, monkeypatch):
-    _make_ui_build(tmp_path)
-    stub, build_data = _run_hook(monkeypatch, tmp_path)
-    stub2 = _StubHook(tmp_path, target_name="sdist")
+def test_sdist_packaging_carries_the_ui_build(tmp_path, monkeypatch):
+    """`python -m build` builds the wheel FROM the sdist, so the sdist needs ui/dist."""
+    import tomllib
+
+    with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
+        project = tomllib.load(handle)
+    artifacts = project["tool"]["hatch"]["build"]["targets"]["sdist"]["artifacts"]
+    assert "ui/dist/**" in artifacts
+    # `include` would replace the VCS-based selection and drop packaging/ —
+    # which is what made `uv build` lose its own build hook once.
+    assert "include" not in project["tool"]["hatch"]["build"]["targets"]["sdist"]
+
+
+def test_hook_fails_a_required_sdist_build_without_a_ui(tmp_path, monkeypatch):
     hook_module = _load_hook_module()
-    sdist_data: dict = {}
-    hook_module.CustomBuildHook.initialize(stub2, "1.2.1", sdist_data)
-    assert sdist_data.get("force_include", {}) == {}
+    monkeypatch.setenv(hook_module.REQUIRE_UI_ENV, "1")
+    monkeypatch.delenv(hook_module.UI_DIST_ENV, raising=False)
+    stub = _StubHook(tmp_path, target_name="sdist")
+    with pytest.raises(RuntimeError, match="ui/dist"):
+        hook_module.CustomBuildHook.initialize(stub, "1.2.1", {})
 
 
 # ── server lookup ───────────────────────────────────────────────────────────
