@@ -34,12 +34,12 @@ the platform exposes one, and a verification state.
 
 | Item | Today | Work in M0 |
 |---|---|---|
-| Media ingest from a phone | **missing** — `POST /api/post` takes `media_paths` on the engine host | `POST /api/media` multipart: size cap, container sniff, probe, staging dir under the config dir, plan-scoped id, idempotency key |
-| Route preview | **service shipped** (MCP `xpst_preflight`, `POST /api/preflight`: per-destination `enabled`/`auth_ready`/`quota_ready`/`hard_blockers`, `network_calls: false`); no CLI verb, no UI screen, no capability-driven envelope/transport contract (PR #340) | render the shipped plan in a phone screen; add `xpst preflight` and per-content-type transport so the preview can refuse honestly |
-| Confirm + idempotency | partial (`/api/post` exists, no frozen plan) | frozen plan, `confirm_stale`, replay returns the original result |
-| Per-destination readback | partial (engine records ids in state) | readback endpoint returning `verified` / `submitted, unconfirmed` + platform id + URL |
-| Phone access | engine binds loopback; token is required for writes; reads open unless Basic auth is configured | device pairing (one-time code → device token with label + revoke); reads authenticated over a non-loopback bind |
-| Client | Svelte pages with mobile breakpoints | compose → criteria → preview → confirm → result on a 390 px viewport with no horizontal scroll and 44 px targets |
+| Media ingest from a phone | **shipped** — `POST /api/media` (multipart) stages under `<config dir>/media/uploads` with a size cap, container sniff from the bytes, probe, content-addressed id and idempotency key | — |
+| Route preview | **shipped** — `POST /api/plans` freezes the resolved route (per-destination `enabled`/`auth_ready`/`quota_ready`/`hard_blockers`, envelopes, `network_calls: false`); MCP `xpst_preflight`, `POST /api/preflight`, `xpst preflight` and the phone screen all read the same service | — |
+| Confirm + idempotency | **shipped** — frozen plan under `<config dir>/plans/`, `confirm_stale` refusal carrying the reasons and the new preview, and per-destination replay that never uploads twice | — |
+| Per-destination readback | **shipped** — `GET /api/plans/{id}/readback` returns platform id, URL and `verified` / `submitted_unconfirmed` / `deferred` / `refused` / `not_attempted` / `failed`; `verify=1` asks YouTube (`videos.list`) and X (tweet read) for the answer | — |
+| Phone access | **shipped** — `xpst pair` issues a one-time code; `POST /api/pair` exchanges it for a per-device token (label, last-seen, revoke via `xpst devices --revoke` or `DELETE /api/devices/{id}`); a non-loopback bind authenticates reads on `/api` while the static shell stays public so an unpaired phone can reach the pairing screen | — |
+| Client | **shipped** — `#/phone`: compose → criteria → preview → confirm → publish → readback at a 390 px viewport, ≥44 px targets, no horizontal scroll, plan id in the URL so a reload or a second device resumes the engine's true state | — |
 
 **Deliberately excluded from M0**: PWA install, offline drafts, scheduling from the
 phone, Instagram/Threads/Facebook, carousels on any destination, caption variants.
@@ -47,6 +47,16 @@ phone, Instagram/Threads/Facebook, carousels on any destination, caption variant
 **Done when** the acceptance criteria in PHONE-FIRST-UX.md §7 hold with YouTube and X,
 and one destination is deliberately put into a cooldown to prove the deferred state is
 reported as deferred rather than failed.
+
+**Measured 2026-11-07 (M0 implementation):** a 390×844, 5 s clip uploaded from a phone
+viewport through the pairing screen produced `390×844 · 5.0s · h264` before confirm, a
+frozen plan for YouTube and X, and per-destination rows carrying `9lZzxG4fUy0`
+(`https://youtube.com/shorts/…`) and `2119335253231968341`
+(`https://x.com/i/status/…`) with `verified` in both cases once the platforms were asked.
+With X deliberately put into a cooldown, the same plan reported `deferred` **with the
+window** and no failure, kept the plan retryable, and the retry — after the window —
+uploaded to X only: the attempts log shows `["youtube","x"]` then `["x"]`, so nothing
+was published twice. The scheduled queue stayed empty throughout.
 
 ## 2. M1 — criteria, gates and refusals (still two destinations)
 
@@ -154,9 +164,12 @@ Every claim in §1 was measured on `origin/main` (2026-11-06) rather than assume
   `auth_ready: true`). This is the preview the phone screen renders — and it is the
   proof for capability-matrix §6 rather than an argument for it.
 - `src/xpst/dashboard/api.py` has `GET /api/media`, `/media/stream`, `/media/thumb`
-  and `POST /api/post`, but no media **upload** route — the M0 gap.
-- `src/xpst/dashboard/server.py` warns on a non-loopback bind without Basic auth, and
-  `src/xpst/dashboard/auth.py` requires a credential on every mutating route — the
-  M0 pairing requirement.
+  and `POST /api/post`; the M0 upload route `POST /api/media` and the plan lifecycle
+  (`/api/plans*`) now sit beside them, and `tests/test_media_upload_api.py` /
+  `tests/test_plan_lifecycle.py` pin their contract.
+- `src/xpst/dashboard/server.py` authenticates reads on `/api` when the bind is
+  non-loopback, and `src/xpst/dashboard/auth.py` requires a credential on every
+  mutating route — the M0 pairing requirement is met by `src/xpst/dashboard/devices.py`,
+  `xpst pair` and `xpst devices`.
 - `ui/public/` contains only `favicon.png`; `ui/index.html` declares an icon and no
   manifest — the M2 gap.

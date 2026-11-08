@@ -139,17 +139,24 @@ What the engine actually enforces on a non-loopback bind (measured in
 `src/xpst/dashboard/server.py`, `src/xpst/dashboard/auth.py`):
 
 - Mutating routes (POST/PUT/PATCH/DELETE) **always** require a credential — Basic
-  auth or the persisted API token. There is no unauthenticated write path.
-- Read-only routes stay open unless `dashboard_username` + `dashboard_password_hash`
-  are configured. A non-loopback bind without them logs a warning and exposes reads
-  to the network.
+  auth, the persisted API token, or a paired device token. There is no
+  unauthenticated write path; the two exemptions are public by design (the OAuth
+  deep-link callback and `POST /api/pair`, where the single-use code *is* the
+  credential) and are pinned by a test.
+- Read routes on `/api` require a credential too once the bind is non-loopback. The
+  static app shell stays public: it carries no account data, and without it an
+  unpaired phone could never load the page that asks for its pairing code.
 - The API token is generated on first run and stored encrypted; `XPST_API_TOKEN` and
   `XPST_UI_TOKEN` are accepted but never persisted.
+- `xpst pair` prints a one-time code (hashed at rest, expiring, single use, with a
+  presentation budget); `POST /api/pair` exchanges it for a per-device token that is
+  stored hashed, listed by label and last-seen, and revoked with
+  `xpst devices --revoke <device_id>` (or `DELETE /api/devices/{device_id}`). Revocation
+  takes effect on the next request.
 
-Therefore the phone-first requirement is: **remote access must be authenticated for
-reads too**, and the client must hold a device token, not a query-string secret. A
-pairing flow (one-time code shown by the engine, exchanged for a device token with a
-label and a revoke control) is part of the MVP.
+Therefore the phone-first requirement — **remote access must be authenticated for
+reads too, and the client must hold a device token, not a query-string secret** — is
+what the engine now does on a non-loopback bind.
 
 ### 4.1 Installability is a TLS property, not a UI property
 

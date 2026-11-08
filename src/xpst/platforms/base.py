@@ -154,6 +154,48 @@ class DeleteResult:
         }
 
 
+class ReadbackState(str, Enum):
+    """Outcome of asking a platform whether a recorded post really exists.
+
+    ``VERIFIED`` is the only state that may be shown as confirmed. ``UNSUPPORTED``
+    and ``UNKNOWN`` are not failures: they mean the platform could not be asked
+    (no adapter, or the read itself failed), so the post stays *submitted,
+    unconfirmed* rather than being upgraded or downgraded.
+    """
+
+    VERIFIED = "verified"
+    NOT_FOUND = "not_found"
+    UNSUPPORTED = "unsupported"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class ReadbackResult:
+    """The answer to "does this post exist on the platform?"."""
+
+    state: ReadbackState
+    platform: str
+    post_id: str
+    url: str | None = None
+    detail: str | None = None
+    visibility: str | None = None
+
+    @property
+    def verified(self) -> bool:
+        return self.state is ReadbackState.VERIFIED
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "state": self.state.value,
+            "verified": self.verified,
+            "platform": self.platform,
+            "post_id": self.post_id,
+            "url": self.url,
+            "detail": self.detail,
+            "visibility": self.visibility,
+        }
+
+
 def normalize_delete_result(raw: Any, platform: str, post_id: str) -> DeleteResult:
     """Coerce an adapter's ``delete()`` return into the DeleteResult contract.
 
@@ -707,6 +749,27 @@ class PlatformUploader(ABC):
         Returns 0 if not supported or on error.
         """
         return 0
+
+    async def readback(self, post_id: str) -> ReadbackResult:
+        """Independently confirm a recorded post exists on this platform.
+
+        Override in subclasses that can read a post back. The default says so
+        explicitly (``UNSUPPORTED``) instead of returning a bare ``True``: a
+        recorded id is *submitted, unconfirmed* until a readback proves it, and
+        only a platform that can be asked may claim ``verified``.
+
+        Args:
+            post_id: The platform-side id the upload returned.
+
+        Returns:
+            ReadbackResult with an explicit state and, when available, the URL.
+        """
+        return ReadbackResult(
+            state=ReadbackState.UNSUPPORTED,
+            platform=self.platform_name,
+            post_id=post_id,
+            detail=f"{self.platform_name} has no readback adapter",
+        )
 
     async def upload_image(self, image_path: Path, caption: str) -> UploadResult:
         """Publish a single still image to this platform.

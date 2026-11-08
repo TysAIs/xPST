@@ -177,18 +177,19 @@ fn root_help_lists_exactly_the_manifest_top_level_commands() {
 
 #[test]
 fn help_covers_the_full_documented_surface_count() {
-    // The Click tree this was captured from exposes 48 top-level commands (75
-    // leaf commands); a capture that silently produced a stub tree
-    // must fail loudly rather than "pass" with three commands.
+    // The Click tree this was captured from exposes 50 top-level commands (77
+    // leaf commands, 90 command paths counting the root); a capture that
+    // silently produced a stub tree must fail loudly rather than "pass" with
+    // three commands.
     let top = parity::manifest()
         .commands
         .iter()
         .filter(|c| c.path.len() == 1)
         .count();
     assert_eq!(
-        top, 48,
+        top, 50,
         "top-level command count drifted from the Python CLI"
     );
     let all = parity::manifest().commands.len();
-    assert_eq!(all, 88, "total command path count drifted (root + 87)");
+    assert_eq!(all, 90, "total command path count drifted (root + 89)");
 }
