@@ -36,6 +36,7 @@ from rich.table import Table
 
 from xpst.config import XPSTConfig
 from xpst.utils.credentials import CredentialStore
+from xpst.utils.graph_api import graph_api_base
 from xpst.utils.logger import get_logger
 from xpst.utils.platform import stdin_is_interactive
 from xpst.utils.secure_io import write_text_0600
@@ -264,7 +265,7 @@ def connect_instagram(config: XPSTConfig) -> bool:
         return _connect_instagram_session(config)
 
 
-GRAPH_API_BASE = "https://graph.facebook.com/v21.0"
+GRAPH_API_BASE = graph_api_base()
 GRAPH_EXPLORER_URL = "https://developers.facebook.com/tools/explorer/"
 
 
@@ -301,7 +302,8 @@ def _graph_api_verify_url(ig_user_id: str, access_token: str) -> str:
         access_token: Meta Graph API access token.
 
     Returns:
-        Full ``https://graph.facebook.com/v21.0/<ig_user_id>?...`` verify URL.
+        Full Graph verify URL for the pinned API version (``XPST_GRAPH_API_BASE``
+        wins when set).
     """
     params = urlencode(
         {

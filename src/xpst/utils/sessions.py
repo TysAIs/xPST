@@ -24,6 +24,7 @@ import json
 from pathlib import Path
 
 from xpst.utils.credentials import CredentialStore
+from xpst.utils.graph_api import graph_api_url
 from xpst.utils.logger import get_logger
 from xpst.utils.probe_errors import (
     ProbeFailure,
@@ -436,7 +437,7 @@ class SessionManager:
                     try:
                         import httpx
                         r = httpx.get(
-                            f"https://graph.facebook.com/v21.0/{ig_user_id}",
+                            graph_api_url(str(ig_user_id)),
                             params={"fields": "username,followers_count", "access_token": token},
                             timeout=10,
                         )
@@ -605,7 +606,7 @@ class SessionManager:
                 proof = hmac.new(secret.encode(), token.encode(), hashlib.sha256).hexdigest()
                 params["appsecret_proof"] = proof
             r = httpx.get(
-                "https://graph.facebook.com/v22.0/me",
+                graph_api_url("me"),
                 params=params,
                 timeout=10,
             )
@@ -699,7 +700,7 @@ class SessionManager:
             import httpx
 
             r = httpx.get(
-                f"https://graph.facebook.com/v21.0/{creds['page_id']}",
+                graph_api_url(str(creds['page_id'])),
                 params={
                     "fields": "id,name,followers_count",
                     "access_token": creds["page_access_token"],

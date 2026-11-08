@@ -37,6 +37,7 @@ from xpst.platforms.base import (
 )
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
 from xpst.reconcile import PublishAttempt, ReconcileOutcome, ReconcileResult
+from xpst.utils.graph_api import graph_api_url, graph_upload_url
 from xpst.utils.logger import get_logger
 from xpst.utils.probe_errors import classify_probe_failure, probe_details_from_error
 
@@ -347,7 +348,7 @@ class InstagramUploader(PlatformUploader):
         if len(caption) > self.MAX_CAPTION_LENGTH:
             caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
 
-        base_url = f"https://graph.facebook.com/v19.0/{ig_user_id}"
+        base_url = graph_api_url(str(ig_user_id))
         video_str = str(video_path)
 
         try:
@@ -388,7 +389,7 @@ class InstagramUploader(PlatformUploader):
                 permalink = ""
                 try:
                     resp = await client.get(
-                        f"https://graph.facebook.com/v19.0/{media_id}",
+                        graph_api_url(str(media_id)),
                         params={"fields": "permalink", "access_token": token},
                     )
                     permalink = resp.json().get("permalink", "")
@@ -529,7 +530,7 @@ class InstagramUploader(PlatformUploader):
             )
 
         # Step 2: Upload binary data to rupload endpoint
-        upload_url = f"https://rupload.facebook.com/ig-api-upload/v19.0/{container_id}"
+        upload_url = graph_upload_url(str(container_id))
         chunk_size = 8 * 1024 * 1024  # 8 MB chunks
 
         logger.info(f"Uploading video data to resumable endpoint ({chunk_size // (1024*1024)} MB chunks)")
@@ -558,7 +559,7 @@ class InstagramUploader(PlatformUploader):
 
         for _ in range(60):  # Max 5 minutes (60 × 5s)
             resp = await client.get(
-                f"https://graph.facebook.com/v19.0/{container_id}",
+                graph_api_url(str(container_id)),
                 params={"fields": "status", "access_token": token},
             )
             resp.raise_for_status()
@@ -867,7 +868,7 @@ class InstagramUploader(PlatformUploader):
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 response = await client.get(
-                    f"https://graph.facebook.com/v21.0/{ig_config.graph_ig_user_id}",
+                    graph_api_url(str(ig_config.graph_ig_user_id)),
                     params={
                         "fields": "id,username,followers_count,account_type",
                         "access_token": ig_config.graph_access_token,
@@ -1130,7 +1131,7 @@ class InstagramUploader(PlatformUploader):
         if len(caption) > self.MAX_CAPTION_LENGTH:
             caption = caption[: self.MAX_CAPTION_LENGTH - 3] + "..."
 
-        base_url = f"https://graph.facebook.com/v19.0/{ig_user_id}"
+        base_url = graph_api_url(str(ig_user_id))
         try:
             async with httpx.AsyncClient(timeout=300) as client:
                 resp = await client.post(
@@ -1166,7 +1167,7 @@ class InstagramUploader(PlatformUploader):
                 permalink = ""
                 try:
                     resp = await client.get(
-                        f"https://graph.facebook.com/v19.0/{media_id}",
+                        graph_api_url(str(media_id)),
                         params={"fields": "permalink", "access_token": token},
                     )
                     permalink = resp.json().get("permalink", "")
@@ -1482,7 +1483,7 @@ class InstagramUploader(PlatformUploader):
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.get(
-                    f"https://graph.facebook.com/v19.0/{ig_user_id}",
+                    graph_api_url(str(ig_user_id)),
                     params={"fields": "followers_count", "access_token": token},
                 )
                 resp.raise_for_status()

@@ -242,7 +242,7 @@ def _cli_json(result) -> dict[str, Any]:
 
 def test_build_login_url_requests_the_page_scopes() -> None:
     url = FacebookGraphClient.build_login_url(APP_ID, "https://localhost/", state="csrf-1")
-    assert url.startswith("https://www.facebook.com/v21.0/dialog/oauth?")
+    assert url.startswith(f"https://www.facebook.com/{facebook_module.GRAPH_API_VERSION}/dialog/oauth?")
     query = {key: values[0] for key, values in parse_qs(urlsplit(url).query).items()}
     assert query["client_id"] == APP_ID
     assert query["response_type"] == "code"
@@ -343,7 +343,7 @@ def test_list_pages_parses_me_accounts_including_page_tokens(stub_client) -> Non
 
 
 def test_list_pages_follows_pagination(stub_client) -> None:
-    next_url = f"https://graph.facebook.com/v21.0/me/accounts?after=CURSOR&access_token={USER_TOKEN}"
+    next_url = f"{facebook_module.GRAPH_API_BASE}/{facebook_module.GRAPH_API_VERSION}/me/accounts?after=CURSOR&access_token={USER_TOKEN}"
     stub = GraphStub(
         pages=[GraphStub.page_entry(PAGE_A, "Page A"), GraphStub.page_entry(PAGE_B, "Page B")],
         next_page=next_url,
