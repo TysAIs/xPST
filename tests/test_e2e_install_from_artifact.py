@@ -15,11 +15,13 @@ import os
 import plistlib
 import shutil
 import stat
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import e2e_install_from_artifact as e2e_install_module
 from scripts.e2e_install_from_artifact import (
@@ -53,6 +55,7 @@ from scripts.e2e_install_from_artifact import (
     safe_extract_zip,
     select_release_asset,
     sniff_artifact_kind,
+    stop_work_processes,
     uninstall_artifact,
     verify_checksum,
     walk_app_bundles,
@@ -1263,3 +1266,157 @@ def test_ci_workflow_gives_the_linux_gui_bundle_a_display():
 
     assert "apt-get install -y -qq xvfb" in workflow
     assert "matrix.platform == 'linux'" in workflow
+
+
+# ---------------------------------------------------------------------------
+# CI matrix guard: the portable Linux download must be booted, not just the .deb
+# ---------------------------------------------------------------------------
+
+def _e2e_workflow() -> dict:
+    workflow = (
+        Path(__file__).resolve().parents[1]
+        / ".github"
+        / "workflows"
+        / "published-artifact-install-e2e.yml"
+    ).read_text(encoding="utf-8")
+    return yaml.safe_load(workflow)
+
+
+def _e2e_workflow_job() -> dict:
+    return _e2e_workflow()["jobs"]["install-published-artifact"]
+
+
+def _e2e_workflow_steps() -> list[dict]:
+    return _e2e_workflow_job()["steps"]
+
+
+def _step(needle: str) -> dict:
+    for step in _e2e_workflow_steps():
+        if needle in str(step.get("name", "")):
+            return step
+    raise AssertionError(f"no workflow step named like {needle!r}")
+
+
+def test_ci_workflow_covers_every_published_installer_leg():
+    """Four legs: the .deb install path AND the portable AppImage a user may take."""
+
+    legs = {
+        str(entry["leg"]): entry for entry in _e2e_workflow_job()["strategy"]["matrix"]["include"]
+    }
+
+    assert set(legs) == {"macos", "linux-deb", "linux-appimage", "windows"}
+    assert legs["linux-deb"]["platform"] == "linux"
+    assert legs["linux-appimage"]["platform"] == "linux"
+    assert legs["linux-appimage"]["asset_suffix"] == "_amd64.AppImage"
+    # The deb leg deliberately has no asset name: the ranker prefers the
+    # installable package, and that preference is what a stranger gets.
+    assert "asset_suffix" not in legs["linux-deb"]
+    assert legs["linux-deb"]["os"] == legs["linux-appimage"]["os"]
+
+
+def test_ci_workflow_appimage_leg_installs_the_portable_runtime():
+    """The AppImage links the distro GTK/WebKit stack and mounts via FUSE."""
+
+    step = _step("AppImage runtime")
+    script = str(step["run"])
+
+    assert step["if"] == "matrix.leg == 'linux-appimage'"
+    for package in (
+        "libfuse2t64",
+        "libfuse2",
+        "libgtk-3-0t64",
+        "libwebkit2gtk-4.1-0",
+        "libfontconfig1",
+        "libxcb1",
+        "libxkbcommon-x11-0",
+    ):
+        assert package in script, package
+    # A runner without /dev/fuse still runs the artifact, by self-extraction.
+    assert "APPIMAGE_EXTRACT_AND_RUN=1" in "\n".join(
+        str(step.get("run", "")) for step in _e2e_workflow_steps()
+    )
+    assert "/dev/fuse" in "\n".join(str(step.get("run", "")) for step in _e2e_workflow_steps())
+
+
+def test_ci_workflow_appimage_leg_names_its_own_asset():
+    """The ranker prefers the .deb, so the portable leg must name the AppImage."""
+
+    run = str(_step("Install a published artifact")["run"])
+
+    assert "--asset-name" in run
+    assert "xPST_${{ steps.tag.outputs.version }}${{ matrix.asset_suffix }}" in run
+    # v1.2.1's real asset name is what that expression produces.
+    version = "v1.2.1"[1:]
+    assert f"xPST_{version}_amd64.AppImage" == "xPST_1.2.1_amd64.AppImage"
+    assert (
+        select_release_asset(V121_ASSETS, "linux", f"xPST_{version}_amd64.AppImage")["name"]
+        == "xPST_1.2.1_amd64.AppImage"
+    )
+
+
+def test_ci_workflow_keeps_one_evidence_file_per_leg():
+    """Two Linux legs on one image must not overwrite each other's evidence."""
+
+    run = str(_step("Install a published artifact")["run"])
+    upload = _step("Attach the machine-readable evidence")["with"]
+
+    assert '--evidence-out "evidence/${{ matrix.leg }}.json"' in run
+    assert upload["name"] == "published-artifact-install-evidence-${{ matrix.leg }}"
+    assert _step("Summarise the evidence")["run"].strip().endswith(
+        'e2e_evidence_summary.py "${{ matrix.leg }}" >> "$GITHUB_STEP_SUMMARY"'
+    )
+
+
+# ---------------------------------------------------------------------------
+# Teardown: a portable AppImage leaves processes that hold the work directory
+# ---------------------------------------------------------------------------
+
+def test_stop_work_processes_kills_only_what_this_run_started(tmp_path):
+    """The AppImage shell and its WebKit helpers escape the process-group kill."""
+
+    if os.name == "nt":
+        pytest.skip("command lines are read from ps/proc on posix only")
+
+    work = tmp_path / "xpst-stranger-install-under-test"
+    work.mkdir()
+    # A stand-in for the self-extracted AppImage shell: its command line carries
+    # the throwaway path, exactly like the real one.
+    mine = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", "import time; time.sleep(30)", str(work)]
+    )
+    other = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", "import time; time.sleep(30)"]
+    )
+    try:
+        stopped = stop_work_processes(work, settle_seconds=5.0)
+
+        assert str(mine.pid) in {entry["pid"] for entry in stopped}
+        assert str(other.pid) not in {entry["pid"] for entry in stopped}
+        mine.wait(timeout=10)
+        assert mine.poll() is not None
+        assert other.poll() is None
+    finally:
+        for process in (mine, other):
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=10)
+
+
+def test_work_dir_cleanup_retries_a_transient_delete_failure(tmp_path, monkeypatch):
+    """A WebKit helper writing into the tree must not turn teardown red."""
+
+    work = WorkDir(str(tmp_path / "xpst-stranger-install-retry"))
+    real_rmtree = shutil.rmtree
+    calls: list[Path] = []
+
+    def flaky_rmtree(path, ignore_errors=False):
+        calls.append(Path(path))
+        if len(calls) < 3:  # the first two deletes lost the race and removed nothing
+            return
+        real_rmtree(path, ignore_errors=ignore_errors)
+
+    monkeypatch.setattr(shutil, "rmtree", flaky_rmtree)
+
+    assert work.cleanup(False) is True
+    assert len(calls) == 3
+    assert not work.path.exists()
