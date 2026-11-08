@@ -353,6 +353,21 @@ def token_metadata(config: Any, platform: str) -> TokenMetadata:
             or getattr(account, "cookies_from_browser", False)
             or _path_exists(getattr(account, "cookies_file", ""))
         )
+        mode = str(getattr(account, "publish_mode", "auto") or "auto").lower()
+        if mode in ("browser", "browser_only"):
+            # Browser publish mode: the logged-in web session is the
+            # credential, so an offline read must not badge this platform
+            # "source only — no posting credentials configured".
+            return TokenMetadata(
+                platform=platform,
+                auth_mode="session",
+                enabled=enabled,
+                configured=configured,
+                notes=(
+                    "browser publish mode: the logged-in TikTok Studio web "
+                    "session is the credential (no OAuth token)",
+                ),
+            )
         return TokenMetadata(
             platform=platform,
             auth_mode="source_only",
@@ -495,6 +510,14 @@ def derive_token_state(
                     "live check passed; access token refreshes automatically "
                     f"in the background (current one expires in {humanize_seconds(expires_in)})"
                 )
+        elif expires_at is None and auth_mode == "session":
+            # A session-file / browser-session credential has no token to
+            # expire: say what the credential actually is instead of claiming
+            # the provider failed to report an expiry that does not exist.
+            reason = (
+                "live check passed; the stored session is the credential "
+                "(there is no token expiry to report)"
+            )
         elif expires_at is None:
             reason = "live check passed; token expiry not reported by this provider"
         elif expires_in is not None and expires_in <= max(

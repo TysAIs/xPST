@@ -352,6 +352,142 @@ async def test_auth_mode_tiktok_source_only_checks_source(tmp_path, monkeypatch)
     assert uploaders["tiktok"].calls == 0
 
 
+# ── Browser publish mode (card t_b375782b) ───────────────────────
+#
+# ``publish_mode: browser`` makes the logged-in web session the posting
+# credential.  The provider verdict must then be the DESTINATION check: the
+# payload used to keep the source check's ``auth_mode: source_only`` (plus a
+# "no posting credentials configured" badge) while the destination role said
+# session/ready, and ``can_post`` answered a download question.
+
+
+def browser_config(tmp_path) -> XPSTConfig:
+    """TikTok in browser publish mode with NO Content Posting API token."""
+    cfg = make_config(tmp_path)
+    cfg.tiktok.publish_mode = "browser"
+    cfg.tiktok.client_key = ""
+    cfg.tiktok.access_token = ""
+    cfg.tiktok.refresh_token = ""
+    touch(cfg.tiktok.cookies_file)
+    return cfg
+
+
+def browser_health(logged_in: bool) -> PlatformHealth:
+    return PlatformHealth(
+        platform="tiktok",
+        authenticated=logged_in,
+        session_valid=logged_in,
+        error=None if logged_in else "TikTok web session is not logged in",
+        details={
+            "route": "tiktok_browser",
+            "logged_in": logged_in,
+            "login_wall": not logged_in,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_tiktok_browser_publish_mode_reports_the_session_not_the_source(tmp_path):
+    """The three places agree: provider row, destination role, badge.
+
+    Top-level, role and badge must all describe the browser publish route —
+    no "source only / no posting credentials" verdict next to a session that
+    just passed its live probe.
+    """
+    cfg = browser_config(tmp_path)
+    uploader = FakeUploader(browser_health(True))
+
+    result = await collect_live_auth_status_async(cfg, {"tiktok": uploader})
+
+    entry = result["tiktok"]
+    destination = entry["roles"]["video_destination"]
+    assert uploader.calls == 1, "the browser route's probe must be the one that ran"
+    # Provider row.
+    assert entry["auth_mode"] == "session"
+    assert entry["authenticated"] is True
+    assert entry["live_checked"] is True
+    assert entry["can_post"] is True
+    assert entry["source_only"] is False
+    assert entry["posting_role"] == "video_destination"
+    assert entry["posting_state"] == "ready"
+    # Destination role — the same story, not a different one.
+    assert destination["auth_mode"] == entry["auth_mode"] == "session"
+    assert destination["authenticated"] is True
+    assert destination["state"] == "ready"
+    assert destination["live_checked"] is True
+    # Badge.
+    assert entry["token_state"] != "source_only"
+    assert entry["badge"] != "source_only"
+    assert "source only" not in str(entry["badge_reason"]).lower()
+    # The download side keeps its own, separate verdict.
+    assert entry["roles"]["source"]["auth_mode"] == "source_only"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_browser_publish_mode_logged_out_is_not_ready(tmp_path):
+    """A logged-out browser session must not read as ready to post."""
+    cfg = browser_config(tmp_path)
+
+    result = await collect_live_auth_status_async(
+        cfg, {"tiktok": FakeUploader(browser_health(False))}
+    )
+
+    entry = result["tiktok"]
+    destination = entry["roles"]["video_destination"]
+    assert destination["state"] == "degraded"
+    assert destination["ready"] is False
+    assert destination["live_checked"] is True
+    assert entry["auth_mode"] == "session"
+    assert entry["authenticated"] is False
+    assert entry["can_post"] is False
+    assert entry["posting_state"] == "degraded"
+    assert entry["source_only"] is False
+    assert entry["badge"] == "needs_reauth"
+    assert "source only" not in str(entry["badge_reason"]).lower()
+
+
+@pytest.mark.asyncio
+async def test_tiktok_browser_publish_mode_without_a_publisher_is_not_green(tmp_path):
+    """No uploader built (browser extras missing) → honest not-postable.
+
+    The route cannot publish without its publisher, so the verdict is a
+    definitive "not usable", not an unknown that leaves ``can_post`` true.
+    """
+    cfg = browser_config(tmp_path)
+
+    result = await collect_live_auth_status_async(cfg, {})
+
+    entry = result["tiktok"]
+    destination = entry["roles"]["video_destination"]
+    assert entry["auth_mode"] == "session"
+    assert entry["authenticated"] is False
+    assert entry["can_post"] is False
+    assert destination["ready"] is False
+    assert destination["live_checked"] is True
+    assert "xpst[browser]" in str(entry["error"])
+    assert entry["badge"] != "connected"
+
+
+@pytest.mark.asyncio
+async def test_tiktok_browser_publish_mode_requires_no_content_posting_token(tmp_path):
+    """Regression guard: browser mode never demands the OAuth app.
+
+    With no client_key/access_token the old code probed the source only and
+    badged the platform "no posting credentials configured".
+    """
+    cfg = browser_config(tmp_path)
+    assert not cfg.tiktok.client_key and not cfg.tiktok.access_token
+
+    result = await collect_live_auth_status_async(
+        cfg, {"tiktok": FakeUploader(browser_health(True))}
+    )
+
+    assert result["tiktok"]["can_post"] is True
+    assert "Content Posting API is not configured" not in str(
+        result["tiktok"]["error"]
+    )
+
+
 @pytest.mark.asyncio
 async def test_tiktok_source_only_fails_without_cookies(tmp_path, monkeypatch):
     """source_only with no yt-dlp → honest failure with error detail.
