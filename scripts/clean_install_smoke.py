@@ -14,6 +14,15 @@ import venv
 import zipfile
 from pathlib import Path
 
+#: Installed-package probe: does this artifact ship the built web UI?
+UI_PROBE_SCRIPT = (
+    "import json\n"
+    "from xpst.dashboard.server import _ui_dist_dir\n"
+    "dist = _ui_dist_dir()\n"
+    "print(json.dumps({'ui_dist': str(dist) if dist else None, "
+    "'ui_built': bool(dist and (dist / 'index.html').is_file())}))\n"
+)
+
 
 def find_wheel(dist_dir: Path) -> Path:
     """Return the newest xPST wheel in a dist directory."""
@@ -177,6 +186,22 @@ def _smoke_artifact(artifact_path: Path, work_dir: Path, keep: bool = False) -> 
     }
     outputs = {name: assert_command_json(cmd, env) for name, cmd in commands.items()}
 
+    # The wheel embeds the built web UI (packaging/hatch_ui.py). Prove it from
+    # the installed artifact: without the bundle `xpst ui` serves a placeholder
+    # page and #/phone does not exist. An sdist install is engine-only by
+    # design (it carries no build product), so only the wheel is held to it.
+    ui_probe = run_command([str(python), "-c", UI_PROBE_SCRIPT], env)
+    if ui_probe.returncode != 0:
+        raise RuntimeError(f"UI probe failed in {artifact_path.name}:\n{ui_probe.stdout}\n{ui_probe.stderr}")
+    ui_probe_data = json_from_output(ui_probe.stdout)
+    ui_built = bool(isinstance(ui_probe_data, dict) and ui_probe_data.get("ui_built"))
+    if artifact_path.suffix == ".whl" and not ui_built:
+        raise RuntimeError(
+            f"The wheel {artifact_path.name} ships no web UI build: xpst.dashboard.server._ui_dist_dir() "
+            f"returned {ui_probe_data!r}. Build it first (cd ui && npm install && npm run build) or "
+            "set XPST_REQUIRE_UI=1 to fail the package build instead."
+        )
+
     if not diagnostics_path.exists():
         raise RuntimeError("Diagnostics bundle was not created")
     with zipfile.ZipFile(diagnostics_path) as archive:
@@ -191,6 +216,8 @@ def _smoke_artifact(artifact_path: Path, work_dir: Path, keep: bool = False) -> 
         "venv": str(venv_dir) if keep else None,
         "commands": sorted(outputs),
         "diagnostics_entries": sorted(entries),
+        "ui_built": ui_built,
+        "ui_dist": ui_probe_data.get("ui_dist") if isinstance(ui_probe_data, dict) else None,
         "xpst_version": outputs["version"].get("xpst") if isinstance(outputs["version"], dict) else None,
     }
 

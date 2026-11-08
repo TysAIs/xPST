@@ -4541,10 +4541,19 @@ def ui(ctx: click.Context, port: int, host: str, no_browser: bool, as_json: bool
 
     url = f"http://{host}:{port}"
 
+    from xpst.dashboard.server import UI_BUILD_HINT, _ui_dist_dir
+
+    # Resolved before the server starts so both the readiness payload and the
+    # warning describe what will actually be served, not what should be.
+    ui_dist = _ui_dist_dir()
+
     def _on_ready(ready_url: str) -> None:
         # Printed only once the server is actually accepting connections,
-        # so scripts/MCP can rely on it as a hard readiness signal.
-        payload = {"url": ready_url, "pid": os.getpid()}
+        # so scripts/MCP can rely on it as a hard readiness signal. The
+        # ``ui_built`` flag keeps the missing-bundle case machine-readable:
+        # without it a JSON caller cannot tell the real UI from the
+        # placeholder page.
+        payload = {"url": ready_url, "pid": os.getpid(), "ui_built": ui_dist is not None}
         if as_json:
             json_output(payload, True)
             return
@@ -4556,6 +4565,8 @@ def ui(ctx: click.Context, port: int, host: str, no_browser: bool, as_json: bool
 
     if not as_json:
         console.print(f"[bold blue]Starting xPST UI on {url}[/bold blue] ...")
+        if ui_dist is None:
+            console.print(f"[bold yellow]No web UI build found[/bold yellow]: {UI_BUILD_HINT}")
 
     from xpst.dashboard.server import serve_ui
 
