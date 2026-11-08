@@ -4508,18 +4508,25 @@ def bio(ctx: click.Context, port: int, host: str, reveal: bool, as_json: bool):
 @main.command()
 @click.option("--port", "-p", default=8080, type=int,
               help="UI server HTTP port (default: 8080)")
+@click.option("--host", default="127.0.0.1",
+              help="Bind address (default: 127.0.0.1). Use 0.0.0.0 or a tailnet "
+                   "address to reach the UI from a phone; reads then require a credential.")
 @click.option("--no-browser", is_flag=True,
               help="Do not open the default browser (server/agent mode)")
 @json_option
 @click.pass_context
-def ui(ctx: click.Context, port: int, no_browser: bool, as_json: bool):
+def ui(ctx: click.Context, port: int, host: str, no_browser: bool, as_json: bool):
     """Launch the local web UI (dashboard server + default browser)
 
-    Starts the xPST dashboard API server on 127.0.0.1 (loopback only) and
-    opens the default browser to the UI once the server is accepting
-    connections. Pass --no-browser for server/agent mode: the server stays
-    up until SIGINT/SIGTERM (graceful shutdown) and a readiness line with
-    the UI URL and PID is printed for scripts/MCP to parse.
+    Starts the xPST dashboard API server (loopback by default) and opens the
+    default browser to the UI once the server is accepting connections. Pass
+    --no-browser for server/agent mode: the server stays up until SIGINT/SIGTERM
+    (graceful shutdown) and a readiness line with the UI URL and PID is printed
+    for scripts/MCP to parse.
+
+    For a phone, bind a reachable address (``--host 0.0.0.0``) and run
+    ``xpst pair`` — a non-loopback bind requires a credential for reads as well
+    as writes.
     """
     config_path = ctx.obj.get("config_path")
     config_dir = str(get_config_dir())
@@ -4532,7 +4539,7 @@ def ui(ctx: click.Context, port: int, no_browser: bool, as_json: bool):
         except Exception as e:
             logger.debug("Could not load config for ui: %s", e)
 
-    url = f"http://127.0.0.1:{port}"
+    url = f"http://{host}:{port}"
 
     def _on_ready(ready_url: str) -> None:
         # Printed only once the server is actually accepting connections,
@@ -4554,11 +4561,100 @@ def ui(ctx: click.Context, port: int, no_browser: bool, as_json: bool):
 
     serve_ui(
         port=port,
-        host="127.0.0.1",
+        host=host,
         config_dir=config_dir,
         open_browser=not no_browser,
         on_started=_on_ready,
     )
+
+
+# ──────────────────────────────────────────────
+# Device pairing (phone access, M0)
+# ──────────────────────────────────────────────
+
+@main.command()
+@click.option("--label", default="phone", show_default=True,
+              help="Label recorded on the device this code pairs")
+@click.option("--ttl", "ttl_s", default=600, type=int, show_default=True,
+              help="Seconds the code stays valid")
+@click.option("--code", default=None,
+              help="Use this fixed 8-character code instead of a random one")
+@click.option("--host", default="127.0.0.1", show_default=True,
+              help="Engine host to print in the pairing URL")
+@click.option("--port", "-p", default=8080, type=int, show_default=True,
+              help="Engine port to print in the pairing URL")
+@json_option
+@click.pass_context
+def pair(ctx: click.Context, label: str, ttl_s: int, code: str | None, host: str, port: int, as_json: bool):
+    """Create a one-time pairing code for a phone.
+
+    \b
+    The phone exchanges the code once for its own device token:
+        POST /api/pair {"code": "ABCD-EFGH", "label": "phone"}
+    The token is returned once, stored hashed by the engine, and can be revoked
+    with `xpst devices --revoke <device_id>`.
+    """
+    from xpst.dashboard.devices import PairingError, create_pairing_code
+
+    config = load_config(ctx.obj.get("config_path"))
+    try:
+        issued = create_pairing_code(config.config_dir, label=label, ttl_s=ttl_s, code=code)
+    except PairingError as exc:
+        if as_json:
+            json_output({"ok": False, "error": exc.to_dict()}, True)
+        else:
+            console.print(f"[red]{exc.message}[/red]")
+        ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    url = f"http://{host}:{port}"
+    if as_json:
+        json_output({"ok": True, "url": url, **issued}, True)
+        return
+    console.print(f"[bold green]Pairing code:[/bold green] [bold]{issued['code']}[/bold]")
+    console.print(
+        f"[dim]Valid for {issued['expires_in_s'] // 60} min, single use, label "
+        f"'{issued['label']}'.[/dim]"
+    )
+    console.print(
+        f"[dim]On the phone, open {url} and enter the code (or POST /api/pair "
+        f"{{\"code\": \"{issued['code']}\"}}).[/dim]"
+    )
+
+
+@main.command()
+@click.option("--revoke", "revoke_id", default=None,
+              help="Revoke this device id; its token stops working immediately")
+@json_option
+@click.pass_context
+def devices(ctx: click.Context, revoke_id: str | None, as_json: bool):
+    """List paired devices, or revoke one with --revoke."""
+    from xpst.dashboard.devices import list_devices, revoke_device
+
+    config = load_config(ctx.obj.get("config_path"))
+    if revoke_id:
+        revoked = revoke_device(config.config_dir, revoke_id)
+        if as_json:
+            json_output({"ok": revoked, "device_id": revoke_id, "revoked": revoked}, True)
+        else:
+            console.print(
+                f"[green]Revoked {revoke_id}.[/green]" if revoked
+                else f"[yellow]{revoke_id} was already revoked (or is unknown).[/yellow]"
+            )
+        if not revoked:
+            ctx.exit(EXIT_CONFIG_ERROR)
+        return
+
+    rows = list_devices(config.config_dir)
+    if as_json:
+        json_output({"ok": True, "devices": rows}, True)
+        return
+    if not rows:
+        console.print("[dim]No paired devices. Run `xpst pair` to add one.[/dim]")
+        return
+    for row in rows:
+        state = "revoked" if row["revoked"] else "active"
+        console.print(f"[bold]{row['device_id']}[/bold]  {row['label']}  ({state})")
 
 
 # ──────────────────────────────────────────────

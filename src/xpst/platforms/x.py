@@ -28,6 +28,8 @@ from xpst.platforms.base import (
     PlatformHealth,
     PlatformRegistry,
     PlatformUploader,
+    ReadbackResult,
+    ReadbackState,
     UploadResult,
 )
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
@@ -828,6 +830,59 @@ class XUploader(PlatformUploader):
                 platform=self.platform_name,
                 post_id=post_id,
                 detail=truncate_error(str(e)),
+            )
+
+    async def readback(self, post_id: str) -> ReadbackResult:
+        """Confirm an X post id exists via the authenticated twikit session.
+
+        twikit has carried both ``get_tweet_by_id`` and ``get_tweet`` across
+        releases, so the adapter probes for the newer spelling and falls back.
+        An unanswerable read (expired session, network) is ``UNKNOWN`` — never
+        reported as "not found" and never as verified.
+        """
+        try:
+            client = await self._get_client()
+            reader = getattr(client, "get_tweet_by_id", None) or getattr(client, "get_tweet", None)
+            if reader is None:
+                return ReadbackResult(
+                    state=ReadbackState.UNSUPPORTED,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                    detail="this twikit build exposes no single-tweet read",
+                )
+            tweet = await reader(post_id)
+            if tweet is None:
+                return ReadbackResult(
+                    state=ReadbackState.NOT_FOUND,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                    detail="the tweet read returned nothing",
+                )
+            return ReadbackResult(
+                state=ReadbackState.VERIFIED,
+                platform=self.platform_name,
+                post_id=post_id,
+                url=f"https://x.com/i/status/{post_id}",
+                detail="confirmed by twikit tweet read",
+            )
+        except Exception as exc:  # noqa: BLE001 - an unanswerable read is not a failure
+            text = str(exc)
+            # twikit answers a deleted/absent tweet with a "… not found in detail
+            # response" error. That IS an answer ("it is gone"), unlike a session
+            # or network error, so report it as such instead of "could not confirm".
+            if "not found" in text.lower():
+                return ReadbackResult(
+                    state=ReadbackState.NOT_FOUND,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                    detail=truncate_error(text),
+                )
+            logger.warning("X readback failed for %s: %s", post_id, exc)
+            return ReadbackResult(
+                state=ReadbackState.UNKNOWN,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail=truncate_error(text),
             )
 
     async def upload_image(self, image_path: Path, caption: str) -> UploadResult:

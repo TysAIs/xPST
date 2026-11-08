@@ -18,13 +18,48 @@
 
 export const TOKEN_STORAGE_KEY = "xpst_api_token";
 export const TOKEN_FRAGMENT_PREFIX = "#xpst_token=";
+//: A paired phone's own device token. It must survive the browser being
+//: closed (the operator reopens the app and expects the true engine state, not
+//: a login screen), so it lives in localStorage rather than sessionStorage.
+export const DEVICE_TOKEN_STORAGE_KEY = "xpst_device_token";
 
 function safeStorage(storage) {
   if (storage !== undefined) return storage;
   try {
     return typeof sessionStorage === "undefined" ? null : sessionStorage;
   } catch {
-    return null; // storage disabled / blocked by policy
+    return null;
+  }
+}
+
+function persistentStorage(storage) {
+  if (storage !== undefined) return storage;
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** The paired-device token this browser remembers, or null. */
+export function getDeviceToken({ storage = undefined } = {}) {
+  const store = persistentStorage(storage);
+  try {
+    const stored = store?.getItem(DEVICE_TOKEN_STORAGE_KEY);
+    return stored || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remember (or clear, with a falsy value) this browser's device token. */
+export function setDeviceToken(token, { storage = undefined } = {}) {
+  const store = persistentStorage(storage);
+  try {
+    if (token) store?.setItem(DEVICE_TOKEN_STORAGE_KEY, token);
+    else store?.removeItem(DEVICE_TOKEN_STORAGE_KEY);
+  } catch {
+    /* storage can be disabled by policy; the session token still works */
   }
 }
 
@@ -47,7 +82,7 @@ export function parseTokenFragment(hash) {
  * Read-only routes never need it; mutating routes will 401 without it, and the
  * UI surfaces the engine's own refusal message in that case.
  */
-export function getApiToken({ globalObject = globalThis, storage = undefined } = {}) {
+export function getApiToken({ globalObject = globalThis, storage = undefined, deviceStorage = undefined } = {}) {
   const injected = globalObject?.__XPST_API_TOKEN;
   if (typeof injected === "string" && injected) return injected;
   const store = safeStorage(storage);
@@ -57,7 +92,8 @@ export function getApiToken({ globalObject = globalThis, storage = undefined } =
   } catch {
     /* storage can be disabled mid-session */
   }
-  return null;
+  // A paired phone holds a durable device token instead of a per-launch one.
+  return getDeviceToken({ storage: deviceStorage });
 }
 
 /** Remember (or clear, with a falsy value) the token for this tab session. */

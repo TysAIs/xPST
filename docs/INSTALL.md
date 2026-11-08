@@ -250,6 +250,32 @@ A successful help command proves that the Python package is importable; it does
 not authenticate accounts or prove that a social-platform upload will work.
 See the capability table below for the current verified scope.
 
+## Publishing from a phone
+
+The engine is a local service; the phone screen is the same web UI at the
+`#/phone` route. Two steps are required, and both are deliberate:
+
+```bash
+# 1. Bind an address the phone can reach (0.0.0.0 on a trusted network/tunnel).
+python -m xpst ui --host 0.0.0.0 --port 8080 --no-browser
+
+# 2. On the engine machine, issue a one-time pairing code.
+python -m xpst pair --label phone --host <the address the phone will use> --port 8080
+```
+
+Enter that code on the `#/phone` screen. The phone exchanges it for its own
+device token (shown once, stored hashed on the engine) and keeps it; `xpst
+devices` lists paired devices and `xpst devices --revoke <device_id>` cuts one
+off immediately. A non-loopback bind requires a credential for reads on `/api`
+as well as writes — the app shell itself stays public so an unpaired phone can
+still reach the pairing screen.
+
+The flow is compose → destinations → preview → confirm → publish → readback. The
+preview is local (`network_calls: false`) and a dry run uploads nothing, so you
+can rehearse a post without publishing. A destination in a rate-limit cooldown is
+reported as **deferred with its window**, the plan stays retryable, and the retry
+publishes only what was deferred.
+
 ## Capability truth table
 
 This is an honest status snapshot, not a guarantee that a platform will keep

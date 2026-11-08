@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import xpst.dashboard.server as srv
+from xpst.dashboard.auth import PUBLIC_MUTATION_PATHS as _ENGINE_PUBLIC_MUTATIONS
 
 USERNAME = "synthetic-admin"
 PASSWORD = "synthetic-password-not-real-123"
@@ -32,6 +33,12 @@ PUBLIC_PATHS = {"/health", "/metrics", "/bio", "/oauth/callback"}
 #: configured app secret (and is fail-closed when it cannot verify the payload),
 #: so it is not covered by the Basic/token middleware.
 PUBLIC_MUTATION_PATHS = {"/webhook/messenger"}
+
+#: The engine's own public-mutation set is the authority; this test set only
+#: adds the webhook path above because the enumeration below walks real routes
+#: that the webhook handler registers outside the router. Keeping the pairing
+#: exchange honest matters: it is public because the code is the credential.
+PUBLIC_MUTATION_PATHS |= set(_ENGINE_PUBLIC_MUTATIONS)
 
 
 @pytest.fixture()
