@@ -213,6 +213,49 @@ export const api = {
   /** Plan (dry_run: true) or run a post through the real engine path. */
   post: (payload) => postJSON("/api/post", payload),
 
+  // ── Phone flow (M0): upload, pairing, frozen plans ────────────────
+  /**
+   * Upload one file the phone picked. The engine caps the size, sniffs the
+   * container from the bytes and returns a staged media id plus its probe.
+   * `idempotencyKey` makes a retried upload return the original record.
+   */
+  mediaUpload: (file, { idempotencyKey = "", label = "" } = {}) => {
+    const form = new FormData();
+    form.append("file", file, file?.name || "upload");
+    if (idempotencyKey) form.append("idempotency_key", idempotencyKey);
+    if (label) form.append("label", label);
+    return requestJSON("/api/media", {
+      method: "POST",
+      headers: { ...tokenHeaders() },
+      body: form,
+    });
+  },
+  /** Re-read a staged media record (probe/digest) by id. */
+  mediaRecord: (mediaId) => getJSON(`/api/media/${encodeURIComponent(mediaId)}`),
+  /** Exchange a one-time pairing code for this device's own token. */
+  pairDevice: (code, label = "") => postJSON("/api/pair", { code, label }),
+  /** Paired devices (labels only; tokens are hashed at rest). */
+  devices: () => getJSON("/api/devices"),
+  /** Revoke one device; its token stops authenticating immediately. */
+  revokeDevice: (deviceId) =>
+    requestJSON(`/api/devices/${encodeURIComponent(deviceId)}`, {
+      method: "DELETE",
+      headers: { ...JSON_HEADERS, ...tokenHeaders() },
+    }),
+  /** Freeze a plan (preview + digest) for a media/caption/destination set. */
+  createPlan: (payload) => postJSON("/api/plans", payload),
+  /** The frozen plan by id. */
+  plan: (planId) => getJSON(`/api/plans/${encodeURIComponent(planId)}`),
+  /** Confirm a frozen plan; a stale plan returns 409 with `stale_reasons`. */
+  confirmPlan: (planId, payload = {}) =>
+    postJSON(`/api/plans/${encodeURIComponent(planId)}/confirm`, payload),
+  /** Publish (or dry-run) a confirmed plan; a replay returns the original result. */
+  publishPlan: (planId, payload = {}) =>
+    postJSON(`/api/plans/${encodeURIComponent(planId)}/publish`, payload),
+  /** Per-destination readback; `verify` asks the platforms (network). */
+  planReadback: (planId, verify = false) =>
+    getJSON(`/api/plans/${encodeURIComponent(planId)}/readback${verify ? "?verify=1" : ""}`),
+
   // ── Durable drafts ───────────────────────────────────────────────
   /** Stored drafts, newest first, each revalidated against this machine now. */
   drafts: () => getJSON("/api/drafts"),
@@ -236,6 +279,7 @@ export const api = {
 export const NAV_ITEMS = [
   // Primary — the daily loop.
   { id: "dashboard", href: "#/", label: "Dashboard", icon: "layout-dashboard", group: "primary" },
+  { id: "phone", href: "#/phone", label: "Phone", icon: "smartphone", group: "primary" },
   { id: "compose", href: "#/compose", label: "Compose", icon: "clapperboard", group: "primary" },
   { id: "connect", href: "#/connect", label: "Connect", icon: "plug", group: "primary" },
   // Post flow — where a post goes before and after it runs.
@@ -262,11 +306,20 @@ export const NAV_GROUPS = [
   { id: "system", label: "System" },
 ];
 
-/** Current route id derived from a hash ("dashboard" by default). */
+/** Current route id derived from a hash ("dashboard" by default).
+ *
+ * A route may carry a query (`#/phone?plan=plan_ab12`): the phone screen puts
+ * its plan in the URL so the same link shows the same plan and readback in
+ * another browser, and a reload resumes the true engine state instead of a
+ * blank compose screen.
+ */
 export function currentRoute(inputHash = undefined) {
   const hash = String(
     inputHash ?? (typeof location === "undefined" ? "" : location.hash) ?? ""
-  ).replace(/^#\/?/, "");
+  )
+    .replace(/^#\/?/, "")
+    .split("?")[0]
+    .trim();
   return NAV_ITEMS.some((item) => item.id === hash) ? hash : "dashboard";
 }
 

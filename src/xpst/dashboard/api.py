@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 logger = logging.getLogger(__name__)
@@ -37,11 +37,13 @@ def require_api_token(request: Request) -> None:
     if accepted is None:
         accepted = env_tokens()
     username, password_hash = getattr(request.app.state, "xpst_dashboard_auth", ("", ""))
+    config_dir = getattr(request.app.state, "xpst_config_dir", None)
     if mutation_authorized(
         request,
         accepted=set(accepted),
         username=username or "",
         password_hash=password_hash or "",
+        config_dir=config_dir,
     ):
         return
     raise HTTPException(
@@ -1054,6 +1056,248 @@ def create_api_router(
                 envelope["draft"] = draft_service.verdict_for(draft_service.get(draft_id) or {})
         blocked = bool(envelope.get("blocked")) or (not dry_run and not envelope.get("ok") and envelope.get("blockers"))
         return JSONResponse(attach_request(envelope), status_code=409 if blocked else 200)
+
+    # ── Phone ingest: media upload (M0) ────────────────────────────────
+    @router.post("/media", dependencies=[Depends(require_api_token)])
+    def api_media_upload(
+        # FastAPI reads these from the multipart form; B008 does not apply to
+        # its parameter-marker calls (that is the framework's idiom, not a
+        # mutable-default bug).
+        file: UploadFile = File(...),  # noqa: B008
+        idempotency_key: str = Form(""),  # noqa: B008
+        label: str = Form(""),  # noqa: B008
+    ) -> JSONResponse:
+        """Accept one media file from a device and stage it under the config dir.
+
+        This is the endpoint that makes a phone possible: every other route takes
+        ``media_paths`` on the engine host. The reply carries the staged media
+        id, the probed format (container, duration, dimensions, codec, bytes),
+        and the content digest the plan will freeze. Size cap, container sniff
+        and idempotency live in :mod:`xpst.media.ingest`; a refusal is a typed
+        code, never a 500 and never a half-staged file.
+        """
+        from xpst.media.ingest import MediaIngestError, max_upload_bytes, stage_upload
+
+        try:
+            record = stage_upload(
+                config_dir,
+                filename=file.filename or "upload",
+                stream=file.file,
+                idempotency_key=idempotency_key,
+                label=label,
+            )
+        except MediaIngestError as exc:
+            return JSONResponse(
+                {"ok": False, "media": None, "error": exc.to_dict(), "message": exc.message},
+                status_code=exc.status_code,
+            )
+        finally:
+            file.file.close()
+        replayed = bool(record.get("replayed"))
+        return JSONResponse(
+            {
+                "ok": True,
+                "media": record,
+                "replayed": replayed,
+                "limits": {"max_upload_bytes": max_upload_bytes()},
+            },
+            status_code=200 if replayed else 201,
+        )
+
+    @router.get("/media/{media_id}")
+    def api_media_get(media_id: str) -> JSONResponse:
+        """Re-read a staged media record (probe, digest, path) by id."""
+        from xpst.media.ingest import get_media
+
+        record = get_media(config_dir, media_id)
+        if record is None:
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "media": None,
+                    "error": {
+                        "code": "MEDIA_UNKNOWN",
+                        "message": "That media id is not staged on this engine. Upload the file again.",
+                    },
+                },
+                status_code=404,
+            )
+        return JSONResponse({"ok": True, "media": record})
+
+    # ── Device pairing (M0) ────────────────────────────────────────────
+    @router.post("/pair")
+    def api_pair(payload: dict[str, Any] | None = None) -> JSONResponse:
+        """Exchange a one-time pairing code for a per-device token.
+
+        Public by design: the phone has no credential yet, and the single-use,
+        expiring code is the credential for this one call. The token is returned
+        **once**; the engine stores only its hash.
+        """
+        from xpst.dashboard.devices import PairingError, redeem_pairing_code
+
+        data = payload or {}
+        if not str(data.get("code") or "").strip():
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "code": "PAIR_CODE_MISSING",
+                    "error": {
+                        "code": "PAIR_CODE_MISSING",
+                        "message": "Send the pairing code: {\"code\": \"ABCD-2345\"}.",
+                    },
+                    "message": "Send the pairing code: {\"code\": \"ABCD-2345\"}.",
+                },
+                status_code=400,
+            )
+        try:
+            result = redeem_pairing_code(
+                config_dir,
+                str(data.get("code") or ""),
+                device_label=str(data.get("label") or data.get("device_label") or ""),
+                client=str(data.get("client") or ""),
+            )
+        except PairingError as exc:
+            return JSONResponse(
+                {"ok": False, "error": exc.to_dict(), "message": exc.message},
+                status_code=exc.status_code,
+            )
+        return JSONResponse({"ok": True, **result})
+
+    @router.get("/devices")
+    def api_devices() -> dict[str, Any]:
+        """Paired devices (labels and last-seen only — tokens are hashed at rest)."""
+        from xpst.dashboard.devices import list_devices
+
+        return {"ok": True, "devices": list_devices(config_dir)}
+
+    @router.delete("/devices/{device_id}", dependencies=[Depends(require_api_token)])
+    def api_device_revoke(device_id: str) -> JSONResponse:
+        """Revoke one device; its token stops authenticating immediately."""
+        from xpst.dashboard.devices import revoke_device
+
+        revoked = revoke_device(config_dir, device_id)
+        return JSONResponse(
+            {
+                "ok": revoked,
+                "device_id": device_id,
+                "revoked": revoked,
+                "message": (
+                    "Device revoked." if revoked else "That device was already revoked (or is unknown)."
+                ),
+            },
+            status_code=200 if revoked else 404,
+        )
+
+    # ── Frozen plans: preview → confirm → publish → readback (M0) ──────
+    def _plan_service() -> Any:
+        from xpst.services.plan_service import PlanService
+
+        return PlanService(_load_ui_config(), config_dir)
+
+    def _plan_error(exc: Any) -> JSONResponse:
+        body: dict[str, Any] = {
+            "ok": False,
+            "blocked": True,
+            "code": exc.code,
+            "error": exc.to_dict(),
+            "message": exc.message,
+        }
+        # A stale refusal carries its reasons and the new preview at the top
+        # level too, so a phone can re-render without unwrapping ``error``.
+        body.update(getattr(exc, "details", {}) or {})
+        return JSONResponse(body, status_code=exc.status_code)
+
+    @router.post("/plans", dependencies=[Depends(require_api_token)])
+    def api_plan_create(payload: dict[str, Any]) -> JSONResponse:
+        """Freeze a plan for a media set, caption and destination list.
+
+        Local computation only: no upload, no network write, no state change.
+        The returned ``plan_id`` is the idempotency key every later step uses.
+        """
+        from xpst.services.plan_service import PlanError
+
+        data = payload or {}
+        try:
+            record = _plan_service().create(
+                media_ids=[str(item) for item in data.get("media_ids") or []],
+                media_paths=[str(item) for item in data.get("media_paths") or []],
+                caption=str(data.get("caption") or data.get("text") or ""),
+                platforms=[str(item) for item in data.get("platforms") or []],
+                overrides=data.get("overrides") or None,
+                content_type=str(data.get("content_type") or data.get("format") or "auto"),
+                client_idempotency_key=str(
+                    data.get("idempotency_key") or data.get("plan_idempotency_key") or ""
+                ),
+            )
+        except PlanError as exc:
+            return _plan_error(exc)
+        return JSONResponse(record, status_code=200 if record.get("replayed") else 201)
+
+    @router.get("/plans/{plan_id}")
+    def api_plan_get(plan_id: str) -> JSONResponse:
+        """The frozen plan: preview, digest, state, and the confirmed destinations."""
+        from xpst.services.plan_service import PlanError
+
+        try:
+            record = _plan_service().get(plan_id)
+        except PlanError as exc:
+            return _plan_error(exc)
+        return JSONResponse(record)
+
+    @router.post("/plans/{plan_id}/confirm", dependencies=[Depends(require_api_token)])
+    def api_plan_confirm(plan_id: str, payload: dict[str, Any]) -> JSONResponse:
+        """Confirm a frozen plan; refuse a stale one unless the client says otherwise."""
+        from xpst.services.plan_service import PlanError
+
+        data = payload or {}
+        try:
+            record = _plan_service().confirm(
+                plan_id,
+                confirm_stale=bool(data.get("confirm_stale", False)),
+                client_digest=str(data.get("digest") or ""),
+            )
+        except PlanError as exc:
+            return _plan_error(exc)
+        return JSONResponse(record)
+
+    @router.post("/plans/{plan_id}/publish", dependencies=[Depends(require_api_token)])
+    def api_plan_publish(plan_id: str, payload: dict[str, Any]) -> JSONResponse:
+        """Publish a confirmed plan (or replay the original result).
+
+        ``dry_run: true`` runs the engine's plan path only — no network write,
+        and the plan stays confirmed so it can be published for real later.
+        """
+        from xpst.services.plan_service import PlanError
+
+        data = payload or {}
+        try:
+            record = _plan_service().publish(
+                plan_id,
+                dry_run=bool(data.get("dry_run", False)),
+                force=bool(data.get("force", False)),
+                force_now=bool(data.get("force_now", data.get("force", False))),
+            )
+        except PlanError as exc:
+            return _plan_error(exc)
+        envelope = record.get("result") or record.get("dry_run_result") or {}
+        blocked = not bool(envelope.get("ok")) and bool(envelope.get("blockers") or envelope.get("failed_count"))
+        return JSONResponse(record, status_code=409 if blocked else 200)
+
+    @router.get("/plans/{plan_id}/readback")
+    def api_plan_readback(plan_id: str, verify: bool = False) -> JSONResponse:
+        """Per-destination platform id, URL and verification state.
+
+        ``verify=1`` asks each platform to confirm the post (network). Without
+        it the rows report the recorded result honestly as
+        ``submitted_unconfirmed``.
+        """
+        from xpst.services.plan_service import PlanError
+
+        try:
+            rows = _plan_service().readback(plan_id, verify=bool(verify))
+        except PlanError as exc:
+            return _plan_error(exc)
+        return JSONResponse({"ok": True, **rows})
 
     @router.get("/summary")
     def api_summary() -> dict[str, Any]:

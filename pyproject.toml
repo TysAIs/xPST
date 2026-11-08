@@ -57,6 +57,9 @@ dependencies = [
     # Dashboard API server
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
+    # Multipart form parsing for POST /api/media (phone uploads). FastAPI
+    # raises at import time on a File/Form route without it.
+    "python-multipart>=0.0.9,<1.0.0",
     
     # HTTP (knowledge-base LLM client)
     "httpx>=0.24.0,<1.0.0",
