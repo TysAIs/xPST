@@ -11,6 +11,19 @@ name: Published Artifact Install E2E
 # pull requests, and a red run is a real finding about the published artifact
 # rather than a CI flake. The evidence JSON is uploaded either way.
 #
+# Four legs, one per published asset a stranger can install:
+#   macos          -> xPST_<v>_aarch64.dmg
+#   linux-deb      -> xPST_<v>_amd64.deb   (the primary Linux install test)
+#   linux-appimage -> xPST_<v>_amd64.AppImage (portable; needs a runtime stack)
+#   windows        -> NSIS setup .exe / .msi
+# The Linux legs are separate on purpose. The .deb is what a stranger on
+# Debian/Ubuntu installs, and apt resolves its declared Depends. The AppImage is
+# the portable download: it carries the app but links the *distro's* GTK/WebKit
+# stack and mounts itself through FUSE, so on a bare runner it used to die in the
+# loader (exit 127, "libfontconfig.so.1: cannot open shared object file") before
+# it could answer /health. Installing that runtime explicitly is what makes the
+# portable artifact a supported, tested download instead of an untested one.
+#
 # Runner caveat: GitHub's hosted runners have no logged-in window server, so the
 # on-screen-window assertion is skipped here via --no-require-visible-window and
 # the evidence records `window_assertion_required: false`. That makes this run
@@ -36,7 +49,7 @@ concurrency:
 
 jobs:
   install-published-artifact:
-    name: Install and smoke a published artifact (${{ matrix.platform }})
+    name: Install and smoke a published artifact (${{ matrix.leg }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -44,10 +57,17 @@ jobs:
         include:
           - os: macos-latest
             platform: macos
+            leg: macos
           - os: ubuntu-latest
             platform: linux
+            leg: linux-deb
+          - os: ubuntu-latest
+            platform: linux
+            leg: linux-appimage
+            asset_suffix: _amd64.AppImage
           - os: windows-latest
             platform: windows
+            leg: windows
     steps:
       - uses: actions/checkout@v4
 
@@ -65,10 +85,12 @@ jobs:
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "install-testing published release $TAG on ${{ matrix.platform }}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "install-testing published release $TAG on ${{ matrix.leg }}"
 
       - name: Install the headless display a Linux GUI bundle needs
-        # The published Linux artifact is a GTK/WebKit desktop app. A hosted
+        # The published Linux artifacts are GTK/WebKit desktop apps. A hosted
         # runner has no display, and GTK aborts without one ("Failed to
         # initialize GTK"), which used to surface only as "no /health in 90s".
         # xvfb gives the bundled app the display a stranger's desktop has; the
@@ -79,31 +101,93 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb
 
+      - name: Install the AppImage runtime (FUSE, GTK3, WebKit2GTK)
+        # A Tauri AppImage deliberately does not bundle the base desktop stack:
+        # it links the distro's libgtk-3 / libwebkit2gtk-4.1 (the same two the
+        # published .deb declares as Depends), needs libfontconfig for text, and
+        # a type-2 AppImage mounts itself through FUSE. Nothing above is on a
+        # bare runner, which is exactly the exit-127 loader failure PR #347
+        # diagnosed. t64 is the ABI name from Ubuntu 24.04 on; older images use
+        # the pre-t64 name, so accept either and fail loudly if neither exists.
+        if: matrix.leg == 'linux-appimage'
+        shell: bash
+        run: |
+          set -uo pipefail
+          sudo apt-get update -qq
+          install_any() {
+            local wanted="$1"; shift
+            local pkg
+            for pkg in "$@"; do
+              if sudo apt-get install -y -qq "$pkg"; then
+                echo "installed $pkg"
+                return 0
+              fi
+            done
+            echo "::error::none of the packages for '$wanted' could be installed: $*"
+            return 1
+          }
+          rc=0
+          install_any fuse libfuse2t64 libfuse2 || rc=1
+          install_any gtk3 libgtk-3-0t64 libgtk-3-0 || rc=1
+          install_any webkit2gtk libwebkit2gtk-4.1-0 libwebkit2gtk-4.0-37 || rc=1
+          install_any fontconfig libfontconfig1 || rc=1
+          # xkb/xcb bits GTK loads lazily for the X11 backend under Xvfb.
+          install_any xkb libxkbcommon-x11-0 libxkbcommon0 || rc=1
+          install_any xcb libxcb1 libxcb-randr0 libxcb-shape0 libxcb-shm0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 || rc=1
+          install_any gl libgl1 libegl1 || rc=1
+          # The harness downloads release assets with curl; a runner image has
+          # it, and naming it here means the leg declares what it needs.
+          sudo apt-get install -y -qq curl || rc=1
+          exit "$rc"
+
+      - name: Check the AppImage can mount itself
+        # A runner without /dev/fuse cannot mount a type-2 AppImage; the app
+        # still runs, via the AppImage runtime's own self-extraction. Record
+        # which path this run took instead of silently testing the other one.
+        if: matrix.leg == 'linux-appimage'
+        shell: bash
+        run: |
+          if [ -w /dev/fuse ] && command -v fusermount >/dev/null; then
+            echo "::notice::/dev/fuse is usable: the AppImage will mount itself via FUSE"
+          else
+            echo "::warning::no usable /dev/fuse on this runner: falling back to APPIMAGE_EXTRACT_AND_RUN=1 (self-extraction, no FUSE mount)"
+            echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
+          fi
+
       - name: Install a published artifact in a clean profile and smoke it
         id: e2e
         shell: bash
         run: |
           set -o pipefail
           mkdir -p evidence
+          # The Linux ranker deliberately prefers the installable .deb, so the
+          # portable leg must name its asset; the .deb leg lets the ranker pick
+          # the package a stranger on Debian/Ubuntu would download.
+          ASSET_ARGS=()
+          if [ -n "${{ matrix.asset_suffix }}" ]; then
+            ASSET_ARGS=(--asset-name "xPST_${{ steps.tag.outputs.version }}${{ matrix.asset_suffix }}")
+          fi
           python scripts/e2e_install_from_artifact.py \
             --release "${{ steps.tag.outputs.tag }}" \
             --platform ${{ matrix.platform }} \
+            "${ASSET_ARGS[@]}" \
             --require-published \
             --no-require-visible-window \
             --health-timeout-seconds 90 \
-            --evidence-out "evidence/${{ matrix.platform }}.json" \
-            | tee "evidence/${{ matrix.platform }}.log"
+            --evidence-out "evidence/${{ matrix.leg }}.json" \
+            | tee "evidence/${{ matrix.leg }}.log"
 
       - name: Summarise the evidence
         if: always()
         shell: bash
         run: |
-          python scripts/e2e_evidence_summary.py "${{ matrix.platform }}" >> "$GITHUB_STEP_SUMMARY"
+          python scripts/e2e_evidence_summary.py "${{ matrix.leg }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Attach the machine-readable evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: published-artifact-install-evidence-${{ matrix.platform }}
+          name: published-artifact-install-evidence-${{ matrix.leg }}
           path: evidence/
           if-no-files-found: warn

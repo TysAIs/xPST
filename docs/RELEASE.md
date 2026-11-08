@@ -126,11 +126,26 @@ clean-profile pass.
 ### Automated run
 
 `.github/workflows/published-artifact-install-e2e.yml` runs this harness against
-the assets a release actually published, on macOS, Linux and Windows, when a
+the assets a release actually published, in four legs: `macos`,
+`linux-deb`, `linux-appimage` and `windows`, when a
 release is published (and on manual dispatch with a tag). It never gates pull
-requests. Each job uploads the evidence JSON and writes a Markdown summary of it
-to the run's step summary via `scripts/e2e_evidence_summary.py`, which reports a
-missing or failed evidence file as such instead of implying a pass.
+requests. Each job uploads the evidence JSON (named after the leg) and writes a
+Markdown summary of it to the run's step summary via
+`scripts/e2e_evidence_summary.py`, which reports a missing or failed evidence
+file as such instead of implying a pass.
+
+The two Linux legs are deliberately separate, because they test different
+downloads a stranger can take. `linux-deb` is the primary Linux install test:
+the harness runs `apt-get install ./xPST_<v>_amd64.deb` so the package's own
+declared `Depends` resolve exactly as they do for a user. `linux-appimage`
+installs the portable AppImage's runtime first — `libfuse2`/`libfuse2t64` (to
+mount a type-2 AppImage), the distro GTK3 and WebKit2GTK stack the Tauri bundle
+links rather than ships, fontconfig and the X11 xcb/xkb libraries — and passes
+`--asset-name xPST_<v>_amd64.AppImage`, because the asset ranker prefers the
+installable `.deb`. Without that runtime the AppImage dies in the dynamic loader
+with exit code 127 on a bare runner. If the runner has no usable `/dev/fuse`,
+the leg falls back to `APPIMAGE_EXTRACT_AND_RUN=1` (self-extraction, no FUSE
+mount) and records which path it took.
 
 The workflow passes `--require-published`, which fails the run unless the
 artifact came from a published GitHub release: a local file is rejected outright,
