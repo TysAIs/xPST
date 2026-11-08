@@ -136,6 +136,10 @@ test("the Phone page compiles and carries the 44 px / 390 px contract", async ()
   assert.match(source, /overflow-x: hidden/);
   // Every step is rendered from the shared step list, not a copied literal.
   assert.match(source, /PHONE_STEPS/);
+  // The link-styled controls are tap targets too: "Revoke" measured 41×16 px
+  // in a real 390 px run before it carried the target box.
+  assert.match(source, /\.phone__link\s*\{[^}]*min-height: var\(--phone-target\)/s);
+  assert.match(source, /\.phone__url\s*\{[^}]*min-height: var\(--phone-target\)/s);
   assert.match(source, /confirmLabel\(/);
   assert.match(source, /verificationBadge\(/);
   // The flow never skips straight from compose to publish.

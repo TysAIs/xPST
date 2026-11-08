@@ -595,10 +595,18 @@
     text-transform: uppercase;
   }
 
+  /* "Revoke" is a destructive control a thumb has to hit, and inline text is
+     16 px tall: give it the minimum target box without making it a filled
+     button (measured at 41×16 px before this). */
   .phone__link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--phone-target);
+    min-width: var(--phone-target);
+    padding: 0 var(--xpst-space-2, 0.25rem);
     background: none;
     border: 0;
-    padding: 0;
     color: var(--xpst-color-accent, currentColor);
     text-decoration: underline;
     cursor: pointer;
