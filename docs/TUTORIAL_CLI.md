@@ -447,7 +447,11 @@ uploaded**, with the reason in `blockers` and exit code 1 — never reported as 
 `--dry-run` answers the same question the live run would face, not just the request shape:
 `ready`/`blockers` come from the canonical preflight, so a destination that live would
 refuse (disabled in configuration, credentials missing, quota exhausted) already blocks
-the dry run with a message naming it.
+the dry run with a message naming it. `"ready": true` never appears beside a non-empty
+`blockers` list, so a gate can read the field and trust it: ready means nothing blocks
+this request. A pre-upload refusal (a content type the destination cannot publish, a
+caption past its limit) still exits `1` in the same invocation; a per-destination blocker
+is reported in `blockers` while the run itself is not aborted.
 
 ```bash
 # Single video to the format route ∩ connected accounts (never an implied "all")
