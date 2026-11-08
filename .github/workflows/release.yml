@@ -32,6 +32,21 @@ jobs:
         with:
           python-version: "3.11"
 
+      # The wheel carries the built web UI (packaging/hatch_ui.py). Without
+      # this step the shipped wheel would serve the placeholder page and
+      # #/phone would be unreachable from a pip install.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build Svelte UI (embedded in the wheel)
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
@@ -51,6 +66,9 @@ jobs:
           python scripts/release_preflight.py --json
           python scripts/clean_install_smoke.py --dist dist --artifact both
           python scripts/release_artifacts.py --dist dist --output-dir release/python --skip-checks --lane python
+        env:
+          # A released wheel must contain the UI build, not silently omit it.
+          XPST_REQUIRE_UI: "1"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
