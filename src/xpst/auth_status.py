@@ -43,6 +43,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from xpst.utils.graph_api import graph_api_url
 from xpst.utils.logger import get_logger
 from xpst.utils.sessions import SessionManager
 
@@ -55,8 +56,6 @@ logger = get_logger(__name__)
 # instagrapi, googleapiclient, graph.facebook.com); without a timeout a
 # hung network call would freeze `xpst auth status --json` indefinitely.
 LIVE_CHECK_TIMEOUT_SECONDS = 90
-
-_GRAPH_API_ME_URL = "https://graph.facebook.com/v19.0/me"
 
 
 def _age_days(path: str | Path | None) -> int | None:
@@ -129,7 +128,7 @@ async def _graph_api_probe(token: str) -> tuple[bool, str | None, dict[str, Any]
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
-                _GRAPH_API_ME_URL,
+                graph_api_url("me"),
                 params={"fields": "id", "access_token": token},
             )
         if resp.status_code == 200:
