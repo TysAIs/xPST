@@ -148,6 +148,10 @@ packages = ["src/xpst"]
 # VCS-based file selection; `include` would REPLACE it and drop packaging/.
 [tool.hatch.build.targets.sdist]
 artifacts = ["ui/dist/**"]
+# hatchling's sdist file selection reads the ROOT ignore file only, so the
+# nested ui/.gitignore does not keep `npm ci` output out of the tarball — 900+
+# node_modules files (and vite's LICENSE email) land in the artifact scan.
+exclude = ["/ui/node_modules/**"]
 
 # Ship the built web UI inside the wheel (xpst/dashboard/webui). A pip install
 # without it serves the placeholder page and #/phone is unreachable; see
