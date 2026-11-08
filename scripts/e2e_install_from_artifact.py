@@ -70,7 +70,15 @@ class WorkDir:
     def cleanup(self, keep: bool) -> bool:
         if keep:
             return False
-        shutil.rmtree(self.path, ignore_errors=True)
+        # A portable AppImage self-extracts and its WebKit helper processes can
+        # still be flushing cache files into the isolated HOME while the tree is
+        # walked, so a single delete can leave a partial directory behind. Retry
+        # briefly instead of reporting a teardown failure for a filesystem race.
+        for attempt in range(6):
+            shutil.rmtree(self.path, ignore_errors=True)
+            if not self.path.exists():
+                return True
+            time.sleep(0.5 * (attempt + 1))
         return not self.path.exists()
 
 
@@ -811,6 +819,60 @@ def terminate_process(process: subprocess.Popen[Any]) -> dict[str, Any]:
             pass
         returncode = process.wait(timeout=10)
     return {"pid": process.pid, "exit_code": returncode}
+
+
+def work_processes(work: Path) -> list[dict[str, str]]:
+    """List processes whose command line points into this run's throwaway dir.
+
+    A portable AppImage self-extracts and its WebKit helpers are started by the
+    shell, not by the process the harness launched directly, so they can outlive
+    the process-group kill: the runner had to terminate orphaned
+    ``xPST_1.2.1_amd64.AppImage`` and ``WebKitWebProcess`` processes *after* the
+    job, and while they lived they kept writing into the run's isolated HOME and
+    held its extracted mount point, which is why the teardown could not delete
+    the work directory. Matching on the unique throwaway path is what makes the
+    sweep safe: it can only ever hit processes this run started.
+    """
+    marker = str(work)
+    own = os.getpid()
+    candidates: list[tuple[str, str]] = []
+    result = command_result(["ps", "-ww", "-axo", "pid=,command="])
+    if result["returncode"] == 0:
+        for line in str(result["stdout"]).splitlines():
+            match = re.match(r"\s*(\d+)\s+(.*)$", line)
+            if match:
+                candidates.append((match.group(1), match.group(2)))
+    if sys.platform.startswith("linux"):
+        candidates.extend(linux_proc_cmdlines())
+    processes: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for pid, command in candidates:
+        if pid in seen or not pid.isdigit() or int(pid) == own:
+            continue
+        if marker not in command:
+            continue
+        seen.add(pid)
+        processes.append({"pid": pid, "command": command})
+    return processes
+
+
+def stop_work_processes(work: Path, settle_seconds: float = 5.0) -> list[dict[str, str]]:
+    """Stop processes this run left behind, escalating TERM then KILL."""
+    stopped = work_processes(work)
+    if not stopped:
+        return []
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for entry in work_processes(work):
+            try:
+                os.kill(int(entry["pid"]), sig)
+            except (OSError, ProcessLookupError):
+                pass
+        deadline = time.monotonic() + settle_seconds
+        while time.monotonic() < deadline:
+            if not work_processes(work):
+                return stopped
+            time.sleep(0.1)
+    return stopped
 
 
 # ---------------------------------------------------------------------------
@@ -1990,6 +2052,18 @@ def main(argv: list[str] | None = None) -> int:
         still_running = engine_processes()
         preexisting_pids = {process["pid"] for process in preexisting_engines}
         leftovers = [process for process in still_running if process["pid"] not in preexisting_pids]
+        # Whatever the process-group kill missed (an AppImage's self-extracted
+        # shell, WebKit helpers) still holds this run's work dir. Stop it before
+        # the teardown walks the tree, and say so in the evidence.
+        strays = stop_work_processes(work_path)
+        if strays:
+            print(
+                f"[e2e] stopped {len(strays)} process(es) still using the throwaway directory "
+                f"after the process-group kill: "
+                f"{', '.join(entry['pid'] for entry in strays)}",
+                flush=True,
+            )
+        launch_record["stray_processes_stopped"] = strays
         home_state = home_dir / ".xpst"
         config_files = sorted(str(path.relative_to(config_dir)) for path in config_dir.rglob("*") if path.is_file())
         home_files = sorted(str(path.relative_to(home_dir)) for path in home_dir.rglob("*") if path.is_file())
@@ -2164,6 +2238,7 @@ def main(argv: list[str] | None = None) -> int:
             "running_process": running,
             "app_exit_code_during_poll": health["process_exit_code_during_poll"],
             "shutdown_exit_code": stop["exit_code"],
+            "stray_processes_stopped": strays,
             "engine_processes_after_shutdown": leftovers,
             "preexisting_engine_processes": preexisting_engines,
             "cleanup_ok": cleanup_ok,
@@ -2181,6 +2256,7 @@ def main(argv: list[str] | None = None) -> int:
         if process is not None:
             terminate_process(process)
         if work is not None:
+            stop_work_processes(work.path)
             summary["cleanup"] = {"ok": work.cleanup(args.keep_work), "work_directory_removed": not args.keep_work}
     except Exception as exc:  # pragma: no cover - defensive boundary for a release gate
         summary["failures"] = [f"unexpected harness error: {type(exc).__name__}: {exc}"]
@@ -2188,6 +2264,7 @@ def main(argv: list[str] | None = None) -> int:
         if process is not None:
             terminate_process(process)
         if work is not None:
+            stop_work_processes(work.path)
             summary["cleanup"] = {"ok": work.cleanup(args.keep_work), "work_directory_removed": not args.keep_work}
     if "evidence" not in summary:
         # A run that failed before it could measure anything still emits the same

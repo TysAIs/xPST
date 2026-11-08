@@ -15,6 +15,7 @@ import os
 import plistlib
 import shutil
 import stat
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -54,6 +55,7 @@ from scripts.e2e_install_from_artifact import (
     safe_extract_zip,
     select_release_asset,
     sniff_artifact_kind,
+    stop_work_processes,
     uninstall_artifact,
     verify_checksum,
     walk_app_bundles,
@@ -1363,3 +1365,58 @@ def test_ci_workflow_keeps_one_evidence_file_per_leg():
     assert _step("Summarise the evidence")["run"].strip().endswith(
         'e2e_evidence_summary.py "${{ matrix.leg }}" >> "$GITHUB_STEP_SUMMARY"'
     )
+
+
+# ---------------------------------------------------------------------------
+# Teardown: a portable AppImage leaves processes that hold the work directory
+# ---------------------------------------------------------------------------
+
+def test_stop_work_processes_kills_only_what_this_run_started(tmp_path):
+    """The AppImage shell and its WebKit helpers escape the process-group kill."""
+
+    if os.name == "nt":
+        pytest.skip("command lines are read from ps/proc on posix only")
+
+    work = tmp_path / "xpst-stranger-install-under-test"
+    work.mkdir()
+    # A stand-in for the self-extracted AppImage shell: its command line carries
+    # the throwaway path, exactly like the real one.
+    mine = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", "import time; time.sleep(30)", str(work)]
+    )
+    other = subprocess.Popen(  # noqa: S603 - fixed argv, no shell
+        [sys.executable, "-c", "import time; time.sleep(30)"]
+    )
+    try:
+        stopped = stop_work_processes(work, settle_seconds=5.0)
+
+        assert str(mine.pid) in {entry["pid"] for entry in stopped}
+        assert str(other.pid) not in {entry["pid"] for entry in stopped}
+        mine.wait(timeout=10)
+        assert mine.poll() is not None
+        assert other.poll() is None
+    finally:
+        for process in (mine, other):
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=10)
+
+
+def test_work_dir_cleanup_retries_a_transient_delete_failure(tmp_path, monkeypatch):
+    """A WebKit helper writing into the tree must not turn teardown red."""
+
+    work = WorkDir(str(tmp_path / "xpst-stranger-install-retry"))
+    real_rmtree = shutil.rmtree
+    calls: list[Path] = []
+
+    def flaky_rmtree(path, ignore_errors=False):
+        calls.append(Path(path))
+        if len(calls) < 3:  # the first two deletes lost the race and removed nothing
+            return
+        real_rmtree(path, ignore_errors=ignore_errors)
+
+    monkeypatch.setattr(shutil, "rmtree", flaky_rmtree)
+
+    assert work.cleanup(False) is True
+    assert len(calls) == 3
+    assert not work.path.exists()
