@@ -201,12 +201,15 @@ def serialize_post_attempt(
     uploaded = [row for row in destinations if row["success"] is True]
     # A skipped (unconnected) destination is not a failure (R3): it was never
     # attempted, so it must not make an otherwise-good post "partial".
+    # A deferred destination (cooldown / anti-bot window) is also not a failure:
+    # it is waiting for its window, and M0 requires that to read as deferred.
     failed = [
         row
         for row in destinations
-        if row["success"] is False and row.get("state") != "skipped_unconnected"
+        if row["success"] is False and row.get("state") not in ("skipped_unconnected", "deferred")
     ]
     skipped = [row for row in destinations if row.get("state") == "skipped_unconnected"]
+    deferred = [row for row in destinations if row.get("state") == "deferred"]
     attempted = bool(requested)
     blocked = bool(blockers)
 
@@ -228,6 +231,8 @@ def serialize_post_attempt(
         "failed_count": len(failed),
         "skipped_unconnected_count": len(skipped),
         "skipped_unconnected": [row["platform"] for row in skipped],
+        "deferred_count": len(deferred),
+        "deferred": [row["platform"] for row in deferred],
         "blockers": list(blockers or []),
         # ``all_success`` keeps the engine vocabulary for CLI/MCP parity; it is
         # never True for a dry run or a refused attempt.

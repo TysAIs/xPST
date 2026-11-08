@@ -835,10 +835,23 @@ input,
     border-bottom: 1px solid var(--xpst-color-border);
   }
   .xpst-nav--mobile { display: flex; }
+  /* A phone must not scroll sideways: the nav strip scrolls INSIDE itself.
+     Without min-width:0 the flex item cannot shrink below its content, the
+     strip grows to every icon's width and the whole document overflows
+     (measured at a 390 px viewport: document scrollWidth 624). */
+  .xpst-shell__mobile-header { max-width: 100%; overflow: hidden; }
+  .xpst-nav--mobile { min-width: 0; max-width: 100%; flex: 1 1 auto; }
   .xpst-nav--mobile .xpst-nav__list {
     flex-direction: row;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
+    min-width: 0;
+    max-width: 100%;
     gap: var(--xpst-space-1);
+    /* The labels are `sr-only` (position: absolute). Without a containing
+       block here they escape this scroll container and pad the DOCUMENT to
+       617 px at a 390 px viewport, so the whole page scrolls sideways. */
+    position: relative;
   }
   .xpst-nav--mobile .xpst-nav__link {
     min-width: max-content;
