@@ -1,6 +1,18 @@
 # xPST Dockerfile
 # Multi-stage build for minimal image size
 
+# Stage 0: Build the web UI. The wheel embeds it (packaging/hatch_ui.py), so
+# the image serves the real UI at / and #/phone instead of the placeholder.
+FROM node:22-slim AS ui
+
+WORKDIR /ui
+
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+
+COPY ui/ ./
+RUN npm run build
+
 # Stage 1: Build
 FROM python:3.12-slim AS builder
 
@@ -11,13 +23,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy project files
+# Copy project files (packaging/ holds the hatch build hook that embeds the UI)
 COPY pyproject.toml README.md LICENSE ./
+COPY packaging/ packaging/
 COPY src/ src/
+COPY --from=ui /ui/dist ui/dist
 
-# Install dependencies
+# Install dependencies. XPST_REQUIRE_UI makes a lost UI build fail the image
+# build instead of shipping an engine that silently serves the placeholder page.
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
+    && XPST_REQUIRE_UI=1 pip install --no-cache-dir .
 
 # Stage 2: Runtime
 FROM python:3.12-slim
