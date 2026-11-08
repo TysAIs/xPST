@@ -141,6 +141,14 @@ Changelog = "https://github.com/TysAIs/xPST/blob/main/CHANGELOG.md"
 [tool.hatch.build.targets.wheel]
 packages = ["src/xpst"]
 
+# The sdist carries the built UI too. `python -m build` (and pip's default
+# behaviour) builds the wheel FROM the sdist, so an sdist without ui/dist would
+# silently produce an engine-only wheel — which is exactly the defect this hook
+# fixes. `artifacts` adds the gitignored build directory to the normal
+# VCS-based file selection; `include` would REPLACE it and drop packaging/.
+[tool.hatch.build.targets.sdist]
+artifacts = ["ui/dist/**"]
+
 # Ship the built web UI inside the wheel (xpst/dashboard/webui). A pip install
 # without it serves the placeholder page and #/phone is unreachable; see
 # packaging/hatch_ui.py. Build it first: cd ui && npm install && npm run build.

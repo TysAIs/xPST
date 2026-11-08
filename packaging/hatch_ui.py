@@ -60,11 +60,7 @@ class CustomBuildHook(BuildHookInterface):
     PLUGIN_NAME = "custom"
 
     def initialize(self, version: str, build_data: dict) -> None:
-        if self.target_name != "wheel":
-            # The sdist stays source-only: it carries no build product, and a
-            # pip install from the sdist rebuilds the wheel (still without a
-            # bundle unless ui/dist is present). PyPI wheels are py3-none-any,
-            # so the wheel is what a pip user actually installs.
+        if self.target_name not in ("wheel", "sdist"):
             return
 
         ui_dist = locate_ui_dist(Path(self.root))
@@ -74,5 +70,11 @@ class CustomBuildHook(BuildHookInterface):
             self.app.display_warning(f"{MISSING_UI_MESSAGE} Set {REQUIRE_UI_ENV}=1 to fail the build instead.")
             return
 
-        force_include = build_data.setdefault("force_include", {})
-        force_include[str(ui_dist)] = WHEEL_UI_TARGET
+        if self.target_name == "wheel":
+            force_include = build_data.setdefault("force_include", {})
+            force_include[str(ui_dist)] = WHEEL_UI_TARGET
+        # For the sdist the files are picked up by
+        # [tool.hatch.build.targets.sdist] artifacts = ["ui/dist/**"] in
+        # pyproject.toml; the presence check above is what keeps a required
+        # (release) build from producing a UI-less sdist, and therefore a
+        # UI-less wheel from that sdist.
