@@ -110,8 +110,9 @@ carries the fields a release record needs:
 | `artifact_name`, `artifact_source`, `release` | what was downloaded, and the resolved release asset metadata |
 | `artifact_bytes`, `artifact_sha256`, `release_expected_sha256`, `checksum_ok`, `checksum_verdict_source` | the bytes, the release's own checksum verdict, and whether it came from `<platform>-SHA256SUMS` or the release API digest |
 | `http_status`, `health_ok`, `health_url`, `packaged_ui_ok` | the engine/UI result |
+| `ui.attempts`, `ui.retry_window_seconds` | how many packaged-HTML samples were needed, and the bounded window they were allowed |
 | `boot_ok`, `boot_to_visible_seconds`, `window_assertion_required` | launch evidence |
-| `running_process` | launched PID, its read-back command line, observed engine sidecars |
+| `running_process` | launched PID, its read-back command line, observed engine sidecars, and `engine_sidecar_attempts` / `engine_sidecar_retry_window_seconds` |
 | `app_exit_code_during_poll`, `shutdown_exit_code` | exit codes |
 | `cleanup_ok`, `uninstall_ok` | teardown |
 | `gatekeeper` | signature/quarantine verdict and remediation |
@@ -156,6 +157,25 @@ Hosted runners have no logged-in window server, so the workflow also passes
 `--no-require-visible-window`: that run is engine/process/cleanup evidence and
 explicitly not the full clean-profile pass, which still has to be taken on a real
 desktop. A red workflow run is a real finding about the published artifact.
+
+### Bounded sampling of the packaged UI and the engine sidecar
+
+Both post-boot observations are retried over a short, fixed window instead of
+being taken once: the packaged-HTML root check for 8 seconds
+(`PACKAGED_UI_RETRY_WINDOW_SECONDS`) and, for the Tauri stack only, the
+`xpst-engine` process enumeration for 8 seconds
+(`SIDECAR_RETRY_WINDOW_SECONDS`), sampling every 250 ms. This exists because a
+single sample races the shell's own startup: on the macOS leg of run 42508682981
+the launch log showed the engine up (`GET /health 200`, `GET / 200 OK`) while the
+one sample read a non-HTML root and an empty sidecar list, and the identical
+commit passed when the failed job was re-run.
+
+Retrying does not weaken either assertion. The UI sample is still HTTP 200 with
+`<html` and an xPST marker, a Tauri run still needs a real `xpst-engine`
+process, and a miss is only recorded as a failure once the window is exhausted —
+the failure text says how many samples it took. Each run records the attempt
+count it needed (`ui.attempts`, `running_process.engine_sidecar_attempts`), so a
+boot that needed retries is visible in the evidence rather than silent.
 
 **Measured on the v1.2.1 artifacts (2026-11-05 run 41988829053, red on linux and
 windows, green on macOS).** None of those three verdicts was about the product:
