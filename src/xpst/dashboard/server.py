@@ -198,7 +198,12 @@ def _ui_dist_dir() -> Path | None:
     return None
 
 
-def _create_app(config_dir: str = "~/.xpst", *, ui_token: str | None = None) -> FastAPI:
+def _create_app(
+    config_dir: str = "~/.xpst",
+    *,
+    ui_token: str | None = None,
+    require_read_auth: bool = False,
+) -> FastAPI:
     """Create the FastAPI application with all endpoints.
 
     Args:
@@ -208,6 +213,11 @@ def _create_app(config_dir: str = "~/.xpst", *, ui_token: str | None = None) -> 
             mutating routes work without ever writing the token to the URL of a
             shared server). The desktop shell passes the same value through
             ``XPST_UI_TOKEN``.
+        require_read_auth: Require a credential (Basic auth, the API token or a
+            paired device token) for read routes too. Callers pass ``True`` when
+            binding a non-loopback address: on loopback the shipped UI stays
+            frictionless, but a phone on the tailnet must not be served an
+            anonymous view of the operator's accounts.
 
     Returns:
         Configured FastAPI app instance.
@@ -442,6 +452,7 @@ def _create_app(config_dir: str = "~/.xpst", *, ui_token: str | None = None) -> 
         basic_is_valid,
         mutation_authorized,
         path_is_public_mutation,
+        read_authorized,
         token_from_request,
         token_is_valid,
         unauthorized_response,
@@ -454,6 +465,11 @@ def _create_app(config_dir: str = "~/.xpst", *, ui_token: str | None = None) -> 
         logger.error("Dashboard API token unavailable (%s); mutations will 401.", exc)
     app.state.xpst_api_tokens = api_tokens
     app.state.xpst_dashboard_auth = (username, password_hash)
+    # The router's defence-in-depth guard needs the config dir to reach the
+    # per-device tokens a paired phone presents (see
+    # xpst.dashboard.api.require_api_token).
+    app.state.xpst_config_dir = str(Path(config_dir).expanduser())
+    app.state.xpst_require_read_auth = bool(require_read_auth)
     # uvicorn logs the raw request path; the editor form's ?token= must not
     # reach the console/CI log.
     from xpst.dashboard.auth import install_access_log_redaction
@@ -466,8 +482,8 @@ def _create_app(config_dir: str = "~/.xpst", *, ui_token: str | None = None) -> 
         async def dispatch(self, request: Request, call_next):
             path = request.url.path
             if request.method.upper() in MUTATING_METHODS:
-                # Public-by-design mutations (OAuth deep-link redirect,
-                # Messenger webhook intake) carry their own validation.
+                # Public-by-design mutations (OAuth deep-link redirect, device
+                # pairing, Messenger webhook intake) carry their own validation.
                 if path_is_public_mutation(path):
                     return await call_next(request)
                 if mutation_authorized(
@@ -475,13 +491,15 @@ def _create_app(config_dir: str = "~/.xpst", *, ui_token: str | None = None) -> 
                     accepted=api_tokens,
                     username=username,
                     password_hash=password_hash,
+                    config_dir=config_dir,
                 ):
                     return await call_next(request)
                 return unauthorized_response(request, basic_configured=basic_configured)
 
             # Read-only traffic: unchanged from the pre-token behaviour, except
             # for the admin form at /bio/edit, which requires the token when no
-            # dashboard login is configured (its save route is a mutation).
+            # dashboard login is configured (its save route is a mutation), and
+            # for a non-loopback bind, where reads require a credential too.
             if path in READ_EXEMPT_PATHS:
                 return await call_next(request)
             if basic_configured:
@@ -493,6 +511,19 @@ def _create_app(config_dir: str = "~/.xpst", *, ui_token: str | None = None) -> 
             if path in TOKEN_READ_PATHS:
                 if token_is_valid(token_from_request(request), api_tokens):
                     return await call_next(request)
+                return unauthorized_response(request, basic_configured=False)
+            if require_read_auth and path.startswith("/api") and not read_authorized(
+                request,
+                accepted=api_tokens,
+                username=username,
+                password_hash=password_hash,
+                config_dir=config_dir,
+            ):
+                # Only the data surface is gated. The app SHELL must stay public
+                # or an unpaired phone cannot load the page it types its pairing
+                # code into: measured on a non-loopback bind, `/` answered 401
+                # and the pairing screen was unreachable. The shell is static
+                # (no account data), and every value it renders comes from /api.
                 return unauthorized_response(request, basic_configured=False)
             return await call_next(request)
 
@@ -894,18 +925,23 @@ def start_dashboard(
 
     if host not in _LOOPBACK_HOSTS:
         username, password_hash = _load_dashboard_auth(config_dir)
+        logger.info(
+            "Dashboard is binding to a non-loopback address (%s). Read AND write "
+            "routes now require a credential: Basic auth when configured, the API "
+            "token, or a paired device token (`xpst pair`).",
+            host,
+        )
         if not (username and password_hash):
             logger.warning(
-                "Dashboard is binding to a non-loopback address (%s) without "
-                "authentication configured. Read-only endpoints are exposed to "
-                "the network without credentials. Mutating endpoints always "
-                "require the API token. Set dashboard_username and "
-                "dashboard_password_hash in your config to also protect reads, "
-                "or bind to 127.0.0.1.",
+                "Dashboard is binding to a non-loopback address (%s) without Basic "
+                "auth configured. Read and write routes require the API token or a "
+                "paired device token (`xpst pair`); an unpaired phone gets 401 "
+                "instead of an anonymous view.",
                 host,
             )
 
-    app = _create_app(config_dir, ui_token=ui_token)
+    require_read_auth = host not in _LOOPBACK_HOSTS
+    app = _create_app(config_dir, ui_token=ui_token, require_read_auth=require_read_auth)
     _record_bind(host)
     uvicorn.run(app, host=host, port=port, log_level="info")
 
@@ -965,7 +1001,11 @@ def serve_ui(
     from xpst.dashboard.auth import generate_token
 
     ui_token = ui_token or generate_token()
-    app = _create_app(config_dir, ui_token=ui_token)
+    app = _create_app(
+        config_dir,
+        ui_token=ui_token,
+        require_read_auth=host not in _LOOPBACK_HOSTS,
+    )
     # Readiness/log URL: unchanged shape (scripts and the Tauri smoke harness
     # parse it) and never carrying the token. Only the browser gets the
     # tokenised fragment URL.

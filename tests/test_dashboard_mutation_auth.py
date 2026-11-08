@@ -89,6 +89,8 @@ def _mutating_api_routes(cfg_dir: str) -> list[str]:
 # ──────────────────────────────────────────────
 
 def test_every_mutating_api_route_401s_without_credentials(tmp_path):
+    from xpst.dashboard.auth import path_is_public_mutation
+
     cfg_dir = _config_dir(tmp_path)
     client = _client(cfg_dir)
     routes = _mutating_api_routes(cfg_dir)
@@ -97,8 +99,30 @@ def test_every_mutating_api_route_401s_without_credentials(tmp_path):
         assert expected in routes
 
     for path in routes:
+        if path_is_public_mutation(path):
+            # Public by design: the credential travels in the request itself (an
+            # OAuth deep-link redirect, a Messenger webhook signature, or the
+            # single-use device pairing code), so no header is expected. The
+            # set is checked by test_public_mutations_are_the_documented_ones.
+            continue
         resp = client.post(path.replace("{platform}", "youtube"), json={})
         assert resp.status_code in (401, 403), f"{path} answered {resp.status_code} anonymously"
+
+
+def test_public_mutations_are_the_documented_ones(tmp_path):
+    """Every anonymous-write exemption is deliberate and named here.
+
+    Without this, adding a route to PUBLIC_MUTATION_PATHS would silently remove
+    it from the fail-closed guard above.
+    """
+    from xpst.dashboard.auth import PUBLIC_MUTATION_PATHS
+
+    assert {"/oauth/callback", "/api/pair"} == PUBLIC_MUTATION_PATHS
+    client = _client(_config_dir(tmp_path))
+    # The pairing exchange is refused on its own terms (no code), not on auth.
+    anonymous = client.post("/api/pair", json={})
+    assert anonymous.status_code == 400
+    assert anonymous.json()["code"] == "PAIR_CODE_MISSING"
 
 
 def test_every_mutating_api_route_accepts_the_api_token(tmp_path):

@@ -77,9 +77,11 @@ TOKEN_READ_PATHS = frozenset({"/bio/edit"})
 
 #: Mutating paths that must stay reachable without a credential because they
 #: are public by design: the OAuth deep-link redirect (a browser cannot attach
-#: a header) and the Messenger webhook intake (Meta calls it, and it carries
-#: its own ``hub.verify_token`` / signature checks).
-PUBLIC_MUTATION_PATHS = frozenset({"/oauth/callback"})
+#: a header), the Messenger webhook intake (Meta calls it, and it carries
+#: its own ``hub.verify_token`` / signature checks) and the device pairing
+#: exchange — a brand-new phone has no credential yet, and the single-use code
+#: in the body *is* the credential for that one call.
+PUBLIC_MUTATION_PATHS = frozenset({"/oauth/callback", "/api/pair"})
 PUBLIC_MUTATION_PREFIXES = ("/webhook/",)
 
 #: The only path whose *HTML form* may carry the token as a query parameter.
@@ -288,6 +290,26 @@ def basic_is_valid(header: str, username: str, password_hash: str) -> bool:
     return hmac.compare_digest(user, username)
 
 
+def device_token_valid(config_dir: str | Path | None, presented: str | None) -> bool:
+    """True when ``presented`` is a live per-device token for this config dir.
+
+    Device tokens live in ``<config_dir>/devices.json`` rather than in the
+    accepted-token set, because a phone pairs *while the engine is running* —
+    the set is built at startup and would never see it. The store hashes the
+    presented token and compares in constant time; a revoked device stops
+    authenticating on the next request.
+    """
+    if not config_dir or not presented:
+        return False
+    from xpst.dashboard.devices import verify_device_token
+
+    try:
+        return verify_device_token(config_dir, presented) is not None
+    except Exception as exc:  # noqa: BLE001 - an unreadable store must not open the door
+        logger.warning("Could not verify a device token: %s", exc)
+        return False
+
+
 def path_is_public_mutation(path: str) -> bool:
     """True when a mutating path is public by design (see module docstring)."""
     if path in PUBLIC_MUTATION_PATHS:
@@ -301,11 +323,43 @@ def mutation_authorized(
     accepted: set[str],
     username: str = "",
     password_hash: str = "",
+    config_dir: str | Path | None = None,
 ) -> bool:
-    """True when a mutating request carries a valid credential."""
+    """True when a mutating request carries a valid credential.
+
+    ``config_dir`` enables the per-device tokens a paired phone presents; it is
+    optional so a bare router (tests, embedded use) keeps working with the
+    process-wide accepted set only.
+    """
     if basic_is_valid(request.headers.get("Authorization", ""), username, password_hash):
         return True
-    return token_is_valid(token_from_request(request), accepted)
+    presented = token_from_request(request)
+    if token_is_valid(presented, accepted):
+        return True
+    return device_token_valid(config_dir, presented)
+
+
+def read_authorized(
+    request: Request,
+    *,
+    accepted: set[str],
+    username: str = "",
+    password_hash: str = "",
+    config_dir: str | Path | None = None,
+) -> bool:
+    """True when a read request carries a valid credential (non-loopback bind).
+
+    Reads stay open on loopback (the shipped UI never had to log in), but once
+    the engine answers the network, "an open read" means the phone is served an
+    anonymous view of the operator's accounts. This is the same credential set
+    writes use, so a paired device reads with its own token.
+    """
+    if basic_is_valid(request.headers.get("Authorization", ""), username, password_hash):
+        return True
+    presented = token_from_request(request)
+    if token_is_valid(presented, accepted):
+        return True
+    return device_token_valid(config_dir, presented)
 
 
 def unauthorized_response(request: Request, *, basic_configured: bool):  # noqa: ANN201

@@ -37,6 +37,8 @@ from xpst.platforms.base import (
     PlatformHealth,
     PlatformRegistry,
     PlatformUploader,
+    ReadbackResult,
+    ReadbackState,
     UploadResult,
 )
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
@@ -633,6 +635,45 @@ class YouTubeUploader(PlatformUploader):
                 platform=self.platform_name,
                 post_id=post_id,
                 detail=str(e)[:200],
+            )
+
+    async def readback(self, post_id: str) -> ReadbackResult:
+        """Confirm a YouTube video id exists, via ``videos.list``.
+
+        ``videos.list`` with an id is one read call and does not need the
+        owner's channel to be re-probed: a found item proves the id is real, and
+        its ``status.privacyStatus`` is reported so the UI can say "public" or
+        "private" from the platform's own answer.
+        """
+        try:
+            service = await self._get_service()
+            response = await asyncio.to_thread(
+                service.videos().list(part="id,status", id=post_id).execute
+            )
+            items = (response or {}).get("items") or []
+            if not items:
+                return ReadbackResult(
+                    state=ReadbackState.NOT_FOUND,
+                    platform=self.platform_name,
+                    post_id=post_id,
+                    detail="videos.list returned no item for this id",
+                )
+            status = (items[0] or {}).get("status") or {}
+            return ReadbackResult(
+                state=ReadbackState.VERIFIED,
+                platform=self.platform_name,
+                post_id=post_id,
+                url=f"https://www.youtube.com/watch?v={post_id}",
+                detail="confirmed by videos.list",
+                visibility=status.get("privacyStatus"),
+            )
+        except Exception as exc:  # noqa: BLE001 - an unanswerable read is not a failure
+            logger.warning("YouTube readback failed for %s: %s", post_id, exc)
+            return ReadbackResult(
+                state=ReadbackState.UNKNOWN,
+                platform=self.platform_name,
+                post_id=post_id,
+                detail=str(exc)[:200],
             )
 
     async def get_followers(self) -> int:

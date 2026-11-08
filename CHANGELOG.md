@@ -38,6 +38,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   destination's duration / container / codec / byte / caption limits named.
 
 ### Added
+- **M0: a phone can upload, preview, confirm, publish and read back.** `POST
+  /api/media` accepts a multipart upload from a camera roll (size cap
+  `XPST_MAX_UPLOAD_BYTES`, container sniffed from the bytes rather than the
+  filename, ffprobe probe that reports `probed: false` with a reason instead of
+  inventing a duration, staging under `<config dir>/media/uploads`,
+  content-addressed `med_<sha256>` ids and idempotency keys). Device pairing
+  (`xpst pair`, `xpst devices --revoke`, `POST /api/pair`) issues a single-use
+  expiring code for a hashed per-device token, and a non-loopback bind now
+  requires a credential for reads as well as writes — the static app shell stays
+  public so an unpaired phone can reach the pairing screen. Frozen plans
+  (`/api/plans*`) capture the media digest, caption, destinations and envelopes;
+  `confirm_stale` returns what changed, publish is idempotent per destination,
+  and a deferred destination keeps the plan retryable. Readback asks the
+  platform (YouTube `videos.list`, X twikit) and reports `verified`,
+  `submitted_unconfirmed`, `not_found`, `deferred` or `refused` — never a
+  guessed success. The `#/phone` screen runs the whole flow at a 390 px
+  viewport with 44 px targets and resumes from the plan id in the URL.
+- **`deferred` is a canonical destination state.** A cooldown or anti-bot
+  deferral used to classify as `failed`; it is now excluded from failure maths
+  and carries its `resume_after` window.
 - **The public-safety gate now catches LAN/tailnet IP addresses.** The
   scanner gained a `private_ip` category covering RFC1918 (`10/8`,
   `172.16/12`, `192.168/16`) and CGNAT/tailnet (`100.64.0.0/10`) host
@@ -125,6 +145,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deadlines.
 
 ### Fixed
+- **The phone screen's `Revoke` control is a 44 px tap target.** It rendered as
+  inline text at 41×16 px; a measured 390 px run flagged it, and it now carries
+  the same minimum target box as the readback URLs, pinned by
+  `ui/tests/phone-flow.test.js`.
 - **`xpst post --dry-run` can no longer report `"ready": true` while listing a
   hard blocker.** Readiness was derived from the destination plan alone, so a
   request the content contract refused — a text post to TikTok, which publishes

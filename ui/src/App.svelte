@@ -8,6 +8,7 @@
   import Onboarding from "./pages/Onboarding.svelte";
   import Connect from "./pages/Connect.svelte";
   import Compose from "./pages/Compose.svelte";
+  import Phone from "./pages/Phone.svelte";
   import Result from "./pages/Result.svelte";
   import Create from "./pages/Create.svelte";
   import Analytics from "./pages/Analytics.svelte";
@@ -25,6 +26,7 @@
     onboarding: Onboarding,
     connect: Connect,
     compose: Compose,
+    phone: Phone,
     result: Result,
     create: Create,
     analytics: Analytics,
