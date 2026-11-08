@@ -1,4 +1,5 @@
-"""Six post-gate truth defects from the 2026-11-03 adapter truth matrix.
+"""Post-gate truth defects from the 2026-11-03 adapter truth matrix (D1-D6) plus
+the 2026-11-07 dry-run readiness contradiction (D7).
 
 Each section reproduces one finding from card ``t_95928695`` (evidence:
 ``~/.hermes/profiles/socials/missions/reports/2026-11-03-adapter-truth-matrix.md``
@@ -21,6 +22,12 @@ surface must tell the same truth about whether a post can publish.
   reported ``not_applicable`` with no warning.
 * **D6** the config file was group/world readable and carried the TikTok
   client secret in cleartext.
+* **D7** the ``--dry-run`` payload could say ``"ready": true`` while listing a
+  hard blocker in the same object, and the same invocation then exited 1 (card
+  ``t_b3ab7439``): readiness was derived from the destination plan alone, so a
+  request the *content* contract refused — a text post to a video-only
+  destination — read as publishable. Readiness now requires an empty blocker
+  list, the answer MCP and the HTTP preflight already gave.
 """
 
 from __future__ import annotations
@@ -534,3 +541,156 @@ class TestD6ConfigHygiene:
         XPSTConfig.load(str(target))
 
         assert stat.S_IMODE(os.stat(target).st_mode) == 0o600
+
+
+# ── D7: readiness and the exit status agree on every dry-run path ───────────
+
+
+def _tiktok_and_x_config(config_dir: Path, *, tiktok_enabled: bool, x_enabled: bool) -> str:
+    """A destination set where TikTok's only blocker is the content type.
+
+    Browser publish mode with a stored cookie jar is ready without an OAuth
+    token (D3), so a text post to it fails for exactly one reason: TikTok
+    publishes video only.
+    """
+
+    (config_dir / "credentials").mkdir(exist_ok=True)
+    (config_dir / "credentials" / "tiktok_cookies.txt").write_text(
+        "# Netscape HTTP Cookie File\n.tiktok.com\tTRUE\t/\tTRUE\t0\tsessionid\tx\n",
+        encoding="utf-8",
+    )
+    cookies = config_dir / "x_cookies.json"
+    cookies.write_text(json.dumps({"auth_token": "stub"}), encoding="utf-8")
+    return _write_config(
+        config_dir,
+        {
+            "accounts": {
+                "tiktok": {"enabled": tiktok_enabled, "publish_mode": "browser"},
+                "x": {"enabled": x_enabled, "cookies_file": str(cookies)},
+            },
+            "video": {"download_dir": str(config_dir / "downloads")},
+            "monitoring": {
+                "log_level": "CRITICAL",
+                "log_file": str(config_dir / "logs" / "xpst.log"),
+            },
+        },
+    )
+
+
+def _dry_run(config_path: str, *args: str):
+    return CliRunner().invoke(
+        main, ["--config", config_path, "post", *args, "--dry-run", "--json"]
+    )
+
+
+def _payload(result) -> dict:
+    return json.loads(result.output[result.output.index("{"):])
+
+
+class TestD7DryRunReadinessAgreesWithExitStatus:
+    """A payload may not call itself ready while it lists a hard blocker."""
+
+    def test_the_tiktok_text_refusal_is_not_ready(self, config_dir, monkeypatch):
+        """The card's seeded case: text to a video-only destination."""
+
+        monkeypatch.setattr(
+            "xpst.cli.CrossPostEngine",
+            lambda config: pytest.fail("dry run must not build an engine"),
+        )
+        config_path = _tiktok_and_x_config(config_dir, tiktok_enabled=True, x_enabled=True)
+
+        result = _dry_run(config_path, "--text", "probe text", "-p", "tiktok")
+
+        payload = _payload(result)
+        assert payload["ready"] is False, result.output
+        assert any("does not support text posts" in b for b in payload["blockers"]), payload
+        assert result.exit_code == 1, result.output
+
+    def test_the_same_refusal_beside_a_viable_destination_is_not_ready(
+        self, config_dir, monkeypatch
+    ):
+        """The shape that still reported ready on main.
+
+        With X in the target set the route plan has one posting destination and
+        no plan blocker, so readiness derived from the plan alone was ``true``
+        while the content verdict refused TikTok and the command exited 1.
+        """
+
+        monkeypatch.setattr(
+            "xpst.cli.CrossPostEngine",
+            lambda config: pytest.fail("dry run must not build an engine"),
+        )
+        config_path = _tiktok_and_x_config(config_dir, tiktok_enabled=True, x_enabled=True)
+
+        result = _dry_run(config_path, "--text", "probe text", "-p", "tiktok,x")
+
+        payload = _payload(result)
+        assert payload["route_plan"]["posting_destinations"] == ["x"], payload["route_plan"]
+        assert payload["blockers"], payload
+        assert payload["ready"] is False, result.output
+        assert result.exit_code == 1, result.output
+
+    def test_a_clean_text_post_is_ready_and_exits_zero(self, config_dir, monkeypatch):
+        """The green control: ready, no blockers, exit 0."""
+
+        monkeypatch.setattr(
+            "xpst.cli.CrossPostEngine",
+            lambda config: pytest.fail("dry run must not build an engine"),
+        )
+        config_path = _tiktok_and_x_config(config_dir, tiktok_enabled=True, x_enabled=True)
+
+        result = _dry_run(config_path, "--text", "B" * 210 + "\n\ndotBANG", "-p", "x")
+
+        payload = _payload(result)
+        assert payload["blockers"] == [], payload
+        assert payload["ready"] is True, result.output
+        assert result.exit_code == 0, result.output
+
+    def test_a_destination_level_blocker_also_clears_readiness(self, config_dir, monkeypatch):
+        """Readiness is one answer, whoever produced the blocker.
+
+        A destination disabled in configuration is a plan blocker, not a
+        content refusal: the dry run still exits 0 (the live run reports it per
+        destination rather than aborting), but it may not call the request
+        ready.
+        """
+
+        monkeypatch.setattr(
+            "xpst.cli.CrossPostEngine",
+            lambda config: pytest.fail("dry run must not build an engine"),
+        )
+        config_path = _tiktok_and_x_config(config_dir, tiktok_enabled=True, x_enabled=False)
+
+        result = _dry_run(config_path, "--text", "probe text", "-p", "x")
+
+        payload = _payload(result)
+        assert any("disabled" in b for b in payload["blockers"]), payload
+        assert payload["ready"] is False, result.output
+
+    @pytest.mark.parametrize(
+        "args,expected_ready",
+        [
+            (("--text", "probe text", "-p", "tiktok"), False),
+            (("--text", "A" * 300, "-p", "x"), False),
+            (("--text", "B" * 210 + "\n\ndotBANG", "-p", "x"), True),
+        ],
+    )
+    def test_the_field_and_the_blocker_list_never_disagree(
+        self, config_dir, monkeypatch, args, expected_ready
+    ):
+        """The card's three cases: readiness ⇔ no blockers, exit status agreeing."""
+
+        monkeypatch.setattr(
+            "xpst.cli.CrossPostEngine",
+            lambda config: pytest.fail("dry run must not build an engine"),
+        )
+        config_path = _tiktok_and_x_config(config_dir, tiktok_enabled=True, x_enabled=True)
+
+        result = _dry_run(config_path, *args)
+
+        payload = _payload(result)
+        assert payload["ready"] is expected_ready, result.output
+        assert payload["ready"] is (payload["blockers"] == [])
+        # The seeded refusal path refuses (exit 1); the clean control publishes
+        # in principle (exit 0). The field never contradicts either.
+        assert (result.exit_code == 0) is expected_ready
