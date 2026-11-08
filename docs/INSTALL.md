@@ -270,6 +270,13 @@ off immediately. A non-loopback bind requires a credential for reads on `/api`
 as well as writes — the app shell itself stays public so an unpaired phone can
 still reach the pairing screen.
 
+`#/phone` is a route in the built web UI (`ui/dist`), which the desktop app
+ships and the engine serves when present. From a source checkout run
+`cd ui && npm install && npm run build` once before `xpst ui`; a bare
+`pip install` carries no UI build, so the engine serves its placeholder page
+and only the JSON API (`/api/plans*`, `/api/media`) is reachable. Point
+`XPST_UI_DIST` at a build if you keep one elsewhere.
+
 The flow is compose → destinations → preview → confirm → publish → readback. The
 preview is local (`network_calls: false`) and a dry run uploads nothing, so you
 can rehearse a post without publishing. A destination in a rate-limit cooldown is
