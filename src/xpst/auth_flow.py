@@ -43,6 +43,7 @@ from collections.abc import Callable  # noqa: TC003 - referenced in runtime-eval
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from xpst.utils.graph_api import graph_login_dialog_url
 from xpst.utils.logger import get_logger
 from xpst.utils.oauth_local import AuthCodeResult, LocalOAuthListener
 
@@ -508,7 +509,7 @@ class MetaSignIn:
             "scope": ",".join(spec.scopes),
             "state": state,
         }
-        url = f"https://www.facebook.com/v21.0/dialog/oauth?{urlencode(params, safe=',')}"
+        url = graph_login_dialog_url() + "?" + urlencode(params, safe=',')
         # The secret rides the private session state (never serialized) so the
         # exchange step does not re-read the store.
         return url, {"app_id": app_id, "app_secret": app_secret}

@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Every Meta Graph API call now uses one pinned, supported version (v26.0).**
+  Instagram (container create/publish, media + container status, permalink,
+  delete/reconcile, followers), the account-type probe, the connect/verify
+  helpers, the Messenger send/health path and the Facebook Page client all build
+  their URLs through `xpst.utils.graph_api`, so the pin is a single constant
+  instead of per-module literals. v19.0 (removed 2026-05-21) and
+  v20.0 (removed 2026-09-24) were still being called directly, and v21.0/v22.0
+  (v21 removed 2027-01-21) were split across the other modules; the Instagram
+  resumable-upload host and the OAuth consent dialog follow the same pin.
+  `XPST_GRAPH_API_BASE` (whole base) and `XPST_GRAPH_API_VERSION` (version only)
+  retarget the family; `tests/test_graph_api_version.py` fails if a new
+  `graph.facebook.com/vNN` literal appears in `src/`.
 - **Platforms are opt-in targets, never an implied "all" (R3).** `--platforms`
   no longer defaults to every enabled platform: an explicit set wins, `--all`
   is the explicit "every connected account that accepts this format", and the

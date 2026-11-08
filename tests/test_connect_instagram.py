@@ -43,7 +43,7 @@ class FakeResponse:
 
 
 class TestGraphApiVerifyUrlBuilder:
-    """The graph_api verify URL builder must produce a well-formed v21.0 URL."""
+    """The graph_api verify URL builder must produce a well-formed pinned-version URL."""
 
     def test_builds_full_url_with_query_params(self) -> None:
         url = _graph_api_verify_url(IG_USER_ID, PAGE_TOKEN)

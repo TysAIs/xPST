@@ -107,7 +107,7 @@ Short-lived tokens expire in ~1 hour. For an unattended cross-posting tool you w
 2. Convert it to a long-lived token with this call (replace placeholders):
 
    ```
-   GET https://graph.facebook.com/v21.0/oauth/access_token
+   GET https://graph.facebook.com/v26.0/oauth/access_token
        ?grant_type=fb_exchange_token
        &client_id={app_id}
        &client_secret={app_secret}
@@ -116,7 +116,13 @@ Short-lived tokens expire in ~1 hour. For an unattended cross-posting tool you w
 
 3. The response contains your `access_token` (valid 60 days) and `expires_in`.
 
-> **Scopes you need:** `instagram_basic` and `instagram_content_publish` are the minimum for posting Reels/media. `pages_show_list` and `pages_read_engagement` are needed to resolve the Page → IG account mapping. The xPST wizard verifies your token against `graph.facebook.com/v21.0/{ig_user_id}` and will tell you if a scope is missing.
+> **Scopes you need:** `instagram_basic` and `instagram_content_publish` are the minimum for posting Reels/media. `pages_show_list` and `pages_read_engagement` are needed to resolve the Page → IG account mapping. The xPST wizard verifies your token against `graph.facebook.com/v26.0/{ig_user_id}` and will tell you if a scope is missing.
+
+> **API version:** every Meta call xPST makes uses one pinned Graph API version,
+> defined in `src/xpst/utils/graph_api.py` (v26.0 at the time of writing). Any
+> supported version works for the curl examples above — set
+> `XPST_GRAPH_API_BASE=https://graph.facebook.com/<version>` to move the whole
+> Instagram/Facebook/Messenger family at once.
 
 ---
 
@@ -181,7 +187,7 @@ Long-lived Instagram tokens expire after **60 days**. xPST will start receiving 
 2. Exchange a still-valid (non-expired) token for a new 60-day one before it lapses:
 
    ```
-   GET https://graph.facebook.com/v21.0/oauth/access_token
+   GET https://graph.facebook.com/v26.0/oauth/access_token
        ?grant_type=ig_exchange_token
        &client_secret={app_secret}
        &access_token={current_long_lived_token}

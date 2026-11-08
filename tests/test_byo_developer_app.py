@@ -40,6 +40,7 @@ from xpst.byo import (
 from xpst.cli import main
 from xpst.config import XPSTConfig
 from xpst.mcp.server import result_is_error
+from xpst.utils.graph_api import graph_login_dialog_url
 
 APP_ID = "1234567890123456"
 APP_SECRET = "meta-fake-secret-9"
@@ -191,7 +192,7 @@ def test_authorize_url_carries_the_users_app_id(config):
     url, secret_state = provider.authorize(config, META_LOOPBACK_REDIRECT, "state-9")
 
     assert f"client_id={APP_ID}" in url
-    assert url.startswith("https://www.facebook.com/v21.0/dialog/oauth?")
+    assert url.startswith(f"{graph_login_dialog_url()}?")
     assert "instagram_content_publish" in url
     from urllib.parse import parse_qs, urlparse
 
