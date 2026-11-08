@@ -398,3 +398,35 @@ def test_engine_refuses_a_format_the_destination_cannot_publish(engine, monkeypa
     assert "cannot publish text" in (youtube.error or "")
     # Only the capable destination was called.
     assert uploader.calls == ["hello"]
+
+
+def test_a_deferred_destination_is_deferred_not_failed() -> None:
+    """M0: a cooldown/window deferral must never be reported as a failure.
+
+    Measured before this: a rate-limit cooldown returned ``metadata.deferred``
+    with the platform's resume window, and the canonical classifier turned that
+    into ``failed`` — a phone saw a red row for a post that had not been tried.
+    """
+    deferred = classify_upload_result(
+        "x",
+        UploadResult(
+            success=False,
+            error="RATE_LIMIT_COOLDOWN: x cooling, resume after 2026-11-07T23:45:00",
+            platform="x",
+            metadata={
+                "deferred": True,
+                "cooldown": True,
+                "resume_after": "2026-11-07T23:45:00",
+                "remaining_s": 240.0,
+            },
+        ),
+    )
+    assert deferred["state"] == "deferred"
+    assert deferred["is_failure"] is False
+    assert deferred["resume_after"] == "2026-11-07T23:45:00"
+    # All-deferred is its own outcome word, not "failed".
+    assert outcome_state({"x": deferred}) == "deferred"
+
+    # A posted destination plus a deferred one is still a successful run.
+    posted = classify_upload_result("youtube", UploadResult(success=True, post_id="v1", platform="youtube"))
+    assert outcome_state({"youtube": posted, "x": deferred}) == POSTED

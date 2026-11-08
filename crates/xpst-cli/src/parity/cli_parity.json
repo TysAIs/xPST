@@ -2,13 +2,13 @@
  "schema_version": 1,
  "captured_from": {
   "repo": "TysAIs/xPST",
-  "git_ref": "f3cf8f8",
+  "git_ref": "a1b8abf",
   "source": "src/xpst/cli.py",
   "framework": "click",
   "captured_by": "xtask/scripts/capture_python_cli.py"
  },
  "note": "Generated contract: the Rust engine must expose every command path and flag listed here. Do not hand-edit; re-run the capture script. `captured_from` is provenance only and is excluded from parity comparisons, which look at `commands` alone.",
- "command_count": 88,
+ "command_count": 90,
  "commands": [
   {
    "path": [],
@@ -1557,6 +1557,50 @@
   },
   {
    "path": [
+    "devices"
+   ],
+   "name": "devices",
+   "help": "List paired devices, or revoke one with --revoke.",
+   "about": "List paired devices, or revoke one with --revoke.",
+   "params": [
+    {
+     "name": "revoke_id",
+     "kind": "option",
+     "opts": [
+      "--revoke"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Revoke this device id; its token stops working immediately"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": false,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
     "diagnostics"
    ],
    "name": "diagnostics",
@@ -2877,6 +2921,119 @@
      "choices": null,
      "default": false,
      "help": "Re-run connect even for platforms whose health check already passes"
+    },
+    {
+     "name": "as_json",
+     "kind": "option",
+     "opts": [
+      "--json"
+     ],
+     "secondary_opts": [],
+     "is_flag": true,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "boolean",
+     "choices": null,
+     "default": false,
+     "help": "Machine-readable JSON output"
+    }
+   ]
+  },
+  {
+   "path": [
+    "pair"
+   ],
+   "name": "pair",
+   "help": "Create a one-time pairing code for a phone.",
+   "about": "Create a one-time pairing code for a phone.\n\n\b\nThe phone exchanges the code once for its own device token:\n    POST /api/pair {\"code\": \"ABCD-EFGH\", \"label\": \"phone\"}\nThe token is returned once, stored hashed by the engine, and can be revoked\nwith `xpst devices --revoke <device_id>`.",
+   "params": [
+    {
+     "name": "label",
+     "kind": "option",
+     "opts": [
+      "--label"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "phone",
+     "help": "Label recorded on the device this code pairs"
+    },
+    {
+     "name": "ttl_s",
+     "kind": "option",
+     "opts": [
+      "--ttl"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": 600,
+     "help": "Seconds the code stays valid"
+    },
+    {
+     "name": "code",
+     "kind": "option",
+     "opts": [
+      "--code"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": null,
+     "help": "Use this fixed 8-character code instead of a random one"
+    },
+    {
+     "name": "host",
+     "kind": "option",
+     "opts": [
+      "--host"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "127.0.0.1",
+     "help": "Engine host to print in the pairing URL"
+    },
+    {
+     "name": "port",
+     "kind": "option",
+     "opts": [
+      "--port",
+      "-p"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "integer",
+     "choices": null,
+     "default": 8080,
+     "help": "Engine port to print in the pairing URL"
     },
     {
      "name": "as_json",
@@ -4630,7 +4787,7 @@
    ],
    "name": "ui",
    "help": "Launch the local web UI (dashboard server + default browser)",
-   "about": "Launch the local web UI (dashboard server + default browser)\n\nStarts the xPST dashboard API server on 127.0.0.1 (loopback only) and\nopens the default browser to the UI once the server is accepting\nconnections. Pass --no-browser for server/agent mode: the server stays\nup until SIGINT/SIGTERM (graceful shutdown) and a readiness line with\nthe UI URL and PID is printed for scripts/MCP to parse.",
+   "about": "Launch the local web UI (dashboard server + default browser)\n\nStarts the xPST dashboard API server (loopback by default) and opens the\ndefault browser to the UI once the server is accepting connections. Pass\n--no-browser for server/agent mode: the server stays up until SIGINT/SIGTERM\n(graceful shutdown) and a readiness line with the UI URL and PID is printed\nfor scripts/MCP to parse.\n\nFor a phone, bind a reachable address (``--host 0.0.0.0``) and run\n``xpst pair`` \u2014 a non-loopback bind requires a credential for reads as well\nas writes.",
    "params": [
     {
      "name": "port",
@@ -4649,6 +4806,23 @@
      "choices": null,
      "default": 8080,
      "help": "UI server HTTP port (default: 8080)"
+    },
+    {
+     "name": "host",
+     "kind": "option",
+     "opts": [
+      "--host"
+     ],
+     "secondary_opts": [],
+     "is_flag": false,
+     "multiple": false,
+     "required": false,
+     "nargs": 1,
+     "metavar": null,
+     "type": "text",
+     "choices": null,
+     "default": "127.0.0.1",
+     "help": "Bind address (default: 127.0.0.1). Use 0.0.0.0 or a tailnet address to reach the UI from a phone; reads then require a credential."
     },
     {
      "name": "no_browser",

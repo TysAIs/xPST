@@ -48,7 +48,7 @@ xPST includes integrations for **seven platforms** — YouTube, Instagram, X/Twi
 
 It runs three ways:
 - **Desktop shell** — one Tauri 2 app (a native window over the local dashboard)
-- **CLI** — 48 top-level commands (75 including subcommands) covering the entire workflow
+- **CLI** — 50 top-level commands (77 including subcommands) covering the entire workflow
 - **MCP server** — 42 tools so AI agents can drive the entire product
 
 No subscriptions, no cloud servers, no vendor lock-in. Your content and credentials never leave your machine.
@@ -99,7 +99,7 @@ secret appears in the tree or in a built artifact. See
 
 ### Three Drivable Surfaces
 - **Desktop shell** — Tauri 2 wrapper around the local dashboard: one native app, built from `src-tauri/` plus the Python engine sidecar. Platform installers (`.dmg`, NSIS `.exe`/`.msi`, `.deb`/`.AppImage`) come from `.github/workflows/tauri-release.yml`
-- **CLI** — 48 Click-based commands (75 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
+- **CLI** — 50 Click-based commands (77 including subcommands) with `--json` output, `--dry-run` mode, and meaningful exit codes
 - **MCP server** — 42 tools (36 `xpst_*` + 2 `messenger_*` + 4 `kb_*`) for AI agent integration
 
 #### Surface counts
@@ -110,9 +110,9 @@ These numbers are generated from the shipped code, not maintained by hand. `pyth
 | Surface | Count | Measured from |
 |---------|-------|---------------|
 | MCP tools | **42** | `tools/list` over a real stdio handshake with `xpst mcp start` |
-| CLI top-level commands | **48** | `xpst.cli.main.commands` |
-| CLI commands including subcommands | **75** | recursive walk of the Click command tree |
-| HTTP routes (dashboard app) | **48** | FastAPI route table (44 xPST routes + 4 framework docs routes) |
+| CLI top-level commands | **50** | `xpst.cli.main.commands` |
+| CLI commands including subcommands | **77** | recursive walk of the Click command tree |
+| HTTP routes (dashboard app) | **58** | FastAPI route table (54 xPST routes + 4 framework docs routes) |
 | Supported providers | **9** | `xpst.provider_truth.SUPPORTED_PROVIDERS` |
 
 Regenerate and verify with `python scripts/generate_counts.py --write` / `--check`; the check runs in CI, so these numbers cannot drift silently.
@@ -282,7 +282,7 @@ See `Dockerfile` and `docker-compose.yml` for details.
 
 ## CLI Reference
 
-xPST provides 48 top-level commands (75 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
+xPST provides 50 top-level commands (77 including subcommands). Run `xpst --help` for the full list. Most commands accept `--json` for machine-readable output, and the CLI auto-enables JSON mode when stdout is piped (non-TTY).
 
 ### Setup & Accounts
 

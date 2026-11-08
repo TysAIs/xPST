@@ -53,6 +53,10 @@ POSTED = "posted"
 SKIPPED_UNCONNECTED = "skipped_unconnected"
 UNSUPPORTED_FORMAT = "unsupported_format"
 REFUSED_BY_COMMUNITY = "refused_by_community"
+#: The destination is cooling down (rate limit) or outside the anti-bot window:
+#: nothing was uploaded *yet* and nothing failed. M0 requires this to be reported
+#: as deferred with its window, never as a failure.
+DEFERRED = "deferred"
 FAILED = "failed"
 
 DESTINATION_STATES: tuple[str, ...] = (
@@ -60,11 +64,12 @@ DESTINATION_STATES: tuple[str, ...] = (
     SKIPPED_UNCONNECTED,
     UNSUPPORTED_FORMAT,
     REFUSED_BY_COMMUNITY,
+    DEFERRED,
     FAILED,
 )
 
 #: States that mean "nothing was attempted here, and that is not an error".
-NEUTRAL_STATES: frozenset[str] = frozenset({SKIPPED_UNCONNECTED})
+NEUTRAL_STATES: frozenset[str] = frozenset({SKIPPED_UNCONNECTED, DEFERRED})
 #: States where the destination was evaluated and refused the content.
 REFUSAL_STATES: frozenset[str] = frozenset({UNSUPPORTED_FORMAT, REFUSED_BY_COMMUNITY})
 #: A real upload failure.
@@ -78,6 +83,7 @@ class DestinationState(str, Enum):
     SKIPPED_UNCONNECTED = SKIPPED_UNCONNECTED
     UNSUPPORTED_FORMAT = UNSUPPORTED_FORMAT
     REFUSED_BY_COMMUNITY = REFUSED_BY_COMMUNITY
+    DEFERRED = DEFERRED
     FAILED = FAILED
 
 
@@ -662,6 +668,11 @@ def classify_upload_result(platform: str, upload: Any) -> dict[str, Any]:
         state = POSTED
     elif declared in DESTINATION_STATES:
         state = declared
+    elif metadata.get("deferred"):
+        # Scheduling, not failure: the anti-bot window or a rate-limit cooldown
+        # will post this later. The window travels with the row so a surface can
+        # say "deferred until …" instead of inventing a failure.
+        state = DEFERRED
     elif metadata.get("skipped_unconnected"):
         state = SKIPPED_UNCONNECTED
     elif metadata.get("unsupported") or metadata.get("unsupported_format"):
@@ -683,6 +694,9 @@ def classify_upload_result(platform: str, upload: Any) -> dict[str, Any]:
             error or str(metadata.get("reason") or "Upload failed")
         ),
         "is_failure": state in FAILURE_STATES,
+        # Only meaningful for a deferred destination: the platform's own window,
+        # so a phone can say "deferred until …" instead of "failed".
+        "resume_after": str(metadata.get("resume_after") or "") or None if state == DEFERRED else None,
         "connect_command": (
             CONNECT_COMMAND.format(platform=platform)
             if state == SKIPPED_UNCONNECTED
@@ -704,8 +718,9 @@ def outcome_state(states: Mapping[str, Mapping[str, Any]] | None) -> str:
 
     Returns ``posted`` (at least one published, none failed), ``partial``
     (something published and something failed/refused), ``skipped`` (only
-    unconnected destinations — NOT a failure), ``refused`` (evaluated and
-    refused, nothing attempted) or ``failed``.
+    unconnected destinations — NOT a failure), ``deferred`` (only destinations
+    waiting out a cooldown/window — also NOT a failure), ``refused`` (evaluated
+    and refused, nothing attempted) or ``failed``.
     """
     values = [str(item.get("state")) for item in (states or {}).values()]
     if not values:
@@ -713,9 +728,12 @@ def outcome_state(states: Mapping[str, Mapping[str, Any]] | None) -> str:
     published = values.count(POSTED)
     failed = sum(1 for value in values if value in FAILURE_STATES)
     refused = sum(1 for value in values if value in REFUSAL_STATES)
-    skipped = sum(1 for value in values if value in NEUTRAL_STATES)
+    deferred = values.count(DEFERRED)
+    skipped = sum(1 for value in values if value == SKIPPED_UNCONNECTED)
     if published:
         return POSTED if not (failed or refused) else "partial"
+    if deferred == len(values):
+        return DEFERRED
     if skipped == len(values):
         return "skipped"
     if refused and not failed:
@@ -797,6 +815,7 @@ def text_refusal(platform: str, caption: str) -> str | None:
 __all__ = [
     "CONNECT_COMMAND",
     "DESTINATION_STATES",
+    "DEFERRED",
     "DestinationState",
     "FAILED",
     "FAILURE_STATES",
