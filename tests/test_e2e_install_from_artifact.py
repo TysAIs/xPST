@@ -47,6 +47,9 @@ from scripts.e2e_install_from_artifact import (
     load_first_checksum_source,
     local_urls_from_log,
     main,
+    observe_engine_sidecar,
+    observe_packaged_ui,
+    packaged_ui_sample,
     parse_checksums,
     platform_key,
     product_executable,
@@ -132,6 +135,48 @@ with socketserver.TCPServer(("127.0.0.1", 0), Handler) as httpd:
     httpd.serve_forever()
 '''
 
+STALE_FIRST_UI_SOURCE = '''#!/usr/bin/env python3
+"""Stand-in for the packaged app during a shell re-exec.
+
+It serves a non-HTML root on the first request (the instant the harness used to
+sample), then the packaged HTML. This is the macOS 42508682981 shape: healthy
+/health, a root that answers 200, and the packaged index a moment later.
+"""
+import http.server
+import socketserver
+
+HTML = b"<html><head><title>xPST Dashboard</title></head><body>xPST</body></html>"
+HEALTH = b'{"status": "ok", "engine": "xPST-fake"}'
+ROOT_REQUESTS = [0]
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.startswith("/health"):
+            body, content_type = HEALTH, "application/json"
+        else:
+            ROOT_REQUESTS[0] += 1
+            if ROOT_REQUESTS[0] == 1:
+                body = b'{"detail": "UI not mounted yet"}'
+            else:
+                body = HTML
+            content_type = "text/html"
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        return
+
+
+with socketserver.TCPServer(("127.0.0.1", 0), Handler) as httpd:
+    print("engine port: %d" % httpd.server_address[1], flush=True)
+    print("http://127.0.0.1:%d/" % httpd.server_address[1], flush=True)
+    httpd.serve_forever()
+'''
+
 TAURI_APP_SOURCE = '''#!/usr/bin/env python3
 """Stand-in for the Tauri shell: it only spawns its engine sidecar."""
 import pathlib
@@ -178,6 +223,25 @@ def build_fake_published_artifact(tmp_path: Path, *, name: str = "xPST-macos-arm
     payload = tmp_path / "payload"
     app = payload / "xPST.app"
     _write_script(app / "Contents" / "MacOS" / "xPST", FAKE_APP_SOURCE)
+    _bundle_info_plist(app)
+    artifact = tmp_path / name
+    _zip_dir(payload, artifact)
+    checksums = tmp_path / "macos-SHA256SUMS"
+    checksums.write_text(f"{_sha256(artifact)}  {artifact.name}\n", encoding="utf-8")
+    return artifact, checksums
+
+
+def build_fake_stale_ui_published_artifact(
+    tmp_path: Path, *, name: str = "xPST-macos-arm64.zip"
+) -> tuple[Path, Path]:
+    """An artifact whose first root response is not the packaged HTML.
+
+    Pins the 42508682981 shape end to end: the harness must retry the root and
+    pass, recording the attempt count, instead of failing on the first sample.
+    """
+    payload = tmp_path / "payload-stale"
+    app = payload / "xPST.app"
+    _write_script(app / "Contents" / "MacOS" / "xPST", STALE_FIRST_UI_SOURCE)
     _bundle_info_plist(app)
     artifact = tmp_path / name
     _zip_dir(payload, artifact)
@@ -537,8 +601,36 @@ def test_harness_passes_against_a_synthetic_tauri_published_artifact(tmp_path, c
     assert summary["checks"]["uninstall"] is True
     assert summary["evidence"]["http_status"] == 200
     assert summary["evidence"]["ui"]["title"] == "xPST"
+    assert summary["evidence"]["ui"]["attempts"] >= 1
     assert summary["evidence"]["running_process"]["engine_sidecar_processes"]
+    assert summary["evidence"]["running_process"]["engine_sidecar_attempts"] >= 1
     assert summary["evidence"]["engine_processes_after_shutdown"] == []
+
+
+@pytest.mark.skipif(os.name == "nt", reason="process-group teardown semantics differ on Windows")
+def test_harness_retries_a_stale_first_ui_sample_and_records_the_attempts(tmp_path, capsys):
+    """A first root fetch that misses must not fail the run (42508682981 shape)."""
+    artifact, checksums = build_fake_stale_ui_published_artifact(tmp_path)
+    evidence = tmp_path / "evidence.json"
+
+    code = main(
+        [
+            str(artifact),
+            "--checksums",
+            str(checksums),
+            "--no-require-visible-window",
+            "--evidence-out",
+            str(evidence),
+        ]
+    )
+    capsys.readouterr()
+    summary = json.loads(evidence.read_text(encoding="utf-8"))
+
+    assert code == 0, summary["failures"]
+    assert summary["checks"]["packaged_ui_served"] is True
+    assert summary["evidence"]["ui"]["attempts"] == 2
+    assert summary["evidence"]["ui"]["title"] == "xPST Dashboard"
+    assert summary["evidence"]["ui"]["retry_window_seconds"] > 0
 
 
 @pytest.mark.skipif(os.name == "nt", reason="process-group teardown semantics differ on Windows")
@@ -657,6 +749,157 @@ def test_linux_proc_cmdlines_is_empty_off_linux():
 
     if not sys.platform.startswith("linux"):
         assert linux_proc_cmdlines() == []
+
+
+# ---------------------------------------------------------------------------
+# The UI and sidecar assertions are bounded-retry, not single-sample.
+#
+# Run 42508682981's macOS leg failed with a healthy engine (/health 200 and
+# "GET / 200 OK" in the launch log) because one root fetch and one ps sample
+# were taken in the instant the shell was re-exec'ing. The identical commit
+# passed on re-run. These tests pin both halves of the fix: a missed sample must
+# be retried (and the attempt count recorded), the strict HTML test must not be
+# weakened, and exhaustion of the documented window must still fail.
+# ---------------------------------------------------------------------------
+
+WAITING_ROOT = b'{"detail": "UI not mounted yet"}'
+PACKAGED_ROOT = b"<html><head><title>xPST Dashboard</title></head><body>xPST</body></html>"
+
+
+def _root_server(bodies: list[bytes]):
+    """Serve successive root bodies (the last one repeats), loopback only."""
+    import http.server
+    import threading
+
+    state = {"index": 0}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 - stdlib handler name
+            index = min(state["index"], len(bodies) - 1)
+            state["index"] += 1
+            body = bodies[index]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}/"
+
+
+def test_packaged_ui_observation_retries_a_stale_root_and_records_attempts():
+    """A first fetch that misses followed by a packaged-HTML fetch must pass."""
+    server, url = _root_server([WAITING_ROOT, PACKAGED_ROOT])
+    try:
+        observation = observe_packaged_ui(url, window_seconds=5.0, poll_interval=0.01)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert observation["ok"] is True
+    assert observation["attempts"] == 2
+    assert observation["attempts_exhausted"] is False
+    assert observation["title"] == "xPST Dashboard"
+    assert observation["retry_window_seconds"] == 5.0
+
+
+def test_packaged_ui_observation_fails_only_once_its_window_is_exhausted():
+    server, url = _root_server([WAITING_ROOT])
+    try:
+        observation = observe_packaged_ui(url, window_seconds=0.4, poll_interval=0.05)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert observation["ok"] is False
+    assert observation["attempts"] >= 2
+    assert observation["attempts_exhausted"] is True
+    assert observation["status"] == 200
+    assert "retried" in observation["reason"]
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_ok"),
+    [
+        (PACKAGED_ROOT, True),
+        (b"<html><body>no product marker here</body></html>", False),
+        (b"plain text, not html", False),
+        (WAITING_ROOT, False),
+    ],
+)
+def test_packaged_html_assertion_stays_strict(monkeypatch, body, expected_ok):
+    """Retrying must not loosen the check: 200 + <html + an xPST marker."""
+    monkeypatch.setattr(
+        "scripts.e2e_install_from_artifact.http_get",
+        lambda url, timeout=2.0: (200, body, None),
+    )
+
+    assert packaged_ui_sample("http://127.0.0.1:1/")["ok"] is expected_ok
+
+
+def test_sidecar_observation_retries_a_ps_that_missed_the_sidecar():
+    """A first ps that misses followed by one that sees the sidecar must pass."""
+    engine = {
+        "pid": "4242",
+        "command": "/tmp/xpst-stranger-install-a/install/xPST.app/Contents/"
+        "Resources/binaries/engine/xpst-engine",
+    }
+    calls = {"count": 0}
+
+    def enumerator():
+        calls["count"] += 1
+        return [] if calls["count"] == 1 else [dict(engine)]
+
+    observation = observe_engine_sidecar(
+        window_seconds=5.0, poll_interval=0.01, enumerate_processes=enumerator
+    )
+
+    assert observation["observed"] is True
+    assert observation["attempts"] == 2
+    assert observation["attempts_exhausted"] is False
+    assert observation["processes"] == [engine]
+
+
+def test_sidecar_observation_fails_only_after_its_window_is_exhausted():
+    ticks = {"now": 0.0}
+
+    def clock():
+        ticks["now"] += 1.0
+        return ticks["now"]
+
+    observation = observe_engine_sidecar(
+        window_seconds=3.0,
+        poll_interval=0.0,
+        enumerate_processes=lambda: [],
+        clock=clock,
+        sleep=lambda _seconds: None,
+    )
+
+    assert observation["observed"] is False
+    assert observation["attempts"] >= 2
+    assert observation["attempts_exhausted"] is True
+    assert observation["processes"] == []
+
+
+def test_sidecar_observation_ignores_a_foreign_engine_that_was_already_running():
+    foreign = {"pid": "111", "command": "/opt/other/install/xpst-engine"}
+    ours = {"pid": "222", "command": "/tmp/install/xPST.app/Contents/binaries/engine/xpst-engine"}
+
+    observation = observe_engine_sidecar(
+        exclude_pids={"111"},
+        window_seconds=1.0,
+        poll_interval=0.0,
+        enumerate_processes=lambda: [dict(foreign), dict(ours)],
+        sleep=lambda _seconds: None,
+    )
+
+    assert observation["attempts"] == 1
+    assert observation["processes"] == [ours]
 
 
 # ---------------------------------------------------------------------------
