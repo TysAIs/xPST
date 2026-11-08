@@ -136,7 +136,10 @@ def test_hook_fails_the_build_when_a_ui_build_is_required(tmp_path, monkeypatch)
 
 def test_sdist_packaging_carries_the_ui_build(tmp_path, monkeypatch):
     """`python -m build` builds the wheel FROM the sdist, so the sdist needs ui/dist."""
-    import tomllib
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python < 3.11 (the project pins tomli there)
+        import tomli as tomllib
 
     with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
         project = tomllib.load(handle)
