@@ -50,6 +50,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Where a wheel-installed bundle lives (packaging/hatch_ui.py embeds ui/dist
+#: here). A source tree never has this directory; tests monkeypatch it.
+_PACKAGED_UI_DIR = Path(__file__).resolve().parent / "webui"
+
 # POST /oauth/callback body cap (~8 KiB): the route is auth-exempt (public)
 # and only ever receives one tiny JSON object from the Tauri shell.
 _OAUTH_CALLBACK_MAX_BODY = 8 * 1024
@@ -82,6 +86,7 @@ _DASHBOARD_INDEX_HTML = """<!doctype html>
         .btn { background: #343437; color: #f5f5f7; }
         .btn:hover { background: #3d3d41; }
         .subtitle { color: #a1a1a6; }
+        .note { color: #a1a1a6; }
         footer { color: #86868b; }
     }
     .card {
@@ -96,6 +101,14 @@ _DASHBOARD_INDEX_HTML = """<!doctype html>
     h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
     .subtitle { font-size: 14px; color: #6e6e73; margin: 6px 0 24px; }
     .links { display: flex; flex-direction: column; gap: 12px; }
+    .note {
+        margin-top: 20px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #6e6e73;
+        text-align: left;
+    }
+    .note code { font-size: 11px; }
     .btn {
         display: block;
         padding: 14px 20px;
@@ -123,6 +136,10 @@ _DASHBOARD_INDEX_HTML = """<!doctype html>
     <a class="btn" href="/bio">Link in Bio</a>
     <a class="btn" href="/bio/edit">Edit Link in Bio</a>
   </div>
+  <p class="note">Web UI bundle not found: this engine serves the JSON API only, so the
+  phone screen (<code>#/phone</code>) is unavailable. The published wheel includes the
+  UI; from a source checkout run <code>cd ui &amp;&amp; npm install &amp;&amp; npm run build</code>,
+  or point <code>XPST_UI_DIST</code> at a build directory.</p>
   <footer>Powered by xPST</footer>
 </main>
 </body>
@@ -176,12 +193,19 @@ def _auth_config_unreadable(config_dir: str) -> bool:
 
 
 def _ui_dist_dir() -> Path | None:
-    """Locate the built web UI (``ui/dist``), if it has been built.
+    """Locate the built web UI, if one is available.
 
-    Looks relative to this module (repo checkout: ``<repo>/ui/dist``) and
-    honours the ``XPST_UI_DIST`` override for packaged installs. Returns
-    ``None`` when no build exists — callers must fall back to the string
-    index so the Tauri shell still boots.
+    Search order:
+
+    1. ``XPST_UI_DIST`` — an explicit build directory (packaged installs, a
+       checkout of another build, the Tauri shell's bundled ``ui`` resource).
+    2. :data:`_PACKAGED_UI_DIR` — a Vite build embedded in the wheel by
+       ``packaging/hatch_ui.py``. This is what makes a plain ``pip install``
+       serve the real UI (including ``#/phone``) instead of the placeholder.
+    3. ``<repo>/ui/dist`` — a source checkout that ran ``npm run build``.
+
+    Returns ``None`` when no build exists; callers must fall back to the string
+    index (and say so) rather than pretending the app shell is there.
     """
     import os
 
@@ -191,11 +215,22 @@ def _ui_dist_dir() -> Path | None:
         if (candidate / "index.html").is_file():
             return candidate
         return None
-    repo_root = Path(__file__).resolve().parents[3]
-    candidate = repo_root / "ui" / "dist"
-    if (candidate / "index.html").is_file():
-        return candidate
+    for candidate in (
+        _PACKAGED_UI_DIR,  # wheel install: the bundle ships inside the package
+        Path(__file__).resolve().parents[3] / "ui" / "dist",  # source checkout with a build
+    ):
+        if (candidate / "index.html").is_file():
+            return candidate
     return None
+
+
+#: Stated on the placeholder page and by ``xpst ui`` when no bundle exists.
+UI_BUILD_HINT = (
+    "the web UI bundle was not found, so this server serves the placeholder page "
+    "and the JSON API only — #/phone is unreachable. The published wheel includes "
+    "the UI; from a source checkout run `cd ui && npm install && npm run build`, "
+    "or point XPST_UI_DIST at a build directory."
+)
 
 
 def _create_app(
