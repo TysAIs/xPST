@@ -19,13 +19,17 @@ Design rules (mirrored by tests/test_instagram_account_type.py):
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-GRAPH_API_BASE = os.environ.get("XPST_GRAPH_API_BASE", "https://graph.facebook.com/v21.0")
+from xpst.utils.graph_api import graph_api_base
+
+#: Kept as a module constant for callers/tests that import it; the base is
+#: resolved through the shared Graph API pin, which honours
+#: ``XPST_GRAPH_API_BASE`` at import time here.
+GRAPH_API_BASE = graph_api_base()
 
 #: The exact in-app path to switch a personal account to a Creator account.
 #: Kept in one place so the CLI, the UI guidance string, and

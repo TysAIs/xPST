@@ -69,7 +69,7 @@ In Development mode, only admins/testers of the app can message the page — whi
 2. Copy the token. It starts with `EAAG…` and is long-lived once generated for a page you administer.
 
 > You can also derive a page token from a user token via the Graph API:
-> `GET /v22.0/me/accounts?access_token={USER_TOKEN}` → returns `id`, `access_token`, and `tasks` (must include `MESSAGING`).
+> `GET /v26.0/me/accounts?access_token={USER_TOKEN}` → returns `id`, `access_token`, and `tasks` (must include `MESSAGING`).
 
 ---
 
@@ -181,7 +181,7 @@ You can also manage rules over MCP with `messenger_set_rules`, or send a one-off
 # Auth status (shows a Messenger row)
 xpst auth status
 
-# Full health check (GET /v22.0/me with the page token)
+# Full health check (GET /v26.0/me with the page token)
 xpst health
 
 # Send a test reply to a PSID (from a webhook event)
