@@ -173,6 +173,20 @@ platforms (dispatch 42404147361): linux via `apt-get install` of the `.deb` and
 sidecar, a real read-back command line, and a clean uninstall. A red run from now
 on is a real finding about the published artifact.
 
+**Measured with the four-leg workflow (2026-11-08 run 42508682981, `tag=v1.2.1`):
+all four legs green.** `linux-appimage` installed `libfuse2t64`/`libgtk-3-0t64`/
+`libwebkit2gtk-4.1-0`/`libfontconfig1`, booted `xPST_1.2.1_amd64.AppImage` under
+`xvfb-run` with a checksum verified against the release's own `SHA256SUMS`, and
+recorded `/health` 200, the packaged UI served (`xPST Dashboard`), one live
+`xpst-engine` sidecar, a clean uninstall and a removed work directory; `linux-deb`
+stayed green on the primary install path. That dispatch also exposed a real
+teardown defect on the portable path: the AppImage runtime and WebKit helpers
+outlive the launched process group, so the throwaway directory could not be
+deleted and the run was reported red although the app had booted healthy. The
+harness now stops processes whose command line points into the run's own
+throwaway directory (recorded as `stray_processes_stopped`) and retries the
+delete before reporting a teardown failure.
+
 ### Stack detection
 
 The stack detector reports `tauri` only when both
