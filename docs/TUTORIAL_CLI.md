@@ -2,7 +2,7 @@
 
 > **In-depth tutorial for every xPST CLI command with examples.**
 >
- xPST provides 48 top-level commands covering the entire cross-posting workflow.
+ xPST provides 50 top-level commands covering the entire cross-posting workflow.
 > This guide explains each one with real examples, flags, and expected output.
 
 ---
@@ -1337,6 +1337,43 @@ xpst-mcp
 ```
 
 See [TUTORIAL_MCP.md](TUTORIAL_MCP.md) for the full MCP walkthrough.
+
+---
+
+## Phone and device pairing
+
+A phone reaches the same engine over the network. Two commands do the whole job:
+`xpst ui --host <address>` binds where the phone can reach it, and `xpst pair` issues
+the one-time code that gives that phone its own credential.
+
+```bash
+# Bind an address the phone can reach (a trusted LAN, tailnet or tunnel).
+xpst ui --host 0.0.0.0 --port 8080 --no-browser
+
+# On the engine machine: issue a one-time, single-use pairing code.
+xpst pair --label phone --host <address the phone will use> --port 8080
+```
+
+Enter the code on the `#/phone` screen. The phone exchanges it at `POST /api/pair` for
+a per-device token (returned once, stored hashed on the engine) and keeps it. A
+non-loopback bind requires a credential for reads on `/api` as well as writes; the
+static app shell stays public so an unpaired phone can reach the pairing screen.
+
+```bash
+# List paired devices (label, created, last seen, revoked) — never their tokens.
+xpst devices
+
+# Cut one device off immediately.
+xpst devices --revoke dev_1a2b3c4d5e6f
+```
+
+Both commands accept `--json`. `xpst pair --ttl 300` shortens the code lifetime and
+`xpst pair --code ABCD2345` uses a fixed code when you need to read it to someone.
+
+The phone flow is compose → destinations → preview → confirm → publish → readback. The
+preview is local (`network_calls: false`), a dry run uploads nothing, and a destination
+in a rate-limit cooldown is reported as **deferred with its window** rather than failed —
+the plan stays retryable and the retry publishes only what was deferred.
 
 ---
 
