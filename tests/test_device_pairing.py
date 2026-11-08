@@ -10,6 +10,7 @@ authenticates writes, and revoking it takes effect on the next request.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,11 @@ def test_revoking_a_device_is_immediate_and_listed(tmp_path: Path) -> None:
     assert "token_sha256" not in listed
 
 
+@pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX mode bits; Windows reports 0o666 and carries the restriction in the "
+    "ACLs of the user-scoped AppData directory",
+)
 def test_the_devices_file_is_owner_only(tmp_path: Path) -> None:
     dev.create_pairing_code(str(tmp_path))
     mode = (tmp_path / dev.DEVICES_FILENAME).stat().st_mode & 0o777
