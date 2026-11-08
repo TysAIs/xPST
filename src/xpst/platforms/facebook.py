@@ -45,6 +45,15 @@ from xpst.platforms.base import (
     UploadResult,
 )
 from xpst.providers import AuthMode, ProviderCapability, ProviderManifest, ProviderRole
+from xpst.utils.graph_api import (
+    GRAPH_API_HOST,
+    GRAPH_API_VERSION,
+    GRAPH_LOGIN_HOST,
+    GRAPH_VIDEO_API_HOST,
+    graph_api_url,
+    graph_api_version,
+    graph_video_api_url,
+)
 from xpst.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -52,11 +61,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Graph API version pin (matches the Instagram connector).
-GRAPH_API_VERSION = "v21.0"
-GRAPH_API_BASE = "https://graph.facebook.com"
-GRAPH_VIDEO_API_BASE = "https://graph-video.facebook.com"
-OAUTH_DIALOG_URL = "https://www.facebook.com/{version}/dialog/oauth"
+# The Graph API version pin lives in ``xpst.utils.graph_api``, never as a
+# literal here (Meta removes a version ~2 years after release).
+GRAPH_API_BASE = GRAPH_API_HOST
+GRAPH_VIDEO_API_BASE = GRAPH_VIDEO_API_HOST
+OAUTH_DIALOG_URL = GRAPH_LOGIN_HOST + "/{version}/dialog/oauth"
 
 #: Scopes Facebook Login for Business must grant for Page publishing. The login
 #: *configuration* saved in the app dashboard may carry them instead; these are
@@ -240,13 +249,13 @@ class FacebookGraphClient:
         self,
         access_token: str = "",
         *,
-        version: str = GRAPH_API_VERSION,
+        version: str = "",
         client: httpx.Client | None = None,
         timeout: float = 60.0,
         proxy: str | None = None,
     ) -> None:
         self.access_token = access_token
-        self.version = version
+        self.version = version or graph_api_version()
         self.timeout = timeout
         self._owns_client = client is None
         self._client = client if client is not None else _http_client(proxy, timeout)
@@ -268,8 +277,9 @@ class FacebookGraphClient:
 
     def url(self, path: str, *, video: bool = False) -> str:
         """Build an absolute Graph API URL for ``path``."""
-        base = GRAPH_VIDEO_API_BASE if video else GRAPH_API_BASE
-        return f"{base}/{self.version}/{path.lstrip('/')}"
+        if video:
+            return graph_video_api_url(path, version=self.version)
+        return graph_api_url(path, version=self.version)
 
     @staticmethod
     def error_message(response: httpx.Response) -> str:
@@ -352,7 +362,7 @@ class FacebookGraphClient:
         state: str | None = None,
         scopes: Iterable[str] = PAGE_LOGIN_SCOPES,
         config_id: str | None = None,
-        version: str = GRAPH_API_VERSION,
+        version: str = "",
     ) -> str:
         """Build the Facebook Login for Business authorization URL.
 
@@ -381,7 +391,10 @@ class FacebookGraphClient:
             params["scope"] = ",".join(scopes)
         if state:
             params["state"] = state
-        return f"{OAUTH_DIALOG_URL.format(version=version)}?{urlencode(params, safe=',')}"
+        return (
+            f"{OAUTH_DIALOG_URL.format(version=version or graph_api_version())}"
+            f"?{urlencode(params, safe=',')}"
+        )
 
     def exchange_code_for_user_token(
         self,
