@@ -88,8 +88,10 @@ jobs:
       # uv.lock is generated with this exact uv version. A different uv can
       # rewrite the lockfile format or re-resolve transitively, which makes
       # `uv lock --check` fail for reasons unrelated to the change under test.
-      # Bumping this pin means regenerating uv.lock in the same PR.
-      - uses: astral-sh/setup-uv@v6
+      # Bumping this `version` pin means regenerating uv.lock in the same PR.
+      # The action major (v7 = node24) is independent of that pin and does not
+      # change which uv gets installed.
+      - uses: astral-sh/setup-uv@v7
         with:
           version: "0.13.4"
           python-version: "3.13"
