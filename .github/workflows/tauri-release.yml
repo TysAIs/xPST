@@ -86,7 +86,10 @@ jobs:
             bundles: "deb,appimage"
             engine_binary: xpst-engine
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
+    # Intel macOS runners are markedly slower than arm64 for the same work
+    # (PyInstaller sidecar + cargo build + three cold boots). The ceiling is a
+    # guard against a hung step, not a target.
+    timeout-minutes: 180
     # Signing credentials live at job level so a step's `if:` can test them:
     # an empty value is not a credential, and Tauri must never see a
     # set-but-empty APPLE_* variable (it treats it as a real identity).
@@ -170,10 +173,44 @@ jobs:
           command -v patchelf >/dev/null || { echo "::error::patchelf missing"; exit 1; }
           command -v xvfb-run >/dev/null || { echo "::error::xvfb missing"; exit 1; }
 
+      - name: Install macOS build tooling
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          # lancedb ships prebuilt wheels for arm64 macOS but not for x86_64, so
+          # the Intel lane's `pip install -e ".[full]"` builds it from source and
+          # its Rust build script needs protoc ("Could not find `protoc`").
+          # Installing it on both macOS legs keeps the lanes identical.
+          if ! command -v protoc >/dev/null 2>&1; then
+            brew install protobuf
+          fi
+          protoc --version
+
       - name: Install Python engine deps (sidecar build)
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install -e ".[full]" pyinstaller
+          # `knowledge` pulls lancedb, which has no x86_64 macOS wheel: pip builds
+          # it from source, and that Rust build alone outlived this lane's whole
+          # timeout on macos-15-intel (measured: still compiling 90 minutes into
+          # the pip step). The engine is written to degrade instead — the KB
+          # backend reports "lancedb is not installed" and `xpst kb doctor`
+          # names the missing extra — so the Intel build ships without that
+          # optional extra instead of shipping no Intel build at all.
+          EXTRAS="full"
+          if [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
+            EXTRAS="mcp,dashboard,windows"
+            {
+              echo "### Python extras (${{ matrix.target }})"
+              echo
+              echo "Installed \`[$EXTRAS]\` rather than \`[full]\`: the \`knowledge\`"
+              echo "extra depends on lancedb, which has no x86_64 macOS wheel and does"
+              echo "not finish a source build inside this lane's timeout. The knowledge"
+              echo "base reports \`lancedb is not installed\` on this architecture."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "installing extras: $EXTRAS"
+          python -m pip install -e ".[$EXTRAS]" pyinstaller
 
       - name: Build engine sidecar (PyInstaller onedir)
         run: |
@@ -847,11 +884,22 @@ jobs:
           find updater-assets -type f \
             \( -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \
                -o -name '*.nsis.zip' -o -name '*.nsis.zip.sig' \
-               -o -name '*.AppImage' -o -name '*.AppImage.tar.gz' \
-               -o -name '*.AppImage.tar.gz.sig' -o -name '*setup.exe' \
+               -o -name '*.AppImage' -o -name '*.AppImage.sig' \
+               -o -name '*.AppImage.tar.gz' -o -name '*.AppImage.tar.gz.sig' \
+               -o -name '*setup.exe' -o -name '*.exe.sig' \
                -o -name '*.msi' -o -name '*.msi.sig' \) \
             -exec cp {} updater-flat/ \;
           find updater-flat -type f -print | sort
+          # The Windows NSIS installer and the Linux AppImage ARE the updater
+          # payloads (`createUpdaterArtifacts: true` reuses the installer), and
+          # their `.sig` sidecars are what makes a platform publishable. This
+          # list previously copied the installers but not `.exe.sig` /
+          # `.AppImage.sig`, so windows-x86_64 and linux-x86_64 were always
+          # reported "unsigned, sidecar missing" while the signatures were
+          # sitting in the same artifact (dryrun-tauri-4: 2 of 4 platforms).
+          if [ -z "$(find updater-flat -name '*.sig' -print -quit)" ]; then
+            echo "::warning::no signature sidecar reached updater-flat; no platform can be published"
+          fi
 
       - name: Select one signed artifact per target
         id: select

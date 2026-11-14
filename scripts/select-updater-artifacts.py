@@ -165,13 +165,42 @@ def _preference_rank(platform: str, path: Path) -> int:
     return 0
 
 
+def _has_signature(path: Path) -> bool:
+    """True when the artifact has a non-empty ``.sig`` sidecar next to it."""
+    signature = _signature_for(path)
+    try:
+        return signature.is_file() and bool(signature.read_text(encoding="utf-8").strip())
+    except OSError:
+        return False
+
+
 def _prefer_updater_archives(candidates: list[Path], platform: str) -> list[Path]:
-    """Keep only the best-ranked candidate group for one platform."""
+    """Keep the best candidate group, preferring a payload that is signed.
+
+    A release can carry a signed WiX ``.msi`` and an unsigned NSIS ``.exe`` (or
+    the other way round depending on the bundler), and only the signed one can
+    be published at all. Ranking an unsigned candidate above a signed one made
+    ``windows-x86_64`` report ``unsigned`` while a perfectly good signed payload
+    sat in the same directory.
+    """
     if not candidates:
         return []
-    ranked = sorted(candidates, key=lambda path: (_preference_rank(platform, path), path.name))
-    best = _preference_rank(platform, ranked[0])
-    return [path for path in ranked if _preference_rank(platform, path) == best]
+    ranked = sorted(
+        candidates,
+        key=lambda path: (
+            0 if _has_signature(path) else 1,
+            _preference_rank(platform, path),
+            path.name,
+        ),
+    )
+    best_signedness = 0 if _has_signature(ranked[0]) else 1
+    best_rank = _preference_rank(platform, ranked[0])
+    return [
+        path
+        for path in ranked
+        if (0 if _has_signature(path) else 1) == best_signedness
+        and _preference_rank(platform, path) == best_rank
+    ]
 
 
 def _unattributable_macos_bundles(files: list[Path]) -> list[str]:

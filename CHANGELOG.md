@@ -125,6 +125,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   payloads `ambiguous`. `scripts/gen-updater-manifest.py` rejects two platform
   keys that describe different files with one `sha512`, and rejects a payload
   whose file type cannot install on that platform.
+- **The release lane stopped dropping the Windows and Linux updater signatures.**
+  `createUpdaterArtifacts: true` reuses the NSIS `.exe`, the `.msi` and the
+  Linux `.AppImage` as the updater payloads and signs each in place, but the
+  manifest job's flatten step copied the installers without `.exe.sig` /
+  `.AppImage.sig`. Both platforms were therefore reported "unsigned, sidecar
+  missing" while their signatures sat in the same build artifact, which is why
+  no Windows or Linux key ever reached `latest.json`. The selector also
+  prefers a signed payload over a better-ranked unsigned one, so a missing
+  sidecar cannot mask a usable installer.
 - **`scripts/publish-updater.sh --assets-dir` re-hashes the released bytes.**
   Every manifest URL must exist among the release assets, its `sha512` must
   match those bytes, and its signature must equal the published `.sig`; both
