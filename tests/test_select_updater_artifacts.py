@@ -203,3 +203,29 @@ def test_signed_nsis_setup_wins_over_the_signed_msi(tmp_path: Path) -> None:
 
     assert result["status"] == "ok"
     assert result["artifact"].endswith("x64-setup.exe")
+
+
+def test_a_signed_msi_beats_an_unsigned_nsis_setup(tmp_path: Path) -> None:
+    """Only the signed payload can be published; rank must not hide it.
+
+    Observed on dryrun-tauri-4: the NSIS `.exe` sidecar was absent from the
+    flattened asset directory while the MSI's was present, and the selector
+    reported windows-x86_64 "unsigned" instead of using the signed MSI.
+    """
+    _artifact(tmp_path, "xPST_1.1.0_x64-setup.exe", signature=None)
+    _artifact(tmp_path, "xPST_1.1.0_x64_en-US.msi")
+
+    result = selector.select("windows-x86_64", sorted(tmp_path.iterdir()))
+
+    assert result["status"] == "ok"
+    assert result["artifact"].endswith("x64_en-US.msi")
+
+
+def test_a_signed_appimage_is_preferred_even_when_another_is_unsigned(tmp_path: Path) -> None:
+    _artifact(tmp_path, "xPST_1.1.0_amd64.AppImage", signature=None)
+    _artifact(tmp_path, "xPST_1.1.0_amd64.AppImage.tar.gz")
+
+    result = selector.select("linux-x86_64", sorted(tmp_path.iterdir()))
+
+    assert result["status"] == "ok"
+    assert result["artifact"].endswith("AppImage.tar.gz")

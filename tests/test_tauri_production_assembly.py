@@ -191,6 +191,25 @@ def test_macos_updater_bundle_is_renamed_not_copied() -> None:
     assert "${{ matrix.updater_platform }}" in step
 
 
+def test_updater_flatten_keeps_every_signature_sidecar() -> None:
+    """The release lane's Windows and Linux payloads ARE the signed installers.
+
+    `createUpdaterArtifacts: true` reuses the NSIS `.exe`, the `.msi` and the
+    Linux `.AppImage`, and signs each in place. The flatten step copied the
+    installers but not `.exe.sig` / `.AppImage.sig`, so the manifest job saw
+    windows-x86_64 and linux-x86_64 as unsigned while their signatures were in
+    the same artifact (dryrun-tauri-4: 2 of 4 platforms publishable).
+    """
+    workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
+    step = workflow[workflow.index("Flatten the updater-relevant files") :]
+    step = step[: step.index("- name: Select one signed artifact per target")]
+
+    assert "'*.exe.sig'" in step
+    assert "'*.AppImage.sig'" in step
+    assert "'*.msi.sig'" in step
+    assert "'*.app.tar.gz.sig'" in step
+
+
 def test_an_unsigned_version_tag_is_refused() -> None:
     """Shipping unsigned installers as if signed is the failure this gate stops.
 

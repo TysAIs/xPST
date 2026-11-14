@@ -847,11 +847,22 @@ jobs:
           find updater-assets -type f \
             \( -name '*.app.tar.gz' -o -name '*.app.tar.gz.sig' \
                -o -name '*.nsis.zip' -o -name '*.nsis.zip.sig' \
-               -o -name '*.AppImage' -o -name '*.AppImage.tar.gz' \
-               -o -name '*.AppImage.tar.gz.sig' -o -name '*setup.exe' \
+               -o -name '*.AppImage' -o -name '*.AppImage.sig' \
+               -o -name '*.AppImage.tar.gz' -o -name '*.AppImage.tar.gz.sig' \
+               -o -name '*setup.exe' -o -name '*.exe.sig' \
                -o -name '*.msi' -o -name '*.msi.sig' \) \
             -exec cp {} updater-flat/ \;
           find updater-flat -type f -print | sort
+          # The Windows NSIS installer and the Linux AppImage ARE the updater
+          # payloads (`createUpdaterArtifacts: true` reuses the installer), and
+          # their `.sig` sidecars are what makes a platform publishable. This
+          # list previously copied the installers but not `.exe.sig` /
+          # `.AppImage.sig`, so windows-x86_64 and linux-x86_64 were always
+          # reported "unsigned, sidecar missing" while the signatures were
+          # sitting in the same artifact (dryrun-tauri-4: 2 of 4 platforms).
+          if [ -z "$(find updater-flat -name '*.sig' -print -quit)" ]; then
+            echo "::warning::no signature sidecar reached updater-flat; no platform can be published"
+          fi
 
       - name: Select one signed artifact per target
         id: select
