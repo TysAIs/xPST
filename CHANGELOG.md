@@ -5,93 +5,7 @@ All notable changes to xPST will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Fixed
-- **`xpst preflight --transform` emits the rendition plan it was asked for.**
-  The flag reached `build_route_plan(include_transform=…)` and the service
-  computed the per-destination decision, but `RouteDestination` never
-  serialised it, so the JSON carried nothing and only `verify-media --plan`
-  showed it. Each destination now carries `transform` (or `transforms`, one
-  entry per carousel item), and `preflight`/`post --dry-run` print it.
-  `None` means "not computed", never "passthrough".
-- **Advisories that used to be JSON-only are printed, and they say what will
-  happen.** A soft ceiling (4K dimensions, 40 Mbps) and a sample rate that
-  differs from a destination's native rate are warnings, not refusals — but
-  nobody reading the human output ever saw them, so "would publish" looked
-  lossless. They now print under each destination, the dimension/bitrate text
-  says the destination re-encodes rather than rejects, and the audio-rate text
-  says it is advisory only (YouTube is 48 kHz, X/TikTok 44.1 kHz, so no single
-  file satisfies both and no re-encode is needed).
-- **`--visibility` no longer reads as a capability every destination has.**
-  Only YouTube forwards a visibility at upload time; X and TikTok take
-  `visibility` on the *delete* path only and publish publicly. The plan
-  accepted the flag for the whole request and still reported `ready: true`,
-  so "nothing gets posted publicly" looked like a flag instead of a scope
-  decision. `post` (dry run and live, JSON and human output) now names the
-  destinations that will ignore it. The key is emitted only when there is
-  something to warn about, so the default (public) payload shape is unchanged.
-- **`xpst status` says its `platform_health` is historical, not current.** The
-  counters come from local post outcomes — TikTok carried 195 "failures" from
-  a retired API path while `xpst doctor` reported it ready. Each entry now
-  carries `historical: true` / `source: state_history`, the payload carries a
-  `platform_health_note` pointing at `xpst doctor`, and the human output's
-  heading says which surface is the live authority.
-- **A paused deployment can no longer queue a post behind the operator.** A
-  manual post fired outside the posting window (08:00–23:00) is deferred to the
-  schedule store — which *creates* `~/.xpst/schedule.json`, a schedule change
-  nobody asked for. `schedule.posting_paused` (or `XPST_POSTING_PAUSED=1`)
-  makes the deferral refuse instead: nothing is queued, nothing is uploaded, and
-  the CLI exits non-zero with `{"paused": true, …}` while the MCP tool returns
-  an error result. The guard sits in the deferral itself, so every surface that
-  defers inherits it; an explicit in-window post or `--now` still publishes.
-- **The post dry run reports deferral instead of silently implying it will
-  post.** The notice lived after the dry-run block's `return`, so it could never
-  print. The payload now carries a `deferral` object — queued (window closed) or
-  refused (deployment paused), with the reason.
-- **A pip/wheel install can serve the web UI, so `#/phone` is reachable from
-  PyPI.** The wheel shipped no UI at all: `/` served the string placeholder and
-  only the JSON API worked, so `xpst pair` handed a phone a code for a screen
-  that did not exist. `packaging/hatch_ui.py` is now a hatch build hook that maps
-  a built `ui/dist` (or `XPST_UI_DIST`) into the wheel as
-  `xpst/dashboard/webui`, and `xpst.dashboard.server._ui_dist_dir()` finds it
-  before the checkout path. The sdist carries the same build (`artifacts =
-  ["ui/dist/**"]`), because pip and `python -m build` build the wheel *from* the
-  sdist. The release, PyPI, public-safety and Docker lanes build the UI and set
-  `XPST_REQUIRE_UI=1`, so a released artifact can never ship UI-less;
-  `scripts/clean_install_smoke.py` fails a wheel with no bundle. When no bundle
-  exists the placeholder page says so, `xpst ui` prints the fix, and the `--json`
-  readiness line reports `"ui_built": false`.
-
-### Changed
-- **Every Meta Graph API call now uses one pinned, supported version (v26.0).**
-  Instagram (container create/publish, media + container status, permalink,
-  delete/reconcile, followers), the account-type probe, the connect/verify
-  helpers, the Messenger send/health path and the Facebook Page client all build
-  their URLs through `xpst.utils.graph_api`, so the pin is a single constant
-  instead of per-module literals. v19.0 (removed 2026-05-21) and
-  v20.0 (removed 2026-09-24) were still being called directly, and v21.0/v22.0
-  (v21 removed 2027-01-21) were split across the other modules; the Instagram
-  resumable-upload host and the OAuth consent dialog follow the same pin.
-  `XPST_GRAPH_API_BASE` (whole base) and `XPST_GRAPH_API_VERSION` (version only)
-  retarget the family; `tests/test_graph_api_version.py` fails if a new
-  `graph.facebook.com/vNN` literal appears in `src/`.
-- **Platforms are opt-in targets, never an implied "all" (R3).** `--platforms`
-  no longer defaults to every enabled platform: an explicit set wins, `--all`
-  is the explicit "every connected account that accepts this format", and the
-  default is the format route ∩ connected accounts. `xpst post --json`, the MCP
-  `xpst_post` result, `POST /api/post` and the schedule store now report and
-  persist that resolved set; the scheduler persists the resolved destinations at
-  add time instead of re-targeting an entry when a new account is connected.
-- **Distinct destination states, including non-failures (R3 rule 4).**
-  `posted`, `skipped_unconnected`, `unsupported_format`,
-  `refused_by_community` and `failed` are one vocabulary across the CLI, MCP,
-  the HTTP API and batch outcomes. A requested-but-unconnected destination is
-  `skipped_unconnected` — visible, exit 0, not a failure — and zero connected
-  accounts is one actionable error naming `xpst connect`.
-- **Refuse rather than truncate, with the envelope in the message (R4 rule 4).**
-  Over-limit captions and out-of-envelope video are refused with the
-  destination's duration / container / codec / byte / caption limits named.
+## [1.3.0] - 2026-11-14
 
 ### Added
 - **The desktop app checks for updates on launch, and always shows what it
@@ -248,6 +162,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the dashboard health-status payload, so the app, an agent and the CLI all
   agree. Derived from the existing live badges: no extra probing, no invented
   deadlines.
+- **Rate-limit cooldowns are visible on every surface that reports health.** An
+  active cooldown used to exist only inside the upload path, so `xpst health`,
+  `xpst doctor` and the MCP health tool could report a platform ready while a
+  persisted cooldown was holding it. They now report the cooldown state, its
+  `until`, and the source file, alongside the readiness verdict (#318).
+- **A durable in-app scheduling engine with timezone-correct firing.** Schedule
+  entries are persisted with the destination set resolved at add time, each entry
+  carries its own zone, and `run-due` compares instants rather than naive local
+  times — so a job scheduled across a DST transition fires when the user's wall
+  clock reaches it (#259).
+- **Per-platform caption overrides survive the schedule store.** A caption
+  override set for one destination is persisted with the entry and applied when
+  it fires, rather than being flattened back to the shared caption at queue time
+  (#278).
+- **Per-destination caption overrides and hard caption-limit blockers.** A post
+  can carry a caption per destination, and a caption that exceeds a
+  destination's limit is a blocker naming that limit instead of a silent
+  truncation (#254).
+- **TikTok has a browser-native publisher route.** Opt-in
+  `publish_mode: browser` drives TikTok Studio with a persisted browser profile
+  and reports typed stage codes; it either returns a receipt or fails, and an
+  unconfirmed attempt is never re-published (#304).
+- **An unaudited TikTok client falls back to an inbox draft.** When Direct Post
+  is refused for an unaudited Content Posting API client, the uploader falls
+  back to the inbox-draft path instead of failing the destination outright
+  (#266, #300).
+- **Instagram account type is detected at connect time.** `xpst connect
+  instagram` reads the account type and walks the Creator-account switch when
+  the API requires it, instead of failing the first publish on a personal
+  account (#306).
+- **A Rust engine scaffold with a checked-in CLI parity manifest.** `crates/*`
+  carries the workspace, the clap tree generated from the Python CLI's own
+  manifest, and config/state read paths, gated by a dedicated CI lane; an
+  unimplemented Rust command exits with the documented `NOT_IMPLEMENTED` code
+  rather than pretending to succeed (#329).
+- **Long-form YouTube, X's real envelope, and Rumble as integration-uncertain.**
+  YouTube gains explicit Shorts/long modes, X reads its configured maximum
+  duration when one is set instead of assuming the 140 s standard envelope, and
+  Rumble is declared opt-in with `integration_uncertain` and an honest
+  manual-handoff path instead of a fabricated success (#339).
+
+### Changed
+- **Every Meta Graph API call now uses one pinned, supported version (v26.0).**
+  Instagram (container create/publish, media + container status, permalink,
+  delete/reconcile, followers), the account-type probe, the connect/verify
+  helpers, the Messenger send/health path and the Facebook Page client all build
+  their URLs through `xpst.utils.graph_api`, so the pin is a single constant
+  instead of per-module literals. v19.0 (removed 2026-05-21) and
+  v20.0 (removed 2026-09-24) were still being called directly, and v21.0/v22.0
+  (v21 removed 2027-01-21) were split across the other modules; the Instagram
+  resumable-upload host and the OAuth consent dialog follow the same pin.
+  `XPST_GRAPH_API_BASE` (whole base) and `XPST_GRAPH_API_VERSION` (version only)
+  retarget the family; `tests/test_graph_api_version.py` fails if a new
+  `graph.facebook.com/vNN` literal appears in `src/`. (#349)
+- **Platforms are opt-in targets, never an implied "all" (R3).** `--platforms`
+  no longer defaults to every enabled platform: an explicit set wins, `--all`
+  is the explicit "every connected account that accepts this format", and the
+  default is the format route ∩ connected accounts. `xpst post --json`, the MCP
+  `xpst_post` result, `POST /api/post` and the schedule store now report and
+  persist that resolved set; the scheduler persists the resolved destinations at
+  add time instead of re-targeting an entry when a new account is connected.
+- **Distinct destination states, including non-failures (R3 rule 4).**
+  `posted`, `skipped_unconnected`, `unsupported_format`,
+  `refused_by_community` and `failed` are one vocabulary across the CLI, MCP,
+  the HTTP API and batch outcomes. A requested-but-unconnected destination is
+  `skipped_unconnected` — visible, exit 0, not a failure — and zero connected
+  accounts is one actionable error naming `xpst connect`.
+- **Refuse rather than truncate, with the envelope in the message (R4 rule 4).**
+  Over-limit captions and out-of-envelope video are refused with the
+  destination's duration / container / codec / byte / caption limits named.
+- **The product direction is an all-Rust engine, recorded in the repo.**
+  `docs/DIRECTION.md` (accepted 2026-11-03) makes the Rust engine the target,
+  with zero personal data as a hard constraint and a lightweight set of
+  destinations; the Python engine stays the reference implementation until
+  parity is proven (#326, #337).
+- **The lockfile is regenerated and gated.** `uv.lock` is committed, CI runs
+  `uv lock --check` with uv pinned to 0.13.4, and the pin's setup action moved
+  to v7; the ghost desktop extra was dropped in the same pass (#268, #321,
+  #361).
+- **PyPI publishing uses the credential path that actually exists.**
+  `publish-pypi.yml` uploads with the stored token secret, `docs/PYPI.md`
+  documents that path (and is drift-tested against the workflow), and the
+  release lane reports which credential path a run took before it uploads
+  instead of discovering it in the upload step (#327, #331, #335).
 
 ### Fixed
 - **The phone screen's `Revoke` control is a 44 px tap target.** It rendered as
@@ -263,7 +261,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not publish. Readiness now requires an empty blocker list, which is the answer
   the MCP dry run and the HTTP preflight already gave; the exit-status contract
   (a pre-upload content refusal exits 1, a per-destination blocker is reported
-  per destination and does not abort the run) is unchanged.
+  per destination and does not abort the run) is unchanged. (#351)
 - **A TikTok API throttle is believed for the window TikTok asked for, not the
   60 s floor.** `TikTokUploader._handle_http_error` mapped a 429 to a static
   `TIKTOK_RATE_LIMITED` string and never read the response, so the persistent
@@ -321,6 +319,160 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1.30.0: `tools/list` returns all 41 tools and the refusal paths still refuse
   without `XPST_MCP_ALLOW_MUTATIONS`. `scripts/mcp_client_smoke.py` also stopped
   assuming the argument guard lets a missing media path through to preflight.
+- **A retry can no longer duplicate a post whose outcome is unknown.**
+  Reconciliation runs before any retry, so an attempt that may have reached the
+  platform is read back rather than re-sent (#257).
+- **The CLI exit verdict reaches MCP.** `run` and `backfill` returned an
+  optimistic result over MCP while the CLI exited non-zero; the batch verdict is
+  now part of the tool result, so an agent sees the same answer the shell does
+  (#262).
+- **A refused dry run carries the same top-level error as the real path.**
+  `xpst_post` in dry-run mode returned the refusal only inside the payload
+  (`isError` false), so a caller that checked the tool error treated a refused
+  request as a success (#274).
+- **Text is never gated by the video path, and `--now` is honoured on every
+  route.** The deliberate-now bypass applied to media posts only, so an explicit
+  text post could be deferred by the posting window while the media route
+  published (#307).
+- **Every platform's duration cap was silently dead.** The upload guard called
+  `manifest()` on a property, so the call raised before any comparison and no
+  cap was ever enforced; the guard now reads the registry value and refuses an
+  out-of-envelope file with the destination's own numbers (#282).
+- **Facebook had no encode branch.** It was declared a video destination but
+  no encoder produced its rendition, so a Facebook-bound post fell through the
+  encode step; the branch exists and is covered by the encode matrix (#283).
+- **yt-dlp is resolved without relying on `PATH`, and a non-zero exit is no
+  longer collapsed into success.** The TikTok source reported a source fetch it
+  never completed; it now resolves the binary, distinguishes rc 0 from a real
+  failure, and degrades health honestly (#285).
+- **A failed source fetch is recorded in state.** Source-fetch failures were
+  dropped, so `xpst health` and `xpst doctor` could report an all-clear channel
+  whose sources had been failing; they now surface the recorded failure
+  (#310).
+- **`mark_video_posted` persists through the transactional seam.** The write
+  bypassed the transaction, leaving a window where a crash after upload could
+  lose the record and re-post the same file (#286).
+- **Live analytics collect again, and a silent zero is reported as a failure.**
+  The dashboard read `post_id` where the state stores `id`, so every live metrics
+  query returned nothing; the collector now reads the platform id under either
+  key, and a collector that returns zero records says so instead of reporting a
+  healthy zero (#256, #276).
+- **A hidden count stays missing end to end.** Platforms that suppress a
+  metric returned `0`, which read as a real measurement; the field is now absent
+  with the dashboard labelling the age of the last successful read (#313).
+- **Analytics writes can no longer escape the configured config directory.**
+  `AnalyticsStore()` and `BestTimeAnalyzer()` defaulted to `~/.xpst/analytics.db`,
+  so tests whose conftest sandboxed `XPST_CONFIG_DIR` recorded rows into the
+  operator's live ledger. The default now resolves from the config dir and the
+  engine passes it explicitly (#330).
+- **`XPST_CONFIG_DIR` owns its credential files.** A config-dir override still
+  resolved credentials from the default location, so two configurations shared
+  one credential store (#271).
+- **Threads waits for a container to finish before publishing.** The adapter
+  published as soon as the container existed, which failed for any real video;
+  it now polls the container status to `FINISHED` and surfaces Meta's own
+  `error_message` when it does not (#302).
+- **The socials-QA defect wave is closed.** Deferral semantics, routing,
+  configuration isolation, delete-by-id and caption truth were fixed together,
+  along with the residual D2/D3/D4/D6/D7 findings and the MCP `serverInfo`
+  identity (#277, #301).
+- **The stranger-install friction found on v1.2.1 is fixed.** The documented
+  install steps, the missing-config path and the credential prompts were
+  corrected against a clean-machine proof (#279), and the failure counts quoted
+  in the gap list were corrected to match what that proof actually produced
+  (#264, #265).
+- **The published-artifact E2E installs the installers instead of exec'ing
+  them.** Exec'ing a `.exe`/`.AppImage` starts an installer (or dies in the
+  loader), never the app, so the harness reported a fake engine-health timeout.
+  The lanes now `apt-get install ./pkg.deb`, run the NSIS installer with `/S`,
+  report the child's exit code and log tail, and the packaged-UI and sidecar
+  probes retry over a bounded window instead of sampling once (#347, #353,
+  #354).
+- **The pause guard is asserted against the store the CLI actually writes.**
+  The regression read the in-memory `config.config_dir`, which is not the file's
+  directory, so the "nothing was queued" assertion was vacuously true; it now
+  globs the sandbox for `schedule.json` (#360).
+- **Host-dependent test assumptions no longer turn the suite red off CI.**
+  Three cases assumed a host layout, and the night-text-post case asserted a
+  force-publish that never happened; both are pinned to their real contracts
+  (#314, #316).
+- **Nine X/YouTube QA edge cases are pinned as dry-run regressions** so the
+  behaviours found by hand cannot silently regress (#312).
+- **The Rust CI lane builds on Intel macOS.** The lane installs protoc on the
+  `macos-15-intel` runner, without which lancedb cannot build and the leg fails
+  for a toolchain reason rather than a code one (#364).
+- **`xpst preflight --transform` emits the rendition plan it was asked for.**
+  The flag reached `build_route_plan(include_transform=…)` and the service
+  computed the per-destination decision, but `RouteDestination` never
+  serialised it, so the JSON carried nothing and only `verify-media --plan`
+  showed it. Each destination now carries `transform` (or `transforms`, one
+  entry per carousel item), and `preflight`/`post --dry-run` print it.
+  `None` means "not computed", never "passthrough". (#357)
+- **Advisories that used to be JSON-only are printed, and they say what will
+  happen.** A soft ceiling (4K dimensions, 40 Mbps) and a sample rate that
+  differs from a destination's native rate are warnings, not refusals — but
+  nobody reading the human output ever saw them, so "would publish" looked
+  lossless. They now print under each destination, the dimension/bitrate text
+  says the destination re-encodes rather than rejects, and the audio-rate text
+  says it is advisory only (YouTube is 48 kHz, X/TikTok 44.1 kHz, so no single
+  file satisfies both and no re-encode is needed).
+- **`--visibility` no longer reads as a capability every destination has.**
+  Only YouTube forwards a visibility at upload time; X and TikTok take
+  `visibility` on the *delete* path only and publish publicly. The plan
+  accepted the flag for the whole request and still reported `ready: true`,
+  so "nothing gets posted publicly" looked like a flag instead of a scope
+  decision. `post` (dry run and live, JSON and human output) now names the
+  destinations that will ignore it. The key is emitted only when there is
+  something to warn about, so the default (public) payload shape is unchanged. (#358)
+- **`xpst status` says its `platform_health` is historical, not current.** The
+  counters come from local post outcomes — TikTok carried 195 "failures" from
+  a retired API path while `xpst doctor` reported it ready. Each entry now
+  carries `historical: true` / `source: state_history`, the payload carries a
+  `platform_health_note` pointing at `xpst doctor`, and the human output's
+  heading says which surface is the live authority. (#358)
+- **A paused deployment can no longer queue a post behind the operator.** A
+  manual post fired outside the posting window (08:00–23:00) is deferred to the
+  schedule store — which *creates* `~/.xpst/schedule.json`, a schedule change
+  nobody asked for. `schedule.posting_paused` (or `XPST_POSTING_PAUSED=1`)
+  makes the deferral refuse instead: nothing is queued, nothing is uploaded, and
+  the CLI exits non-zero with `{"paused": true, …}` while the MCP tool returns
+  an error result. The guard sits in the deferral itself, so every surface that
+  defers inherits it; an explicit in-window post or `--now` still publishes. (#359)
+- **The post dry run reports deferral instead of silently implying it will
+  post.** The notice lived after the dry-run block's `return`, so it could never
+  print. The payload now carries a `deferral` object — queued (window closed) or
+  refused (deployment paused), with the reason.
+- **A pip/wheel install can serve the web UI, so `#/phone` is reachable from
+  PyPI.** The wheel shipped no UI at all: `/` served the string placeholder and
+  only the JSON API worked, so `xpst pair` handed a phone a code for a screen
+  that did not exist. `packaging/hatch_ui.py` is now a hatch build hook that maps
+  a built `ui/dist` (or `XPST_UI_DIST`) into the wheel as
+  `xpst/dashboard/webui`, and `xpst.dashboard.server._ui_dist_dir()` finds it
+  before the checkout path. The sdist carries the same build (`artifacts =
+  ["ui/dist/**"]`), because pip and `python -m build` build the wheel *from* the
+  sdist. The release, PyPI, public-safety and Docker lanes build the UI and set
+  `XPST_REQUIRE_UI=1`, so a released artifact can never ship UI-less;
+  `scripts/clean_install_smoke.py` fails a wheel with no bundle. When no bundle
+  exists the placeholder page says so, `xpst ui` prints the fix, and the `--json`
+  readiness line reports `"ui_built": false`.
+
+### Security
+- **The zero-personal-data gate is real and checked in.**
+  `.public-safety-denylist` is the live deny list, `scripts/scan_public_safety.py`
+  loads it in tree, artifact and history modes, and CI plus the release lanes run
+  it; synthetic Instagram fixtures and the two deny-list hits that had landed on
+  `main` were cleaned up in the same effort (#252, #328, #333).
+- **The Messenger webhook intake fails closed.** An unsigned payload with no
+  configured `app_secret` was accepted with `200`, and the `GET` subscription
+  handshake completed for anyone who asked; both are now refused, and the docs
+  name the two refusal reasons (#272).
+- **`XPST_MCP_ALLOW_ANY_PATH` no longer disables URL validation.** The flag
+  exists to relax local path checks, but it also switched off the scheme/host
+  validation on remote URLs, so an agent granted path freedom could be pointed
+  at an arbitrary endpoint (#287).
+- **The security audit script checks its assertions.** It reported passes for
+  conditions it never evaluated, which made the audit itself worthless as
+  evidence (#284).
 
 ## [1.2.1] — 2026-09-25
 
