@@ -11,10 +11,18 @@ when it will fire — exit code 0, nothing lost.
 
 A request can bypass the queue with an explicit ``force`` flag: a human who
 says "post now, I know it's midnight" should be obeyed, not lectured.
+
+A PAUSED deployment refuses the queue instead of filling it
+(``schedule.posting_paused`` / ``XPST_POSTING_PAUSED``): the deferral is the
+only place an implicit post becomes a schedule entry, so the guard lives here
+and no surface can write one behind the operator's back. The verdict says what
+happened (nothing queued, nothing uploaded) rather than pretending the post was
+deferred.
 """
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +36,26 @@ from xpst.content import (
 if TYPE_CHECKING:
     from xpst.config import XPSTConfig
     from xpst.content import ContentRequest
+
+#: Env spellings that turn the deployment pause on without editing config.yaml.
+_TRUE_SPELLINGS = frozenset({"1", "true", "yes", "on"})
+
+
+def posting_pause_reason(config: XPSTConfig) -> str:
+    """Why implicit posting is paused on this deployment, or ``""``.
+
+    Two switches, one meaning: ``schedule.posting_paused`` in config and the
+    ``XPST_POSTING_PAUSED`` environment variable. The env var exists because a
+    lane-level pause is applied by whoever runs the deployment, not only by
+    whoever owns the config file.
+    """
+    if os.environ.get("XPST_POSTING_PAUSED", "").strip().lower() in _TRUE_SPELLINGS:
+        return "XPST_POSTING_PAUSED is set"
+    schedule = getattr(config, "schedule", None)
+    if bool(getattr(schedule, "posting_paused", False)):
+        return "schedule.posting_paused is true in config"
+    return ""
+
 
 #: Routes the schedule store can represent and therefore defer. Text is
 #: deferrable too (it always was intent-wise — a midnight text was simply
@@ -74,6 +102,27 @@ def defer_manual_post_to_schedule(
     # inside the window even under clock skew.
     fire_at = resume + timedelta(minutes=1)
 
+    # F3: a paused deployment must not be able to accumulate a queue. The
+    # deferral itself — not the caller — is where an implicit post becomes a
+    # schedule entry, so the guard lives here and covers every surface that
+    # defers (CLI post, MCP xpst_post). Refused, not silently dropped: the
+    # verdict says what happened and what to do instead, and the store is
+    # never opened.
+    pause_reason = posting_pause_reason(config)
+    if pause_reason:
+        return {
+            "paused": True,
+            "deferred": False,
+            "reason": "posting_paused",
+            "resume_after": None,
+            "scheduled": None,
+            "message": (
+                f"Posting is paused ({pause_reason}): this post was NOT queued and "
+                "nothing was uploaded. The schedule store was not written. Fire it "
+                f"deliberately with --now, or clear the pause to allow deferral."
+            ),
+        }
+
     from xpst.schedule_manager import ScheduleManager
 
     media = [str(path) for path in request.resolved_media]
@@ -106,4 +155,4 @@ def defer_manual_post_to_schedule(
     }
 
 
-__all__ = ["defer_manual_post_to_schedule"]
+__all__ = ["defer_manual_post_to_schedule", "posting_pause_reason"]

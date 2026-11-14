@@ -398,6 +398,7 @@ DEFAULT_CONFIG = {
         "catchup_times_per_day": 3,
         "analytics_snapshot_enabled": False,
         "analytics_snapshot_interval": 3600,  # 1 hour
+        "posting_paused": False,  # refuse implicit queueing while the deployment is paused
     },
     "shortcuts": {
         "dashboard": "Ctrl+1",
@@ -729,6 +730,15 @@ class ScheduleConfig:
     catchup_times_per_day: int = 3
     analytics_snapshot_enabled: bool = False
     analytics_snapshot_interval: int = 3600
+    #: Deployment kill-switch for IMPLICIT posting. When true, a manual post
+    #: that would be QUEUED to the schedule store (fired outside the anti-bot
+    #: window) is refused instead — nothing is written, nothing is uploaded —
+    #: so a paused deployment cannot accumulate a queue behind the operator's
+    #: back. An explicit in-window post, or ``--now``, still publishes: the
+    #: pause forbids silent deferral, not a deliberate manual action.
+    #: ``XPST_POSTING_PAUSED`` (1/true/yes/on) turns it on without editing the
+    #: file, which is what a lane-level pause needs.
+    posting_paused: bool = False
 
 
 @dataclass
@@ -1752,6 +1762,10 @@ class XPSTConfig:
                 "catchup_times_per_day": self.schedule.catchup_times_per_day,
                 "analytics_snapshot_enabled": self.schedule.analytics_snapshot_enabled,
                 "analytics_snapshot_interval": self.schedule.analytics_snapshot_interval,
+                # Round-trips: a pause set by whoever paused the deployment must
+                # survive a config save (it is the only thing stopping implicit
+                # queueing).
+                "posting_paused": self.schedule.posting_paused,
             },
             "notifications": {
                 "enabled": self.notifications.enabled,
