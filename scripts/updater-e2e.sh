@@ -5,7 +5,9 @@
 #   1. Build app v0.1.0 -> xPST.app + updater artifacts (.app.tar.gz + .sig)
 #   2. Serve a static manifest dir on http://127.0.0.1:9555 (latest.json, v0.1.0)
 #   3. Rebuild as v0.2.0, replace artifact + latest.json
-#   4. Launch the v0.1.0 app with XPST_UPDATER_CHECK=1 (opt-in updater check)
+#   4. Launch the v0.1.0 app with XPST_UPDATER_CHECK=1 (unattended E2E mode:
+#      check -> install -> relaunch; the product check is default-on and never
+#      installs without the user asking)
 #   5. Assert the process downloads, installs and relaunches as v0.2.0
 #      (proof = marker files in /private/tmp/xpst-updater-e2e/ written by
 #       src-tauri/src/lib.rs on every boot — written by the app itself)

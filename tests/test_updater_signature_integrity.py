@@ -110,14 +110,43 @@ class TestNoVerificationBypass:
         for pattern in (r"fs::copy\([^)]*current_exe", r"std::fs::rename\([^)]*current_exe"):
             assert not re.search(pattern, text), f"hand-rolled binary replacement: {pattern}"
 
-    def test_updater_check_is_opt_in_and_cannot_be_forced(self):
-        """The check is env-gated; an attacker cannot make it run unrequested."""
+    def test_updater_check_is_default_on_and_install_is_user_initiated(self):
+        """The check runs by default; installing is always a user action.
+
+        The previous contract made the whole update path conditional on
+        ``XPST_UPDATER_CHECK=1`` (an E2E harness variable), so a normal launch
+        never looked for a release. The variable now selects unattended
+        install-and-relaunch for the harness and nothing else.
+        """
         text = (TAURI_SRC / "lib.rs").read_text(encoding="utf-8")
-        assert "XPST_UPDATER_CHECK" in text
-        gate_lines = [ln for ln in text.splitlines() if "XPST_UPDATER_CHECK" in ln and "std::env::var" in ln]
-        assert gate_lines, "no env gate around the updater check"
-        # Must be an equality check against the explicit value "1".
-        assert any('== Some("1")' in ln or '== "1"' in ln for ln in gate_lines), gate_lines
+        assert "const UPDATER_E2E_ENV: &str = \"XPST_UPDATER_CHECK\";" in text
+        # Mode parsing is explicit: 1 = E2E, 0 = disabled, anything else
+        # (including absent) = interactive product behaviour.
+        assert 'Some("1") => UpdaterMode::E2e' in text
+        assert 'Some("0") => UpdaterMode::Disabled' in text
+        assert "_ => UpdaterMode::Interactive" in text
+        # The product surface exists and is registered with the IPC handler.
+        assert "async fn updater_check(" in text
+        assert "async fn updater_install(" in text
+        assert "generate_handler![updater_check, updater_install]" in text
+        # The unattended install path is reachable only from the E2E mode.
+        e2e_start = text.index("fn run_updater_e2e(")
+        interactive_arm = text.index("UpdaterMode::Interactive =>")
+        assert e2e_start < interactive_arm
+        assert "run_updater_e2e(" in text
+        assert text.count("download_and_install(") == 2, (
+            "expected exactly two install paths: the user-invoked command and the E2E harness"
+        )
+
+    def test_no_ui_auto_install_on_launch(self):
+        """A launch may check for updates; it may not install them."""
+        app = (ROOT / "ui" / "src" / "App.svelte").read_text(encoding="utf-8")
+        assert "if (updatesAvailable()) refreshUpdateState();" in app
+        assert "installUpdate()" in app
+        # The install call sits behind the banner's button handler, not in
+        # onMount.
+        on_mount = app[app.index("onMount(") : app.index("</script>")]
+        assert "installUpdate()" not in on_mount, "onMount must not install an update"
 
     def test_e2e_script_uses_a_throwaway_key_not_the_shipped_one(self):
         """The E2E harness must not use (or overwrite) the committed pubkey."""

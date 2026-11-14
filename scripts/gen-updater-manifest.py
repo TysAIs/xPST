@@ -27,6 +27,15 @@ PLATFORM_KEYS = (
     "windows-x86_64",
     "linux-x86_64",
 )
+# What an updater payload for a platform may be named. A macOS ``.app.tar.gz``
+# assigned to a Windows key (or vice versa) is a manifest that cannot install,
+# so the shape is checked before a digest is computed for it.
+PLATFORM_ARTIFACT_SUFFIXES = {
+    "darwin-aarch64": (".app.tar.gz",),
+    "darwin-x86_64": (".app.tar.gz",),
+    "windows-x86_64": ("setup.exe", ".msi", ".nsis.zip", ".msi.zip"),
+    "linux-x86_64": (".appimage", ".appimage.tar.gz"),
+}
 _VERSION_RE = re.compile(r"^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 
 
@@ -66,6 +75,17 @@ def _sha512(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _validate_platform_shape(platform: str, artifact: Path) -> None:
+    """Refuse a payload whose file type cannot install on ``platform``."""
+    suffixes = PLATFORM_ARTIFACT_SUFFIXES[platform]
+    name = artifact.name.lower()
+    if not any(name.endswith(suffix) for suffix in suffixes):
+        allowed = " or ".join(f"*{suffix}" for suffix in suffixes)
+        raise ValueError(
+            f"{platform} cannot be updated from {artifact.name}: expected {allowed}"
+        )
 
 
 def _validate_artifacts(artifacts: Mapping[str, Path], platforms: Sequence[str]) -> None:
@@ -118,12 +138,28 @@ def generate_manifest(
     _validate_artifacts(artifacts, selected_platforms)
     signature_paths = signatures or {}
     manifest_platforms: dict[str, dict[str, str]] = {}
+    # sha512 -> (platform, url). Two platform keys may share one payload (a
+    # universal macOS build is published under both darwin keys), but they may
+    # never describe two different files with one digest: that is exactly how
+    # v1.2.1 advertised the arm64 archive as darwin-x86_64, and an Intel Mac
+    # then downloaded a file whose digest and signature could not verify.
+    digests: dict[str, tuple[str, str]] = {}
     for platform in selected_platforms:
         artifact = Path(artifacts[platform])
+        _validate_platform_shape(platform, artifact)
+        url = f"{base_url.rstrip('/')}/{quote(artifact.name)}"
+        digest = _sha512(artifact)
+        previous = digests.get(digest)
+        if previous is not None and previous[1] != url:
+            raise ValueError(
+                f"{platform} and {previous[0]} would publish different files with the same "
+                f"sha512 ({digest[:12]}…): {artifact.name} vs {previous[1].rsplit('/', 1)[-1]}"
+            )
+        digests[digest] = (platform, url)
         manifest_platforms[platform] = {
             "signature": _read_signature(platform, artifact, signature_paths),
-            "sha512": _sha512(artifact),
-            "url": f"{base_url.rstrip('/')}/{quote(artifact.name)}",
+            "sha512": digest,
+            "url": url,
         }
 
     manifest: dict[str, object] = {

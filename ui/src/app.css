@@ -233,6 +233,48 @@ input,
   font-size: 0.875rem;
 }
 
+/* Update available: a quiet, persistent strip — not a modal. It states what is
+   available and offers the one action that matters; it never installs by
+   itself. */
+.xpst-update-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--xpst-space-3);
+  margin-bottom: var(--xpst-space-4);
+  padding: var(--xpst-space-3) var(--xpst-space-4);
+  background: var(--xpst-color-primary-soft);
+  border: 1px solid var(--xpst-color-border);
+  border-radius: var(--xpst-radius-md);
+  font-size: 0.9375rem;
+}
+
+.xpst-update-banner__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--xpst-space-3);
+}
+
+.xpst-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--xpst-space-3);
+  margin-top: var(--xpst-space-4);
+}
+
+.xpst-update-notes {
+  max-height: 12rem;
+  margin: var(--xpst-space-3) 0 0;
+  overflow: auto;
+  padding: var(--xpst-space-3);
+  background: var(--xpst-color-surface-raised);
+  border: 1px solid var(--xpst-color-border);
+  border-radius: var(--xpst-radius-sm);
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+}
+
 .xpst-button {
   display: inline-flex;
   align-items: center;

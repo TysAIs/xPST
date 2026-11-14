@@ -247,7 +247,10 @@ def measure_once(
     env["XPST_CONFIG_DIR"] = str(config_dir)
     env["XPST_NO_KEYRING"] = "1"
     env["XPST_SHELL_LOG"] = str(tmpdir / "shell-lifecycle.log")
-    env.pop("XPST_UPDATER_CHECK", None)
+    # The boot gate measures startup, not the update channel: pin the shell to
+    # its disabled mode so the UI's default-on check cannot add network
+    # variance to the measurement (and an offline runner never stalls on it).
+    env["XPST_UPDATER_CHECK"] = "0"
     env.pop("XPST_ENGINE_PORT", None)
 
     started = time.monotonic()

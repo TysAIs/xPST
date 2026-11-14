@@ -94,6 +94,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   destination's duration / container / codec / byte / caption limits named.
 
 ### Added
+- **The desktop app checks for updates on launch, and always shows what it
+  found.** The updater used to run only when `XPST_UPDATER_CHECK=1` was set —
+  an E2E harness variable — so an installed copy was never told a newer release
+  existed. The UI now calls `updater_check` once per launch, shows a banner when
+  a release is available, and About → Updates carries "Check for updates" and
+  "Download and install". Installing is always a user action; the unattended
+  check→install→relaunch behaviour and the `/private/tmp/xpst-updater-e2e`
+  boot markers now live behind that same variable, and
+  `XPST_UPDATER_CHECK=0` disables the network check entirely (the boot gate
+  pins it).
+- **Both macOS architectures are release builds, so both updater keys can carry
+  a real payload.** The release matrix gains a native `x86_64-apple-darwin` leg
+  on GitHub's `macos-15-intel` runner (PyInstaller cannot cross-build the engine
+  sidecar), and each lane renames its updater archive to
+  `darwin-aarch64-…`/`darwin-x86_64-…` instead of copying it and leaving the
+  bare name behind.
+- **`updates/latest.json` lost the `darwin-x86_64` entry that could not
+  verify.** Both darwin keys carried the arm64 `sha512`/signature while the
+  Intel key pointed at a different file (sha512 `a4ffe4a1…` against the arm64
+  `2e969c3d…`), so an Intel Mac downloaded an update Tauri always refused. The
+  manifest was regenerated with the repository's own generator against the
+  published arm64 bytes; the Intel key returns when a real Intel build ships.
+- **Manifest generation refuses the two shapes that produced that entry.**
+  `scripts/select-updater-artifacts.py` reports a macOS bundle with no
+  architecture in its name as `unattributable` instead of guessing "Intel", and
+  picks NSIS over MSI deterministically instead of calling two signed Windows
+  payloads `ambiguous`. `scripts/gen-updater-manifest.py` rejects two platform
+  keys that describe different files with one `sha512`, and rejects a payload
+  whose file type cannot install on that platform.
+- **`scripts/publish-updater.sh --assets-dir` re-hashes the released bytes.**
+  Every manifest URL must exist among the release assets, its `sha512` must
+  match those bytes, and its signature must equal the published `.sig`; both
+  publishing pipelines pass the directory they just downloaded.
+- **A version tag can no longer ship unsigned installers.** `tauri-release.yml`
+  fails a `v*` tag before building when the Apple or Azure signing credentials
+  are absent, asserts the macOS bundle is Developer ID signed and the DMG is
+  stapled, and asserts every Windows installer has a valid Authenticode
+  signature. `dryrun-tauri-*` tags stay open for credential-free rehearsals.
+  Missing accounts: Apple Developer Program ($99/yr) and Azure Trusted Signing
+  ($9.99/mo) — see `docs/tauri-updater-production.md`.
 - **M0: a phone can upload, preview, confirm, publish and read back.** `POST
   /api/media` accepts a multipart upload from a camera roll (size cap
   `XPST_MAX_UPLOAD_BYTES`, container sniffed from the bytes rather than the
