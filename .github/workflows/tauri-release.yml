@@ -170,6 +170,19 @@ jobs:
           command -v patchelf >/dev/null || { echo "::error::patchelf missing"; exit 1; }
           command -v xvfb-run >/dev/null || { echo "::error::xvfb missing"; exit 1; }
 
+      - name: Install macOS build tooling
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          # lancedb ships prebuilt wheels for arm64 macOS but not for x86_64, so
+          # the Intel lane's `pip install -e ".[full]"` builds it from source and
+          # its Rust build script needs protoc ("Could not find `protoc`").
+          # Installing it on both macOS legs keeps the lanes identical.
+          if ! command -v protoc >/dev/null 2>&1; then
+            brew install protobuf
+          fi
+          protoc --version
+
       - name: Install Python engine deps (sidecar build)
         run: |
           python -m pip install --upgrade pip setuptools wheel
