@@ -35,7 +35,7 @@ def test_release_surfaces_are_all_110() -> None:
         "ui": _json("ui/package.json")["version"],
         "ui-lock": _json("ui/package-lock.json")["packages"][""]["version"],
     }
-    assert versions == {name: "1.2.1" for name in versions}
+    assert versions == {name: "1.3.0" for name in versions}
 
 
 def test_release_version_verification_path_passes() -> None:
@@ -47,7 +47,7 @@ def test_release_version_verification_path_passes() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "1.2.1" in result.stdout
+    assert "1.3.0" in result.stdout
     assert "python-runtime" in result.stdout
 
 
