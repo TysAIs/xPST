@@ -930,6 +930,46 @@ def _pre_upload_refusal_blockers(request: ContentRequest) -> list[ContentIssue]:
     return blockers
 
 
+#: Destinations whose uploader honours a per-post visibility choice. Only
+#: YouTube writes ``privacyStatus`` at upload time; X and TikTok take
+#: ``visibility`` on the *delete* path only, and publish publicly. The plan
+#: still accepts the flag for the whole request, so a caller who reads only
+#: ``ready: true`` can believe "nothing public" is a flag rather than a scope
+#: decision — the readiness report's F2. This list is the one place that
+#: answers "who can honour it", and the surfaces say so out loud.
+VISIBILITY_DESTINATIONS = frozenset({"youtube"})
+
+
+def _visibility_advisories(targets: list[str], visibility: str) -> list[str]:
+    """Say which destinations cannot honour ``--visibility``, if any.
+
+    Empty for the default (``public``): every destination publishes publicly,
+    so there is nothing to warn about. Otherwise the destinations that would
+    ignore the flag are named, because "post privately to YouTube and X" is
+    not a thing X can do.
+    """
+    requested = str(visibility or "public").strip().lower()
+    if requested == "public":
+        return []
+    ignored = [
+        str(platform) for platform in targets
+        if str(platform).strip().lower() not in VISIBILITY_DESTINATIONS
+    ]
+    if not ignored:
+        return []
+    named = ", ".join(ignored)
+    return [
+        f"{named} cannot honour --visibility {requested}: it has no per-post "
+        f"private/unlisted mode, so this post is PUBLIC there. Only "
+        f"{', '.join(sorted(VISIBILITY_DESTINATIONS))} honours the flag."
+    ]
+
+
+def _print_visibility_advisories(advisories: list[str], *, indent: str = "  ") -> None:
+    for note in advisories:
+        console.print(f"{indent}[yellow]advisory[/yellow]: {note}")
+
+
 @main.command()
 @click.option("--video", "-v", required=False, multiple=True, type=click.Path(exists=True), help="Video/image file path (use multiple times for carousel)")
 @click.option("--caption", "-c", required=False, default=None, help="Post text/caption (required with --video)")
@@ -1117,6 +1157,12 @@ def post(
         # the dry run alike (they must never disagree about the destination set).
         refuse_resolution()
 
+    # F2: the plan accepts --visibility for the whole request, but only YouTube
+    # can honour it. Say which destinations will ignore it on every surface
+    # (dry run and live run), so "post it privately" cannot read as a flag that
+    # silently covers destinations that publish publicly.
+    visibility_advisories = _visibility_advisories(targets, visibility)
+
     # ONE content answer, from the contract module: the same request produces
     # the same verdict on the CLI, in MCP, and over HTTP. Per-destination copy
     # rides the request itself (``overrides``), so the text that is validated
@@ -1228,6 +1274,14 @@ def post(
             "content": verdict,
             "ready": ready,
             "blockers": merged_blockers,
+            # Only when there is something to say: the shipped default
+            # (public visibility) keeps this payload unchanged, and the
+            # payload-shape contract test pins that shape.
+            **(
+                {"visibility_warnings": visibility_advisories}
+                if visibility_advisories
+                else {}
+            ),
         }
         if as_json:
             json_output(info, True)
@@ -1246,6 +1300,7 @@ def post(
             console.print(f"  Targets ({resolution.source}): {', '.join(targets)}")
             _print_route_plan(route_payload)
             console.print(f"  Visibility: {visibility}")
+            _print_visibility_advisories(visibility_advisories)
             for blocker in merged_blockers:
                 console.print(f"  [red]Blocked:[/red] {blocker}")
         if refusal_blockers:
@@ -1273,6 +1328,7 @@ def post(
             console.print(f"[bold blue]Posting text to: {', '.join(targets)}[/bold blue]")
         else:
             console.print(f"[bold blue]Posting to: {', '.join(targets)} (visibility: {visibility})[/bold blue]")
+        _print_visibility_advisories(visibility_advisories)
 
     # The same plan the dry run prints is what this run consumes (R4): only
     # destinations the plan says will publish are attempted. The rest are
@@ -1318,6 +1374,8 @@ def post(
             out["destinations"] = list(states.values())
             out["skipped_unconnected"] = list(execution_plan.skipped_unconnected)
             out["status"] = status
+            if visibility_advisories:
+                out["visibility_warnings"] = visibility_advisories
             out["exit_code"] = plan_exit
             json_output(out, True)
         else:
@@ -1482,6 +1540,13 @@ def post(
             platform for platform, state in states.items() if state["state"] == "skipped_unconnected"
         ]
         out["status"] = status
+        # F2: the machine-readable outcome says who ignored --visibility too —
+        # a caller must not have to read human text to learn that the post is
+        # public on a destination with no private mode. Emitted only when there
+        # is something to say, so the default path's payload shape is unchanged
+        # (pinned by test_cli_post_exit_status).
+        if visibility_advisories:
+            out["visibility_warnings"] = visibility_advisories
         if quota_blocked:
             out["error"] = {
                 "code": "QUOTA_EXHAUSTED",
@@ -1874,8 +1939,13 @@ def status(ctx: click.Context, as_json: bool):
 
     console.print(table)
 
-    # Platform health
-    console.print("\n[bold]Platform Health:[/bold]")
+    # Platform health. These counters are local post history, never a live
+    # check (F7): a retired API path leaves a pile of "failures" that says
+    # nothing about today. Say so where a human reads it.
+    console.print(
+        "\n[bold]Platform Health (historical — local post history; "
+        "run `xpst doctor` for live readiness):[/bold]"
+    )
     for platform, health in stats["platform_health"].items():
         status_icon = "✅" if health["status"] == "ok" else "❌"
         console.print(f"  {status_icon} {platform.title()}: {health['status']}")

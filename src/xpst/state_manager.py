@@ -715,6 +715,15 @@ class StateManager:
                 "status": health.get("status", "unknown"),
                 "last_success": health.get("last_success"),
                 "failures": health.get("failures", 0),
+                # F7: these counters come from local post history — they are
+                # never a live check. A retired API path leaves 195 TikTok
+                # "failures" behind that say nothing about today's readiness,
+                # and reading that as current is how "TikTok is broken" gets
+                # reported. `xpst doctor` (live) is the authority; the flag and
+                # the note below make the distinction machine-readable instead
+                # of folklore.
+                "historical": True,
+                "source": "state_history",
             }
 
         return {
@@ -727,6 +736,13 @@ class StateManager:
             "last_wake_check": state["health"].get("last_wake_check"),
             "dead_letter_count": dlq_count,
             "platform_health": platform_health,
+            # One sentence a reader or an agent can quote instead of inferring
+            # currency from numbers that are not current (F7).
+            "platform_health_note": (
+                "platform_health is historical: it counts local post outcomes, not "
+                "a live check. Run `xpst doctor` (or `xpst health`) for current "
+                "auth/readiness."
+            ),
         }
 
     # ── Persistence ──
