@@ -689,11 +689,18 @@ def verify_media(
     width = int(video.get("width") or 0)
     height = int(video.get("height") or 0)
     long_edge = max(width, height)
+    # Soft ceiling: YouTube/X re-encode anything above their long edge rather
+    # than refusing it, so the verdict is a warning — and it now says what will
+    # actually happen to the file, instead of leaving "ready" looking lossless
+    # (F6). Never truncate, never silently re-encode is the fixed invariant;
+    # this is the destination doing its own re-encode.
     _add(
         checks,
         "dimensions",
         0 < long_edge <= spec.long_edge,
-        f"{width}x{height} (long edge {long_edge}) vs max {spec.long_edge}",
+        f"{width}x{height} (long edge {long_edge}) vs max {spec.long_edge} — "
+        f"advisory: {spec.display_name} re-encodes above its ceiling instead of "
+        "rejecting the file",
     )
     fps = _parse_frame_rate(video.get("avg_frame_rate") or video.get("r_frame_rate") or "")
     _add(
@@ -708,11 +715,15 @@ def verify_media(
         checks,
         "video_bitrate",
         not bit_rate or bit_rate <= spec.max_video_bitrate_bps * 1.25,
-        f"{bit_rate / 1_000_000:.2f} Mbps vs ceiling {spec.max_video_bitrate_bps / 1_000_000:.0f} Mbps (+25%)"
+        (
+            f"{bit_rate / 1_000_000:.2f} Mbps vs ceiling "
+            f"{spec.max_video_bitrate_bps / 1_000_000:.0f} Mbps (+25%) — "
+            f"advisory: {spec.display_name} re-encodes above its ceiling instead "
+            "of rejecting the file"
+        )
         if bit_rate
         else "unknown",
     )
-
     if audio is not None:
         _add(
             checks,
@@ -721,11 +732,16 @@ def verify_media(
             f"{audio.get('codec_name')} vs {spec.audio_codec}",
         )
         sample_rate = int(audio.get("sample_rate") or 0)
+        # Advisory, never a defect: every destination resamples audio to its
+        # own rate, and YouTube (48 kHz) / X / TikTok (44.1 kHz) disagree, so
+        # one file cannot satisfy all of them at once. The message says so
+        # instead of reading like a problem the user must fix (F4).
         _add(
             checks,
             "audio_rate",
             not sample_rate or sample_rate == spec.audio_rate,
-            f"{sample_rate} Hz vs {spec.audio_rate} Hz",
+            f"{sample_rate} Hz vs {spec.audio_rate} Hz target — advisory only: "
+            f"{spec.display_name} resamples audio, so the file is accepted",
         )
 
     # Duration — premium tiers allow more; standard tier is a warn (the
