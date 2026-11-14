@@ -3,6 +3,7 @@
   import { api, isLandingHash, NAV_ITEMS, currentRoute } from "./lib/api.js";
   import { shouldStartOnboarding } from "./lib/firstRun.js";
   import { storedTheme, applyTheme } from "./lib/theme.js";
+  import { checkForUpdates, describeUpdateResult, installUpdate, updatesAvailable } from "./lib/updates.js";
   import Shell from "./lib/components/Shell.svelte";
   import Dashboard from "./pages/Dashboard.svelte";
   import Onboarding from "./pages/Onboarding.svelte";
@@ -46,6 +47,26 @@
   // must not be bounced by an error).
   let firstRunChecked = false;
 
+  // Updates are checked once per launch, by default. This is the whole point
+  // of the check: a user who installed xPST should not have to know that a
+  // newer release exists. Installing is still a user action.
+  let updateState = $state({ status: "idle" });
+  let installing = $state(false);
+
+  async function refreshUpdateState() {
+    updateState = { status: "checking" };
+    updateState = await checkForUpdates();
+  }
+
+  async function installAvailableUpdate() {
+    installing = true;
+    const result = await installUpdate();
+    installing = false;
+    if (!result.ok) {
+      updateState = { status: "error", error: result.error };
+    }
+  }
+
   async function maybeStartOnboarding() {
     if (firstRunChecked) return;
     firstRunChecked = true;
@@ -77,6 +98,10 @@
     window.addEventListener("popstate", updateRoute);
     updateRoute();
     maybeStartOnboarding();
+    // Default-on update check (shell only; resolves to "unavailable" in a
+    // browser). Deliberately after routing so a slow network cannot delay the
+    // first screen.
+    if (updatesAvailable()) refreshUpdateState();
 
     return () => {
       window.removeEventListener("hashchange", updateRoute);
@@ -86,5 +111,16 @@
 </script>
 
 <Shell items={NAV_ITEMS} {route} onNavigate={onNav}>
+  {#if updateState.status === "available"}
+    <aside class="xpst-update-banner" role="status" aria-live="polite">
+      <span>{describeUpdateResult(updateState)}</span>
+      <span class="xpst-update-banner__actions">
+        <button type="button" class="xpst-button" data-size="sm" onclick={installAvailableUpdate} disabled={installing}>
+          {installing ? "Installing…" : "Install and restart"}
+        </button>
+        <a href="#/about">Details</a>
+      </span>
+    </aside>
+  {/if}
   <Page />
 </Shell>

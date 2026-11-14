@@ -624,18 +624,67 @@ fn boot_engine(app: tauri::AppHandle) {
 }
 
 // ---------------------------------------------------------------------------
-// Updater E2E (Phase 2).
+// Updates.
 //
-// The setup hook writes boot-version markers so an E2E test can PROVE the
-// running process's version (marker file written by the app itself):
-//   $WORK/started-<version>.txt — one file per boot (canonical /private/tmp
-//   path: tauri-plugin-updater refuses to run when current_exe() crosses a
-//   symlink, and /tmp is a symlink to /private/tmp on macOS)
+// Two separate concerns, deliberately not mixed:
+//
+// * The PRODUCT path is user-facing and default-on. The UI calls
+//   `updater_check` when it starts (and when the user presses "Check for
+//   updates"), and `updater_install` when the user chooses to install. Nothing
+//   downloads or replaces a binary without that choice.
+// * The E2E path exists so scripts/updater-e2e.sh can prove the whole loop
+//   unattended. It is still opt-in via XPST_UPDATER_CHECK=1; that variable no
+//   longer gates the product check, it only selects the unattended
+//   install-and-relaunch behaviour and the boot-version markers.
+//
+// `XPST_UPDATER_CHECK=0` disables the network check entirely (used by the boot
+// measurement harness and by anyone running offline).
+//
+// Boot-version markers (E2E only, written by the app itself so the proof cannot
+// be forged by the harness):
+//   $WORK/started-<version>.txt — one file per boot
 //   $WORK/current.txt           — overwritten with the latest boot's version
-//
-// The updater check is OPT-IN via XPST_UPDATER_CHECK=1 so normal boots never
-// auto-update. On match: check() -> download_and_install() -> restart().
+// The canonical /private/tmp path matters: tauri-plugin-updater refuses to run
+// when current_exe() crosses a symlink, and /tmp is a symlink to /private/tmp.
 const UPDATER_MARKER_DIR: &str = "/private/tmp/xpst-updater-e2e";
+const UPDATER_E2E_ENV: &str = "XPST_UPDATER_CHECK";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UpdaterMode {
+    /// Unattended check -> download -> install -> restart, plus markers.
+    E2e,
+    /// No network check at all.
+    Disabled,
+    /// Product behaviour: the UI asks, the user decides.
+    Interactive,
+}
+
+fn updater_mode_from(value: Option<&str>) -> UpdaterMode {
+    match value.map(str::trim) {
+        Some("1") => UpdaterMode::E2e,
+        Some("0") => UpdaterMode::Disabled,
+        _ => UpdaterMode::Interactive,
+    }
+}
+
+fn updater_mode() -> UpdaterMode {
+    let value = std::env::var(UPDATER_E2E_ENV).ok();
+    updater_mode_from(value.as_deref())
+}
+
+/// What the UI needs to know about an available release.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct UpdateInfo {
+    current_version: String,
+    version: String,
+    notes: Option<String>,
+    date: Option<String>,
+}
+
+/// True when the user asked for an update and we may install it.
+fn install_allowed(mode: UpdaterMode) -> bool {
+    mode != UpdaterMode::Disabled
+}
 
 fn write_version_marker(version: &str) {
     if std::fs::create_dir_all(UPDATER_MARKER_DIR).is_err() {
@@ -657,17 +706,82 @@ fn write_version_marker(version: &str) {
     std::fs::write(format!("{UPDATER_MARKER_DIR}/current.txt"), &stamp).ok();
 }
 
-fn run_updater_check(handle: tauri::AppHandle) {
+async fn check_for_update(
+    handle: &tauri::AppHandle,
+) -> Result<Option<tauri_plugin_updater::Update>, String> {
+    let updater = handle
+        .updater()
+        .map_err(|e| format!("updater is unavailable in this build: {e}"))?;
+    updater
+        .check()
+        .await
+        .map_err(|e| format!("update check failed: {e}"))
+}
+
+fn describe(update: &tauri_plugin_updater::Update) -> UpdateInfo {
+    UpdateInfo {
+        current_version: update.current_version.clone(),
+        version: update.version.clone(),
+        notes: update.body.clone(),
+        date: update.date.as_ref().map(|d| d.to_string()),
+    }
+}
+
+/// Product-path check. Returns `None` when this build is up to date.
+#[tauri::command]
+async fn updater_check(handle: tauri::AppHandle) -> Result<Option<UpdateInfo>, String> {
+    if updater_mode() == UpdaterMode::Disabled {
+        return Ok(None);
+    }
+    match check_for_update(&handle).await? {
+        Some(update) => {
+            println!(
+                "[xpst-updater] update available: {} -> {}",
+                update.current_version, update.version
+            );
+            Ok(Some(describe(&update)))
+        }
+        None => {
+            println!("[xpst-updater] no update available");
+            Ok(None)
+        }
+    }
+}
+
+/// Product-path install. Only ever runs because the user asked for it.
+#[tauri::command]
+async fn updater_install(handle: tauri::AppHandle) -> Result<String, String> {
+    if !install_allowed(updater_mode()) {
+        return Err("updates are disabled in this launch (XPST_UPDATER_CHECK=0)".to_string());
+    }
+    let update = check_for_update(&handle)
+        .await?
+        .ok_or_else(|| "no update is available".to_string())?;
+    let version = update.version.clone();
+    let mut downloaded: usize = 0;
+    update
+        .download_and_install(
+            |chunk, total| {
+                downloaded += chunk;
+                if let Some(t) = total {
+                    println!("[xpst-updater] downloaded {downloaded}/{t} bytes");
+                }
+            },
+            || println!("[xpst-updater] download finished; installing"),
+        )
+        .await
+        .map_err(|e| format!("update could not be installed: {e}"))?;
+    println!("[xpst-updater] installed {version}; restarting");
+    handle.restart();
+    #[allow(unreachable_code)]
+    Ok(version)
+}
+
+/// E2E-only: check -> download -> install -> relaunch, unattended.
+fn run_updater_e2e(handle: tauri::AppHandle) {
     std::thread::spawn(move || {
         tauri::async_runtime::block_on(async move {
-            let updater = match handle.updater() {
-                Ok(u) => u,
-                Err(e) => {
-                    eprintln!("[xpst-updater] updater() failed: {e}");
-                    return;
-                }
-            };
-            match updater.check().await {
+            match check_for_update(&handle).await {
                 Ok(Some(update)) => {
                     println!(
                         "[xpst-updater] update available: {} -> {}",
@@ -701,7 +815,7 @@ fn run_updater_check(handle: tauri::AppHandle) {
                     }
                 }
                 Ok(None) => println!("[xpst-updater] no update available"),
-                Err(e) => eprintln!("[xpst-updater] check failed: {e}"),
+                Err(e) => eprintln!("[xpst-updater] {e}"),
             }
         });
     });
@@ -796,6 +910,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
+        // App commands the engine-origin page calls over IPC. Registered app
+        // commands are allowed for every window by default (Tauri v2 ACL covers
+        // plugin/core permissions); the loopback origin itself is granted by
+        // capabilities/default.json's `remote.urls`.
+        .invoke_handler(tauri::generate_handler![updater_check, updater_install])
         // Native OS file picker for the composer. The engine-origin page calls
         // `plugin:dialog|open` over IPC; the grant (and the loopback origin it
         // is granted to) lives in capabilities/default.json.
@@ -836,11 +955,21 @@ pub fn run() {
             });
             shell_log(&format!("SHELL_STARTED pid={}", std::process::id()));
 
-            // Updater E2E (Phase 2): boot-version marker + opt-in update check.
+            // Updates: the product path is driven by the UI (default-on check
+            // at app start, install only when the user asks). These modes are
+            // for unattended harnesses and offline runs.
             let version = app.package_info().version.to_string();
-            write_version_marker(&version);
-            if std::env::var("XPST_UPDATER_CHECK").ok().as_deref() == Some("1") {
-                run_updater_check(app.handle().clone());
+            match updater_mode() {
+                UpdaterMode::E2e => {
+                    write_version_marker(&version);
+                    run_updater_e2e(app.handle().clone());
+                }
+                UpdaterMode::Disabled => {
+                    shell_log("UPDATER_DISABLED by XPST_UPDATER_CHECK=0");
+                }
+                UpdaterMode::Interactive => {
+                    shell_log("UPDATER_READY interactive (UI-initiated check)");
+                }
             }
 
             // In-process boot-to-visible probe: the window is created
@@ -934,6 +1063,22 @@ mod tests {
         let res = wait_for_engine_health(port, Duration::from_millis(300));
         assert!(res.is_none());
         assert!(started.elapsed() >= Duration::from_millis(250));
+    }
+
+    #[test]
+    fn updater_mode_defaults_to_interactive_and_never_installs_silently() {
+        // The product default must be a user-initiated check: anything that
+        // auto-installs on a normal launch is the defect this replaced.
+        assert_eq!(updater_mode_from(None), UpdaterMode::Interactive);
+        assert_eq!(updater_mode_from(Some("")), UpdaterMode::Interactive);
+        assert_eq!(updater_mode_from(Some("true")), UpdaterMode::Interactive);
+        assert_eq!(updater_mode_from(Some("0")), UpdaterMode::Disabled);
+        assert_eq!(updater_mode_from(Some("1")), UpdaterMode::E2e);
+        // Trimmed, so " 1 " cannot silently fall back to the interactive path.
+        assert_eq!(updater_mode_from(Some(" 1 ")), UpdaterMode::E2e);
+        assert!(install_allowed(UpdaterMode::Interactive));
+        assert!(install_allowed(UpdaterMode::E2e));
+        assert!(!install_allowed(UpdaterMode::Disabled));
     }
 
     #[test]

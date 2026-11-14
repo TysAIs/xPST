@@ -134,14 +134,85 @@ def test_tauri_workflow_builds_the_installer_without_an_updater_key() -> None:
     """No updater key must not downgrade the bundle set to `app` only.
 
     The old else-branch built `--bundles app`, so the macOS lane produced no
-    .dmg at all and the subsequent upload had nothing to publish.
+    .dmg at all and the subsequent upload had nothing to publish. The build is
+    now one invocation whose config overlay carries whatever credentials exist.
     """
     workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
 
     assert "--bundles app" not in workflow
-    assert "no TAURI_SIGNING_PRIVATE_KEY" in workflow
-    # The configured bundle set is used on both branches.
-    assert workflow.count("--bundles ${{ matrix.bundles }}") == 2
+    # The configured bundle set is used in the single build invocation.
+    assert workflow.count("--bundles ${{ matrix.bundles }}") == 1
+    assert 'args=(--target ${{ matrix.target }} --bundles ${{ matrix.bundles }})' in workflow
+    # Updater artifacts and Windows signing are both requested through the
+    # overlay the step before, never by mutating the committed config.
+    assert "steps.overlay.outputs.path" in workflow
+    assert '"createUpdaterArtifacts"' in workflow
+    assert '"signCommand"' in workflow
+    assert "cargo tauri build \"${args[@]}\"" in workflow
+
+
+def test_tauri_workflow_builds_both_macos_architectures() -> None:
+    """darwin-aarch64 and darwin-x86_64 are both real builds.
+
+    The updater manifest has a key per architecture; publishing the arm64
+    bundle under the Intel key is the defect this matrix prevents. PyInstaller
+    cannot cross-build the engine sidecar, so the Intel leg needs a native
+    Intel runner (GitHub retired macos-13; macos-15-intel is the supported
+    x86_64 label).
+    """
+    jobs = _workflow_jobs()
+    legs = jobs["build-tauri"]["strategy"]["matrix"]["include"]
+    by_target = {leg["target"]: leg for leg in legs}
+
+    assert by_target["aarch64-apple-darwin"]["os"] == "macos-latest"
+    assert by_target["x86_64-apple-darwin"]["os"] == "macos-15-intel"
+    assert by_target["aarch64-apple-darwin"]["updater_platform"] == "darwin-aarch64"
+    assert by_target["x86_64-apple-darwin"]["updater_platform"] == "darwin-x86_64"
+    assert by_target["x86_64-pc-windows-msvc"]["updater_platform"] == "windows-x86_64"
+    assert by_target["x86_64-unknown-linux-gnu"]["updater_platform"] == "linux-x86_64"
+    # The media binary is fetched per architecture, not per runner OS.
+    assert by_target["aarch64-apple-darwin"]["media_platform"] == "macos-arm64"
+    assert by_target["x86_64-apple-darwin"]["media_platform"] == "macos-x64"
+
+
+def test_macos_updater_bundle_is_renamed_not_copied() -> None:
+    """The release asset set must contain one unambiguously-named macOS archive.
+
+    v1.2.1 copied `xPST.app.tar.gz` to `darwin-aarch64-…` and left the bare name
+    in the release; the selector then published that arm64 file as
+    darwin-x86_64. A rename leaves no bare name to misattribute.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
+    step = workflow[workflow.index("Name the macOS updater bundle for its architecture") :]
+    step = step[: step.index("- name: Verify app/installer size budget")]
+
+    assert "mv \"$f\"" in step
+    assert "cp \"$f\"" not in step
+    assert "${{ matrix.updater_platform }}" in step
+
+
+def test_an_unsigned_version_tag_is_refused() -> None:
+    """Shipping unsigned installers as if signed is the failure this gate stops.
+
+    macOS would trip Gatekeeper and Windows SmartScreen while the release page
+    advertises a normal download. The updater `.sig` sidecars are a different
+    keypair and do not make an installer code-signed.
+    """
+    workflow = (ROOT / ".github" / "workflows" / "tauri-release.yml").read_text(encoding="utf-8")
+
+    assert "Refuse an unsigned release tag" in workflow
+    assert "refusing to publish an unsigned" in workflow
+    gate = workflow[workflow.index("Refuse an unsigned release tag") :]
+    gate = gate[: gate.index("Import Apple signing cert")]
+    assert "APPLE_CERTIFICATE" in gate
+    assert "AZURE_CERTIFICATE_PROFILE" in gate
+    assert gate.count("if: startsWith(github.ref, 'refs/tags/v')") == 1
+
+    # And the built artifacts are verified, not merely assumed signed.
+    assert "Assert macOS signature and notarization" in workflow
+    assert "xcrun stapler validate" in workflow
+    assert "Assert Windows Authenticode signature" in workflow
+    assert "Get-AuthenticodeSignature" in workflow
 
 
 def test_tauri_workflow_uploads_from_the_target_specific_bundle_dir() -> None:

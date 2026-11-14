@@ -188,6 +188,67 @@ def test_cli_rejects_a_platform_outside_the_supported_set(tmp_path: Path) -> Non
     assert not (tmp_path / "latest.json").exists()
 
 
+def test_generate_manifest_rejects_two_files_with_one_digest(tmp_path: Path) -> None:
+    """The v1.2.1 Intel entry: two platform keys, one digest, two files.
+
+    The manifest advertised the arm64 sha512/signature for ``darwin-x86_64``
+    while pointing at a different payload, so an Intel Mac downloaded a file
+    whose digest and signature could never verify.
+    """
+    artifacts = _fixtures(tmp_path)
+    arm = artifacts["darwin-aarch64"]
+    intel = artifacts["darwin-x86_64"]
+    intel.write_bytes(arm.read_bytes())  # same bytes, different file name
+    (intel.with_name(intel.name + ".sig")).write_text(
+        "untrusted comment: fixture signature for darwin-aarch64\nsignature-darwin-aarch64\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="different files with the same sha512"):
+        manifest_module.generate_manifest(
+            version="1.2.3",
+            notes="Updater fixture release",
+            artifacts=artifacts,
+            base_url="https://downloads.example.test/v1.2.3",
+            pubkey="fixture-public-key",
+        )
+
+
+def test_generate_manifest_allows_one_payload_under_two_keys(tmp_path: Path) -> None:
+    """A universal macOS build is legitimately one file for both darwin keys."""
+    artifacts = _fixtures(tmp_path)
+    universal = artifacts["darwin-aarch64"]
+    artifacts["darwin-x86_64"] = universal
+
+    manifest = manifest_module.generate_manifest(
+        version="1.2.3",
+        notes="Updater fixture release",
+        artifacts=artifacts,
+        base_url="https://downloads.example.test/v1.2.3",
+        pubkey="fixture-public-key",
+        platforms=("darwin-aarch64", "darwin-x86_64"),
+    )
+
+    entries = manifest["platforms"]
+    assert entries["darwin-aarch64"]["url"] == entries["darwin-x86_64"]["url"]
+    assert entries["darwin-aarch64"]["sha512"] == entries["darwin-x86_64"]["sha512"]
+
+
+def test_generate_manifest_rejects_a_payload_that_cannot_install(tmp_path: Path) -> None:
+    """A macOS archive must never be advertised as the Windows payload."""
+    artifacts = _fixtures(tmp_path)
+    artifacts["windows-x86_64"] = artifacts["darwin-aarch64"]
+
+    with pytest.raises(ValueError, match="windows-x86_64 cannot be updated from"):
+        manifest_module.generate_manifest(
+            version="1.2.3",
+            notes="Updater fixture release",
+            artifacts=artifacts,
+            base_url="https://downloads.example.test/v1.2.3",
+            pubkey="fixture-public-key",
+        )
+
+
 def test_there_is_exactly_one_manifest_generator() -> None:
     """Two generators writing latest.json is the defect this consolidates away.
 

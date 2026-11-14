@@ -16,8 +16,11 @@ download will trigger a Gatekeeper approval on first launch — see
 the checksum before opening any downloaded artifact.
 
 Automatic updates through the Tauri updater manifest (`latest.json`) are wired
-for the `.app.tar.gz` channel; when in doubt, use the Releases page to install
-a newer build manually.
+for the macOS `.app.tar.gz` channel. v1.2.1 predates the in-app update control:
+from the next release the app checks once at launch, shows a banner when a newer
+release exists, and About → Updates carries "Check for updates". Installing is
+always your choice — nothing replaces the app on its own. On v1.2.1, use the
+Releases page to install a newer build manually.
 
 ## Choose the release asset
 

@@ -211,7 +211,11 @@ jobs:
             --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             "${args[@]}"
           # Stage the manifest at the exact path Pages serves for this repo.
-          scripts/publish-updater.sh --manifest "$manifest" --site-dir "$GITHUB_WORKSPACE"
+          # --assets-dir re-hashes the released bytes and re-reads each .sig, so
+          # a manifest that disagrees with the published payloads cannot be
+          # staged (the v1.2.1 Intel entry did exactly that).
+          scripts/publish-updater.sh --manifest "$manifest" --site-dir "$GITHUB_WORKSPACE" \
+            --assets-dir "$RUNNER_TEMP/updater-assets"
           test -s "$GITHUB_WORKSPACE/updates/latest.json"
           printf 'manifest=%s\n' "$manifest" >> "$GITHUB_OUTPUT"
 

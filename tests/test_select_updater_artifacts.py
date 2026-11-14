@@ -160,3 +160,46 @@ def test_signed_updater_archive_beats_the_unsigned_raw_installer(tmp_path: Path)
     assert windows["artifact"].endswith("xPST_1.1.0_x64-setup.nsis.zip")
     assert linux["status"] == "ok"
     assert linux["artifact"].endswith("xPST_1.1.0_amd64.AppImage.tar.gz")
+
+
+def test_bare_macos_bundle_is_never_attributed_to_an_architecture(tmp_path: Path) -> None:
+    """Regression: v1.2.1 published the arm64 archive as darwin-x86_64.
+
+    ``cargo tauri build`` names the macOS updater archive ``xPST.app.tar.gz`` on
+    every architecture. Inferring "no arm marker, therefore Intel" gave both
+    darwin keys the same digest, and an Intel Mac downloaded a file whose
+    signature could not verify.
+    """
+    _artifact(tmp_path, "xPST.app.tar.gz")
+
+    results = {result["platform"]: result for result in selector.select_all(tmp_path)}
+
+    assert results["darwin-aarch64"]["status"] == "unattributable"
+    assert results["darwin-x86_64"]["status"] == "unattributable"
+    assert results["darwin-aarch64"]["candidates"][0].endswith("xPST.app.tar.gz")
+    assert "architecture" in results["darwin-x86_64"]["reason"]
+
+
+def test_macos_bundle_names_that_state_their_architecture_still_resolve(tmp_path: Path) -> None:
+    _artifact(tmp_path, "xPST_1.1.0_aarch64.app.tar.gz")
+    _artifact(tmp_path, "xPST_1.1.0_x64.app.tar.gz")
+
+    statuses = _statuses(selector.select_all(tmp_path))
+
+    assert statuses["darwin-aarch64"] == "ok"
+    assert statuses["darwin-x86_64"] == "ok"
+
+
+def test_signed_nsis_setup_wins_over_the_signed_msi(tmp_path: Path) -> None:
+    """Both Windows installers are signed; NSIS is the updater's install mode.
+
+    Reporting two signed candidates as ambiguous kept windows-x86_64 out of the
+    manifest even though the release had a valid updater payload.
+    """
+    _artifact(tmp_path, "xPST_1.1.0_x64-setup.exe")
+    _artifact(tmp_path, "xPST_1.1.0_x64_en-US.msi")
+
+    result = selector.select("windows-x86_64", sorted(tmp_path.iterdir()))
+
+    assert result["status"] == "ok"
+    assert result["artifact"].endswith("x64-setup.exe")

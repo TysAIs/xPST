@@ -12,13 +12,28 @@ Two naming shapes are accepted for one platform:
 * an explicit target prefix -- ``<platform>-<artifact>`` (for example
   ``darwin-aarch64-xPST.app.tar.gz``), which is what the release workflow
   produces; this always wins;
-* the bundler's own names -- ``*.app.tar.gz`` (macOS, architecture inferred from
-  ``aarch64``/``arm64`` in the name), ``*setup.exe`` (Windows),
-  ``*.AppImage`` (Linux).
+* the bundler's own names -- ``*.app.tar.gz`` (macOS), ``*setup.exe`` or
+  ``*.msi`` (Windows), ``*.AppImage`` (Linux).
 
-A platform with no candidate is reported as ``absent``; one with more than one
-is reported as ``ambiguous``. Neither aborts the run: the caller publishes the
-platforms it does have and reports the rest.
+**A macOS bundle name must carry its architecture.** ``cargo tauri build``
+names the macOS updater archive ``xPST.app.tar.gz`` on every architecture, so
+an unmarked name cannot be attributed to a target. Treating "no arm marker" as
+"Intel" is how v1.2.1 published an arm64 payload under ``darwin-x86_64``: the
+manifest then carried the arm64 digest for both keys, and Intel Macs were
+offered an update that could not verify. An unmarked macOS bundle is therefore
+reported as ``unattributable`` and never published, unless its name carries an
+architecture marker (``aarch64``/``arm64`` vs ``x86_64``/``x64``/``intel``).
+
+Windows ships one signed updater payload per release, not two: when a release
+carries a signed NSIS ``setup.exe`` *and* a signed ``.msi`` (the release lane
+builds both), NSIS wins deterministically. Two signed candidates used to be
+reported as ``ambiguous``, which kept ``windows-x86_64`` out of the manifest
+for an entirely avoidable reason.
+
+A platform with no candidate is reported as ``absent``; one whose candidate is
+unmarked or tied is reported as ``unattributable``/``ambiguous``. None of these
+aborts the run: the caller publishes the platforms it does have and reports the
+rest.
 """
 
 from __future__ import annotations
@@ -46,17 +61,16 @@ ARTIFACT_SUFFIXES = (
     ".appimage",
     ".exe",
     ".msi",
+    ".zip",
     ".dmg",
 )
 _ARTIFACT_SUFFIXES_LOWER = tuple(suffix.lower() for suffix in ARTIFACT_SUFFIXES)
 
-# The packages `cargo tauri build` SIGNS when `bundle.createUpdaterArtifacts` is
-# enabled. The raw installer is not signed, so when a release carries both the
-# updater archive and its installer for one platform, the archive is the only
-# candidate that can be published.
-UPDATER_ARCHIVE_SUFFIXES = (".app.tar.gz", ".appimage.tar.gz", ".nsis.zip")
+# Architecture markers a bundle name may carry. A macOS archive without one
+# cannot be attributed to either darwin target (see the module docstring).
+_MACOS_ARM_MARKERS = ("aarch64", "arm64")
+_MACOS_INTEL_MARKERS = ("x86_64", "x64", "intel", "amd64")
 
-_MACOS_ARM_HINTS = ("aarch64", "arm64")
 
 
 def _is_signature(path: Path) -> bool:
@@ -81,6 +95,24 @@ def explicit_candidates(files: list[Path], platform: str) -> list[Path]:
     return sorted(matches)
 
 
+def macos_arch_of(name: str) -> str | None:
+    """Return ``aarch64``/``x86_64`` for a name that names its architecture.
+
+    ``None`` means the name carries no architecture marker; it must not be
+    guessed into either target.
+    """
+    lower = name.lower()
+    arm = any(marker in lower for marker in _MACOS_ARM_MARKERS)
+    intel = any(marker in lower for marker in _MACOS_INTEL_MARKERS)
+    if arm and intel:
+        return None
+    if arm:
+        return "aarch64"
+    if intel:
+        return "x86_64"
+    return None
+
+
 def inferred_candidates(files: list[Path], platform: str) -> list[Path]:
     """Bundler-default names, mapped to a target in the manifest."""
     matches: list[Path] = []
@@ -92,11 +124,10 @@ def inferred_candidates(files: list[Path], platform: str) -> list[Path]:
         if platform in ("darwin-aarch64", "darwin-x86_64"):
             if not lower.endswith(".app.tar.gz"):
                 continue
-            is_arm = any(hint in lower for hint in _MACOS_ARM_HINTS)
-            if (platform == "darwin-aarch64") == is_arm:
+            if macos_arch_of(name) == platform.removeprefix("darwin-"):
                 matches.append(path)
         elif platform == "windows-x86_64":
-            if lower.endswith(("setup.exe", ".msi", ".nsis.zip")):
+            if lower.endswith(("setup.exe", ".msi", ".nsis.zip", ".msi.zip")):
                 matches.append(path)
         elif platform == "linux-x86_64":
             if lower.endswith((".appimage", ".appimage.tar.gz")):
@@ -104,24 +135,78 @@ def inferred_candidates(files: list[Path], platform: str) -> list[Path]:
     return sorted(matches)
 
 
-def _prefer_updater_archives(candidates: list[Path]) -> list[Path]:
-    """Drop raw installers when a signed updater archive is also present.
+def _preference_rank(platform: str, path: Path) -> int:
+    """Lower is better; one deterministic payload per platform.
 
-    ``createUpdaterArtifacts`` signs only the archive (``xPST.app.tar.gz``,
-    ``*.nsis.zip``, ``*.AppImage.tar.gz``); the ``.exe``/``.msi``/``.AppImage``
-    next to it carries no ``.sig``. Preferring the archive keeps a release with
-    both files from being reported as ``ambiguous`` (or ``unsigned``).
+    * updater archives (which are what ``createUpdaterArtifacts`` signs in the
+      v1-compatible layout) beat raw installers;
+    * on Windows the NSIS installer is the updater's install mode, so it beats
+      the WiX ``.msi`` when both are signed;
+    * on Linux the plain AppImage is what the updater replaces.
     """
-    archives = [path for path in candidates if path.name.lower().endswith(UPDATER_ARCHIVE_SUFFIXES)]
-    return archives or candidates
+    name = path.name.lower()
+    if platform == "windows-x86_64":
+        if name.endswith(".nsis.zip"):
+            return 0
+        if name.endswith("setup.exe"):
+            return 1
+        if name.endswith(".msi"):
+            return 2
+        if name.endswith(".zip"):
+            return 1
+    if platform == "linux-x86_64":
+        if name.endswith(".appimage.tar.gz"):
+            return 0
+        if name.endswith(".appimage"):
+            return 1
+    if platform.startswith("darwin-"):
+        if name.endswith(".app.tar.gz"):
+            return 0
+    return 0
+
+
+def _prefer_updater_archives(candidates: list[Path], platform: str) -> list[Path]:
+    """Keep only the best-ranked candidate group for one platform."""
+    if not candidates:
+        return []
+    ranked = sorted(candidates, key=lambda path: (_preference_rank(platform, path), path.name))
+    best = _preference_rank(platform, ranked[0])
+    return [path for path in ranked if _preference_rank(platform, path) == best]
+
+
+def _unattributable_macos_bundles(files: list[Path]) -> list[str]:
+    """Bare ``*.app.tar.gz`` names that name no architecture."""
+    found: list[str] = []
+    for path in files:
+        if _is_signature(path):
+            continue
+        lower = path.name.lower()
+        if lower.endswith(".app.tar.gz") and macos_arch_of(path.name) is None:
+            found.append(str(path))
+    return sorted(found)
 
 
 def select(platform: str, files: list[Path]) -> dict[str, Any]:
     """Resolve one platform to a signed artifact, or explain why it cannot be."""
     explicit = explicit_candidates(files, platform)
-    candidates = _prefer_updater_archives(explicit or inferred_candidates(files, platform))
+    candidates = _prefer_updater_archives(
+        explicit or inferred_candidates(files, platform), platform
+    )
     source = "explicit-prefix" if explicit else "bundler-name"
     if not candidates:
+        excerpt = _unattributable_macos_bundles(files) if platform.startswith("darwin-") else []
+        if excerpt:
+            return {
+                "platform": platform,
+                "status": "unattributable",
+                "candidates": excerpt,
+                "source": source,
+                "reason": (
+                    "macOS updater bundle name carries no architecture marker; it cannot be "
+                    "attributed to darwin-aarch64 or darwin-x86_64 (rename it to "
+                    "<platform>-<name> in the release lane)"
+                ),
+            }
         return {"platform": platform, "status": "absent", "candidates": [], "source": source}
     if len(candidates) > 1:
         return {
@@ -173,6 +258,11 @@ def _report_notes(results: list[dict[str, Any]]) -> list[str]:
         elif result["status"] == "ambiguous":
             names = ", ".join(Path(path).name for path in result["candidates"])
             notes.append(f"{result['platform']}: ambiguous, needs an explicit target prefix: {names}")
+        elif result["status"] == "unattributable":
+            names = ", ".join(Path(path).name for path in result["candidates"])
+            notes.append(
+                f"{result['platform']}: no architecture in the macOS bundle name, refusing to guess: {names}"
+            )
         elif result["status"] == "unsigned":
             notes.append(
                 f"{result['platform']}: artifact present but {Path(str(result['missing_signature'])).name} is missing"

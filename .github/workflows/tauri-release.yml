@@ -52,22 +52,57 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Both macOS architectures are built natively: the updater manifest
+          # has a key for each (darwin-aarch64, darwin-x86_64), and a bundle
+          # built for one architecture cannot honestly serve the other. GitHub
+          # retired the old Intel image (macos-13); `macos-15-intel` is the
+          # supported x86_64 label and is available until fall 2027.
+          # PyInstaller cannot cross-build the engine sidecar, so an Intel
+          # shell has to be produced on an Intel runner.
           - os: macos-latest
             target: aarch64-apple-darwin
+            updater_platform: darwin-aarch64
+            media_platform: macos-arm64
+            bundles: "app,dmg"
+            engine_binary: xpst-engine
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            updater_platform: darwin-x86_64
+            media_platform: macos-x64
             bundles: "app,dmg"
             engine_binary: xpst-engine
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            updater_platform: windows-x86_64
+            media_platform: win-x64
             bundles: "nsis,msi"
             engine_binary: xpst-engine.exe
           # Pinned to 22.04: the AppImage bundler needs libfuse2, which is
           # absent from ubuntu-24.04 (ubuntu-latest) images.
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            updater_platform: linux-x86_64
+            media_platform: linux-x64
             bundles: "deb,appimage"
             engine_binary: xpst-engine
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
+    # Signing credentials live at job level so a step's `if:` can test them:
+    # an empty value is not a credential, and Tauri must never see a
+    # set-but-empty APPLE_* variable (it treats it as a real identity).
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      AZURE_CODE_SIGNING_ACCOUNT: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT }}
+      AZURE_CERTIFICATE_PROFILE: ${{ secrets.AZURE_CERTIFICATE_PROFILE }}
     defaults:
       run:
         # Git Bash on Windows so the POSIX steps below run identically on all
@@ -172,13 +207,10 @@ jobs:
           # checksum-verified static build on first use. Only yt-dlp still ships,
           # and the engine's bundled yt_dlp module is the primary path, so a
           # failed yt-dlp fetch is a warning rather than a lane failure.
-          case "${RUNNER_OS}" in
-            macOS)   PLATFORM=macos-arm64 ;;
-            Linux)   PLATFORM=linux-x64 ;;
-            Windows) PLATFORM=win-x64 ;;
-            *) echo "::error::unsupported runner OS ${RUNNER_OS}"; exit 1 ;;
-          esac
-          scripts/fetch-media-binaries.sh "$PLATFORM"
+          # The platform comes from the matrix, not from RUNNER_OS: the macOS
+          # lane now has an arm64 leg AND an Intel leg, so "macOS" alone no
+          # longer names one binary.
+          scripts/fetch-media-binaries.sh "${{ matrix.media_platform }}"
           if [ "${RUNNER_OS}" = "Windows" ]; then
             YTDLP=src-tauri/binaries/ytdlp/yt-dlp.exe
           else
@@ -214,6 +246,39 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Refuse an unsigned release tag
+        # A version tag that ships unsigned installers is the failure this gate
+        # exists for: macOS would trip Gatekeeper and Windows SmartScreen, while
+        # the release page claims a normal download. The updater `.sig` sidecars
+        # are a DIFFERENT keypair and do not make an installer code-signed.
+        # Dry-run tags (dryrun-tauri-*) stay open so the build path can be
+        # exercised without credentials.
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          case "${RUNNER_OS}" in
+            macOS)
+              for var in APPLE_CERTIFICATE APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+                [[ -n "${!var:-}" ]] || missing+=("$var")
+              done
+              ;;
+            Windows)
+              for var in AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET \
+                         AZURE_TRUSTED_SIGNING_ENDPOINT AZURE_CODE_SIGNING_ACCOUNT AZURE_CERTIFICATE_PROFILE; do
+                [[ -n "${!var:-}" ]] || missing+=("$var")
+              done
+              ;;
+          esac
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            printf '::error::refusing to publish an unsigned %s build for tag %s. Missing repository secret(s): %s\n' \
+              "${RUNNER_OS}" "${GITHUB_REF_NAME}" "${missing[*]}"
+            printf 'See docs/tauri-updater-production.md for the credential requests.\n'
+            exit 1
+          fi
+          echo "signing credentials present for ${RUNNER_OS}"
+
       - name: Import Apple signing cert (if secrets present)
         if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != null && env.APPLE_CERTIFICATE != ''
         id: cert
@@ -221,8 +286,10 @@ jobs:
         with:
           p12-file-base64: ${{ secrets.APPLE_CERTIFICATE }}
           p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+
+      - name: Install trusted-signing-cli (Windows code signing)
+        if: runner.os == 'Windows' && env.AZURE_CERTIFICATE_PROFILE != ''
+        run: cargo install trusted-signing-cli --locked
 
       - name: Shell unit tests (cargo test)
         # Runs the shell's own tests, including the capability/ACL contract that
@@ -236,6 +303,47 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version 2.11.4 --locked
 
+      - name: Assemble the release build overlay
+        id: overlay
+        shell: bash
+        env:
+          # Not a signing credential: this only decides whether the overlay asks
+          # for updater artifacts, so it is scoped to this step.
+          UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          overlay="$RUNNER_TEMP/xpst-build-overlay.json"
+          python - "$overlay" <<'PY'
+          import json
+          import os
+          import sys
+
+          bundle = {}
+          if os.environ.get("UPDATER_KEY"):
+              bundle["createUpdaterArtifacts"] = True
+
+          endpoint = os.environ.get("AZURE_TRUSTED_SIGNING_ENDPOINT")
+          account = os.environ.get("AZURE_CODE_SIGNING_ACCOUNT")
+          profile = os.environ.get("AZURE_CERTIFICATE_PROFILE")
+          if endpoint and account and profile:
+              # Tauri runs this while bundling, BEFORE the updater artifact and
+              # its .sig are produced. Signing the .exe afterwards would change
+              # its bytes and invalidate the updater signature.
+              bundle["windows"] = {
+                  "signCommand": f"trusted-signing-cli -e {endpoint} -a {account} -c {profile} -d xPST %1"
+              }
+
+          if bundle:
+              with open(sys.argv[1], "w", encoding="utf-8") as handle:
+                  json.dump({"bundle": bundle}, handle, indent=2)
+              print("overlay:", json.dumps({"bundle": bundle}))
+          else:
+              print("no credentials: no config overlay (ad-hoc build)")
+          PY
+          if [ -s "$overlay" ]; then
+            echo "path=$overlay" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build Tauri app + bundles
         run: |
           set -euo pipefail
@@ -246,8 +354,8 @@ jobs:
             # An empty Apple signing/notarization variable is NOT the same as an
             # absent one: Tauri treats a set-but-empty APPLE_SIGNING_IDENTITY as
             # an identity named "" and every bundle fails with
-            # `codesign: no identity found`. The repository has no Apple
-            # secrets, so drop the variables instead of passing empty strings.
+            # `codesign: no identity found`. Keep dropping empty values so a
+            # machine without credentials still builds an ad-hoc bundle.
             for var in APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_CERTIFICATE; do
               if [ -z "${!var:-}" ]; then
                 unset "$var" || true
@@ -256,28 +364,77 @@ jobs:
           fi
           # Build the configured bundle set whether or not an updater key is
           # present. Downgrading the list to `app` here silently produced no
-          # installer at all; createUpdaterArtifacts is false in
-          # tauri.conf.json, so an absent key simply means ad-hoc signing.
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
-            # Signed release build. The committed config keeps
-            # bundle.createUpdaterArtifacts=false so a plain local
-            # `cargo tauri build` never demands a key; this lane flips it on for
-            # exactly this build through a config overlay, which is what emits
-            # the updater packages the manifest points at (macOS .app.tar.gz,
-            # Windows *.nsis.zip, Linux *.AppImage.tar.gz) plus their .sig
-            # sidecars.
-            echo "updater signing key present: building ${{ matrix.bundles }} with signed updater artifacts"
-            cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} \
-              --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          # installer at all. The overlay carries createUpdaterArtifacts (only
+          # when the updater key exists) and the Windows signing command (only
+          # when Azure credentials exist), so this single invocation covers
+          # every credential state without inventing one.
+          args=(--target ${{ matrix.target }} --bundles ${{ matrix.bundles }})
+          if [ -n "${{ steps.overlay.outputs.path }}" ]; then
+            args+=(--config "${{ steps.overlay.outputs.path }}")
+            echo "building ${{ matrix.bundles }} with overlay ${{ steps.overlay.outputs.path }}"
           else
-            echo "no TAURI_SIGNING_PRIVATE_KEY: building ${{ matrix.bundles }} with Tauri's default ad-hoc signing"
-            cargo tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+            echo "no credentials: building ${{ matrix.bundles }} with Tauri's default ad-hoc signing"
           fi
+          cargo tauri build "${args[@]}"
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Assert macOS signature and notarization
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find src-tauri/target -type d -path '*release*' -name 'xPST.app' -print -quit)
+          test -n "$APP_PATH" || { echo "::error::xPST.app not found"; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
+          grep -q 'Authority=Developer ID Application' "$RUNNER_TEMP/codesign.txt" || {
+            echo "::error::the bundle is not signed by a Developer ID Application certificate"
+            exit 1
+          }
+          # The app bundle is the payload Gatekeeper assesses; its staple is a
+          # hard requirement. The DMG is checked too, but only reported: whether
+          # the bundler staples the disk image is a Tauri implementation detail,
+          # and failing a correctly signed release over it would be a false
+          # negative. The DMG's contents are the stapled, verified app.
+          xcrun stapler validate "$APP_PATH" || {
+            echo "::error::$APP_PATH is not notarized and stapled"
+            exit 1
+          }
+          DMG=$(find src-tauri/target -type f -path '*bundle/dmg/*.dmg' -print -quit)
+          if [ -n "$DMG" ]; then
+            if xcrun stapler validate "$DMG"; then
+              echo "DMG staple verified: $DMG"
+            else
+              echo "::warning::$DMG carries no stapled ticket; the app inside it is stapled and verified. Re-check with: xcrun stapler validate '$DMG'"
+            fi
+          fi
+          echo "macOS bundle is Developer ID signed, notarized and stapled"
+
+      - name: Assert Windows Authenticode signature
+        if: runner.os == 'Windows' && env.AZURE_CERTIFICATE_PROFILE != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $targets = Get-ChildItem -Recurse -Path src-tauri/target -Include *.exe,*.msi |
+                     Where-Object { $_.FullName -match 'bundle\\(nsis|msi)\\' }
+          if (-not $targets) { Write-Error 'no Windows installer found to verify'; exit 1 }
+          $bad = @()
+          foreach ($file in $targets) {
+            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            Write-Host "$($file.Name): $($sig.Status) / $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') { $bad += $file.Name }
+          }
+          if ($bad.Count -gt 0) {
+            Write-Error "unsigned or invalid Authenticode signature: $($bad -join ', ')"
+            exit 1
+          }
+          Write-Host 'Windows installers carry a valid Authenticode signature'
 
       - name: Assert the expected installer was produced
         run: |
@@ -317,24 +474,42 @@ jobs:
           esac
           echo "expected installer present: $INSTALLER"
 
-      - name: Tag the macOS updater bundle with its architecture
-        # The macOS bundle name (`xPST.app.tar.gz`) carries no arch marker, and
-        # the updater-artifact selector infers darwin-x86_64 for any bare name.
-        # This lane builds aarch64, so a bare name would publish an x86_64
-        # entry that real Apple-silicon updaters can neither verify nor run.
-        # Copy (not move: the DMG budget check below reads the tree) to the
-        # explicit `darwin-aarch64-` shape the selector accepts.
+      - name: Name the macOS updater bundle for its architecture
+        # `cargo tauri build` names the macOS updater archive `xPST.app.tar.gz`
+        # on every architecture, and the selector will not guess which one it
+        # is. Rename it to the explicit `<platform>-` shape the selector
+        # requires, using this leg's matrix value. It is a rename, not a copy:
+        # v1.2.1 copied the arm64 archive to `darwin-aarch64-…` and left the
+        # bare name in the release, and the selector then published that arm64
+        # file as darwin-x86_64.
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
           bundle_dir=$(find src-tauri/target -type d -path '*bundle/macos' -print -quit)
           test -n "$bundle_dir" || { echo "::error::no bundle/macos dir"; exit 1; }
-          for f in "$bundle_dir"/*.app.tar.gz "$bundle_dir"/*.app.tar.gz.sig; do
+          shopt -s nullglob
+          archives=("$bundle_dir"/*.app.tar.gz)
+          [ "${#archives[@]}" -gt 0 ] || {
+            echo "::error::no *.app.tar.gz in $bundle_dir (updater artifacts were not produced)"
+            ls -la "$bundle_dir"
+            exit 1
+          }
+          for f in "${archives[@]}"; do
             base=$(basename "$f")
-            case "$base" in darwin-*) continue ;; esac
-            cp "$f" "$bundle_dir/darwin-aarch64-$base"
-            echo "staged darwin-aarch64-$base"
+            case "$base" in
+              "${{ matrix.updater_platform }}-"*) continue ;;
+              darwin-*)
+                echo "::error::$base already names a darwin target other than ${{ matrix.updater_platform }}"
+                exit 1
+                ;;
+            esac
+            mv "$f" "$bundle_dir/${{ matrix.updater_platform }}-$base"
+            if [ -f "$f.sig" ]; then
+              mv "$f.sig" "$bundle_dir/${{ matrix.updater_platform }}-$base.sig"
+            fi
+            echo "staged ${{ matrix.updater_platform }}-$base (+ .sig)"
           done
+          ls -la "$bundle_dir"
 
       - name: Verify app/installer size budget
         run: |
@@ -709,7 +884,8 @@ jobs:
             "${args[@]}"
           # Same staging/validation script the publish workflow uses, so the
           # bytes that reach a release asset are the bytes that reach Pages.
-          scripts/publish-updater.sh --manifest "$manifest" --site-dir "$GITHUB_WORKSPACE"
+          scripts/publish-updater.sh --manifest "$manifest" --site-dir "$GITHUB_WORKSPACE" \
+            --assets-dir updater-flat
           test -s "$GITHUB_WORKSPACE/updates/latest.json"
           printf 'manifest=%s\n' "$manifest" >> "$GITHUB_OUTPUT"
 
