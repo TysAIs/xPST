@@ -1613,6 +1613,11 @@ def preflight_cmd(
                 # A refusal already carries the envelope in its reason.
                 if limits and item["state"] == "posted":
                     console.print(f"      envelope: {', '.join(limits)}")
+                # Advisories and the rendition plan are shown for every state:
+                # a human deciding whether to fire the post needs to know the
+                # destination will re-encode (soft ceiling) or that nothing
+                # was computed, not only what the JSON says.
+                _print_destination_advisories(item)
         else:
             console.print("  [red]No destination resolved.[/red]")
         if payload.get("error"):
@@ -4974,6 +4979,28 @@ def _display_result(result: CrossPostResult) -> None:
             console.print(f"[yellow]💡 Fix ({platform}):[/yellow] {hint}")
 
 
+def _print_destination_advisories(item: dict, *, indent: str = "      ") -> None:
+    """Print one destination's advisories and its rendition decision.
+
+    Warnings were JSON-only, so a human reading ``preflight`` saw "would
+    publish" with no hint that the destination will re-encode the file, or
+    that a soft ceiling was exceeded (F6). ``transform``/``transforms`` are
+    printed only when the caller asked for the rendition plan (F1) — absent
+    means "not computed", which must never read as "passthrough".
+    """
+    for issue in item.get("warnings") or []:
+        console.print(
+            f"{indent}[yellow]advisory[/yellow] ({issue.get('code')}): {issue.get('message')}"
+        )
+    transform = item.get("transform")
+    transforms = item.get("transforms") or []
+    plans = transforms or ([transform] if transform else [])
+    for index, plan in enumerate(plans, start=1):
+        prefix = f"item {index} " if len(plans) > 1 else ""
+        reasons = "; ".join(plan.get("reasons") or []) or "no change needed"
+        console.print(f"{indent}{prefix}transform: {plan.get('action')} — {reasons}")
+
+
 def _print_route_plan(route_plan: dict) -> None:
     """Print the resolved per-destination plan (R4) before anything publishes.
 
@@ -4991,6 +5018,7 @@ def _print_route_plan(route_plan: dict) -> None:
         console.print(
             f"    - {item.get('platform')}: [{colour}]{state}[/{colour}] — {item.get('reason')}"
         )
+        _print_destination_advisories(item, indent="      ")
 
 
 def _result_to_dict(result: CrossPostResult) -> dict:

@@ -389,6 +389,16 @@ class RouteDestination:
     constraints: dict[str, Any] = field(default_factory=dict)
     blockers: tuple[dict[str, str], ...] = ()
     warnings: tuple[dict[str, str], ...] = ()
+    #: The rendition decision for this destination's media (``action``:
+    #: passthrough / remux / transcode) — only computed when the caller asked
+    #: for it (``build_route_plan(include_transform=True)``, CLI
+    #: ``preflight --transform``). ``None`` means "not computed", never
+    #: "no transform": a plan that skipped the probe must not claim the file
+    #: will be uploaded untouched.
+    transform: dict[str, Any] | None = None
+    #: One entry per media item when the request carries several (a carousel),
+    #: so a multi-file post's rendition decision is visible item by item.
+    transforms: tuple[dict[str, Any], ...] = ()
 
     @property
     def will_post(self) -> bool:
@@ -418,6 +428,12 @@ class RouteDestination:
             "constraints": self.constraints,
             "blockers": [dict(item) for item in self.blockers],
             "warnings": [dict(item) for item in self.warnings],
+            # Serialised so the caller that asked for the rendition plan
+            # receives it: excluding this field is what made
+            # ``preflight --transform`` inert while ``verify-media --plan``
+            # printed the same decision correctly (defect F1).
+            "transform": dict(self.transform) if self.transform else None,
+            "transforms": [dict(item) for item in self.transforms],
         }
 
 
@@ -593,6 +609,15 @@ def build_route_plan(
             if issue.code in {"QUOTA_NOT_READY", "AUTH_NOT_READY"}
         )
 
+        # The rendition decision the caller asked for (F1): every media item
+        # whose transform was computed carries it, so a single-file post gets
+        # one ``transform`` and a carousel gets the same decision per item.
+        transforms = tuple(
+            dict(item.transform.to_dict())
+            for item in (platform_plan.media if platform_plan else ())
+            if item.transform is not None
+        )
+
         state = POSTED
         reason = "will publish"
         if profile is None:
@@ -636,6 +661,8 @@ def build_route_plan(
                 constraints=dict(platform_plan.constraints) if platform_plan else {},
                 blockers=blockers,
                 warnings=warnings,
+                transform=transforms[0] if len(transforms) == 1 else None,
+                transforms=transforms if len(transforms) > 1 else (),
             )
         )
 

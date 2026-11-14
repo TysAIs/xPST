@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`xpst preflight --transform` emits the rendition plan it was asked for.**
+  The flag reached `build_route_plan(include_transform=…)` and the service
+  computed the per-destination decision, but `RouteDestination` never
+  serialised it, so the JSON carried nothing and only `verify-media --plan`
+  showed it. Each destination now carries `transform` (or `transforms`, one
+  entry per carousel item), and `preflight`/`post --dry-run` print it.
+  `None` means "not computed", never "passthrough".
+- **Advisories that used to be JSON-only are printed, and they say what will
+  happen.** A soft ceiling (4K dimensions, 40 Mbps) and a sample rate that
+  differs from a destination's native rate are warnings, not refusals — but
+  nobody reading the human output ever saw them, so "would publish" looked
+  lossless. They now print under each destination, the dimension/bitrate text
+  says the destination re-encodes rather than rejects, and the audio-rate text
+  says it is advisory only (YouTube is 48 kHz, X/TikTok 44.1 kHz, so no single
+  file satisfies both and no re-encode is needed).
 - **A pip/wheel install can serve the web UI, so `#/phone` is reachable from
   PyPI.** The wheel shipped no UI at all: `/` served the string placeholder and
   only the JSON API worked, so `xpst pair` handed a phone a code for a screen
