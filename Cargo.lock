@@ -354,19 +354,19 @@ dependencies = [
 
 [[package]]
 name = "xpst-api"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-app"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-auth"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-cli"
-version = "1.2.1"
+version = "1.3.0"
 dependencies = [
  "clap",
  "serde",
@@ -379,7 +379,7 @@ dependencies = [
 
 [[package]]
 name = "xpst-config"
-version = "1.2.1"
+version = "1.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -389,51 +389,51 @@ dependencies = [
 
 [[package]]
 name = "xpst-core"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-mcp"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-media"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-provider"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-provider-instagram"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-provider-meta"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-provider-threads"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-provider-tiktok"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-provider-x"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-provider-youtube"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-source"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xpst-state"
-version = "1.2.1"
+version = "1.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -442,11 +442,11 @@ dependencies = [
 
 [[package]]
 name = "xpst-store"
-version = "1.2.1"
+version = "1.3.0"
 
 [[package]]
 name = "xtask"
-version = "1.2.1"
+version = "1.3.0"
 dependencies = [
  "serde_json",
 ]
