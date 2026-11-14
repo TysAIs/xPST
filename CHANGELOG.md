@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   says the destination re-encodes rather than rejects, and the audio-rate text
   says it is advisory only (YouTube is 48 kHz, X/TikTok 44.1 kHz, so no single
   file satisfies both and no re-encode is needed).
+- **`--visibility` no longer reads as a capability every destination has.**
+  Only YouTube forwards a visibility at upload time; X and TikTok take
+  `visibility` on the *delete* path only and publish publicly. The plan
+  accepted the flag for the whole request and still reported `ready: true`,
+  so "nothing gets posted publicly" looked like a flag instead of a scope
+  decision. `post` (dry run and live, JSON and human output) now names the
+  destinations that will ignore it. The key is emitted only when there is
+  something to warn about, so the default (public) payload shape is unchanged.
+- **`xpst status` says its `platform_health` is historical, not current.** The
+  counters come from local post outcomes — TikTok carried 195 "failures" from
+  a retired API path while `xpst doctor` reported it ready. Each entry now
+  carries `historical: true` / `source: state_history`, the payload carries a
+  `platform_health_note` pointing at `xpst doctor`, and the human output's
+  heading says which surface is the live authority.
 - **A pip/wheel install can serve the web UI, so `#/phone` is reachable from
   PyPI.** The wheel shipped no UI at all: `/` served the string placeholder and
   only the JSON API worked, so `xpst pair` handed a phone a code for a screen
