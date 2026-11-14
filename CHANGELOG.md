@@ -37,6 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries `historical: true` / `source: state_history`, the payload carries a
   `platform_health_note` pointing at `xpst doctor`, and the human output's
   heading says which surface is the live authority.
+- **A paused deployment can no longer queue a post behind the operator.** A
+  manual post fired outside the posting window (08:00–23:00) is deferred to the
+  schedule store — which *creates* `~/.xpst/schedule.json`, a schedule change
+  nobody asked for. `schedule.posting_paused` (or `XPST_POSTING_PAUSED=1`)
+  makes the deferral refuse instead: nothing is queued, nothing is uploaded, and
+  the CLI exits non-zero with `{"paused": true, …}` while the MCP tool returns
+  an error result. The guard sits in the deferral itself, so every surface that
+  defers inherits it; an explicit in-window post or `--now` still publishes.
+- **The post dry run reports deferral instead of silently implying it will
+  post.** The notice lived after the dry-run block's `return`, so it could never
+  print. The payload now carries a `deferral` object — queued (window closed) or
+  refused (deployment paused), with the reason.
 - **A pip/wheel install can serve the web UI, so `#/phone` is reachable from
   PyPI.** The wheel shipped no UI at all: `/` served the string placeholder and
   only the JSON API worked, so `xpst pair` handed a phone a code for a screen

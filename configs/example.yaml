@@ -162,3 +162,11 @@ schedule:
   
   # Catch-up checks per day
   catchup_times_per_day: 3
+
+  # Refuse IMPLICIT posting while the deployment is paused.
+  # When true, a manual post fired outside the posting window (8am-11pm) is
+  # refused instead of being queued to the schedule store: nothing is written,
+  # nothing is uploaded. An explicit in-window post, or `--now`, still
+  # publishes - the pause forbids silent deferral, not a deliberate post.
+  # `XPST_POSTING_PAUSED=1` turns this on without editing this file.
+  posting_paused: false

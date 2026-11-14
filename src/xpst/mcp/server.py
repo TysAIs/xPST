@@ -1949,6 +1949,25 @@ async def _handle_post(engine: CrossPostEngine, args: dict[str, Any]) -> CallToo
         from xpst.services.manual_defer import defer_manual_post_to_schedule
 
         deferral = defer_manual_post_to_schedule(engine.config, request, verdict["route"])
+        if deferral is not None and deferral.get("paused"):
+            # F3: a paused deployment refuses implicit queueing on this surface
+            # too. Nothing was queued and nothing was uploaded, so this is an
+            # error result — an agent that only checks isError must not treat a
+            # refused post as a success (or as a deferral it can wait on).
+            return CallToolResult(
+                content=[TextContent(
+                    type="text",
+                    text=json.dumps({
+                        "paused": True,
+                        "deferred": False,
+                        "reason": deferral["reason"],
+                        "message": deferral["message"],
+                        "content_type": verdict["effective_content_type"],
+                        "network_calls": False,
+                    }, indent=2, default=str),
+                )],
+                isError=True,
+            )
         if deferral is not None:
             return CallToolResult(content=[TextContent(
                 type="text",

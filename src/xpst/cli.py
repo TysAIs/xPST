@@ -968,6 +968,42 @@ def _visibility_advisories(targets: list[str], visibility: str) -> list[str]:
 def _print_visibility_advisories(advisories: list[str], *, indent: str = "  ") -> None:
     for note in advisories:
         console.print(f"{indent}[yellow]advisory[/yellow]: {note}")
+def _deferral_dry_run_note(config: Any, route: str, *, now: bool) -> dict[str, Any] | None:
+    """What a real run would do instead of publishing right now (dry run).
+
+    Two things can stop an immediate post, and they behave differently: outside
+    the anti-bot window the post is QUEUED (which creates ``schedule.json``),
+    while on a paused deployment it is REFUSED and nothing is written. The dry
+    run says which, because "would post" is not the whole answer (F3 — the
+    notice used to sit after the dry run's ``return``, so it never printed).
+    """
+    if now:
+        return None
+    from xpst.anti_bot import AntiBotProtection
+    from xpst.services.manual_defer import _DEFERRABLE_ROUTES, posting_pause_reason
+
+    if route not in _DEFERRABLE_ROUTES or AntiBotProtection().should_post_now():
+        return None
+    pause_reason = posting_pause_reason(config)
+    if pause_reason:
+        return {
+            "paused": True,
+            "deferred_would_apply": False,
+            "reason": "posting_paused",
+            "message": (
+                f"Outside the posting window (8am-11pm) and posting is paused "
+                f"({pause_reason}): a real run would REFUSE this post and queue "
+                "nothing. Use --now to publish deliberately."
+            ),
+        }
+    return {
+        "deferred_would_apply": True,
+        "reason": "outside_anti_bot_window",
+        "message": (
+            "Outside the posting window (8am-11pm): a real run would queue this "
+            "post to the schedule store instead of posting now (use --now to force)."
+        ),
+    }
 
 
 @main.command()
@@ -1283,6 +1319,13 @@ def post(
                 else {}
             ),
         }
+        # F3: what a real run would actually do instead of posting right now.
+        # This used to live in a branch after this block's `return`, so the
+        # deferral notice could never print — the dry run said nothing about a
+        # queue it would create (or, on a paused deployment, a refusal).
+        deferral_note = _deferral_dry_run_note(config, verdict["route"], now=now)
+        if deferral_note is not None:
+            info["deferral"] = deferral_note
         if as_json:
             json_output(info, True)
         else:
@@ -1301,6 +1344,8 @@ def post(
             _print_route_plan(route_payload)
             console.print(f"  Visibility: {visibility}")
             _print_visibility_advisories(visibility_advisories)
+            if deferral_note is not None:
+                console.print(f"  [yellow]Deferral:[/yellow] {deferral_note['message']}")
             for blocker in merged_blockers:
                 console.print(f"  [red]Blocked:[/red] {blocker}")
         if refusal_blockers:
@@ -1403,50 +1448,42 @@ def post(
     if not now and publishable:
         from xpst.services.manual_defer import defer_manual_post_to_schedule
 
-        if dry_run:
-            from xpst.anti_bot import AntiBotProtection
-            from xpst.services.manual_defer import _DEFERRABLE_ROUTES
-
-            window_open = AntiBotProtection().should_post_now()
-            if verdict["route"] in _DEFERRABLE_ROUTES and not window_open:
+        deferral = defer_manual_post_to_schedule(config, request, verdict["route"])
+        if deferral is not None:
+            if deferral.get("paused"):
+                # Refused because the deployment is paused: nothing was
+                # queued and nothing was uploaded, so this is not a
+                # deferral and not a success — say it and exit non-zero.
                 if as_json:
                     json_output(
                         {
-                            "dry_run": True,
-                            "deferred_would_apply": True,
-                            "reason": "outside_anti_bot_window",
-                            "message": (
-                                "Dry run: outside the posting window (8am-11pm); "
-                                "a real run would queue this post to the schedule "
-                                "store instead of posting now (use --now to force)."
-                            ),
-                        },
-                        True,
-                    )
-                else:
-                    console.print(
-                        "[yellow]Dry run:[/yellow] outside the posting window; a "
-                        "real run would defer this to the schedule (use --now to force)."
-                    )
-                return
-        else:
-            deferral = defer_manual_post_to_schedule(config, request, verdict["route"])
-            if deferral is not None:
-                if as_json:
-                    json_output(
-                        {
-                            "deferred": True,
+                            "paused": True,
+                            "deferred": False,
                             "reason": deferral["reason"],
-                            "resume_after": deferral["resume_after"],
-                            "scheduled": deferral["scheduled"],
                             "message": deferral["message"],
                             "content_type": verdict["effective_content_type"],
+                            "exit_code": EXIT_GENERAL,
                         },
                         True,
                     )
                 else:
-                    console.print(f"[yellow]Deferred:[/yellow] {deferral['message']}")
-                return
+                    console.print(f"[red]Refused:[/red] {deferral['message']}")
+                sys.exit(EXIT_GENERAL)
+            if as_json:
+                json_output(
+                    {
+                        "deferred": True,
+                        "reason": deferral["reason"],
+                        "resume_after": deferral["resume_after"],
+                        "scheduled": deferral["scheduled"],
+                        "message": deferral["message"],
+                        "content_type": verdict["effective_content_type"],
+                    },
+                    True,
+                )
+            else:
+                console.print(f"[yellow]Deferred:[/yellow] {deferral['message']}")
+            return
 
     # Route through the shared pidfile helper: a manual post may run even
     # while a daemon/watch instance holds the pidfile (advisory semantics —
