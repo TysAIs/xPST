@@ -86,7 +86,10 @@ jobs:
             bundles: "deb,appimage"
             engine_binary: xpst-engine
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
+    # Intel macOS runners are markedly slower than arm64 for the same work
+    # (PyInstaller sidecar + cargo build + three cold boots). The ceiling is a
+    # guard against a hung step, not a target.
+    timeout-minutes: 180
     # Signing credentials live at job level so a step's `if:` can test them:
     # an empty value is not a credential, and Tauri must never see a
     # set-but-empty APPLE_* variable (it treats it as a real identity).
@@ -185,8 +188,29 @@ jobs:
 
       - name: Install Python engine deps (sidecar build)
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install -e ".[full]" pyinstaller
+          # `knowledge` pulls lancedb, which has no x86_64 macOS wheel: pip builds
+          # it from source, and that Rust build alone outlived this lane's whole
+          # timeout on macos-15-intel (measured: still compiling 90 minutes into
+          # the pip step). The engine is written to degrade instead — the KB
+          # backend reports "lancedb is not installed" and `xpst kb doctor`
+          # names the missing extra — so the Intel build ships without that
+          # optional extra instead of shipping no Intel build at all.
+          EXTRAS="full"
+          if [ "${{ matrix.target }}" = "x86_64-apple-darwin" ]; then
+            EXTRAS="mcp,dashboard,windows"
+            {
+              echo "### Python extras (${{ matrix.target }})"
+              echo
+              echo "Installed \`[$EXTRAS]\` rather than \`[full]\`: the \`knowledge\`"
+              echo "extra depends on lancedb, which has no x86_64 macOS wheel and does"
+              echo "not finish a source build inside this lane's timeout. The knowledge"
+              echo "base reports \`lancedb is not installed\` on this architecture."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "installing extras: $EXTRAS"
+          python -m pip install -e ".[$EXTRAS]" pyinstaller
 
       - name: Build engine sidecar (PyInstaller onedir)
         run: |
