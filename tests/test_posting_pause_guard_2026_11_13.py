@@ -142,7 +142,11 @@ def test_cli_post_outside_window_is_refused_not_queued(
     assert payload["paused"] is True
     assert payload["deferred"] is False
     assert payload["reason"] == "posting_paused"
-    assert not (Path(config.config_dir) / "schedule.json").exists()
+    # ``config_dir`` is not persisted in config.yaml, so the config the CLI
+    # loads points at the config FILE's directory, not the one this test set on
+    # the in-memory object. Scan the whole sandbox: the claim is "no schedule
+    # store was created", not "one specific path is empty".
+    assert not list(tmp_path.rglob("schedule.json"))
 
 
 def test_cli_dry_run_says_refused_instead_of_would_queue(
@@ -204,4 +208,41 @@ async def test_mcp_post_refuses_when_paused(tmp_path: Path, monkeypatch: pytest.
     assert result_is_error(result) is True, (
         "an agent that only checks isError must not read a refused post as a success"
     )
-    assert not (Path(config.config_dir) / "schedule.json").exists()
+    assert not list(tmp_path.rglob("schedule.json"))
+
+
+def test_cli_post_without_the_pause_does_create_the_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Positive control: the guard is the pause, not a broken deferral.
+
+    Same command, same closed window, no pause: the deferred post is queued and
+    the store appears where the CLI actually writes it.
+    """
+    from click.testing import CliRunner
+
+    from xpst.cli import main
+
+    _close_the_window(monkeypatch)
+    config = _config(tmp_path, paused=False)
+    config_path = tmp_path / "config.yaml"
+    config.save(str(config_path))
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"not a real video")
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "--config", str(config_path), "post", "-v", str(clip),
+            "-c", "caption", "-p", "youtube", "--json",
+        ],
+        obj={},
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _json_payload(result.output)
+    assert payload["deferred"] is True
+    stores = list(tmp_path.rglob("schedule.json"))
+    assert len(stores) == 1, f"expected exactly one schedule store, found {stores}"
+    entries = json.loads(stores[0].read_text())
+    assert len(entries) == 1
